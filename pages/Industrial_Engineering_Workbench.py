@@ -1490,6 +1490,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         }
 
                     if run_method:
+                        previous_t006_state = {}
+                        if selected_tool["tool_id"] == "T006":
+                            for key in (
+                                "shoir_tool_result_T006",
+                                "shoir_tool_inputs_T006",
+                                "shoir_tool_save_status_T006",
+                            ):
+                                previous_t006_state[key] = (key in st.session_state, st.session_state.get(key))
                         # Remove only the in-session output before a new run. The last
                         # successful saved workspace snapshot remains intact if this run fails.
                         st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
@@ -1543,7 +1551,21 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         recovery_snapshot = json.loads(recovery_snapshot_json)
                                     except json.JSONDecodeError as exc:
                                         raise ValueError("Snapshot must be valid JSON.") from exc
-                                recovery_history_key = "shoir_recovery_history_T006"
+                                import hashlib
+                                recovery_scope_values = (
+                                    st.session_state.get("current_user"),
+                                    st.session_state.get("shoir_workspace_name"),
+                                    st.session_state.get("workspace"),
+                                    st.session_state.get("active_workspace_name"),
+                                    st.session_state.get("active_workspace_id"),
+                                    st.session_state.get("workspace_id"),
+                                    st.session_state.get("active_project_id"),
+                                    st.session_state.get("project_id"),
+                                )
+                                recovery_scope_token = hashlib.sha256(
+                                    "\\x1f".join(str(value or "") for value in recovery_scope_values).encode("utf-8")
+                                ).hexdigest()[:16]
+                                recovery_history_key = "shoir_recovery_history_T006_" + recovery_scope_token
                                 result = manage_recovery_snapshot_history(
                                     st.session_state.get(recovery_history_key),
                                     action=recovery_action,
@@ -1553,7 +1575,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 st.session_state[recovery_history_key] = result.pop("history_state")
                                 result["data_provenance"] = (
                                     "USER_ENTERED_UNVERIFIED" if recovery_snapshot is not None
-                                    else "SAVED_WORKSPACE_SNAPSHOT_HISTORY"
+                                    else "TOOL_SCOPED_SNAPSHOT_HISTORY_UNVERIFIED"
                                 )
                                 result["scope"] = (
                                     "JSON snapshots explicitly entered into this recovery tool only; "
@@ -2154,9 +2176,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
+                            if selected_tool["tool_id"] == "T006":
+                                for key, (existed, previous_value) in previous_t006_state.items():
+                                    if existed:
+                                        st.session_state[key] = previous_value
+                                    else:
+                                        st.session_state.pop(key, None)
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
