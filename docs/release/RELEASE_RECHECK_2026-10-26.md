@@ -95,6 +95,14 @@ The matrix difference is part of the source-branch divergence. Reconcile to a si
 
 ## 6. Commercial, legal and operational gates
 
+The current staging-branch legal package is present but not legally cleared:
+- `docs/TERMS_AND_CONDITIONS.md` and `docs/PRIVACY_POLICY.md` explicitly state that the operating legal name, official address and applicable registration details must be published before a public commercial launch.
+- The privacy notice requires verification of actual provider regions, contracts/subprocessors, transfer controls, retention and deletion. No completed counsel approval or end-to-end retention/deletion evidence was located in this source audit.
+- The terms label calculations, forecasts, optimization, simulation, AI and report results as decision-support outputs requiring independent professional verification; this is not equivalent to formula-by-formula technical validation.
+- The referral terms describe attribution only and do not promise rewards. Do not market rewards unless separately implemented and approved.
+- `docs/LEGAL_RISK_REGISTER.md` says “NOT LEGALLY CLEARED FOR COMMERCIAL PRODUCTION”; `docs/THIRD_PARTY_LICENSE_REVIEW.md` says the licence review is incomplete; `docs/COMMERCIAL_LAUNCH_CHECKLIST.md` remains HOLD and its legal, privacy, calculation and operator approval rows are open.
+- The live GitHub comparison shows these broader commercial/legal documents and the full 100-tool matrix are added on the staging branch relative to the current common base, not reconciled identically into the reviewed main tree. Reconcile the final versions into the reviewed release source and test the actual public notices in the deployed app before launch.
+
 These remain NOT RUN / BLOCKED until accountable owners provide evidence and approvals:
 - qualified Saudi legal and privacy review of the actual contracting entity, terms, privacy notices, refunds, referrals, legal acceptance and cross-border processing;
 - real payment-lifecycle acceptance if payment collection is enabled;
