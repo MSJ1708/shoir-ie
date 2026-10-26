@@ -67,6 +67,12 @@ def test_pdf_export_paginates_and_preserves_rows_past_previous_30_row_limit():
     assert len(reader.pages) >= 2
 
     extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
+    # Confirm the table uses the available landscape width rather than a
+    # narrow, centered strip. Inspect extracted text coordinates on page 1.
+    positions = []
+    reader.pages[0].extract_text(visitor_text=lambda text, cm, tm, font, size: positions.append(tm[4]) if text.strip() else None)
+    page_width = float(reader.pages[0].mediabox.width)
+    assert positions and (max(positions) - min(positions)) >= page_width * 0.45
     for metric, value in zip(rows["Metric"], rows["Value"], strict=True):
         assert metric in extracted
         assert str(value) in extracted
@@ -93,7 +99,7 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         for slide in presentation.slides
         if any(getattr(shape, "has_table", False) for shape in slide.shapes)
     ]
-    assert len(table_slides) == (len(rows) + 14) // 15
+    assert len(table_slides) == (len(rows) + 9) // 10
 
     exported_metrics = []
     exported_values = []
@@ -101,6 +107,9 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         table_shapes = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
         assert len(table_shapes) == 1
         table = table_shapes[0].table
+        assert len(table.rows) <= 11  # header + no more than 10 data rows
+        assert sum(row.height for row in table.rows) <= Inches(5.2)
+        assert all(row.height > 0 for row in table.rows)
         assert table.cell(0, 0).text == "Metric"
         assert table.cell(0, 1).text == "Value"
         exported_metrics.extend(table.cell(row, 0).text for row in range(1, len(table.rows)))
