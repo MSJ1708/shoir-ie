@@ -65,7 +65,7 @@ Every PR below is currently open and marked draft in live GitHub metadata. The m
 | [#184](https://github.com/MSJ1708/shoir-ie/pull/184) | feat/shoir-100-tools-integration-20261025 (base a312da52…) ← feat/shoir-t044-rcm-current-base-20261025 (7af10bd0…) | DIRTY; test, engine and security PASS; hosted smoke SKIPPED | T044 limited RCM review register plus responsive smoke fixes | Reconcile stack and port the T044 workflow and responsive fixes; verify human review status, entitlement, persistence and browser behavior. |
 | [#188](https://github.com/MSJ1708/shoir-ie/pull/188) | feat/shoir-100-tools-integration-20261025 (base c84565ba…) ← agent/shoir-100-rnle-ergonomics-20261025 (e8db67bd…) | DIRTY; test PASS; hosted smoke SKIPPED; no further checks returned for the current head | T046 single-task RNLE screening; requires scope boundaries and qualified review | Port only after formula/reference/boundary/domain review; retain the human-review warning, then run tier and browser checks. |
 | [#189](https://github.com/MSJ1708/shoir-ie/pull/189) | staging-e2e-20261019 (base 19678321…) ← agent/shoir-100-release-gates-verify-20261025 (49f46bcf…) | DIRTY; validation, engine, platform, security, transaction and Edge PASS on that head; hosted smoke SKIPPED | Large staging/release stack, not a safe mainline merge | Keep staging-specific. The staging branch has since advanced; run authenticated gate on the exact final staging candidate and verify parity. Never merge this large stack blindly to main. |
-| [#191](https://github.com/MSJ1708/shoir-ie/pull/191) | feat/shoir-100-tools-integration-20261025 (base 800b86b7…) ← feat/shoir-100-t006-recovery-20261026 (latest aa286834…) | prior head c1e6f657… had two AppTest failures; intermediate 28449466… resolved T020 but exposed a T006 Streamlit form-submission issue. Latest head aa28683435b39fa45574da88e510728ae7a59b98 has validation, platform, engine and security/quality PASS. Hosted smoke is SKIPPED and authenticated acceptance is NOT RUN; mergeability is currently recalculating/unknown | T006 snapshot recovery, T020 dataset lineage and T039 status reconciliation | Keep draft for human review. Normal tool flows isolate persistence in AppTest; explicit negative tests assert failed-save rollback; latest exact-head required CI is green. No hosted smoke/authenticated staging proof yet. |
+| [#191](https://github.com/MSJ1708/shoir-ie/pull/191) | main (base 72e498d8…) ← feat/shoir-100-t006-recovery-20261026 (latest aa286834…) | prior head c1e6f657… had two AppTest failures; intermediate 28449466… resolved T020 but exposed a T006 Streamlit form-submission issue. On latest head aa28683435b39fa45574da88e510728ae7a59b98, validation, platform, engine and security/quality PASS; hosted smoke is SKIPPED and authenticated acceptance is NOT RUN. After retargeting to main, GitHub reports mergeable=true / clean; this is not release approval | T006 snapshot recovery, T020 dataset lineage and T039 status reconciliation | Keep draft for human review. Normal tool flows isolate persistence in AppTest; explicit negative tests assert failed-save rollback; all available exact-head automated workflows are green. Hosted smoke/authenticated staging proof remain outstanding. |
 
 ## 2A. Direct base/head comparisons (not just PR title or total historical commits)
 
@@ -92,10 +92,10 @@ These comparisons explain why historical commit counts and mergeable state alone
 
 ### PR inventory count
 
-- Release-feature drafts captured in this inventory: 14
-- Open non-drafts in that feature inventory: 0
-- The separate documentation-only audit PR #192 was created after the feature inventory snapshot; it is deliberately excluded from the 14-row functional CSV because it contains no runtime change. It remains a draft and must receive the normal review process.
-- No feature PR was closed, merged or retargeted by this audit.
+- Functional/release-feature drafts captured in the original inventory: 14; the separate audit PR #192 adds a documentation-only draft.
+- Open non-drafts in the original functional inventory: 0.
+- PR #191 was retargeted from the old feature-integration base to main after compare confirmed its old base SHA is a parent of main. The current diff is 47 commits ahead / 5 behind across 11 files; GitHub reports mergeable=true / clean. PR #191 remains draft and was not merged.
+- No feature PR was closed or merged by this audit.
 
 ## 3. Canonical integration and dependency graph
 
@@ -136,11 +136,11 @@ Recommended order:
 - Matched production smoke error text against current main source. No production deployment or schema fix was attempted.
 - Committed test-only updates to PR #191, latest head aa28683435b39fa45574da88e510728ae7a59b98. Normal T006/T020 AppTest flows mock the persistence boundary so they do not depend on a live session token; explicit negative tests verify failed-save rollback; Streamlit form input and submit are sent in the same event. Exact-head workflows PASS: [validation](https://github.com/MSJ1708/shoir-ie/actions/runs/40280196434), [platform tests](https://github.com/MSJ1708/shoir-ie/actions/runs/40280196567), [engine regression](https://github.com/MSJ1708/shoir-ie/actions/runs/40280196702), [security/quality](https://github.com/MSJ1708/shoir-ie/actions/runs/40280196723). The hosted smoke was skipped; authenticated release gate was not run.
 - Prepared a 100-row tool acceptance matrix template, PDPL data inventory template, release/rollback manifest, counsel-review-only copies of six PR #170 legal draft/checklist files, an engineering calculation disclaimer draft and attribution-only referral rules. Legal drafts are not in public app policy paths and are not approved.
-- PR #191's current base remains the feature integration branch; the attempted metadata retarget to main did not apply through the available GitHub update operation. No main change, production mutation, database/Edge deployment, payment operation, account action, PR merge or PR closure occurred.
+- PR #191 was retargeted to main but remains a draft; no feature PR was merged or closed. No production deployment, schema/Edge deployment, payment operation, account action or branch-protection change occurred.
 
 ## 6. Exact next steps
 
-1. Keep #191 draft pending owner/reviewer review; recheck exact-head CI if its code or base changes. Do not merge while hosted smoke is skipped and staging acceptance remains outstanding.
+1. Keep #191 draft for owner/reviewer review. Validation, platform, engine and security/quality workflows pass on aa28683435b39fa45574da88e510728ae7a59b98; do not merge while hosted smoke is skipped and authenticated staging acceptance is outstanding.
 2. Build the commit/file-level unique-change map; port accepted changes into one current-main-based integration path and retest affected files.
 3. Verify the live production Streamlit configuration and mismatch without touching production; prepare an approved compatibility plan only after source, schema and Edge versions are agreed.
 4. Configure branch protection, then run authenticated staging gate, direct-action/tier denials, cross-workspace isolation, save/reload/re-login and real artifact round trips on the exact candidate SHA.
