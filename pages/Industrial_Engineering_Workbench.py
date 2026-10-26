@@ -1546,6 +1546,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
 
                     if run_method:
                         previous_t006_state = {}
+                        previous_t006_history = {}
                         if selected_tool["tool_id"] == "T006":
                             for key in (
                                 "shoir_tool_result_T006",
@@ -1553,6 +1554,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "shoir_tool_save_status_T006",
                             ):
                                 previous_t006_state[key] = (key in st.session_state, st.session_state.get(key))
+                            previous_t006_history = {
+                                key: st.session_state[key]
+                                for key in st.session_state
+                                if str(key).startswith("shoir_recovery_history_T006_")
+                            }
                         previous_t020_state = {}
                         previous_t020_lineage = {}
                         if selected_tool["tool_id"] == "T020":
@@ -2321,9 +2327,36 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
                                 result = pack_result
 
-                            _persist_focused_tool_result(
+                            persistence_outcome = _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
+                            if persistence_outcome == "SAVE_FAILED" and selected_tool["tool_id"] in {"T006", "T020"}:
+                                if selected_tool["tool_id"] == "T006":
+                                    for key, (existed, previous_value) in previous_t006_state.items():
+                                        if existed:
+                                            st.session_state[key] = previous_value
+                                        else:
+                                            st.session_state.pop(key, None)
+                                    for key in list(st.session_state):
+                                        if str(key).startswith("shoir_recovery_history_T006_") and key not in previous_t006_history:
+                                            st.session_state.pop(key, None)
+                                    for key, previous_value in previous_t006_history.items():
+                                        st.session_state[key] = previous_value
+                                else:
+                                    for key, (existed, previous_value) in previous_t020_state.items():
+                                        if existed:
+                                            st.session_state[key] = previous_value
+                                        else:
+                                            st.session_state.pop(key, None)
+                                    for key in list(st.session_state):
+                                        if str(key).startswith("shoir_dataset_lineage_T020_") and key not in previous_t020_lineage:
+                                            st.session_state.pop(key, None)
+                                    for key, previous_value in previous_t020_lineage.items():
+                                        st.session_state[key] = previous_value
+                                st.error(
+                                    "Workspace save failed. The last successful result and recovery/lineage history "
+                                    "were restored in the current session; do not assume the new state was saved."
+                                )
                         except Exception as exc:
                             if selected_tool["tool_id"] == "T006":
                                 for key, (existed, previous_value) in previous_t006_state.items():
@@ -2331,6 +2364,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         st.session_state[key] = previous_value
                                     else:
                                         st.session_state.pop(key, None)
+                                for key in list(st.session_state):
+                                    if str(key).startswith("shoir_recovery_history_T006_") and key not in previous_t006_history:
+                                        st.session_state.pop(key, None)
+                                for key, previous_value in previous_t006_history.items():
+                                    st.session_state[key] = previous_value
                             elif selected_tool["tool_id"] == "T020":
                                 for key, (existed, previous_value) in previous_t020_state.items():
                                     if existed:
