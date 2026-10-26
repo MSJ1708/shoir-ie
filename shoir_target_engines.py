@@ -6368,6 +6368,22 @@ def manage_dataset_version_lineage(
     else:
         metadata = dict(source_metadata)
     metadata_json, metadata = canonical_json(metadata, "Source metadata")
+    # Dataset identity must remain stable when the content/version signature changes.
+    dataset_identity = str(
+        metadata.get("dataset_id")
+        or metadata.get("dataset_name")
+        or metadata.get("filename")
+        or metadata.get("source_name")
+        or (
+            packed_payload.get("dataset_id")
+            or packed_payload.get("dataset")
+            or packed_payload.get("name")
+            if isinstance(packed_payload, dict)
+            else ""
+        )
+        or source_sig
+    ).strip()
+    metadata["dataset_id"] = dataset_identity
     if transformations is None:
         transformation_list: list[Any] = []
     else:
@@ -6424,7 +6440,7 @@ def manage_dataset_version_lineage(
         version_no = int(current.get("version_number", len(versions))) + 1 if current else 1
         version = {
             "version_number": version_no,
-            "dataset_id": "DS-" + hashlib.sha256((str(metadata.get("dataset_id", "")) + source_sig).encode("utf-8")).hexdigest()[:16].upper(),
+            "dataset_id": "DS-" + hashlib.sha256(str(metadata.get("dataset_id", source_sig)).encode("utf-8")).hexdigest()[:16].upper(),
             "version_signature": version_signature,
             "source_signature": source_sig,
             "source_metadata": metadata,
