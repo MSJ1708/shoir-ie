@@ -64,9 +64,9 @@ ZATCA's VAT registration page says its individual registration service targets i
 
 ## 4. Terms, privacy notice and customer-facing claims
 
-**Status: DRAFT EXISTS; qualified Saudi legal review and factual alignment BLOCKED.**
+**Status: CANDIDATE DRAFTS EXIST ONLY ON OPEN PR #170; main does not contain the full policy set. Qualified Saudi legal review and factual alignment BLOCKED.**
 
-The repository contains beta terms and privacy/refund/cookie drafts, and the legal risk register explicitly says the product is not legally cleared for commercial production. The public legal identity is incomplete. Before paid use:
+The current main branch has a legal risk register and a placeholder Terms file, but the complete versioned Terms, Privacy, Refund and Cookie drafts plus the pre-commercial checklist are still on open draft PR #170 (not merged). Those files are candidate review material, not live legal clearance. The main-branch legal risk register explicitly says Shoir-IE is not legally cleared for commercial production. The public legal identity is incomplete. Before paid use:
 
 - Have qualified Saudi counsel review Terms of Service / beta or paid-pilot agreement, privacy notice, refund/cancellation, subscription and renewal, complaints, acceptable use, confidentiality, data ownership, warranty/liability language and governing law against the real operator and service behavior.
 - Ensure the UI names the current policy version; record acceptance (actor, timestamp and exact version) server-side; fail closed if it cannot be recorded or the required version is stale.
