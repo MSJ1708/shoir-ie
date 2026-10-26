@@ -23,6 +23,12 @@ jobs:
         run: python -m compileall -q .
       - name: Run regression tests
         run: python -m pytest -q tests
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Run persistence Edge Function security tests
+        run: deno test supabase/functions/shoir-persistence/security_test.ts
       - name: Parse required application modules
         run: |
           python - <<'PY'
