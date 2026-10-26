@@ -145,7 +145,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
         external_dependency = "No external configuration established by this source audit."
         if tool_id in {"T048", "T074", "T096", "T098"}:
             external_dependency = "Approved data source or provider configuration must be explicitly set up and tested; live operation is not assumed."
-        if tool_id in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+        if tool_id in {"T006", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T063", "T066", "T070", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T094", "T096", "T097", "T098", "T099"}:
             persistence_scope = (
                 "Focused result and input snapshot are saved through workspace_persistence.py for authenticated users; "
                 "managed storage is used only when configured, otherwise the local SQLite fallback may be ephemeral. "
@@ -172,7 +172,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
             "entitlement_enforcement_points": (
                 "Direct Workbench specialist methods require _require_focused_tool_actor() plus require_tool_access(tier, tool_id) before calculation; "
                 "the capability directory also checks target access. Mapped legacy module routes still enforce their native policy."
-                if tool_id in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
+                if tool_id in {"T006", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T063", "T066", "T070", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T094", "T096", "T097", "T098", "T099"}
                 else
                 "Target catalog gate: tier_allows_tool(tool_id, tier). Target execution is not yet wired to this ID; "
                 "the mapped legacy route must also enforce its native server-side policy."
