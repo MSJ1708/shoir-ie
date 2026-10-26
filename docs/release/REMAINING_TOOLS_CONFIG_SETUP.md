@@ -102,3 +102,11 @@ Before marking any of these targets `VERIFIED_WORKING`, complete:
 7. Evidence capture, named reviewer and limitations documented in the acceptance matrix.
 
 **No production app, database, Edge Function, connector, identity provider, account, payment or data record is changed by these deterministic handlers.** Production activation requires a separate reviewed release, parity verification, backup/restore evidence and explicit authorization.
+
+## T098 explicit status contract (current code)
+
+The handler returns `NOT_CONFIGURED` when required settings are absent, `CONFIGURATION_INVALID` when supplied syntax/settings conflict with the defined contract, and `READY_FOR_AUTHORIZED_IDP_TEST` only when configuration appears complete enough for a provider test. None of these statuses proves enterprise authentication is implemented or active.
+
+The result deliberately reports `oidc_login_flow_implemented=false`, `provider_authentication_tested=false`, `provider_mfa_evidence_verified=false`, `audit_sink_configured=false`, `audit_persistence_verified=false`, and `verified_at=null`. These fields may not be changed to true from environment flags or a UI toggle. Current app login remains the existing custom password/session path; no second OIDC login has been layered into it because a supported provider/flow and authenticated account-mapping contract have not been selected and reviewed.
+
+Before code or status can advance: choose the provider and protocol/library; implement callback/state/nonce/signature/issuer/audience/expiry/session/logout/revocation protections in the existing application architecture; define trusted provider-identity-to-account/role/workspace mapping; implement a durable, server-protected audit write/read path with clear sink-failure behavior; and pass current-candidate staging tests. A real provider administrator must then register the redirect/logout URLs and enforce the provider's MFA policy. Until these actions are completed and evidence is captured, T098 remains `EXTERNAL_CONFIGURATION_REQUIRED` and is not `VERIFIED_WORKING`.
