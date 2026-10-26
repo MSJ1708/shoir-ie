@@ -1577,7 +1577,7 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
 
 if not st.session_state.get("current_user"):
     if getattr(_durable_account_store, "APP_ENVIRONMENT", "production") == "staging":
-        st.warning(f"STAGING TEST ENVIRONMENT · SHOIR-IE SHELL VERSION: {SHELL_VERSION} — use disposable test accounts and synthetic data only.", icon="🧪")
+        st.warning("STAGING TEST ENVIRONMENT · use disposable test accounts and synthetic data only.", icon="🧪")
     st.title("🔐 Welcome to Shoir-IE Workspace")
     if st.session_state.pop("subscription_expired_notice", False):
         st.warning(
