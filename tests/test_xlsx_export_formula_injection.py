@@ -123,3 +123,31 @@ def test_facility_layout_export_keeps_formula_like_labels_as_text():
     ]
     assert matching
     assert all(cell.data_type != "f" and cell.hyperlink is None for cell in matching)
+
+
+def test_enterprise_workspace_pack_keeps_formula_like_content_as_text():
+    from shoir_enterprise_integration import _build_enterprise_workspace_pack
+
+    formula = '=HYPERLINK("https://attacker.invalid/enterprise","Open")'
+    url = "https://attacker.invalid/enterprise"
+    payload = _build_enterprise_workspace_pack(
+        connectors=pd.DataFrame({"Name": [formula, url]}),
+        assets=pd.DataFrame({"Name": ["Synthetic asset"]}),
+        activity=pd.DataFrame({"Summary": ["Synthetic activity"]}),
+        audit_rows=[{"Area": "Workspace", "Value": formula, "State": url}],
+    )
+
+    workbook = load_workbook(BytesIO(payload), data_only=False)
+    connector_sheet = workbook["Connectors"]
+    for cell_ref, expected in (("A2", formula), ("A3", url)):
+        cell = connector_sheet[cell_ref]
+        assert cell.value == expected
+        assert cell.data_type != "f"
+        assert cell.hyperlink is None
+
+    audit_sheet = workbook["Audit"]
+    for cell_ref, expected in (("B2", formula), ("C2", url)):
+        cell = audit_sheet[cell_ref]
+        assert cell.value == expected
+        assert cell.data_type != "f"
+        assert cell.hyperlink is None
