@@ -414,7 +414,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -428,7 +428,43 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T007":
+                        if selected_tool["tool_id"] == "T006":
+                            st.caption(
+                                "Create bounded JSON checkpoints for a record you explicitly provide here. "
+                                "Undo/redo applies only to this snapshot history, not arbitrary edits in other modules. "
+                                "Do not paste passwords, tokens or unnecessary personal/customer data."
+                            )
+                            recovery_action_label = st.selectbox(
+                                "Recovery action",
+                                ["Create checkpoint", "Undo", "Redo", "Restore selected revision"],
+                                key="tool006_action",
+                            )
+                            recovery_action = {
+                                "Create checkpoint": "checkpoint",
+                                "Undo": "undo",
+                                "Redo": "redo",
+                                "Restore selected revision": "restore",
+                            }[recovery_action_label]
+                            recovery_snapshot_json = st.text_area(
+                                "Snapshot JSON (used only when creating a checkpoint)",
+                                value='{"asset_id":"P-101","inspection_state":"PENDING"}',
+                                key="tool006_snapshot_json",
+                            )
+                            recovery_target_revision = st.number_input(
+                                "Revision to restore (1-based)",
+                                min_value=1,
+                                max_value=25,
+                                value=1,
+                                step=1,
+                                key="tool006_target_revision",
+                            )
+                            run_method = st.form_submit_button(
+                                "Apply recovery action",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool006_run",
+                            )
+                        elif selected_tool["tool_id"] == "T007":
                             st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")
                             diagnostic_inspector_text = st.text_area(
                                 "Error or warning text",
@@ -1235,7 +1271,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
-                    if selected_tool["tool_id"] == "T007":
+                    if selected_tool["tool_id"] == "T006":
+                        current_tool_inputs = {
+                            "action": recovery_action,
+                            "snapshot_input_bytes": len(recovery_snapshot_json.encode("utf-8")),
+                            "target_revision": int(recovery_target_revision) if recovery_action == "restore" else None,
+                            "snapshot_contents_excluded_from_input_metadata": True,
+                        }
+                    elif selected_tool["tool_id"] == "T007":
                         safe_diagnostic = classify_diagnostic(diagnostic_inspector_text)
                         current_tool_inputs = {
                             "reported_subsystem": diagnostic_category,
@@ -1489,10 +1532,34 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 get_student_practice_problem,
                                 evaluate_student_practice_answer,
                                 build_guided_study_plan,
+                                manage_recovery_snapshot_history,
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
                             )
-                            if selected_tool["tool_id"] == "T007":
+                            if selected_tool["tool_id"] == "T006":
+                                recovery_snapshot = None
+                                if recovery_action == "checkpoint":
+                                    try:
+                                        recovery_snapshot = json.loads(recovery_snapshot_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Snapshot must be valid JSON.") from exc
+                                recovery_history_key = "shoir_recovery_history_T006"
+                                result = manage_recovery_snapshot_history(
+                                    st.session_state.get(recovery_history_key),
+                                    action=recovery_action,
+                                    new_snapshot=recovery_snapshot,
+                                    target_revision=int(recovery_target_revision) if recovery_action == "restore" else None,
+                                )
+                                st.session_state[recovery_history_key] = result.pop("history_state")
+                                result["data_provenance"] = (
+                                    "USER_ENTERED_UNVERIFIED" if recovery_snapshot is not None
+                                    else "SAVED_WORKSPACE_SNAPSHOT_HISTORY"
+                                )
+                                result["scope"] = (
+                                    "JSON snapshots explicitly entered into this recovery tool only; "
+                                    "not a cross-module undo manager or external-system rollback."
+                                )
+                            elif selected_tool["tool_id"] == "T007":
                                 result = classify_diagnostic(diagnostic_inspector_text)
                                 result["reported_subsystem"] = diagnostic_category
                                 result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
