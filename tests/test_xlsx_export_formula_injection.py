@@ -43,3 +43,79 @@ def test_formula_and_url_like_values_remain_inert_text_in_xlsx_report():
     assert audit["A2"].data_type != "f"
     assert audit["A2"].hyperlink is None
     assert audit["B2"].hyperlink is None
+
+
+
+def test_excel_studio_export_keeps_formula_like_input_as_text():
+    from shoir_excel_studio import build_ultimate_workbook
+
+    formula = '=HYPERLINK("https://attacker.invalid/studio","Open")'
+    source = pd.DataFrame({"Label": [formula, "https://attacker.invalid/studio"]})
+    payload = build_ultimate_workbook(
+        "Synthetic safety test",
+        {"Cleaned Data": source},
+        {"Raw Data": source},
+        {"Cleaned Data": [{"Action": formula, "Details": "synthetic"}]},
+        {},
+    )
+
+    workbook = load_workbook(BytesIO(payload), data_only=False)
+    found = []
+    for sheet in workbook.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.value == formula:
+                    found.append(cell)
+    assert found, "Formula-like input should be retained in the export"
+    assert all(cell.data_type != "f" and cell.hyperlink is None for cell in found)
+
+
+def test_industrial_workbook_export_keeps_formula_like_values_as_text():
+    from shoir_industrial_workbook import _serialize_workbook
+
+    formula = '=HYPERLINK("https://attacker.invalid/workbook","Open")'
+    payload = _serialize_workbook(
+        {"Inputs": pd.DataFrame({"Label": [formula, "https://attacker.invalid/workbook"]})},
+        formulas={"Inputs": {"B2": "=1+1"}},
+    )
+
+    workbook = load_workbook(BytesIO(payload), data_only=False)
+    sheet = workbook["Inputs"]
+    assert sheet["A3"].value == formula
+    assert sheet["A3"].data_type != "f"
+    assert sheet["A3"].hyperlink is None
+    # The calculation formula inventory is metadata, not a user-executable cell.
+    formula_sheets = [ws for ws in workbook.worksheets if "FORMULA" in ws.title.upper()]
+    for ws in formula_sheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value == "=1+1":
+                    assert cell.data_type != "f"
+
+
+def test_facility_layout_export_keeps_formula_like_labels_as_text():
+    from shoir_facility_layout import _export_workbook
+
+    formula = '=HYPERLINK("https://attacker.invalid/facility","Open")'
+    departments = pd.DataFrame([
+        {"id": "D1", "name": formula, "x": 0.0, "y": 0.0, "area_sqm": 100.0},
+        {"id": "D2", "name": "Assembly", "x": 2.0, "y": 1.0, "area_sqm": 50.0},
+    ])
+    flows = pd.DataFrame([
+        {"from_id": "D1", "to_id": "D2", "loads_day": 10, "distance_m": 2.0},
+    ])
+    slp = pd.DataFrame([
+        {"From": "D1", "To": "D2", "REL": "X", "From Department": formula},
+    ])
+
+    payload = _export_workbook(departments, flows, slp)
+    workbook = load_workbook(BytesIO(payload), data_only=False)
+    matching = [
+        cell
+        for ws in workbook.worksheets
+        for row in ws.iter_rows()
+        for cell in row
+        if cell.value == formula
+    ]
+    assert matching
+    assert all(cell.data_type != "f" and cell.hyperlink is None for cell in matching)
