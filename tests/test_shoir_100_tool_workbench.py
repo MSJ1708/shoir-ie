@@ -861,8 +861,9 @@ def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert at.session_state["shoir_tool_result_T006"]["status"] == "SNAPSHOT_CHECKPOINTED"
 
+    # Streamlit forms submit all edited controls together. Do not rerun between
+    # selecting an action and submitting, or the unsubmitted selection resets.
     at.selectbox(key="tool006_action").select("Undo")
-    at.run(timeout=90)
     at.button(key="tool006_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -870,14 +871,12 @@ def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated
     assert result["status"] == "SNAPSHOT_UNDONE" and result["current_snapshot"]["inspection_state"] == "PENDING"
 
     at.selectbox(key="tool006_action").select("Redo")
-    at.run(timeout=90)
     at.button(key="tool006_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert at.session_state["shoir_tool_result_T006"]["current_snapshot"]["inspection_state"] == "COMPLETE"
 
     at.selectbox(key="tool006_action").select("Restore selected revision")
-    at.run(timeout=90)
     at.number_input(key="tool006_target_revision").set_value(1)
     at.button(key="tool006_run").click()
     at.run(timeout=90)
