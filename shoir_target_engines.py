@@ -6367,7 +6367,7 @@ def manage_dataset_version_lineage(
         raise ValueError("Source metadata must be a JSON object.")
     else:
         metadata = dict(source_metadata)
-    metadata_json, metadata = canonical_json(metadata, "Source metadata")
+    _, metadata = canonical_json(metadata, "Source metadata")
     # Dataset identity must remain stable when the content/version signature changes.
     dataset_identity = str(
         metadata.get("dataset_id")
@@ -6440,7 +6440,7 @@ def manage_dataset_version_lineage(
             raise ValueError("Each downstream run must be an object.")
         _, run_list = canonical_json(list(downstream_runs), "Downstream runs")
 
-    schema_bytes = metadata.get("schema_fingerprint", metadata.get("schemas", {}))
+    schema_bytes = metadata.get("schema_fingerprint") or metadata.get("schemas") or metadata.get("table_catalog") or {}
     schema_json, _ = canonical_json(schema_bytes, "Schema fingerprint")
     recipe_json, _ = canonical_json(transformation_list, "Transformations")
     version_material = json.dumps(
