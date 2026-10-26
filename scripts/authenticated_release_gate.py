@@ -36,6 +36,22 @@ def record(case: str, account_class: str, passed: bool | None, detail: str) -> N
     print(f"[{status}] {case} ({account_class}): {detail}")
 
 
+def summarize_results(results: list[dict[str, Any]]) -> tuple[str, int]:
+    """Return an honest aggregate status and process code for the release gate.
+
+    Explicit failures are FAIL. Any skipped/unknown case (including missing
+    results) is BLOCKED, never a successful release gate.
+    """
+    statuses = [str(item.get("status") or "SKIP").upper() for item in results]
+    if not statuses:
+        return "BLOCKED", 2
+    if "FAIL" in statuses:
+        return "FAIL", 1
+    if any(status != "PASS" for status in statuses):
+        return "BLOCKED", 2
+    return "PASS", 0
+
+
 def require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -448,14 +464,17 @@ def main() -> int:
                 except Exception:
                     record("session_revocation", label, False, "Could not confirm cleanup of a dedicated test session.")
 
+    overall, exit_code = summarize_results(RESULTS)
     REPORT_PATH.write_text(json.dumps({
         "run_at_utc": datetime.now(timezone.utc).isoformat(),
         "target": edge_url,
-        "overall": "PASS" if all(item["status"] != "FAIL" for item in RESULTS) else "FAIL",
+        "overall": overall,
         "cases": RESULTS,
     }, indent=2), encoding="utf-8")
     print(f"Report written to {REPORT_PATH}")
-    return 0 if all(item["status"] != "FAIL" for item in RESULTS) else 1
+    if overall == "BLOCKED":
+        print("[BLOCKED] One or more mandatory release-gate cases were skipped or had no result.", file=sys.stderr)
+    return exit_code
 
 
 if __name__ == "__main__":
