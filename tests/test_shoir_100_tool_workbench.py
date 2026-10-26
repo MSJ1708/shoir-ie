@@ -784,6 +784,9 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     at.selectbox(key="shoir_100_tool_inspector").select("T039 · CAPA and 8D Manager")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.text_area(key="tool039_transitions").set_value(
+        '[{"capa_id":"DEMO-CAPA-001","to_status":"PENDING_EFFECTIVENESS","reviewer":"reviewer-1","reason":"Effectiveness observation period started","transitioned_at":"2026-10-26T12:00:00Z"}]'
+    )
     at.button(key="tool039_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -792,7 +795,9 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["status"] == "CAPA_REGISTER_REVIEWED"
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-    assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+    assert result["records"].iloc[0]["Workflow state"] == "PENDING_EFFECTIVENESS"
+    assert result["transition_count"] == 1
+    assert result["transition_audit"][0]["reviewer"] == "reviewer-1"
 
 
 def test_workbench_runs_rnle_ergonomics_screen():
