@@ -322,3 +322,34 @@ def test_live_rest_adapter_rejects_non_token_credentials(monkeypatch):
     profile = {**_profile(), "credential_env": "SHOIR_CONNECTOR_PLANT_CREDENTIAL"}
     out = connector.verify_readonly_rest_connector(profile)
     assert out["status"] == "CONFIGURATION_INVALID"
+
+def test_live_rest_action_requires_boolean_sample_preview(monkeypatch):
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(
+        engines, "verify_readonly_rest_connector",
+        lambda *a, **k: pytest.fail("string values must not enable preview"),
+    )
+    with pytest.raises(ValueError, match="must be a JSON boolean"):
+        engines.integration_configuration_status({
+            "action": "verify_rest_read",
+            "profile": _profile(),
+            "include_sample_data": "false",
+        })
+
+
+def test_endpoint_not_allowlisted_is_not_reported_as_network_attempt(monkeypatch):
+    cfg = _valid_config(SHOIR_CONNECTOR_PLANT_ENDPOINT="https://unlisted.example.test/api")
+    monkeypatch.setattr(connector, "_config_value", lambda key: cfg.get(key, ""))
+    monkeypatch.setattr(connector, "_resolve_pinned_ip", lambda *a, **k: pytest.fail("allowlist check precedes DNS"))
+    out = connector.verify_readonly_rest_connector(_profile())
+    assert out["status"] == "DESTINATION_BLOCKED"
+    assert out["attempted"] is False
+
+
+def test_connector_token_control_characters_are_rejected_without_exposure(monkeypatch):
+    cfg = _valid_config(SHOIR_CONNECTOR_PLANT_TOKEN="token\r\nInjected: header")
+    monkeypatch.setattr(connector, "_config_value", lambda key: cfg.get(key, ""))
+    out = connector.verify_readonly_rest_connector(_profile())
+    assert out["status"] == "CONFIGURATION_INVALID"
+    assert out["attempted"] is False
+    assert "Injected" not in json.dumps(out)
