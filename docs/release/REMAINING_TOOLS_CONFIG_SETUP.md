@@ -1,12 +1,12 @@
 # Remaining target tools — implementation and configuration guide
 
-**Branch:** \`feat/shoir-remaining-tools-config-20261026\`  
-**State:** implementation tranche; exact-head CI and authenticated staging acceptance still required.  
+**Branch:** `feat/t096-rest-readonly-adapter-20261026`  
+**State:** T096 generic REST adapter added; automated mocks required on the exact head and no live provider is verified. T098 remains configuration-only and release-gated.  
 **Safety rule:** configuration inspection is not proof of a live connection. Do not copy credentials into the Workbench JSON input, source code, CSV files, screenshots, test output, or Git.
 
 ## Implemented deterministic target handlers
 
-The existing grouped Industrial Engineering Workbench now offers a structured JSON editor for the target methods below. It uses stable target IDs, the existing authenticated focused-runner boundary and \`require_tool_access\` before dispatch. No new top-level navigation page was created.
+The existing grouped Industrial Engineering Workbench now offers a structured JSON editor for the target methods below. It uses stable target IDs, the existing authenticated focused-runner boundary and `require_tool_access` before dispatch. No new top-level navigation page was created.
 
 | ID | Method now available | Important limitation |
 |---|---|---|
@@ -24,40 +24,75 @@ Example JSON inputs are labelled synthetic and provided per target ID. Replace t
 
 ## T096 — Integration Management Center configuration
 
-The handler checks configuration presence and basic endpoint syntax without returning secret values or making outbound network calls. This protects against mistaking a profile or an entered URL for an authorized connection.
+### Supported code-side adapter
 
-Use the approved deployment secret store (for example, Streamlit Community Cloud secrets or process environment) to define one endpoint key and one credential key per approved connector. Example **key names only**:
+The generic adapter currently supports **HTTPS REST with a server-side Bearer token and GET-only health/data-read operations**. It is not a native SAP, Oracle, MQTT, OPC-UA, SQL, WMS, MES or ERP adapter. A provider-specific protocol or authentication method needs its own reviewed adapter using the provider's real documentation and approved staging contract.
 
-- \`SHOIR_CONNECTOR_PLANT_ENDPOINT\`
-- \`SHOIR_CONNECTOR_PLANT_TOKEN\`
-- \`SHOIR_CONNECTOR_MES_ENDPOINT\`
-- \`SHOIR_CONNECTOR_MES_CREDENTIAL\`
+Default JSON action `inspect` checks configuration and performs no DNS lookup or outbound request. Only an explicit submitted payload with `"action": "verify_rest_read"` attempts a connection. That action is restricted to an authenticated user with the T096 entitlement and an Owner/Admin role.
 
-For a REST connector, the endpoint should use HTTPS. Other protocols have their own allowlisted schemes. A profile refers to these names; it must not include the secret value. Do not use an unapproved endpoint or broaden network access just to make a health test pass.
+Example T096 JSON payload (key names only; never add a real token or endpoint value):
 
-**Still required to mark a connector connected:** select the actual source system, obtain owner-approved endpoint and least-privilege credentials, confirm contract/schema and data scope, run a controlled staging connection test, verify read/write permissions independently, confirm redacted health/error logs and freshness, and record a successful test timestamp. The current handler intentionally reports readiness for an authorized test rather than \`CONNECTED\`.
+```json
+{
+  "action": "verify_rest_read",
+  "profile": {
+    "name": "Approved plant REST API",
+    "protocol": "REST",
+    "endpoint_env": "SHOIR_CONNECTOR_PLANT_ENDPOINT",
+    "credential_env": "SHOIR_CONNECTOR_PLANT_TOKEN"
+  },
+  "include_sample_data": false
+}
+```
+
+### Required server-side configuration
+
+Store the following in the deployment's approved secret store or environment; do not enter values in Workbench JSON or commit them:
+
+- `SHOIR_CONNECTOR_PLANT_ENABLED=true` — explicit opt-in; absent/false disables attempts.
+- `SHOIR_CONNECTOR_PLANT_ENDPOINT=https://approved-host.example/path-prefix` — the configured service origin/base path.
+- `SHOIR_CONNECTOR_PLANT_TOKEN` — short-lived or rotatable least-privilege Bearer token, permitted only for approved health/read access.
+- `SHOIR_CONNECTOR_PLANT_HEALTH_PATH=health` — administrator-specified relative health path from the real provider contract.
+- `SHOIR_CONNECTOR_PLANT_READ_PATH=sample` — administrator-specified relative read-only JSON resource path from the real provider contract.
+- `SHOIR_CONNECTOR_ALLOWED_HOSTS=approved-host.example` — comma-separated exact hostnames or explicit `hostname:port` entries. Wildcards and arbitrary URLs are rejected.
+- `SHOIR_CONNECTOR_APPROVED_PRIVATE_CIDRS` — optional exact private industrial-network CIDRs only when an administrator approves them and deployment network policy restricts egress. Leave blank for public-only destinations.
+- `SHOIR_CONNECTOR_TIMEOUT_SECONDS=5` — optional request timeout between 0.5 and 10 seconds.
+
+The endpoint host and port must exactly match the allowlist. HTTPS certificate validation remains on. The adapter validates all DNS answers, pins the selected validated address for the connection, blocks loopback/link-local/reserved and known metadata addresses, blocks redirects, sends no requests during import/render/configuration inspection, uses GET only, performs no automatic retry, limits response bodies to 1 MiB, and requires the data-read response to be JSON. If any DNS answer is prohibited, the connection is denied.
+
+### Expected results and operations
+
+- `NOT_CONFIGURED` / `CONFIGURATION_INVALID`: missing or malformed server settings; no claim of connectivity.
+- `DISABLED_OR_REVOKED`: the administrator has not enabled the connector; no request is attempted.
+- `DESTINATION_BLOCKED`: endpoint host/port is not allowlisted or DNS resolves to an unapproved range.
+- `CONNECTION_FAILED_TIMEOUT`, `TLS_VERIFICATION_FAILED`, `CONNECTION_FAILED`: correct DNS, egress, provider health or valid TLS configuration; never disable TLS verification.
+- `AUTHENTICATION_REJECTED` / `AUTHORIZATION_REJECTED`: rotate the token or ask the service owner to review the requested read scope.
+- `REDIRECT_BLOCKED`, `RATE_LIMITED`, `RESPONSE_TOO_LARGE`, `MALFORMED_RESPONSE`, `DATA_RETRIEVAL_FAILED`: correct the real provider contract or respect the provider's rate-limit guidance; no redirect is followed and no retry is attempted.
+- `DATA_RETRIEVAL_VERIFIED`: proves only that the configured health path and read-only JSON path succeeded at the stated timestamp. The response hash, size, shape and keys are reported; sample rows are omitted by default. If an authorized administrator explicitly enables the preview, likely sensitive keys are redacted. This is not proof of vendor-wide functionality, write permission, ongoing availability or engineering data quality.
+
+To disable the connector, set `SHOIR_CONNECTOR_PLANT_ENABLED=false` or remove the enable setting, and revoke/rotate the token in the provider and secret store. There are no pooled long-lived sessions; each submitted check obtains current configuration and performs fresh requests. After rotation/revocation, repeat the negative test and confirm access is denied. Do not paste credentials into screenshots, reports, issues or chat.
 
 ## T098 — Enterprise Identity and Audit Center configuration
 
 The handler checks for these server-side configuration keys without displaying their values:
 
-- \`SHOIR_OIDC_ISSUER_URL\`
-- \`SHOIR_OIDC_CLIENT_ID\`
-- \`SHOIR_OIDC_CLIENT_SECRET\`
-- \`SHOIR_OIDC_REDIRECT_URI\`
-- \`SHOIR_OIDC_SCOPES\`
-- \`SHOIR_MFA_ENFORCED\`
-- \`SHOIR_AUDIT_LOG_ENABLED\`
+- `SHOIR_OIDC_ISSUER_URL`
+- `SHOIR_OIDC_CLIENT_ID`
+- `SHOIR_OIDC_CLIENT_SECRET`
+- `SHOIR_OIDC_REDIRECT_URI`
+- `SHOIR_OIDC_SCOPES`
+- `SHOIR_MFA_ENFORCED`
+- `SHOIR_AUDIT_LOG_ENABLED`
 
-Issuer and redirect URLs must use HTTPS and include a host. Scopes must include \`openid\`; MFA and audit flags must be explicitly enabled. These flags are configuration-readiness evidence only. They do not enable OIDC login, enforce an MFA challenge, configure an identity provider or prove audit coverage.
+Issuer and redirect URLs must use HTTPS and include a host. Scopes must include `openid`; MFA and audit flags must be explicitly enabled. These flags are configuration-readiness evidence only. They do not enable OIDC login, enforce an MFA challenge, configure an identity provider or prove audit coverage.
 
-**Still required to activate SSO/MFA:** the accountable owner must choose an OIDC provider, create a staging application/client, register exact callback/logout URLs, store the secret in the deployment's secret manager, agree group/role mapping and MFA policy, and implement/review the authorization-code callback, state/nonce validation, session handling, logout, expiry and revocation. Then run authenticated tests for both allowed and denied roles, MFA challenge and failure, callback mismatch, replay/state failures, logout, expired/revoked sessions, and security audit events. No provider was supplied or activated by this change, and the tool deliberately continues to report \`sso_active=false\` and \`mfa_active=false\`.
+**Still required to activate SSO/MFA:** the accountable owner must choose an OIDC provider, create a staging application/client, register exact callback/logout URLs, store the secret in the deployment's secret manager, agree group/role mapping and MFA policy, and implement/review the authorization-code callback, state/nonce validation, session handling, logout, expiry and revocation. Then run authenticated tests for both allowed and denied roles, MFA challenge and failure, callback mismatch, replay/state failures, logout, expired/revoked sessions, and security audit events. No provider was supplied or activated by this change, and the tool deliberately continues to report `sso_active=false` and `mfa_active=false`.
 
 ## Verification and release gates
 
 The unit tests cover method behavior, malformed input, numerical/boundary conditions, content hashes, stale-run detection, transition denials, secret redaction, and all example JSON payloads. CI results are valid only for the exact commit SHA reported by GitHub Actions.
 
-Before marking any of these targets \`VERIFIED_WORKING\`, complete:
+Before marking any of these targets `VERIFIED_WORKING`, complete:
 1. Exact-candidate CI: validation, tests, platform tests, engine regression and security/quality.
 2. Authenticated Workbench browser walkthrough with each target's minimum tier and an unauthorized tier.
 3. Save/reload/re-login, error recovery and two-user workspace isolation; confirm the previous valid state survives a failed action.
