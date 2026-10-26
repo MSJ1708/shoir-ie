@@ -157,6 +157,42 @@ def login_failure_detail(status: int | None, data: dict[str, Any], expected: str
     return f"{expected}; staging Edge API returned unexpected HTTP {status}. Response details were suppressed."
 
 
+def verify_session_revocation(api: EdgeAPI, username: str, token: str) -> tuple[bool, str]:
+    """Prove a disposable session is valid, revoke it, then prove reuse is denied.
+
+    The renewal probe omits its payment reference deliberately. A valid workspace
+    or renewal-scoped session reaches the endpoint's no-write validation and
+    returns HTTP 400 before any request or payment proof is persisted. After
+    logout the same token must receive HTTP 401, including for expired accounts
+    whose valid token is limited to renewal scope.
+    """
+    payload = {"username": username, "token": token}
+    expected_validation_error = "A transaction/payment reference is required for renewal review."
+
+    try:
+        before_status, before_data = api.call("renew_request", payload)
+    except Exception as exc:
+        return False, f"Pre-logout session probe failed ({type(exc).__name__}); response details suppressed."
+    if before_status != 400 or before_data.get("error") != expected_validation_error:
+        return False, f"Pre-logout session probe did not reach the expected no-write validation (HTTP {before_status}); details suppressed."
+
+    try:
+        logout_status, logout_data = api.call("logout", payload)
+    except Exception as exc:
+        return False, f"Logout failed ({type(exc).__name__}); response details suppressed."
+    if logout_status != 200 or logout_data.get("ok") is not True or logout_data.get("revoked") is not True:
+        return False, f"Logout did not confirm revocation (HTTP {logout_status}); response details suppressed."
+
+    try:
+        reuse_status, reuse_data = api.call("renew_request", payload)
+    except Exception as exc:
+        return False, f"Post-logout token-reuse probe failed ({type(exc).__name__}); response details suppressed."
+    if reuse_status != 401 or reuse_data.get("error") != "Unauthorized session.":
+        return False, f"Post-logout token reuse was not denied as unauthorized (HTTP {reuse_status}); response details suppressed."
+
+    return True, "Logout revoked the dedicated session; reuse of the same token was rejected with HTTP 401."
+
+
 def main() -> int:
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -488,45 +524,8 @@ def main() -> int:
             else:
                 record("workspace_restore_retry", "active", False, "No valid test session remained to restore the workspace.")
 
-def verify_session_revocation(api: EdgeAPI, username: str, token: str) -> tuple[bool, str]:
-    """Prove a disposable session is valid, revoke it, then prove reuse is denied.
-
-    The renewal probe omits its payment reference deliberately. A valid workspace
-    or renewal-scoped session reaches the endpoint's no-write validation and
-    returns HTTP 400 before any request or payment proof is persisted. After
-    logout the same token must receive HTTP 401, including for expired accounts
-    whose valid token is limited to renewal scope.
-    """
-    payload = {"username": username, "token": token}
-    expected_validation_error = "A transaction/payment reference is required for renewal review."
-
-    try:
-        before_status, before_data = api.call("renew_request", payload)
-    except Exception as exc:
-        return False, f"Pre-logout session probe failed ({type(exc).__name__}); response details suppressed."
-    if before_status != 400 or before_data.get("error") != expected_validation_error:
-        return False, f"Pre-logout session probe did not reach the expected no-write validation (HTTP {before_status}); details suppressed."
-
-    try:
-        logout_status, logout_data = api.call("logout", payload)
-    except Exception as exc:
-        return False, f"Logout failed ({type(exc).__name__}); response details suppressed."
-    if logout_status != 200 or logout_data.get("ok") is not True or logout_data.get("revoked") is not True:
-        return False, f"Logout did not confirm revocation (HTTP {logout_status}); response details suppressed."
-
-    try:
-        reuse_status, reuse_data = api.call("renew_request", payload)
-    except Exception as exc:
-        return False, f"Post-logout token-reuse probe failed ({type(exc).__name__}); response details suppressed."
-    if reuse_status != 401 or reuse_data.get("error") != "Unauthorized session.":
-        return False, f"Post-logout token reuse was not denied as unauthorized (HTTP {reuse_status}); response details suppressed."
-
-    return True, "Logout revoked the dedicated session; reuse of the same token was rejected with HTTP 401."
-
-
         # Never leave probe sessions active after the test. For each issued token,
-        # prove it works before logout, require the logout endpoint to delete it,
-        # then reuse the same token on the no-write renewal probe and require HTTP 401.
+        # prove it works before logout, require deletion, then reuse it and require HTTP 401.
         for label, username, token in (
             ("active", active_user, active_token),
             ("active-fresh", active_user, reload_token),
