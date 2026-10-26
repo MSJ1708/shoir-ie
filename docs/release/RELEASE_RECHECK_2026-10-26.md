@@ -33,13 +33,12 @@ GitHub compare for `main` vs `staging-e2e-20261019` reports `status=diverged`, s
 ## 2. Authenticated staging evidence
 
 - Candidate SHA: `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
-- Authenticated release gate: [run 40326994939](https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939), recorded successful.
-- Redacted evidence artifact: [artifact 12653225915](https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939/artifacts/12653225915), SHA-256 digest `d9e382b73e885d54257a22eaa50e2241fe273e2ac82915219f564f848be18695`, recorded expiry 9 November 2026.
-- Standard validation: [run 40326994926](https://github.com/MSJ1708/shoir-ie/actions/runs/40326994926), recorded successful on the same candidate.
-- Evidence summary in the release-gate report: preflight PASS; backend 22 PASS / 0 FAIL / 2 SKIP; 96/96 authenticated module routes PASS; browser shell/Excel/logout 7/7 PASS.
-- Mandatory follow-ups remain: login-throttle probe was skipped because `SHOIR_E2E_VERIFY_LOGIN_THROTTLE` was not enabled; inactive-account denial was skipped because a dedicated inactive `shoir-e2e-*` account was not configured. Skips are not passes.
-- The current workflow must be manually dispatched by an authorized GitHub Actions operator on `staging-e2e-20261019` after those staging-only prerequisites are configured. This review did not dispatch it.
-- The actual authoritative Streamlit staging app, configured branch/entry point, startup banner and runtime SHA have not been independently verified through the available browser/deployment access. The app URLs listed in prior notes did not return inspectable page content through the available browser connector. This is NOT RUN/BLOCKED, not evidence that the app is down.
+- Authenticated release gate #88: [run 40369188234](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234), workflow conclusion `success`, exact branch `staging-e2e-20261019`, candidate SHA `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
+- Redacted evidence artifact: [artifact 12672656752](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234/artifacts/12672656752), name `shoir-ie-authenticated-release-evidence`, 472,693 bytes, SHA-256 `697cce352663dd9574f702846a876631e2ca695036ed6934982a7ac4e4d7dcf8`, recorded expiry 9 November 2026. The job log and report summaries were inspected; all three gate steps and evidence upload completed.
+- Gate #88 reported preflight/candidate-build success; backend **24 PASS / 0 FAIL / 0 SKIP**, 96/96 module-route/default-state rendering PASS, and 7/7 browser shell/Excel/logout PASS. The inactive-account denial and login-throttle probes both executed and passed in this run.
+- Important scope limit: session-revocation entries in this report confirm logout cleanup calls; they do not reuse each revoked token to prove subsequent requests are denied. The gate also does not contain a real workbook import-transform-download round-trip, parsed XLSX assertions, general PDF/PPT/XLSX acceptance, formula-by-formula numerical validation, or production runtime parity.
+- PR #200's strict gate hardening is still a separate draft branch and must receive independent review and current-head CI before integration. Gate #88 predates that change; after an approved integration creates a new staging candidate, manually dispatch the strict gate on that exact reviewed/deployed SHA.
+- The actual authoritative Streamlit staging app, configured branch/entry point, startup banner and runtime SHA remain BLOCKED/NOT RUN through the available deployment access. The run identifies `shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app` as its target host, but that does not independently prove platform settings or deployed revision. This is not evidence that the app is down.
 
 ## 3. Direct read-only Supabase comparison
 
