@@ -305,7 +305,11 @@ def _excel_column_width(series: pd.Series, header: Any) -> int:
 def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], figures=None, audit=None, function_reference=True) -> bytes:
     figures=figures or []; audit=audit or []
     buf=io.BytesIO()
-    with pd.ExcelWriter(buf,engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(
+        buf,
+        engine="xlsxwriter",
+        engine_kwargs={"options": {"strings_to_formulas": False, "strings_to_urls": False}},
+    ) as writer:
         workbook=writer.book
         title_fmt=workbook.add_format({"bold":True,"font_size":18,"font_color":"1E3A8A"})
         subtitle_fmt=workbook.add_format({"italic":True,"font_color":"64748B"})
