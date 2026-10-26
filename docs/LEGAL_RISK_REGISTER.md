@@ -7,8 +7,10 @@
 ## Current release-candidate recheck — October 26, 2026
 
 - Reviewed candidate branch: staging-e2e-20261019, commit 9e3899d6f5147584cf27585d946fa7b5d18d92d5.
-- Authenticated release gate [run #88](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) was **in progress** at this snapshot. The authenticated Edge API lifecycle/workspace-isolation stage had passed; the 96-module rendering stage was in progress; browser shell/Excel/logout and evidence upload were pending.
+- Authenticated release gate [run #88](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) completed **successfully** on this exact candidate after 14m 57s. The job and evidence upload succeeded; candidate build marker check confirmed shell version 3.2 and that credentials were not submitted before the marker was checked.
 - The older fully-green staging statement later in this register refers to run [39861471413](https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413) on an earlier candidate. It is historical evidence only, not proof that run #88 or this candidate has passed.
+- Current run #88 redacted artifact `shoir-ie-authenticated-release-evidence` (artifact ID `12672656752`) reports backend **24/24 PASS**, browser shell/Excel/logout **7/7 PASS**, and module-route/default-state rendering **96/96 PASS**. Backend cases include current-consent enforcement, stale-policy rejection, unknown-referral rejection, invalid credentials, admin-action denial, cross-workspace load/save denial, workspace save/re-login restore, expired-subscription restrictions, renewal-reference validation, login-throttle blocking, inactive-account denial and session revocation. The 96-module report explicitly does **not** establish calculation correctness or complete data-I/O/export acceptance.
+
 - Current policy identifiers are Terms 2026-10-21-beta-v1, Privacy 2026-10-21-v1, Refund 2026-10-23-v2, and Cookie 2026-10-21-v1. The prior Refund v1 value in this register was stale and is corrected here. The policy-consistency regression test compares public notices, embedded application copies, server enforcement, the latest approval-guard migration and the authenticated staging probe.
 
 
