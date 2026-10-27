@@ -86,14 +86,13 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
         base.autocommit = True
         with base.cursor() as cursor:
             cursor.execute(
-                "DO $ BEGIN CREATE ROLE anon; EXCEPTION WHEN duplicate_object THEN NULL; END $;"
+                "SELECT rolname FROM pg_roles WHERE rolname = ANY(%s);",
+                (["anon", "authenticated", "service_role"],),
             )
-            cursor.execute(
-                "DO $ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $;"
-            )
-            cursor.execute(
-                "DO $ BEGIN CREATE ROLE service_role; EXCEPTION WHEN duplicate_object THEN NULL; END $;"
-            )
+            existing_roles = {row[0] for row in cursor.fetchall()}
+            for role in ("anon", "authenticated", "service_role"):
+                if role not in existing_roles:
+                    cursor.execute(f"CREATE ROLE {role};")
             cursor.execute("ALTER ROLE service_role BYPASSRLS;")
             cursor.execute(
                 f'DROP DATABASE IF EXISTS "{SAFE_MIGRATION_TARGET_DATABASE}" WITH (FORCE);'
