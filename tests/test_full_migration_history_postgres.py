@@ -229,7 +229,8 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
         index = _fetchone(
             target,
             """
-            SELECT i.indisunique, pg_get_expr(i.indpred, i.indrelid)
+            SELECT i.indisunique, pg_get_expr(i.indpred, i.indrelid),
+                   pg_get_indexdef(i.indexrelid)
             FROM pg_index i
             JOIN pg_class idx ON idx.oid = i.indexrelid
             JOIN pg_class tbl ON tbl.oid = i.indrelid
@@ -239,8 +240,14 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
               AND idx.relname = 'idx_shoir_accounts_affiliate_code_unique';
             """,
         )
-        assert index and index[0] is True and "affiliate_code IS NOT NULL" in index[1], (
-            "The additive migration must create a unique partial index for populated codes."
+        assert (
+            index
+            and index[0] is True
+            and "affiliate_code IS NOT NULL" in index[1]
+            and "lower(btrim(affiliate_code))" in index[2].casefold()
+        ), (
+            "The additive migration must create a unique partial index for "
+            "whitespace-normalized populated codes."
         )
 
         # A case-insensitive duplicate must be rejected by PostgreSQL itself,
@@ -250,7 +257,7 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             with pytest.raises(psycopg2.Error) as duplicate_error:
                 cursor.execute(
                     "UPDATE public.shoir_accounts SET affiliate_code=%s WHERE username_lc=%s;",
-                    ("keep-case-001", "legacy-code"),
+                    (" KEEP-CASE-001 ", "legacy-code"),
                 )
             assert duplicate_error.value.pgcode == "23505"
             cursor.execute("ROLLBACK TO SAVEPOINT referral_duplicate_guard")
