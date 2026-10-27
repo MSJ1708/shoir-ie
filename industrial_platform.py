@@ -845,7 +845,7 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
     # Ten data rows plus the header leave enough vertical room for
     # readable text in LibreOffice/PowerPoint renderers. Do not rely on
     # shape-level bounds alone: explicitly size each cell row and text.
-    max_data_rows_per_slide = 10
+    max_data_rows_per_slide = 7
     for label, df in tables:
         safe = df.fillna("").astype(str)
         base_label = str(label or "Data")
@@ -869,8 +869,8 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
             # Fixed row heights and explicit text styling avoid the last
             # row being clipped by renderer-specific auto-fit behavior.
             table_height = Inches(5.2)
-            table.rows[0].height = Inches(.42)
-            data_row_height = Inches(.46)
+            table.rows[0].height = Inches(.44)
+            data_row_height = Inches(.62)
             for row_index in range(1, rows):
                 table.rows[row_index].height = data_row_height
             for j, col in enumerate(chunk.columns):
