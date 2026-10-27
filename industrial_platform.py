@@ -724,7 +724,17 @@ def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: S
     from reportlab.lib.units import inch
 
     out = io.BytesIO()
-    doc = SimpleDocTemplate(out, pagesize=landscape(A4))
+    # Landscape reports need a wider usable canvas: with the default 1-inch
+    # side margins, a two-column table's text anchors span only ~349 pt on an
+    # 842-pt page, making the report look unnecessarily narrow. Keep modest
+    # margins so tabular columns use the page width while retaining vertical
+    # room for pagination and repeated headers.
+    doc = SimpleDocTemplate(
+        out,
+        pagesize=landscape(A4),
+        leftMargin=0.25 * inch,
+        rightMargin=0.25 * inch,
+    )
     styles = getSampleStyleSheet()
     story = [Paragraph(html.escape(str(title or ""), quote=False), styles["Title"]), Spacer(1, 8)]
     for label, df in tables:
