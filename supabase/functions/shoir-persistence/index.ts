@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
+  hasCanonicalMasterAdminInvariant,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   readBoundedJsonObject,
@@ -369,20 +370,20 @@ Deno.serve(async (req) => {
             "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
       }
-      // The canonical master-admin identity receives Enterprise Plus, while its
-      // existing password, role, email, account identity and expiry remain intact.
-      const isMasterAdmin = row.username_lc === "sho" &&
-        row.role === "Enterprise Admin";
-      const adminTier = "Enterprise Plus Tier ($399)";
-      if (isMasterAdmin && row.tier !== adminTier) {
-        const { error: tierError } = await supabase.from("shoir_accounts")
-          .update({ tier: adminTier, updated_at: new Date().toISOString() }).eq(
-            "username_lc",
-            "sho",
-          );
-        if (tierError) throw tierError;
+      // Never silently rewrite the reserved administrator on login. Any drift
+      // is an operational incident that must be corrected deliberately.
+      const isProtectedMasterAdmin = row.username_lc === "sho";
+      if (
+        isProtectedMasterAdmin &&
+        !hasCanonicalMasterAdminInvariant(row as Record<string, unknown>)
+      ) {
+        return response({
+          error:
+            "The protected administrator configuration requires manual review.",
+        }, 503);
       }
-      const effectiveTier = isMasterAdmin ? adminTier : row.tier;
+      const isMasterAdmin = isProtectedMasterAdmin;
+      const effectiveTier = row.tier;
       if (!isMasterAdmin && isExpired(row.subscription_expires_at)) {
         const token = await createSession(
           row.username_lc,
