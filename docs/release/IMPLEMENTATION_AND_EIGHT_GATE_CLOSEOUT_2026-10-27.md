@@ -155,3 +155,56 @@ These direct checks strengthen the Gate 7 NO-GO rationale. Follow the current Su
 Next: finish exact-head checks and visual artifact review for #217; finish exact-head validation of #215 and #216; rerun hosted smoke and authenticated staging acceptance on the exact accepted staging candidate; reconcile production schema/Edge compatibility and complete backup/restore rehearsal; and obtain operator plus qualified Saudi legal/privacy sign-off. Only the accountable release owner should record a dated GO after every applicable gate passes.
 
 No production deployment, database migration, Edge Function deployment, billing change, public policy publication, or reserved-administrator login/mutation was performed for this assessment.
+
+## Fresh execution snapshot — 27 October 2026, approximately 12:18 UTC
+
+This addendum supersedes earlier candidate-head and queue-status statements where they differ. It is evidence only, not a release approval. All database checks below were read-only aggregate/schema/privilege checks; no customer records were selected, no administrator login was attempted, and no database/function/host configuration was changed.
+
+### Git branches and enforcement metadata
+
+| Resource | Exact observed state | Result |
+|---|---|---|
+| `main` | `2ef44057f84162389d39998e922b505dcfe4d3e9` | Baseline confirmed |
+| `staging-e2e-20261019` | `0558c23d59a3f0b79558a8d3407869d0238aceaf` | Baseline confirmed |
+| Main branch metadata | Protected = true; required status-check contexts/checks arrays are empty; branch-protection detail endpoint returned 403 to the connected integration | BLOCKED: owner must verify/configure named required checks and review requirements |
+| Staging branch metadata | Protected = true; enforcement level reported `off`; required status-check contexts/checks arrays are empty | FAIL for a dependable staging release gate until owner configures and verifies enforcement |
+| Repository rulesets | Empty array | No repository ruleset evidence |
+| Reviews on PRs #211, #215, #216, #217 and #218 | No submitted review records returned | Independent reviews remain outstanding; no self-approval was performed |
+
+### Exact-head CI evidence
+
+| Candidate | Exact head / relevant runs | Current status and limitation |
+|---|---|---|
+| [PR #217 — PDF/PPTX completeness](https://github.com/MSJ1708/shoir-ie/pull/217) | `231001c7b985ab34c110060df19e6c77fd708fa5`; [validation 40496541791](https://github.com/MSJ1708/shoir-ie/actions/runs/40496541791), [platform tests 40496541571](https://github.com/MSJ1708/shoir-ie/actions/runs/40496541571), [engine regression 40496541634](https://github.com/MSJ1708/shoir-ie/actions/runs/40496541634), [tests 40496541818](https://github.com/MSJ1708/shoir-ie/actions/runs/40496541818), [security/quality 40496541876](https://github.com/MSJ1708/shoir-ie/actions/runs/40496541876) | PASS for those five exact-head CI runs. The hosted live-deployment-smoke job is SKIPPED, not passed. PR is open and has no review record in the connected review query. Existing PR evidence states its synthetic PDF/PPTX artifacts preserved all 67 row markers and all 14 rendered pages were visually inspected; this is not live-hosted acceptance. |
+| [PR #216 — auth and Streamlit hardening](https://github.com/MSJ1708/shoir-ie/pull/216) | `5b3438b9a0f74cc1c7a29848e59989e7c15c456f`; [validation 40497035666](https://github.com/MSJ1708/shoir-ie/actions/runs/40497035666), [tests 40497035633](https://github.com/MSJ1708/shoir-ie/actions/runs/40497035633), [platform tests 40497035602](https://github.com/MSJ1708/shoir-ie/actions/runs/40497035602), [engine regression 40497035569](https://github.com/MSJ1708/shoir-ie/actions/runs/40497035569), [Edge Function verification 40497035622](https://github.com/MSJ1708/shoir-ie/actions/runs/40497035622), [security/quality 40497035577](https://github.com/MSJ1708/shoir-ie/actions/runs/40497035577) | PASS for observed exact-head CI runs. Hosted smoke is SKIPPED. PR remains draft and independent security review is outstanding. These are source/CI results only; production Edge Function v8 has not been changed. |
+| [PR #218 — safe legal/referral migrations](https://github.com/MSJ1708/shoir-ie/pull/218) | `0866687b12443ec9237547ee65f8f02ed4630fc1`; [validation 40499158757](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158757), [engine regression 40499158851](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158851), [transaction contract 40499158915](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158915) | PASS for the three completed jobs above. Platform tests 40499158867, tests 40499158841 and security/quality 40499158822 were QUEUED at the latest observed check; hosted smoke is SKIPPED. Do not merge/deploy this migration candidate until those jobs pass and independent DB/security review plus preservation/restore rehearsal are documented. |
+| [PR #215 — clean staging integration](https://github.com/MSJ1708/shoir-ie/pull/215) | `d96abd66ab325fdba5ae4a5f25e8f736c5be7396`; [security/quality 40499245211](https://github.com/MSJ1708/shoir-ie/actions/runs/40499245211), [engine regression 40499245281](https://github.com/MSJ1708/shoir-ie/actions/runs/40499245281), [platform tests 40499245237](https://github.com/MSJ1708/shoir-ie/actions/runs/40499245237), [validation 40499245241](https://github.com/MSJ1708/shoir-ie/actions/runs/40499245241) | Security/quality was IN PROGRESS; engine, platform and validation were QUEUED. Hosted smoke is SKIPPED. No authenticated lifecycle/tenant-isolation pass is established for this exact candidate. |
+| [PR #211 — release evidence](https://github.com/MSJ1708/shoir-ie/pull/211) | `cd3fa7a7ec370602f19f1d864b9f4f478f8a0cff`; [validation 40499427798](https://github.com/MSJ1708/shoir-ie/actions/runs/40499427798) | Validation test was QUEUED and hosted smoke SKIPPED. Recheck after CI completes; this documentation cannot self-certify its own evidence. |
+
+### Fresh Supabase control-plane and aggregate checks
+
+| Check | Production | Staging |
+|---|---|---|
+| Project ref / status | `gcsamrdaeraxieaagsta` / ACTIVE_HEALTHY | `hfhrosthswcybccepmak` / ACTIVE_HEALTHY |
+| Database version | PostgreSQL 17.6.1.166 | PostgreSQL 17.11.0.003 |
+| Applied migration records | 14, ending `20261019140600_atomic_subscription_request_decisions` | 17, including `20261021130000_shoir_beta_legal_referrals`, `20261022110000_enforce_beta_legal_acceptance`, and policy-version refresh record `20261025164602` |
+| `shoir-persistence` | v8; SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` | v10; SHA-256 `5605d40e61feac6d010e7e1097565a7090bdf3325c862cc09de32af650b5a232` |
+| Reserved-admin invariant | Exactly one row matched the required role, Enterprise Plus $399 tier, active state and 2099-01-01 UTC expiry | Same aggregate result |
+| Legal acceptance schema | Six acceptance columns absent from `shoir_subscription_requests` | Six expected acceptance columns present |
+| `public.shoir_referrals` | Absent | Present, RLS enabled, no row policies; `anon` and `authenticated` lack SELECT while `service_role` has SELECT |
+| Security advisor | 0 findings returned | 1 INFO finding: RLS enabled without policies on `public.shoir_referrals` |
+
+The staging referrals advisor result is consistent with the documented server-only access design only if all sensitive operations truly remain server-mediated and the grants remain tightly restricted. Do not add broad client policies just to clear the informational advisor. Production/staging schema and function versions remain incompatible for a direct function rollout. The historic staging referral migration is not safe to replay blindly against production; preserve account identifiers, referral codes and timestamps with a reviewed forward-only plan and isolated restore rehearsal.
+
+Production performance advisors also returned 16 informational unused-index findings. They are not proof of a defect and must be individually reviewed before any index removal. No migration, Edge Function deploy, SQL write, entitlement change, or production host change was performed during this check.
+
+### Human gates that remain mandatory
+
+1. Repository owner: configure and verify branch protection for `main` and `staging-e2e-20261019`, including the actual named CI checks, enforcement, and appropriate review requirements. Provide the saved settings or API evidence; gate cleared: controlled source promotion.
+2. Independent code/security reviewer: review #216 and #217; do not self-approve. Provide submitted review records and exact reviewed SHA; gate cleared: source acceptance.
+3. Independent DB/security reviewer and release operator: finish #218 exact-head checks, rehearse the safe additive migration on an isolated production-shaped database, prove preservation and backup restoration/rollback, inspect the final migration ledger, and approve a coordinated schema/function sequence; provide test logs, hashes and sign-off; gate cleared: data-preservation and recovery.
+4. Staging operator: after the candidate is integrated into the protected staging branch and deployed by the authorized host, verify deployed commit/entry point and pass authenticated acceptance with two disposable users, tenant-isolation negative tests, persistence/re-login, exports and recovery. The public smoke is not a substitute; gate cleared: hosted beta acceptance.
+5. Qualified Saudi legal/privacy professional and business owner: review PDPL/cross-border/data-processing facts, final legal documents, operator identity and contracting entity, IP/licence questions, subscription/refund/cancellation/payment terms and launch scope. Provide explicit sign-off and completed factual disclosures; gate cleared: legal and commercial approval.
+6. Accountable release owner/platform operator: provide current backup and successful restore evidence, rollback window/operator and explicit production approval before any production database/function rollout; gate cleared: production authorization.
+
+**Decision remains HOLD / NO-GO for both paid general availability and a controlled beta that depends on the unverified staging candidate.** A later controlled-beta GO can only cover the exact restricted pilot scope that passes all mandatory technical, hosted, tenant-isolation, recovery and approval gates. No such GO is authorized by this addendum.
