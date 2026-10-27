@@ -141,6 +141,44 @@ export function normalizeWorkspaceStateJson(
 }
 
 /**
+ * Browser origins allowed to call this function directly.
+ *
+ * Keep this list aligned with the Streamlit app host/origin allowlists. The
+ * Python server-to-server caller normally sends no Origin header; that traffic
+ * remains supported and must still satisfy action-level authentication.
+ */
+const ALLOWED_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+  "https://shoirieverified.streamlit.app",
+  "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+  "http://127.0.0.1:8501",
+  "http://localhost:8501",
+]);
+
+/** Missing Origin is allowed for non-browser server-to-server clients only. */
+export function isAllowedBrowserOrigin(origin: string | null): boolean {
+  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+}
+
+/**
+ * Return restrictive CORS headers. Never emit a wildcard origin; callers must
+ * reject non-allowlisted Origin values before reaching this helper.
+ */
+export function corsHeadersForOrigin(origin: string | null): Headers {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  });
+  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+  return headers;
+}
+
+/**
  * Validate the reserved master-administrator invariant without mutating the
  * account. Any discrepancy must fail closed and be corrected through a reviewed
  * operational procedure rather than as a side effect of login.

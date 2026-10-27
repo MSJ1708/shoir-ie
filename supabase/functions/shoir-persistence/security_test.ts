@@ -1,5 +1,7 @@
 import {
+  corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  isAllowedBrowserOrigin,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizeWorkspaceStateJson,
@@ -191,4 +193,55 @@ Deno.test("protected administrator invariant is read-only and fails closed on dr
       canonical.subscription_expires_at === "2099-01-01T00:00:00.000Z",
     "The invariant checker must not mutate its input.",
   );
+});
+
+Deno.test("persistence CORS allows only exact configured browser origins", () => {
+  const origins = [
+    "https://shoir-ie-app.streamlit.app",
+    "https://shoirieverified.streamlit.app",
+    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+    "http://127.0.0.1:8501",
+    "http://localhost:8501",
+  ];
+  for (const origin of origins) {
+    assert(isAllowedBrowserOrigin(origin), `Expected allowlisted origin: ${origin}`);
+    const headers = corsHeadersForOrigin(origin);
+    assert(
+      headers.get("Access-Control-Allow-Origin") === origin,
+      "CORS must reflect the exact allowlisted origin, not a wildcard.",
+    );
+    assert(
+      headers.get("Access-Control-Allow-Methods") === "POST, OPTIONS",
+      "Preflight must name only supported browser request methods.",
+    );
+    assert(
+      headers.get("Vary") === "Origin",
+      "Origin-specific headers must be cache-safe.",
+    );
+  }
+
+  assert(
+    isAllowedBrowserOrigin(null),
+    "Server-to-server requests without an Origin header must remain supported.",
+  );
+  assert(
+    !corsHeadersForOrigin(null).has("Access-Control-Allow-Origin"),
+    "Requests without an Origin must not receive a fabricated CORS origin.",
+  );
+
+  const rejected = [
+    "https://attacker.invalid",
+    "https://shoir-ie-app.streamlit.app.attacker.invalid",
+    "null",
+  ];
+  for (const origin of rejected) {
+    assert(
+      !isAllowedBrowserOrigin(origin),
+      `Unexpected browser origin accepted: ${origin}`,
+    );
+    assert(
+      !corsHeadersForOrigin(origin).has("Access-Control-Allow-Origin"),
+      "Rejected origins must never receive an allow-origin header.",
+    );
+  }
 });

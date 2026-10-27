@@ -1,7 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
+  corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   readBoundedJsonObject,
@@ -121,15 +123,14 @@ async function storePaymentProof(
   return `storage://${PAYMENT_PROOF_BUCKET}/${objectPath}`;
 }
 
-function response(data: unknown, status = 200) {
+function response(
+  data: unknown,
+  status = 200,
+  origin: string | null = null,
+) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers":
-        "authorization, x-client-info, apikey, content-type",
-    },
+    headers: corsHeadersForOrigin(origin),
   });
 }
 function hexToBytes(hex: string) {
@@ -312,7 +313,24 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return response({ ok: true });
+  const origin = req.headers.get("origin");
+  if (!isAllowedBrowserOrigin(origin)) {
+    return new Response(JSON.stringify({ error: "Origin not allowed." }), {
+      status: 403,
+      headers: {
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      },
+    });
+  }
+  const sendResponse = (data: unknown, status = 200) =>
+    response(data, status, origin);
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeadersForOrigin(origin),
+    });
+  }
   try {
     const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
@@ -337,13 +355,13 @@ Deno.serve(async (req) => {
           ) blocked = true;
         }
       } catch {
-        return response({
+        return sendResponse({
           error:
             "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
       }
       if (blocked) {
-        return response({
+        return sendResponse({
           error: "Too many sign-in attempts. Please wait and try again.",
         }, 429);
       }
@@ -352,7 +370,7 @@ Deno.serve(async (req) => {
         !row || row.active === false ||
         !await verifyPassword(row.password_hash, password)
       ) {
-        return response({ error: "Invalid username or password." }, 401);
+        return sendResponse({ error: "Invalid username or password." }, 401);
       }
       try {
         for (const bucket of throttleBuckets) {
@@ -365,7 +383,7 @@ Deno.serve(async (req) => {
           }
         }
       } catch {
-        return response({
+        return sendResponse({
           error:
             "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
@@ -377,7 +395,7 @@ Deno.serve(async (req) => {
         isProtectedMasterAdmin &&
         !hasCanonicalMasterAdminInvariant(row as Record<string, unknown>)
       ) {
-        return response({
+        return sendResponse({
           error:
             "The protected administrator configuration requires manual review.",
         }, 503);
@@ -390,7 +408,7 @@ Deno.serve(async (req) => {
           "renewal",
           60 * 60 * 1000,
         );
-        return response({
+        return sendResponse({
           error: "SUBSCRIPTION_EXPIRED",
           token,
           username: row.username,
@@ -401,7 +419,7 @@ Deno.serve(async (req) => {
         }, 403);
       }
       const token = await createSession(row.username_lc);
-      return response({
+      return sendResponse({
         ok: true,
         token,
         username: row.username,
@@ -467,14 +485,14 @@ Deno.serve(async (req) => {
         else if (referral.status === "Qualified") counts.qualified_count++;
         else if (referral.status === "Declined") counts.declined_count++;
       }
-      return response({ ok: true, referral_code: referralCode, ...counts });
+      return sendResponse({ ok: true, referral_code: referralCode, ...counts });
     }
 
     if (action === "account_exists") {
       // Do not expose account or registration status through a public username
       // probe. The serialized registration transaction enforces duplicates and
       // returns the same generic conflict response to every caller.
-      return response({ exists: false });
+      return sendResponse({ exists: false });
     }
 
     if (action === "register_request") {
@@ -494,13 +512,13 @@ Deno.serve(async (req) => {
         String(body.refund_policy_version || "") !== REFUND_POLICY_VERSION ||
         String(body.cookie_policy_version || "") !== COOKIE_POLICY_VERSION
       ) {
-        return response({
+        return sendResponse({
           error:
             "Please accept the current beta terms and acknowledge the current policy notices before registering.",
         }, 400);
       }
       if (referralCode && !/^[A-Z0-9-]{3,32}$/.test(referralCode)) {
-        return response({
+        return sendResponse({
           error:
             "Referral codes may contain only letters, numbers and hyphens.",
         }, 400);
@@ -512,12 +530,12 @@ Deno.serve(async (req) => {
           .ilike("affiliate_code", referralCode).maybeSingle();
         if (referrerError) throw referrerError;
         if (!referrer || referrer.active === false) {
-          return response({
+          return sendResponse({
             error: "Referral code was not found or is inactive.",
           }, 400);
         }
         if (String(referrer.username_lc).toLowerCase() === usernameLc) {
-          return response({ error: "Self-referrals are not allowed." }, 400);
+          return sendResponse({ error: "Self-referrals are not allowed." }, 400);
         }
         referrerUsernameLc = String(referrer.username_lc).toLowerCase();
         const { data: priorReferral, error: priorReferralError } =
@@ -528,7 +546,7 @@ Deno.serve(async (req) => {
             ).maybeSingle();
         if (priorReferralError) throw priorReferralError;
         if (priorReferral) {
-          return response({
+          return sendResponse({
             error: "This account already has referral attribution recorded.",
           }, 409);
         }
@@ -543,13 +561,13 @@ Deno.serve(async (req) => {
       ]);
 
       if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
-        return response({
+        return sendResponse({
           error:
             "Username must be 3-32 letters, numbers, periods, underscores or hyphens.",
         }, 400);
       }
       if (password.length < 8 || password.length > 128) {
-        return response({
+        return sendResponse({
           error: "Password must be between 8 and 128 characters.",
         }, 400);
       }
@@ -565,19 +583,19 @@ Deno.serve(async (req) => {
         email.includes(" ") || email.includes("\t") || email.includes("\n") ||
         email.includes("\r")
       ) {
-        return response({ error: "Enter a valid email address." }, 400);
+        return sendResponse({ error: "Enter a valid email address." }, 400);
       }
       if (!allowedTiers.has(tier)) {
-        return response({ error: "Select a valid subscription tier." }, 400);
+        return sendResponse({ error: "Select a valid subscription tier." }, 400);
       }
       if (paymentMethod !== "STC Pay (QR)") {
-        return response(
+        return sendResponse(
           { error: "Unsupported registration payment method." },
           400,
         );
       }
       if (transactionId.length > 128) {
-        return response({
+        return sendResponse({
           error: "Payment reference must be 128 characters or fewer.",
         }, 400);
       }
@@ -586,14 +604,14 @@ Deno.serve(async (req) => {
       try {
         proofPath = await storePaymentProof(body);
       } catch (err) {
-        return response({
+        return sendResponse({
           error: err instanceof Error
             ? err.message
             : "Payment proof could not be validated.",
         }, 400);
       }
       if (!transactionId && !proofPath) {
-        return response({
+        return sendResponse({
           error:
             "Provide a payment reference or upload payment proof before submitting registration.",
         }, 400);
@@ -623,13 +641,13 @@ Deno.serve(async (req) => {
           ]);
         }
         if (error.code === "P0002") {
-          return response({
+          return sendResponse({
             error:
               "Registration request could not be submitted. Sign in if you have an account or contact support.",
           }, 409);
         }
         if (error.code === "22023") {
-          return response({ error: error.message }, 400);
+          return sendResponse({ error: error.message }, 400);
         }
         throw error;
       }
@@ -704,7 +722,7 @@ Deno.serve(async (req) => {
             );
           }
         }
-        return response({
+        return sendResponse({
           error:
             "The registration was not accepted because its legal-acceptance record could not be saved. No subscription was activated. Refresh and retry, or contact support if the issue continues.",
         }, 500);
@@ -733,7 +751,7 @@ Deno.serve(async (req) => {
         referralWarning =
           "Registration was received, but the legal-acceptance record could not be confirmed. Referral attribution was not recorded.";
       }
-      return response({
+      return sendResponse({
         ok: true,
         request_id: result.request_id,
         status: result.status || "Pending",
@@ -747,7 +765,7 @@ Deno.serve(async (req) => {
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
-      if (!token || !usernameLc) return response({ ok: true, revoked: false });
+      if (!token || !usernameLc) return sendResponse({ ok: true, revoked: false });
       const tokenHash = bytesToHex(
         await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
       );
@@ -757,7 +775,7 @@ Deno.serve(async (req) => {
           "token_hash",
         );
       if (error) throw error;
-      return response({ ok: true, revoked: !!(data && data.length) });
+      return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
 
     if (action === "workspace_load") {
@@ -768,7 +786,7 @@ Deno.serve(async (req) => {
           String(body.username).trim().toLowerCase(),
         ).maybeSingle();
       if (error) throw error;
-      return response({
+      return sendResponse({
         ok: true,
         state_json: data?.state_json || null,
         updated_at: data?.updated_at || null,
@@ -784,7 +802,7 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       }, { onConflict: "username_lc" });
       if (error) throw error;
-      return response({ ok: true });
+      return sendResponse({ ok: true });
     }
     if (action === "renew_request") {
       const row = await getSession(
@@ -793,14 +811,14 @@ Deno.serve(async (req) => {
         "either",
       );
       if (row.username_lc === "sho" && row.role === "Enterprise Admin") {
-        return response({
+        return sendResponse({
           error:
             "Administrator subscription is not eligible for customer renewal.",
         }, 403);
       }
       const transactionId = String(body.transaction_id || "").trim();
       if (!transactionId) {
-        return response({
+        return sendResponse({
           error:
             "A transaction/payment reference is required for renewal review.",
         }, 400);
@@ -831,7 +849,7 @@ Deno.serve(async (req) => {
         }
         throw pending.error;
       }
-      return response({
+      return sendResponse({
         ok: true,
         request_id: pending.data.id,
         proof_uploaded: !!proofPath,
@@ -842,19 +860,19 @@ Deno.serve(async (req) => {
       const storedPath = String(body.screenshot_path || "");
       const prefix = `storage://${PAYMENT_PROOF_BUCKET}/`;
       if (!storedPath.startsWith(prefix)) {
-        return response(
+        return sendResponse(
           { error: "Invalid private payment proof reference." },
           400,
         );
       }
       const objectPath = storedPath.slice(prefix.length);
       if (!objectPath.startsWith("renewals/") || objectPath.includes("..")) {
-        return response({ error: "Invalid private payment proof path." }, 400);
+        return sendResponse({ error: "Invalid private payment proof path." }, 400);
       }
       const { data, error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET)
         .createSignedUrl(objectPath, 300);
       if (error) throw error;
-      return response({
+      return sendResponse({
         ok: true,
         signed_url: data.signedUrl,
         expires_in: 300,
@@ -867,7 +885,7 @@ Deno.serve(async (req) => {
           ascending: true,
         });
       if (error) throw error;
-      return response({ ok: true, requests: data || [] });
+      return sendResponse({ ok: true, requests: data || [] });
     }
 
     if (
@@ -892,7 +910,7 @@ Deno.serve(async (req) => {
       const { data, error } = await query;
       if (error) throw error;
       const request = data?.[0];
-      if (!request) return response({ error: "Request not found." }, 404);
+      if (!request) return sendResponse({ error: "Request not found." }, 404);
       if (
         request.request_type === "New" &&
         (
@@ -904,7 +922,7 @@ Deno.serve(async (req) => {
           !request.accepted_at
         )
       ) {
-        return response({
+        return sendResponse({
           error:
             "This registration has no confirmed current beta-terms and policy acknowledgement. Do not approve it; have the user resubmit.",
         }, 409);
@@ -915,7 +933,7 @@ Deno.serve(async (req) => {
       );
       if (decisionError) {
         if (decisionError.code === "P0002") {
-          return response(
+          return sendResponse(
             { error: "Pending request not found or already processed." },
             409,
           );
@@ -943,7 +961,7 @@ Deno.serve(async (req) => {
       const decisionBody = decision && typeof decision === "object"
         ? decision as Record<string, unknown>
         : { ok: true, request_id: request.id };
-      return response({
+      return sendResponse({
         ...decisionBody,
         referral_status_updated: referralStatusUpdated,
       });
@@ -953,7 +971,7 @@ Deno.serve(async (req) => {
       await adminSession(String(body.username), String(body.token));
       const id = Number(body.request_id);
       if (!Number.isSafeInteger(id) || id <= 0) {
-        return response({ error: "Invalid request identifier." }, 400);
+        return sendResponse({ error: "Invalid request identifier." }, 400);
       }
       const { data: declinedRequest, error: declinedRequestError } =
         await supabase
@@ -963,7 +981,7 @@ Deno.serve(async (req) => {
           .eq("id", id).eq("status", "Pending").maybeSingle();
       if (declinedRequestError) throw declinedRequestError;
       if (!declinedRequest) {
-        return response({
+        return sendResponse({
           error: "Pending request not found or already processed.",
         }, 404);
       }
@@ -973,7 +991,7 @@ Deno.serve(async (req) => {
       );
       if (decisionError) {
         if (decisionError.code === "P0002") {
-          return response(
+          return sendResponse(
             { error: "Pending request not found or already processed." },
             404,
           );
@@ -998,15 +1016,15 @@ Deno.serve(async (req) => {
       const decisionBody = decision && typeof decision === "object"
         ? decision as Record<string, unknown>
         : { ok: true, request_id: id };
-      return response({
+      return sendResponse({
         ...decisionBody,
         referral_status_updated: referralStatusUpdated,
       });
     }
 
-    return response({ error: "Unknown action." }, 400);
+    return sendResponse({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
     const failure = publicErrorFor(err);
-    return response({ error: failure.message }, failure.status);
+    return sendResponse({ error: failure.message }, failure.status);
   }
 });
