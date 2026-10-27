@@ -793,3 +793,159 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+
+def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    # Isolate this Workbench test from live Edge configuration. AppTest has no
+    # remote session token; simulate a confirmed save for the normal action flow.
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "recovery-history-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T006 · Undo, Redo, and Recovery")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T006")
+    assert result is not None and result["status"] == "SNAPSHOT_CREATED"
+    assert result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    at.text_area(key="tool006_snapshot_json").set_value('{"asset_id":"P-101","inspection_state":"COMPLETE"}')
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state["shoir_tool_result_T006"]["status"] == "SNAPSHOT_CHECKPOINTED"
+
+    # Streamlit forms submit all edited controls together. Do not rerun between
+    # selecting an action and submitting, or the unsubmitted selection resets.
+    at.selectbox(key="tool006_action").select("Undo")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "SNAPSHOT_UNDONE" and result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    at.selectbox(key="tool006_action").select("Redo")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state["shoir_tool_result_T006"]["current_snapshot"]["inspection_state"] == "COMPLETE"
+
+    at.selectbox(key="tool006_action").select("Restore selected revision")
+    at.number_input(key="tool006_target_revision").set_value(1)
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "REVISION_RESTORED" and result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    # A malformed attempted checkpoint must not discard the last valid output or history.
+    at.selectbox(key="tool006_action").select("Create checkpoint")
+    at.run(timeout=90)
+    at.text_area(key="tool006_snapshot_json").set_value("{invalid json")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    preserved = at.session_state["shoir_tool_result_T006"]
+    assert preserved["status"] == "REVISION_RESTORED"
+    assert preserved["current_snapshot"]["inspection_state"] == "PENDING"
+
+    # A valid action whose durable write fails must keep the last confirmed
+    # result and its snapshot history, and must not claim that it was saved.
+    history_key = next(key for key in at.session_state if key.startswith("shoir_recovery_history_T006_"))
+    history_before_failed_save = at.session_state[history_key]
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: False)
+    at.text_area(key="tool006_snapshot_json").set_value('{"asset_id":"P-101","inspection_state":"NEW_UNSAVED"}')
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Workspace save failed" in str(item.value) for item in at.error)
+    preserved_after_failed_save = at.session_state["shoir_tool_result_T006"]
+    assert preserved_after_failed_save["status"] == "REVISION_RESTORED"
+    assert preserved_after_failed_save["current_snapshot"]["inspection_state"] == "PENDING"
+    assert at.session_state[history_key] == history_before_failed_save
+
+
+def test_workbench_t020_tracks_dataset_versions_and_stale_runs(monkeypatch):
+    import json
+    from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    # Avoid sending synthetic AppTest state to any configured remote backend.
+    # This test covers the method flow and explicitly tests failed-save rollback.
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "lineage-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T020 · Dataset Versioning and Lineage")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="tool020_source_mode").select("Manual JSON snapshot")
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":10}]}')
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    first = at.session_state.get("shoir_tool_result_T020")
+    assert first is not None
+    assert first["status"] == "VERSION_CREATED_INITIAL"
+    assert first["version_number"] == 1
+
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":12}]}')
+    at.text_area(key="tool020_downstream_runs_json").set_value(json.dumps([
+        {"run_id": "RUN-OLD", "version_signature": first["version_signature"]},
+        {"run_id": "RUN-NO-LINK"},
+    ]))
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    changed = at.session_state.get("shoir_tool_result_T020")
+    assert changed["status"] == "VERSION_CREATED"
+    assert changed["version_number"] == 2
+    assert changed["stale_run_count"] == 1
+    assert changed["unverifiable_run_count"] == 1
+    assert any(key.startswith("shoir_dataset_lineage_T020_") for key in at.session_state)
+
+    # Invalid input must not destroy the last successful version/result.
+    at.text_area(key="tool020_snapshot_json").set_value("{invalid json")
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    preserved = at.session_state["shoir_tool_result_T020"]
+    assert preserved["status"] == "VERSION_CREATED"
+    assert preserved["version_number"] == 2
+    history_keys = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
+    assert len(history_keys) == 1
+    assert len(at.session_state[history_keys[0]]["versions"]) == 2
+
+    # Failed persistence must preserve the confirmed v2 lineage and not retain
+    # a phantom v3 version in the session.
+    lineage_before_failed_save = at.session_state[history_keys[0]]
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: False)
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":14}]}')
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Workspace save failed" in str(item.value) for item in at.error)
+    preserved_after_failed_save = at.session_state["shoir_tool_result_T020"]
+    assert preserved_after_failed_save["status"] == "VERSION_CREATED"
+    assert preserved_after_failed_save["version_number"] == 2
+    history_keys_after_failed_save = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
+    assert history_keys_after_failed_save == history_keys
+    assert at.session_state[history_keys_after_failed_save[0]] == lineage_before_failed_save
