@@ -122,12 +122,10 @@ jobs:
     # main allow an explicit post-deployment check without account credentials.
     if: >-
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
-      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main' || github.ref_name == 'staging-e2e-20261019')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref_name == 'main' || github.ref_name == 'staging-e2e-20261019'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      SHoir_LIVE_URL: https://shoir-ie-app.streamlit.app/
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -140,7 +138,9 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Test hosted entry-screen rendering at desktop and mobile widths
         env:
-          SHOIR_LIVE_URL: https://shoir-ie-app.streamlit.app/
+          # After a staging push/manual run, probe the staging Streamlit app.
+          # On main/audit workflows, keep the production public-shell probe.
+          SHOIR_LIVE_URL: ${{ github.ref_name == 'staging-e2e-20261019' && 'https://shoirieverified.streamlit.app/' || 'https://shoir-ie-app.streamlit.app/' }}
         run: python scripts/live_deployment_smoke.py
       - name: Save live browser screenshots and result
         if: always()
