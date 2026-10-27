@@ -22,7 +22,56 @@ jobs:
       - name: Compile all Python modules
         run: python -m compileall -q .
       - name: Run regression tests
+        env:
+          SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
+          SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python -m pytest -q tests
+      - name: Install PDF rendering tools for visual export acceptance
+        if: always()
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreoffice-impress poppler-utils
+      - name: Render the exact-head synthetic PDF and every PowerPoint slide
+        if: always()
+        run: |
+          set -euo pipefail
+          evidence=artifacts/report-export-validation
+          test -s "$evidence/complete_export_verification.pptx"
+          test -s "$evidence/complete_export_verification.pdf"
+          mkdir -p "$evidence/pptx-rendered"
+          libreoffice --headless --convert-to pdf --outdir "$evidence/pptx-rendered" "$evidence/complete_export_verification.pptx"
+          deck_pdf="$evidence/pptx-rendered/complete_export_verification.pdf"
+          test -s "$deck_pdf"
+          pdfinfo "$deck_pdf"
+          pdftoppm -png -r 110 "$deck_pdf" "$evidence/pptx-rendered/slide"
+          slide_count="$(find "$evidence/pptx-rendered" -maxdepth 1 -name 'slide-*.png' | wc -l)"
+          test "$slide_count" -ge 1
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          evidence = Path("artifacts/report-export-validation")
+          def extract(path):
+              return subprocess.run(
+                  ["pdftotext", "-layout", str(path), "-"],
+                  check=True, capture_output=True, text=True
+              ).stdout
+          expected = [f"ROW-{i:03d}" for i in range(1, 68)]
+          for path in (evidence / "complete_export_verification.pdf",
+                       evidence / "pptx-rendered" / "complete_export_verification.pdf"):
+              rendered = extract(path)
+              missing = [marker for marker in expected if marker not in rendered]
+              if missing:
+                  raise SystemExit(f"{path}: rendered export is missing rows: {missing}")
+          print(f"Rendered PDF and PowerPoint PDFs contain all {len(expected)} expected row markers.")
+          PY
+      - name: Upload sanitized report-export validation artifacts and rendered pages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-report-export-validation
+          path: artifacts/report-export-validation/
+          if-no-files-found: error
+          retention-days: 14
       - name: Parse required application modules
         run: |
           python - <<'PY'
