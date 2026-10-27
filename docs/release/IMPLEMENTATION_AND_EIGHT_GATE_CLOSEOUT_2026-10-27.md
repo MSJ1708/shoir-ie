@@ -109,6 +109,15 @@ A historical authenticated staging gate passed on an earlier candidate: [run 403
 
 **Evidence required:** verified operator and price/terms matrix; counsel/privacy sign-off; approved live policy/version screenshots; data/provider/region/transfer inventory; tested data-subject request, retention/deletion and incident runbook; SBOM/license/asset register; invoice/payment/refund/renewal evidence; support/monitoring/restore runbooks; dated accountable-owner GO decision.
 
+## Addendum — latest exact-head recheck, 27 October 2026
+
+This addendum supersedes earlier candidate SHA/check-status details above where they conflict.
+
+- **PR #215 staging candidate** advanced to `b00a7bcd8d89c86d239f7847467e31c30a7e0ffb`. Its latest visible exact-head checks remain queued (5 pending), and both live-deployment-smoke jobs are skipped. No candidate PASS is established.
+- **PR #216 security candidate** originally failed the test and security-quality jobs for one shared regression-test defect: the dependency test filtered every line beginning with `streamlit`, so it mistakenly included the separate package `streamlit-folium`. Application compile completed and the test run reported 978 passed, 2 skipped, 1 failed; the failed assertion was in `tests/test_streamlit_security_config.py`. I corrected the package match on the same PR branch to require the exact `streamlit=` package spec. New head: `71dfbcd49a7fcaa385ac9c95d819bc2beb0365f5`. Its new check runs have been queued, not passed; hosted smoke remains skipped. Re-read the exact-head checks after completion.
+- **PR #217 export candidate** remains at `231001c7b985ab34c110060df19e6c77fd708fa5`; at last check, 6 jobs were queued/in progress and 2 hosted-smoke jobs were skipped. No export artifact is accepted until the exact-head workflow finishes and all PDF pages / every PPTX slide are visually reviewed.
+- **PR #211 evidence branch** now includes this disposition document (commit `8a68bb2155247cdc4715eb3f404c2b0c69ea2c32`). Its validation tests were queued and hosted smoke was skipped after this commit.
+
 ## Final recommendation
 
 **NO-GO for production deployment or paid general availability today.** Keep beta/manual-payment boundaries and synthetic-only test data. Do not claim 100 verified tools, live SAP/Oracle connectivity, validated savings, legal compliance or current hosted staging acceptance without evidence.
