@@ -32,12 +32,17 @@ def test_streamlit_cors_xsrf_and_origin_host_allowlists_are_enabled():
     assert server.get("enableXsrfProtection") is True
     allowed_origins = set(server.get("corsAllowedOrigins", []))
     allowed_hosts = set(server.get("allowedHosts", []))
-    assert EXPECTED_ORIGINS <= allowed_origins
-    assert EXPECTED_HOSTS <= allowed_hosts
+    assert allowed_origins == EXPECTED_ORIGINS
+    assert allowed_hosts == EXPECTED_HOSTS
     assert "*" not in allowed_origins
     assert "*" not in allowed_hosts
 
 
 def test_streamlit_version_range_supports_the_security_config():
     requirements = REQUIREMENTS.read_text(encoding="utf-8")
-    assert "streamlit>=1.61,<2" in requirements.replace(" ", "")
+    streamlit_specs = [
+        line.strip().replace(" ", "")
+        for line in requirements.splitlines()
+        if line.strip().lower().startswith("streamlit")
+    ]
+    assert streamlit_specs == ["streamlit>=1.61,<2"]
