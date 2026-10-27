@@ -24,6 +24,7 @@ import html
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
 from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
+from shoir_ergonomics import calculate_rnle_lifting_index
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -51,6 +52,7 @@ _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
 _TOOL039_EXAMPLE_RECORDS = '[{"capa_id":"DEMO-CAPA-001","title":"Repeated seal failure","status":"IN_PROGRESS","team":"Maintenance and quality","problem_statement":"Recurring seal failures on pump family","containment_action":"Inspect affected units and quarantine suspect lot","root_cause":"Supplier batch variation; validation still required","corrective_action":"Replace suspect seal batch and verify installation","implementation_evidence":"DEMO-WO-104","preventive_action":"Add supplier lot verification at receipt","closure_review":"Pending review after effectiveness period","effectiveness_evidence":"","owner":"Quality lead (illustrative)","reviewer":"","approval_reference":"","evidence_reference":"DEMO-EVIDENCE-001","opened_date":"2026-10-01","due_date":"2026-11-01"}]'
+_TOOL044_EXAMPLE_MODES = "[{\"asset\":\"Conveyor-01\",\"function\":\"Move product to packing line\",\"failure_mode\":\"Drive belt slips\",\"failure_effect\":\"Output flow is interrupted\",\"consequence_category\":\"operational\",\"consequence_rationale\":\"SYNTHETIC example only; replace with site-reviewed consequence analysis\",\"proposed_task\":\"Inspect belt condition against an approved limit\",\"task_strategy\":\"condition_directed\",\"condition_indicator\":\"Belt wear or slip exceeds an approved limit\",\"evidence_reference\":\"SYNTHETIC example only; replace with CMMS and inspection records\",\"owner\":\"Maintenance planner\"}]"
 _TOOL048_EXAMPLE_OBSERVATIONS = '[{"timestamp":"2026-10-25T00:00:00Z","value":10},{"timestamp":"2026-10-25T01:00:00Z","value":10},{"timestamp":"2026-10-25T02:00:00Z","value":10},{"timestamp":"2026-10-25T03:00:00Z","value":10},{"timestamp":"2026-10-25T04:00:00Z","value":10},{"timestamp":"2026-10-25T05:00:00Z","value":10},{"timestamp":"2026-10-25T06:00:00Z","value":10},{"timestamp":"2026-10-25T07:00:00Z","value":100}]'
 _TOOL089_PRACTICE_TOPICS = {
     "takt_time": {"label": "Takt time", "question": "A line has 420 production minutes available in a shift and must produce 210 units. What is takt time?", "unit": "minutes per unit"},
@@ -412,7 +414,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T020", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T020", "T044", "T046", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -1093,10 +1095,79 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             pm_as_of_date = st.text_input("Plan as-of date (YYYY-MM-DD)", "2026-10-24", key="tool043_as_of")
                             run_method = st.form_submit_button("Calculate maintenance due list", type="primary", use_container_width=True, key="tool043_run")
+                        elif selected_tool["tool_id"] == "T044":
+                            st.caption("Review-first worksheet: checks decision completeness and flags limited consequence/task mismatches; it does not make or certify RCM decisions.")
+                            rcm_modes_json = st.text_area(
+                                "Failure modes (JSON list: asset, function, failure_mode, failure_effect, consequence_category, consequence_rationale, proposed_task, task_strategy, evidence_reference; interval/condition fields as required)",
+                                value=_TOOL044_EXAMPLE_MODES,
+                                key="tool044_modes",
+                            )
+                            st.caption("Strategies: condition_directed, scheduled_restoration, scheduled_discard, failure_finding, run_to_failure, redesign, undecided. Every row remains pending human review.")
+                            run_method = st.form_submit_button("Validate RCM decision register", type="primary", use_container_width=True, key="tool044_run")
                         elif selected_tool["tool_id"] == "T045":
                             st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
                             spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
                             run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
+                        elif selected_tool["tool_id"] == "T046":
+                            st.caption(
+                                "Single-task Revised NIOSH Lifting Equation (RNLE) screening. "
+                                "Frequency multiplier is interpolated from the NIOSH Table 5; "
+                                "coupling multipliers follow Table 7. Use measured field values."
+                            )
+                            rnle_load_kg = st.number_input(
+                                "Load weight (kg)", min_value=0.1, max_value=1000.0,
+                                value=15.0, step=0.5, key="tool046_load_kg"
+                            )
+                            rnle_h_origin = st.number_input(
+                                "Horizontal hand distance at origin (cm)", min_value=0.0,
+                                max_value=63.0, value=30.0, step=1.0, key="tool046_h_origin"
+                            )
+                            rnle_h_destination = st.number_input(
+                                "Horizontal hand distance at destination (cm)", min_value=0.0,
+                                max_value=63.0, value=40.0, step=1.0, key="tool046_h_destination"
+                            )
+                            rnle_v_origin = st.number_input(
+                                "Vertical hand height at origin (cm)", min_value=0.0,
+                                max_value=175.0, value=75.0, step=1.0, key="tool046_v_origin"
+                            )
+                            rnle_v_destination = st.number_input(
+                                "Vertical hand height at destination (cm)", min_value=0.0,
+                                max_value=175.0, value=100.0, step=1.0, key="tool046_v_destination"
+                            )
+                            rnle_a_origin = st.number_input(
+                                "Asymmetry angle at origin (degrees)", min_value=0.0,
+                                max_value=135.0, value=0.0, step=5.0, key="tool046_a_origin"
+                            )
+                            rnle_a_destination = st.number_input(
+                                "Asymmetry angle at destination (degrees)", min_value=0.0,
+                                max_value=135.0, value=10.0, step=5.0, key="tool046_a_destination"
+                            )
+                            rnle_frequency = st.number_input(
+                                "Average lifting frequency (lifts/minute)", min_value=0.01,
+                                max_value=15.0, value=2.5, step=0.1, key="tool046_frequency"
+                            )
+                            rnle_duration_category = st.selectbox(
+                                "Continuous lifting duration category",
+                                ["≤1 hour", ">1 to ≤2 hours", ">2 to ≤8 hours"],
+                                index=0, key="tool046_duration"
+                            )
+                            rnle_coupling_origin = st.selectbox(
+                                "Hand-to-object coupling quality at origin", ["Good", "Fair", "Poor"],
+                                index=0, key="tool046_coupling_origin"
+                            )
+                            rnle_coupling_destination = st.selectbox(
+                                "Hand-to-object coupling quality at destination", ["Good", "Fair", "Poor"],
+                                index=0, key="tool046_coupling_destination"
+                            )
+                            rnle_applicability_confirmed = st.checkbox(
+                                "Confirm this is one two-handed standing lifting task within RNLE applicability "
+                                "(not seated/kneeling, one-handed, carrying, or an otherwise excluded task).",
+                                value=False, key="tool046_confirm_scope"
+                            )
+                            run_method = st.form_submit_button(
+                                "Calculate RNLE screening", type="primary",
+                                use_container_width=True, key="tool046_run"
+                            )
                         elif selected_tool["tool_id"] == "T047":
                             st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
                             hazard_json = st.text_area(
@@ -1387,8 +1458,25 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"failure_times_json": weibull_times_json}
                     elif selected_tool["tool_id"] == "T043":
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
+                    elif selected_tool["tool_id"] == "T044":
+                        current_tool_inputs = {"failure_modes_json": rcm_modes_json}
                     elif selected_tool["tool_id"] == "T045":
                         current_tool_inputs = {"parts_json": spare_parts_json}
+                    elif selected_tool["tool_id"] == "T046":
+                        current_tool_inputs = {
+                            "load_kg": rnle_load_kg,
+                            "horizontal_origin_cm": rnle_h_origin,
+                            "horizontal_destination_cm": rnle_h_destination,
+                            "vertical_origin_cm": rnle_v_origin,
+                            "vertical_destination_cm": rnle_v_destination,
+                            "asymmetry_origin_degrees": rnle_a_origin,
+                            "asymmetry_destination_degrees": rnle_a_destination,
+                            "frequency_lifts_per_minute": rnle_frequency,
+                            "duration_category": rnle_duration_category,
+                            "coupling_quality_origin": rnle_coupling_origin,
+                            "coupling_quality_destination": rnle_coupling_destination,
+                            "applicability_confirmed": rnle_applicability_confirmed,
+                        }
                     elif selected_tool["tool_id"] == "T047":
                         current_tool_inputs = {"hazards_json": hazard_json}
                     elif selected_tool["tool_id"] == "T050":
@@ -1507,7 +1595,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 balance_production_line, analyze_bottleneck_capacity,
                                 build_value_stream_map, analyze_fmea, analyze_mm1_queue,
                                 analyze_industrial_cost_variance, calculate_roi_evidence,
-                                plan_preventive_maintenance, assess_job_hazards,
+                                plan_preventive_maintenance, build_rcm_decision_register, assess_job_hazards,
                                 plan_material_requirements, score_project_portfolio,
                                 merge_data_tables, process_time_series,
                                 generate_synthetic_industrial_data, plan_acceptance_sampling,
@@ -1963,11 +2051,49 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_pm_tasks, list):
                                     raise ValueError("Maintenance tasks must be a JSON list of task objects.")
                                 result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
+                            elif selected_tool["tool_id"] == "T044":
+                                parsed_rcm_modes = json.loads(rcm_modes_json)
+                                if not isinstance(parsed_rcm_modes, list):
+                                    raise ValueError("RCM failure modes must be a JSON list of decision objects.")
+                                result = build_rcm_decision_register(parsed_rcm_modes)
+                                if parsed_rcm_modes == json.loads(_TOOL044_EXAMPLE_MODES):
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE"
+                                    result["provenance_warning"] = (
+                                        "The displayed failure-mode record is synthetic teaching data. "
+                                        "Replace it with site-reviewed evidence before operational use."
+                                    )
+                                else:
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    result["provenance_warning"] = (
+                                        "User-entered failure descriptions, consequences, task strategies and evidence references "
+                                        "have not been independently verified."
+                                    )
                             elif selected_tool["tool_id"] == "T045":
                                 parsed_parts = json.loads(spare_parts_json)
                                 if not isinstance(parsed_parts, list):
                                     raise ValueError("Spare parts must be a JSON list of part objects.")
                                 result = analyze_spare_parts_criticality(parsed_parts)
+                            elif selected_tool["tool_id"] == "T046":
+                                duration_hours = {
+                                    "≤1 hour": 1.0,
+                                    ">1 to ≤2 hours": 2.0,
+                                    ">2 to ≤8 hours": 8.0,
+                                }[rnle_duration_category]
+                                result = calculate_rnle_lifting_index(
+                                    load_kg=rnle_load_kg,
+                                    horizontal_origin_cm=rnle_h_origin,
+                                    horizontal_destination_cm=rnle_h_destination,
+                                    vertical_origin_cm=rnle_v_origin,
+                                    vertical_destination_cm=rnle_v_destination,
+                                    asymmetry_origin_degrees=rnle_a_origin,
+                                    asymmetry_destination_degrees=rnle_a_destination,
+                                    frequency_lifts_per_minute=rnle_frequency,
+                                    duration_hours=duration_hours,
+                                    coupling_quality_origin=rnle_coupling_origin,
+                                    coupling_quality_destination=rnle_coupling_destination,
+                                    applicability_confirmed=rnle_applicability_confirmed,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T047":
                                 parsed_hazards = json.loads(hazard_json)
                                 if not isinstance(parsed_hazards, list):
@@ -2256,15 +2382,38 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     st.session_state[key] = previous_value
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T006", "T007", "T020", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T020", "T044", "T046", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
-                            render_engineering_result(
-                                result,
-                                title=selected_tool["canonical_name"],
-                                key_prefix="target_" + selected_tool["tool_id"].lower(),
-                            )
+                            if selected_tool["tool_id"] == "T044":
+                                st.metric("Failure modes for review", int(result.get("failure_mode_count", 0)))
+                                c1, c2 = st.columns(2)
+                                c1.metric("Open review items", int(result.get("open_review_count", 0)))
+                                c2.metric("Flagged decisions", int(result.get("rule_flag_count", 0)))
+                                st.warning(result.get("warning", "RCM output requires qualified human review before use."))
+                                st.caption(result.get("method", "Structured RCM worksheet"))
+                                st.caption("Data provenance: " + str(result.get("data_provenance", "USER_ENTERED_UNVERIFIED")))
+                                provenance_warning = result.get("provenance_warning")
+                                if provenance_warning:
+                                    if result.get("data_provenance") == "SYNTHETIC_EXAMPLE":
+                                        st.info(provenance_warning)
+                                    else:
+                                        st.warning(provenance_warning)
+                                st.caption("Method / scope: " + str(result.get("formula", "Validation and review flags only; no numeric risk score is computed.")))
+                                register = result.get("review_register")
+                                if isinstance(register, pd.DataFrame):
+                                    st.markdown("**RCM review register**")
+                                    st.dataframe(register, use_container_width=True, hide_index=True)
+                                else:
+                                    st.error("The RCM review register was not returned; rerun the tool with valid inputs.")
+                                st.caption(result.get("assumptions", "User-provided decision inputs require validation."))
+                            else:
+                                render_engineering_result(
+                                    result,
+                                    title=selected_tool["canonical_name"],
+                                    key_prefix="target_" + selected_tool["tool_id"].lower(),
+                                )
                             if selected_tool["tool_id"] == "T100":
                                 st.download_button(
                                     "Download redacted support bundle (JSON)",
