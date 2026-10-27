@@ -47,6 +47,7 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     assert 'INSERT OR IGNORE INTO enterprise_users' in admin_seed
     assert "UPDATE enterprise_users" not in admin_seed
     assert "2099-01-01T00:00:00+00:00" in admin_seed
+    assert '"2099-01-01T00:00:00+00:00")' in app_source
 
     login_start = app_source.index("                # The session already contains authoritative server values.")
     login_end = app_source.index('                st.success(f"Welcome back, {username}!")', login_start)

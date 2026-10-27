@@ -656,7 +656,7 @@ def init_db():
                 (username,password,role,tier,email,created_at,subscription_expires_at)
                 VALUES (?,?,?,?,?,?,?)
             """, ("sho", admin_pass_hash, "admin", "Enterprise Plus Tier ($399)",
-                  "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
+                  "shoirtheagent@gmail.com", "2020-01-01T00:00:00+00:00", "2099-01-01T00:00:00+00:00"))
 
         conn.commit()
 
