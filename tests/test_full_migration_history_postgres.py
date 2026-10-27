@@ -202,6 +202,23 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     f"Migration replay is missing columns from {table}: {sorted(expected - set(columns or []))}"
                 )
 
+            unique_code_index = _fetchone(
+                target,
+                """
+                SELECT i.indisunique
+                FROM pg_index i
+                JOIN pg_class idx ON idx.oid = i.indexrelid
+                JOIN pg_class tbl ON tbl.oid = i.indrelid
+                JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+                WHERE ns.nspname = 'public'
+                  AND tbl.relname = 'shoir_accounts'
+                  AND idx.relname = 'idx_shoir_accounts_affiliate_code_unique';
+                """,
+            )
+            assert unique_code_index == (True,), (
+                "Populated referral codes must be protected by a unique partial index."
+            )
+
             for table in ("shoir_accounts", "shoir_pending_credentials", "shoir_sessions",
                           "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states", "shoir_login_throttle"):
                 assert _fetchone(
