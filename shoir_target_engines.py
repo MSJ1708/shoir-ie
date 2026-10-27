@@ -6556,3 +6556,446 @@ def manage_dataset_version_lineage(
             "Durable hosted persistence, linkage to every core dataset consumer and cross-workspace isolation require staging verification.",
         ],
     }
+
+
+
+def solve_supply_chain_network(network: Mapping[str, Any]) -> dict[str, Any]:
+    """Solve a bounded minimum-cost single-commodity flow network.
+
+    This is a deterministic flow model, not a live ERP/network integration.
+    Each edge carries one nonnegative flow up to its stated capacity.
+    """
+    from scipy.optimize import linprog
+
+    if not isinstance(network, Mapping):
+        raise ValueError("Network input must be a JSON object.")
+    nodes = network.get("nodes")
+    edges = network.get("edges")
+    if not isinstance(nodes, list) or not 2 <= len(nodes) <= 100:
+        raise ValueError("Network must contain between 2 and 100 nodes.")
+    if not isinstance(edges, list) or not 1 <= len(edges) <= 500:
+        raise ValueError("Network must contain between 1 and 500 edges.")
+
+    by_name: dict[str, dict[str, float]] = {}
+    for i, node in enumerate(nodes):
+        if not isinstance(node, Mapping):
+            raise ValueError("Every network node must be an object.")
+        name = str(node.get("name", "")).strip()
+        if not name or len(name) > 120 or name in by_name:
+            raise ValueError("Network node names must be non-empty, unique and at most 120 characters.")
+        supply = _finite_number(node.get("supply", 0), f"Node {name} supply")
+        demand = _finite_number(node.get("demand", 0), f"Node {name} demand")
+        if supply < 0 or demand < 0:
+            raise ValueError("Node supply and demand must be nonnegative.")
+        by_name[name] = {"supply": supply, "demand": demand}
+
+    total_supply = sum(n["supply"] for n in by_name.values())
+    total_demand = sum(n["demand"] for n in by_name.values())
+    if not math.isclose(total_supply, total_demand, rel_tol=1e-9, abs_tol=1e-7):
+        raise ValueError("Total network supply must equal total demand for this balanced model.")
+
+    edge_rows: list[dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, Mapping):
+            raise ValueError("Every network edge must be an object.")
+        source, target = str(edge.get("source", "")).strip(), str(edge.get("target", "")).strip()
+        if source not in by_name or target not in by_name or source == target:
+            raise ValueError("Every edge must connect two different declared nodes.")
+        capacity = _finite_number(edge.get("capacity"), "Edge capacity")
+        cost = _finite_number(edge.get("unit_cost"), "Edge unit cost")
+        if capacity <= 0 or cost < 0:
+            raise ValueError("Edge capacity must be positive and unit cost must be nonnegative.")
+        edge_rows.append({"source": source, "target": target, "capacity": capacity, "unit_cost": cost})
+
+    names = list(by_name)
+    positions = {name: i for i, name in enumerate(names)}
+    a_eq = np.zeros((len(names), len(edge_rows)), dtype=float)
+    for j, edge in enumerate(edge_rows):
+        a_eq[positions[edge["source"]], j] += 1.0
+        a_eq[positions[edge["target"]], j] -= 1.0
+    b_eq = np.array([by_name[name]["supply"] - by_name[name]["demand"] for name in names], dtype=float)
+    solved = linprog(
+        c=np.array([edge["unit_cost"] for edge in edge_rows], dtype=float),
+        A_eq=a_eq,
+        b_eq=b_eq,
+        bounds=[(0.0, edge["capacity"]) for edge in edge_rows],
+        method="highs",
+    )
+    if not solved.success:
+        return {
+            "status": "INFEASIBLE" if solved.status == 2 else "SOLVER_ERROR",
+            "solver_status": int(solved.status),
+            "message": "No feasible capacity-respecting flow was found." if solved.status == 2 else "The flow solver did not return a verified solution.",
+            "total_supply": total_supply,
+            "total_demand": total_demand,
+            "flows": [],
+            "model_scope": "single_commodity_minimum_cost_flow",
+            "limitations": ["No lead-time, multi-commodity, facility-opening, uncertainty, or live-system constraints are included."],
+        }
+
+    flows = []
+    for edge, value in zip(edge_rows, solved.x):
+        flow = float(value)
+        flows.append({
+            **edge,
+            "flow": flow,
+            "unused_capacity": max(0.0, edge["capacity"] - flow),
+            "edge_cost": flow * edge["unit_cost"],
+        })
+    return {
+        "status": "OPTIMAL",
+        "solver_status": int(solved.status),
+        "total_supply": total_supply,
+        "total_demand": total_demand,
+        "total_cost": float(solved.fun),
+        "flows": flows,
+        "node_balance_residual": float(np.max(np.abs(a_eq @ solved.x - b_eq))),
+        "model_scope": "single_commodity_minimum_cost_flow",
+        "data_origin": str(network.get("data_origin", "USER_ENTERED")).upper(),
+        "limitations": ["Deterministic single-commodity flow only; input costs/capacities are assumptions, not verified supplier or transport data."],
+    }
+
+
+def calibrate_digital_twin_outputs(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Fit a linear output correction to supplied simulated/measured pairs.
+
+    This is a first-order output-fit diagnostic, not physics-based parameter
+    estimation and not a connection to a live plant.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError("Calibration input must be a JSON object.")
+    pairs = payload.get("pairs")
+    if not isinstance(pairs, list) or not 3 <= len(pairs) <= 5000:
+        raise ValueError("Calibration requires between 3 and 5,000 simulated/measured pairs.")
+    origin = str(payload.get("data_origin", "")).strip().upper()
+    if origin not in {"SYNTHETIC", "IMPORTED", "USER_ENTERED"}:
+        raise ValueError("Data origin must be SYNTHETIC, IMPORTED, or USER_ENTERED; live data is not verified by this tool.")
+    simulated, measured = [], []
+    for row in pairs:
+        if not isinstance(row, Mapping):
+            raise ValueError("Every calibration pair must be an object.")
+        simulated.append(_finite_number(row.get("simulated"), "Simulated output"))
+        measured.append(_finite_number(row.get("measured"), "Measured output"))
+    x = np.asarray(simulated, dtype=float)
+    y = np.asarray(measured, dtype=float)
+    x_centered, y_centered = x - float(x.mean()), y - float(y.mean())
+    denominator = float(np.dot(x_centered, x_centered))
+    if denominator <= 1e-12:
+        raise ValueError("Simulated outputs must vary to fit a gain and bias.")
+    gain = float(np.dot(x_centered, y_centered) / denominator)
+    bias = float(y.mean() - gain * x.mean())
+    predicted = gain * x + bias
+    residuals = y - predicted
+    ss_total = float(np.dot(y_centered, y_centered))
+    ss_residual = float(np.dot(residuals, residuals))
+    return {
+        "status": "CALIBRATION_DIAGNOSTIC_CREATED",
+        "method": "ordinary_least_squares_affine_output_correction",
+        "data_origin": origin,
+        "observation_count": int(len(pairs)),
+        "gain": gain,
+        "bias": bias,
+        "r_squared": None if ss_total <= 1e-12 else float(1.0 - ss_residual / ss_total),
+        "mae": float(np.mean(np.abs(residuals))),
+        "rmse": float(np.sqrt(np.mean(np.square(residuals)))),
+        "residuals": [
+            {"observation": i + 1, "simulated": float(x[i]), "measured": float(y[i]), "calibrated_estimate": float(predicted[i]), "residual": float(residuals[i])}
+            for i in range(len(pairs))
+        ],
+        "limitations": [
+            "Fits output gain and bias only; it does not identify physical parameters or validate model structure.",
+            "No live plant data source is configured or verified. An R-squared value is not proof of predictive validity.",
+        ],
+    }
+
+
+def simulate_industrial_disruption(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Run a deterministic period-based capacity-shock and backlog scenario."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("Disruption scenario must be a JSON object.")
+    baseline = _finite_number(payload.get("baseline_capacity_per_period"), "Baseline capacity")
+    demand = _finite_number(payload.get("demand_per_period"), "Demand per period")
+    starting_inventory = _finite_number(payload.get("starting_inventory", 0), "Starting inventory")
+    periods_raw = payload.get("periods")
+    if isinstance(periods_raw, bool) or not isinstance(periods_raw, int) or not 1 <= periods_raw <= 500:
+        raise ValueError("Periods must be an integer from 1 to 500.")
+    if baseline <= 0 or demand < 0 or starting_inventory < 0:
+        raise ValueError("Baseline capacity must be positive; demand and inventory must be nonnegative.")
+    events = payload.get("disruptions", [])
+    if not isinstance(events, list) or len(events) > 100:
+        raise ValueError("Disruptions must be a list containing at most 100 events.")
+    normalized: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            raise ValueError("Every disruption event must be an object.")
+        start, end = event.get("start_period"), event.get("end_period")
+        if any(isinstance(v, bool) or not isinstance(v, int) for v in (start, end)):
+            raise ValueError("Disruption start/end periods must be integers.")
+        fraction = _finite_number(event.get("capacity_fraction"), "Capacity fraction")
+        if not 1 <= start <= end <= periods_raw or not 0 <= fraction <= 1:
+            raise ValueError("Disruption periods must fit the horizon and capacity fractions must be between 0 and 1.")
+        normalized.append({"name": str(event.get("name", "Disruption"))[:100], "start_period": start, "end_period": end, "capacity_fraction": fraction})
+
+    inventory, backlog = starting_inventory, 0.0
+    rows = []
+    total_demand_served = 0.0
+    maximum_backlog = 0.0
+    recovery_period = None
+    for period in range(1, periods_raw + 1):
+        active = [e for e in normalized if e["start_period"] <= period <= e["end_period"]]
+        capacity_fraction = math.prod(e["capacity_fraction"] for e in active) if active else 1.0
+        capacity = baseline * capacity_fraction
+        available = inventory + capacity
+        backlog_served = min(backlog, available)
+        available -= backlog_served
+        current_served = min(demand, available)
+        inventory = max(0.0, available - current_served)
+        backlog = max(0.0, backlog - backlog_served) + max(0.0, demand - current_served)
+        total_demand_served += current_served
+        maximum_backlog = max(maximum_backlog, backlog)
+        if not active and backlog <= 1e-9 and recovery_period is None and period >= max([e["end_period"] for e in normalized], default=0):
+            recovery_period = period
+        rows.append({
+            "period": period,
+            "active_disruptions": [e["name"] for e in active],
+            "effective_capacity_fraction": capacity_fraction,
+            "capacity": capacity,
+            "current_demand": demand,
+            "current_demand_served": current_served,
+            "inventory_end": inventory,
+            "backlog_end": backlog,
+        })
+    total_demand = demand * periods_raw
+    return {
+        "status": "DETERMINISTIC_SCENARIO_COMPLETED",
+        "data_origin": str(payload.get("data_origin", "USER_ENTERED")).upper(),
+        "periods": periods_raw,
+        "total_demand": total_demand,
+        "total_current_demand_served": total_demand_served,
+        "service_percent": 100.0 if total_demand <= 0 else 100.0 * total_demand_served / total_demand,
+        "ending_inventory": inventory,
+        "ending_backlog": backlog,
+        "maximum_backlog": maximum_backlog,
+        "recovery_period": recovery_period,
+        "period_results": rows,
+        "limitations": ["Deterministic capacity/backlog scenario only; no probabilistic failure, lead-time, routing, workforce, cost or real-time plant model is included."],
+    }
+
+
+def evaluate_kpi_thresholds(payload: Mapping[str, Any], *, as_of_utc: Any = None) -> dict[str, Any]:
+    """Evaluate freshness-aware KPI thresholds without persisting or sending alerts."""
+    from datetime import datetime, timezone
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("KPI alert input must be a JSON object.")
+    records = payload.get("kpis")
+    if not isinstance(records, list) or not 1 <= len(records) <= 500:
+        raise ValueError("Provide between 1 and 500 KPI records.")
+    as_of = as_of_utc or datetime.now(timezone.utc)
+    if isinstance(as_of, str):
+        as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    if not isinstance(as_of, datetime) or as_of.tzinfo is None:
+        raise ValueError("As-of time must be timezone-aware UTC.")
+    as_of = as_of.astimezone(timezone.utc)
+    seen: set[tuple[str, str]] = set()
+    results = []
+    for row in records:
+        if not isinstance(row, Mapping):
+            raise ValueError("Every KPI record must be an object.")
+        name, period = str(row.get("name", "")).strip(), str(row.get("period", "")).strip()
+        if not name or len(name) > 120 or not period or len(period) > 80:
+            raise ValueError("KPI name and period are required and must be bounded.")
+        key = (name.casefold(), period)
+        if key in seen:
+            raise ValueError("Duplicate KPI name/period records are not allowed.")
+        seen.add(key)
+        value = _finite_number(row.get("value"), f"{name} value")
+        threshold = _finite_number(row.get("threshold"), f"{name} threshold")
+        max_age = _finite_number(row.get("max_age_hours"), f"{name} maximum age")
+        comparison = str(row.get("comparison", "")).strip().lower()
+        if comparison not in {"above", "below"} or max_age <= 0:
+            raise ValueError("Comparison must be above/below and maximum age must be positive.")
+        stamp_raw = str(row.get("measured_at_utc", "")).strip()
+        try:
+            stamp = datetime.fromisoformat(stamp_raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"{name} measurement time must be ISO-8601 with a timezone.") from exc
+        if stamp.tzinfo is None:
+            raise ValueError(f"{name} measurement time must include a timezone.")
+        age = (as_of - stamp.astimezone(timezone.utc)).total_seconds() / 3600.0
+        if age < -1e-6:
+            raise ValueError(f"{name} measurement time cannot be in the future.")
+        stale = age > max_age
+        threshold_breached = value > threshold if comparison == "above" else value < threshold
+        status = "STALE_DATA" if stale else ("ALERT" if threshold_breached else "OK")
+        results.append({
+            "name": name, "period": period, "value": value, "unit": str(row.get("unit", ""))[:40],
+            "threshold": threshold, "comparison": comparison, "measured_at_utc": stamp.astimezone(timezone.utc).isoformat(),
+            "age_hours": age, "maximum_age_hours": max_age, "status": status,
+        })
+    return {
+        "status": "KPI_THRESHOLDS_EVALUATED",
+        "evaluated_count": len(results),
+        "alert_count": sum(r["status"] == "ALERT" for r in results),
+        "stale_count": sum(r["status"] == "STALE_DATA" for r in results),
+        "kpis": results,
+        "delivery_status": "NOT_SENT",
+        "limitations": ["Results are calculated from supplied KPI values only; no source connector, durable alert state, recipient routing, or notification delivery is configured."],
+    }
+
+
+def validate_api_plugin_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a read-only plugin manifest; never calls the endpoint or executes code."""
+    import re
+    from urllib.parse import urlsplit
+
+    if not isinstance(manifest, Mapping):
+        raise ValueError("Plugin manifest must be a JSON object.")
+    plugin_id = str(manifest.get("plugin_id", "")).strip()
+    version = str(manifest.get("version", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,79}", plugin_id):
+        raise ValueError("Plugin ID must be 2-80 safe ASCII characters.")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("Plugin version must use semantic major.minor.patch form.")
+    method = str(manifest.get("method", "")).strip().upper()
+    if method != "GET":
+        raise ValueError("Only read-only GET plugin descriptors are accepted.")
+    endpoint = str(manifest.get("endpoint_url", "")).strip()
+    try:
+        parsed = urlsplit(endpoint)
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
+        port = parsed.port or 443
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("Plugin endpoint has an invalid host or port.") from exc
+    if parsed.scheme.lower() != "https" or not host or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("Plugin endpoint must be HTTPS without embedded credentials, query or fragment.")
+    allowlist = manifest.get("approved_hosts")
+    if not isinstance(allowlist, list) or not allowlist:
+        raise ValueError("An explicit approved host allowlist is required.")
+    allowed = set()
+    for entry in allowlist:
+        value = str(entry).strip().lower().rstrip(".")
+        if not value or "/" in value or "@" in value or any(ch.isspace() for ch in value):
+            raise ValueError("Approved hosts must be exact hostnames, optionally with a port.")
+        allowed.add(value)
+    endpoint_key = host if port == 443 else f"{host}:{port}"
+    if endpoint_key not in allowed:
+        raise ValueError("Plugin endpoint host is not present in the explicit allowlist.")
+    required_scopes = manifest.get("required_scopes", [])
+    granted_scopes = manifest.get("granted_scopes", [])
+    if not isinstance(required_scopes, list) or not required_scopes or not all(isinstance(s, str) and s.strip() for s in required_scopes):
+        raise ValueError("At least one explicit required scope is needed.")
+    if not isinstance(granted_scopes, list) or not all(isinstance(s, str) and s.strip() for s in granted_scopes):
+        raise ValueError("Granted scopes must be a list of non-empty strings.")
+    if not set(required_scopes).issubset(set(granted_scopes)):
+        raise ValueError("Granted scopes do not cover the required plugin scopes.")
+    timeout = _finite_number(manifest.get("timeout_seconds"), "Timeout")
+    rate_limit = manifest.get("rate_limit_per_minute")
+    if isinstance(rate_limit, bool) or not isinstance(rate_limit, int) or not 1 <= rate_limit <= 600:
+        raise ValueError("Rate limit must be an integer from 1 to 600 requests per minute.")
+    if not 1 <= timeout <= 60:
+        raise ValueError("Timeout must be between 1 and 60 seconds.")
+    return {
+        "status": "MANIFEST_VALIDATED_REVIEW_REQUIRED",
+        "plugin_id": plugin_id, "version": version, "endpoint_host": endpoint_key,
+        "method": "GET", "required_scopes": sorted(set(required_scopes)),
+        "granted_scopes": sorted(set(granted_scopes)), "timeout_seconds": timeout,
+        "rate_limit_per_minute": rate_limit, "network_request_sent": False,
+        "plugin_executed": False, "write_capability": False,
+        "limitations": ["This validates metadata only; it does not register, authenticate, invoke or sandbox a plugin/API. A separate reviewed server-side transport is required."],
+    }
+
+
+def audit_data_governance_recovery(payload: Mapping[str, Any], *, as_of_utc: Any = None) -> dict[str, Any]:
+    """Audit supplied workspace retention and recovery evidence without mutating data."""
+    from datetime import datetime, timezone
+    import re
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("Governance input must be a JSON object.")
+    workspace_id = str(payload.get("workspace_id", "")).strip()
+    records = payload.get("records")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", workspace_id):
+        raise ValueError("A bounded workspace reference is required.")
+    if not isinstance(records, list) or not 1 <= len(records) <= 1000:
+        raise ValueError("Provide between 1 and 1,000 governance records.")
+    max_restore_age = payload.get("max_restore_test_age_days", 90)
+    if isinstance(max_restore_age, bool) or not isinstance(max_restore_age, int) or not 1 <= max_restore_age <= 3650:
+        raise ValueError("Maximum restore-test age must be an integer from 1 to 3,650 days.")
+    as_of = as_of_utc or datetime.now(timezone.utc)
+    if isinstance(as_of, str):
+        as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    if not isinstance(as_of, datetime) or as_of.tzinfo is None:
+        raise ValueError("As-of time must include a timezone.")
+    as_of = as_of.astimezone(timezone.utc)
+
+    ids: set[str] = set()
+    findings = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Every governance record must be an object.")
+        record_id = str(record.get("record_id", "")).strip()
+        record_workspace = str(record.get("workspace_id", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", record_id) or record_id in ids:
+            raise ValueError("Governance record IDs must be bounded and unique.")
+        ids.add(record_id)
+        if record_workspace != workspace_id:
+            raise ValueError("Every record must belong to the requested workspace.")
+        classification = str(record.get("classification", "")).strip().upper()
+        if classification not in {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"}:
+            raise ValueError("Classification must be PUBLIC, INTERNAL, CONFIDENTIAL, or RESTRICTED.")
+        retention = record.get("retention_days")
+        if isinstance(retention, bool) or not isinstance(retention, int) or not 0 <= retention <= 36500:
+            raise ValueError("Retention days must be an integer between 0 and 36,500.")
+        try:
+            created = datetime.fromisoformat(str(record.get("created_at_utc", "")).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Created time must be ISO-8601 with a timezone.") from exc
+        if created.tzinfo is None:
+            raise ValueError("Created time must include a timezone.")
+        age_days = (as_of - created.astimezone(timezone.utc)).total_seconds() / 86400.0
+        if age_days < -1e-6:
+            raise ValueError("Created time cannot be in the future.")
+        legal_hold = record.get("legal_hold", False)
+        backup_verified = record.get("backup_verified", False)
+        if not isinstance(legal_hold, bool) or not isinstance(backup_verified, bool):
+            raise ValueError("Legal-hold and backup-verified flags must be booleans.")
+        if legal_hold:
+            retention_status = "LEGAL_HOLD_REQUIRES_HUMAN_REVIEW"
+        elif age_days > retention:
+            retention_status = "RETENTION_DUE_REQUIRES_APPROVAL"
+        else:
+            retention_status = "WITHIN_RETENTION"
+        backup_ref = str(record.get("backup_ref", "")).strip()
+        restore_raw = str(record.get("last_restore_test_utc", "")).strip()
+        restore_test_age = None
+        if not backup_ref or not backup_verified:
+            recovery_status = "BACKUP_EVIDENCE_MISSING_OR_UNVERIFIED"
+        elif not restore_raw:
+            recovery_status = "RESTORE_TEST_MISSING"
+        else:
+            try:
+                restore_time = datetime.fromisoformat(restore_raw.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Restore-test time must be ISO-8601 with a timezone.") from exc
+            if restore_time.tzinfo is None:
+                raise ValueError("Restore-test time must include a timezone.")
+            restore_test_age = (as_of - restore_time.astimezone(timezone.utc)).total_seconds() / 86400.0
+            if restore_test_age < -1e-6:
+                raise ValueError("Restore-test time cannot be in the future.")
+            recovery_status = "RESTORE_TEST_STALE" if restore_test_age > max_restore_age else "RESTORE_EVIDENCE_FRESH"
+        findings.append({
+            "record_id": record_id, "classification": classification, "age_days": age_days,
+            "retention_status": retention_status, "recovery_status": recovery_status,
+            "restore_test_age_days": restore_test_age,
+        })
+    return {
+        "status": "GOVERNANCE_PREFLIGHT_COMPLETED",
+        "workspace_id": workspace_id, "record_count": len(findings),
+        "retention_due_count": sum(f["retention_status"] == "RETENTION_DUE_REQUIRES_APPROVAL" for f in findings),
+        "legal_hold_count": sum(f["retention_status"] == "LEGAL_HOLD_REQUIRES_HUMAN_REVIEW" for f in findings),
+        "recovery_not_ready_count": sum(f["recovery_status"] != "RESTORE_EVIDENCE_FRESH" for f in findings),
+        "findings": findings,
+        "mutations_performed": False, "delete_performed": False, "restore_performed": False,
+        "limitations": ["Metadata preflight only; no data export, deletion, backup creation, restore, legal approval or durable audit event is performed."],
+    }
