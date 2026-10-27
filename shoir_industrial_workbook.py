@@ -763,7 +763,7 @@ def _serialize_workbook(
     semantic_map=semantic_map or {}
     variables=variables or {}
     payload=io.BytesIO()
-    with pd.ExcelWriter(payload,engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(payload,engine="xlsxwriter",engine_kwargs={"options":{"strings_to_formulas":False,"strings_to_urls":False}}) as writer:
         book=writer.book
         title_fmt=book.add_format({"bold":True,"font_size":16,"font_color":"1E3A8A"})
         meta_fmt=book.add_format({"italic":True,"font_color":"64748B"})
@@ -851,7 +851,7 @@ def _build_workbook_evidence_bundle(
 def _serialize_persistence_workbook(workbook:Mapping[str,pd.DataFrame])->bytes:
     """Stable internal format for DB persistence; do not couple it to presentation exports."""
     payload=io.BytesIO()
-    with pd.ExcelWriter(payload,engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(payload,engine="xlsxwriter",engine_kwargs={"options":{"strings_to_formulas":False,"strings_to_urls":False}}) as writer:
         used=set()
         for raw_sheet,df in workbook.items():
             sheet=re.sub(r"[:\\/?*\[\]]+","",str(raw_sheet)).strip()[:31] or "Sheet1"

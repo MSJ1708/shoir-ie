@@ -716,23 +716,60 @@ def save_experiment(name: str, module: str, scenarios: list, results: dict, user
     return eid
 
 def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
+    """Build a paginated PDF without silently truncating source tables."""
     from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle, Image
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
-    out=io.BytesIO(); doc=SimpleDocTemplate(out,pagesize=landscape(A4)); styles=getSampleStyleSheet()
-    story=[Paragraph(html.escape(str(title or ""), quote=False),styles["Title"]),Spacer(1,8)]
-    for label,df in tables:
-        safe=df.head(30).fillna("").astype(str)
-        story.append(Paragraph(html.escape(str(label), quote=False),styles["Heading2"]))
+
+    out = io.BytesIO()
+    # Landscape reports need a wider usable canvas: with the default 1-inch
+    # side margins, a two-column table's text anchors span only ~349 pt on an
+    # 842-pt page, making the report look unnecessarily narrow. Keep modest
+    # margins so tabular columns use the page width while retaining vertical
+    # room for pagination and repeated headers.
+    doc = SimpleDocTemplate(
+        out,
+        pagesize=landscape(A4),
+        leftMargin=0.25 * inch,
+        rightMargin=0.25 * inch,
+        topMargin=0.5 * inch,
+        bottomMargin=0.5 * inch,
+    )
+    styles = getSampleStyleSheet()
+    story = [Paragraph(html.escape(str(title or ""), quote=False), styles["Title"]), Spacer(1, 8)]
+    for label, df in tables:
+        safe = df.fillna("").astype(str)
+        story.append(Paragraph(html.escape(str(label), quote=False), styles["Heading2"]))
         if len(safe.columns):
-            t=Table([list(safe.columns)]+safe.values.tolist(),repeatRows=1); t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1E3A8A")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.25,colors.grey),("FONTSIZE",(0,0),(-1,-1),7)])); story += [t,Spacer(1,8)]
-    for label,fig in figures:
-        safe_label=html.escape(str(label), quote=False)
+            # LongTable repeats the column header on every page and splits rows
+            # across pages instead of dropping rows beyond a fixed preview cap.
+            # Explicitly occupy the usable landscape width. ReportLab's
+            # inferred widths can otherwise leave a two-column report as a
+            # narrow strip centered on the page.
+            column_count = len(safe.columns)
+            table = LongTable(
+                [list(safe.columns)] + safe.values.tolist(),
+                colWidths=[doc.width / column_count] * column_count,
+                repeatRows=1,
+                splitByRow=1,
+            )
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), .25, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ]))
+            story += [table, Spacer(1, 8)]
+    for label, fig in figures:
+        safe_label = html.escape(str(label), quote=False)
         try:
-            png=fig.to_image(format="png",width=1200,height=650,scale=2)
-            story += [Paragraph(safe_label,styles["Heading2"]),Image(io.BytesIO(png),width=10.5*inch,height=5.7*inch)]
+            png = fig.to_image(format="png", width=1200, height=650, scale=2)
+            story += [
+                Paragraph(safe_label, styles["Heading2"]),
+                Image(io.BytesIO(png), width=10.5 * inch, height=5.7 * inch),
+            ]
         except Exception:
             # Keep the report complete and explain the missing static chart,
             # rather than failing the entire PDF export.
@@ -740,33 +777,122 @@ def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: S
                 f"{safe_label} (static chart rendering was unavailable; include the underlying table where supplied)",
                 styles["Normal"],
             )]
-    doc.build(story); return out.getvalue()
+    doc.build(story)
+    return out.getvalue()
+
 
 def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
+    """Build a widescreen PowerPoint report with complete, continued tables."""
     from pptx import Presentation
     from pptx.util import Inches
-    prs=Presentation(); cover=prs.slides.add_slide(prs.slide_layouts[0]); cover.shapes.title.text=str(title or "Shoir-IE Report"); cover.placeholders[1].text="Shoir-IE Industrial Decision Platform"
-    for label,fig in figures:
-        safe_label=str(label or "Chart")[:180]
+    from pptx.enum.text import MSO_ANCHOR
+
+    prs = Presentation()
+    # Report content below uses 16:9 coordinates; set the page size explicitly
+    # instead of inheriting python-pptx's 4:3 default template dimensions.
+    prs.slide_width = Inches(13.333333)
+    prs.slide_height = Inches(7.5)
+
+    def set_report_title(slide, text: str):
+        title_shape = slide.shapes.title
+        title_shape.text = str(text or "Shoir-IE Report")[:180]
+        title_shape.left = Inches(.25)
+        title_shape.top = Inches(.15)
+        title_shape.width = Inches(12.8)
+        title_shape.height = Inches(1.0)
+        return title_shape
+
+    cover = prs.slides.add_slide(prs.slide_layouts[0])
+    cover_title = cover.shapes.title
+    cover_title.text = str(title or "Shoir-IE Report")
+    cover_title.left = Inches(.5)
+    cover_title.top = Inches(2.15)
+    cover_title.width = Inches(12.333333)
+    cover_title.height = Inches(1.15)
+    cover_title.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    subtitle = cover.placeholders[1]
+    subtitle.text = "Shoir-IE Industrial Decision Platform"
+    subtitle.left = Inches(.5)
+    subtitle.top = Inches(3.55)
+    subtitle.width = Inches(12.333333)
+    subtitle.height = Inches(.8)
+    subtitle.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+    for label, fig in figures:
+        safe_label = str(label or "Chart")[:180]
         try:
-            png=fig.to_image(format="png",width=1600,height=900,scale=2)
-            s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=safe_label
-            s.shapes.add_picture(io.BytesIO(png),Inches(.4),Inches(1.1),width=Inches(12.5))
+            png = fig.to_image(format="png", width=1600, height=900, scale=2)
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            set_report_title(slide, safe_label)
+            # Keep a 16:9 chart proportion and leave an explicit title gap.
+            chart_width = 10.2
+            chart_height = chart_width * 9 / 16
+            chart_left = (13.333333 - chart_width) / 2
+            slide.shapes.add_picture(
+                io.BytesIO(png), Inches(chart_left), Inches(1.3),
+                width=Inches(chart_width), height=Inches(chart_height),
+            )
         except Exception:
             # A missing chart image should not silently vanish from a delivered deck.
-            s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=safe_label
-            box=s.shapes.add_textbox(Inches(.6),Inches(1.6),Inches(12.0),Inches(2.0))
-            box.text_frame.text=(
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            set_report_title(slide, safe_label)
+            box = slide.shapes.add_textbox(Inches(.6), Inches(1.6), Inches(12.0), Inches(2.0))
+            box.text_frame.text = (
                 "The chart image could not be rendered in this export environment. "
                 "Retry with chart-rendering support enabled, and include the related data table for a traceable result."
             )
-    for label,df in tables:
-        d=df.head(15).fillna("").astype(str); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label)
-        rows=max(1,len(d)+1); cols=max(1,len(d.columns)); table=s.shapes.add_table(rows,cols,Inches(.25),Inches(1.1),Inches(12.8),Inches(5.6)).table
-        for j,col in enumerate(d.columns): table.cell(0,j).text=str(col)
-        for i,row in enumerate(d.itertuples(index=False),1):
-            for j,val in enumerate(row): table.cell(i,j).text=str(val)
-    b=io.BytesIO(); prs.save(b); return b.getvalue()
+
+    # Ten data rows plus the header leave enough vertical room for
+    # readable text in LibreOffice/PowerPoint renderers. Do not rely on
+    # shape-level bounds alone: explicitly size each cell row and text.
+    max_data_rows_per_slide = 7
+    for label, df in tables:
+        safe = df.fillna("").astype(str)
+        base_label = str(label or "Data")
+        if len(safe):
+            chunks = [
+                safe.iloc[offset:offset + max_data_rows_per_slide]
+                for offset in range(0, len(safe), max_data_rows_per_slide)
+            ]
+        else:
+            # Preserve the header-only table as a usable empty-state export.
+            chunks = [safe]
+        for chunk_index, chunk in enumerate(chunks):
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            slide_title = base_label if chunk_index == 0 else f"{base_label} (continued {chunk_index + 1})"
+            set_report_title(slide, slide_title)
+            rows = len(chunk) + 1
+            cols = max(1, len(chunk.columns))
+            table = slide.shapes.add_table(
+                rows, cols, Inches(.25), Inches(1.4), Inches(12.8), Inches(5.5)
+            ).table
+            # Fixed row heights and explicit text styling avoid the last
+            # row being clipped by renderer-specific auto-fit behavior.
+            table_height = Inches(5.2)
+            table.rows[0].height = Inches(.44)
+            data_row_height = Inches(.62)
+            for row_index in range(1, rows):
+                table.rows[row_index].height = data_row_height
+            for j, col in enumerate(chunk.columns):
+                table.cell(0, j).text = str(col)
+            for i, row in enumerate(chunk.itertuples(index=False), 1):
+                for j, val in enumerate(row):
+                    table.cell(i, j).text = str(val)
+            for row_index in range(rows):
+                for cell in table.rows[row_index].cells:
+                    cell.margin_top = Inches(.025)
+                    cell.margin_bottom = Inches(.025)
+                    cell.margin_left = Inches(.06)
+                    cell.margin_right = Inches(.06)
+                    cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+                    for paragraph in cell.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.size = Inches(.14)
+            # Check effective row extents, not just the containing shape.
+            assert sum(r.height for r in table.rows) <= table_height
+    payload = io.BytesIO()
+    prs.save(payload)
+    return payload.getvalue()
 
 def _normalize_render_export_args(figures, tier, username):
     """Accept the legacy (module, tables, tier, username) calling convention safely.

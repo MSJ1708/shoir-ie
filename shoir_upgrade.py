@@ -7,7 +7,7 @@ the Streamlit Copilot.
 from __future__ import annotations
 import csv, io, re, zipfile, html
 from datetime import datetime, timezone
-from typing import Iterable, Optional, Tuple, Sequence
+from typing import Any, Iterable, Optional, Tuple, Sequence
 import pandas as pd
 import numpy as np
 
@@ -291,6 +291,19 @@ def _excel_safe_df(value: Any) -> pd.DataFrame:
             out[col] = out[col].map(lambda v: v if v is None or isinstance(v, (str, int, float, bool, pd.Timestamp)) else str(v))
     return out
 
+def literalize_untrusted_formula_cells(workbook: Any) -> None:
+    """Store formula-looking strings as text in openpyxl reports with no intentional formulas.
+
+    Only call this for generated report workbooks whose sheets are data/audit exports,
+    not for user-authored workbooks where real formulas must be preserved.
+    """
+    for worksheet in getattr(workbook, "worksheets", []):
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if cell.data_type == "f" and isinstance(cell.value, str):
+                    cell.data_type = "s"
+
+
 def _excel_column_width(series: pd.Series, header: Any) -> int:
     """Calculate a bounded width without vectorized len() failures on mixed objects."""
     width = len(str(header)) + 2
@@ -305,7 +318,11 @@ def _excel_column_width(series: pd.Series, header: Any) -> int:
 def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], figures=None, audit=None, function_reference=True) -> bytes:
     figures=figures or []; audit=audit or []
     buf=io.BytesIO()
-    with pd.ExcelWriter(buf,engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(
+        buf,
+        engine="xlsxwriter",
+        engine_kwargs={"options": {"strings_to_formulas": False, "strings_to_urls": False}},
+    ) as writer:
         workbook=writer.book
         title_fmt=workbook.add_format({"bold":True,"font_size":18,"font_color":"1E3A8A"})
         subtitle_fmt=workbook.add_format({"italic":True,"font_color":"64748B"})
