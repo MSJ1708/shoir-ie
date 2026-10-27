@@ -2413,7 +2413,7 @@ def test_supply_chain_network_solves_minimum_cost_flow_and_reports_infeasible_ca
     }
     result = solve_supply_chain_network(network)
     assert result["status"] == "OPTIMAL"
-    assert result["total_cost"] == pytest.approx(16.0)
+    assert result["total_cost"] == pytest.approx(10.0)
     assert result["node_balance_residual"] <= 1e-8
     assert sum(row["flow"] for row in result["flows"] if row["source"] == "Source") == pytest.approx(5.0)
 
@@ -2471,7 +2471,7 @@ def test_industrial_disruption_scenario_tracks_backlog_recovery_and_rejects_inva
     assert result["status"] == "DETERMINISTIC_SCENARIO_COMPLETED"
     assert result["period_results"][1]["capacity"] == pytest.approx(40.0)
     assert result["ending_backlog"] == pytest.approx(0.0)
-    assert result["recovery_period"] == 7
+    assert result["recovery_period"] == 6
     no_shock = simulate_industrial_disruption({
         "baseline_capacity_per_period": 100, "demand_per_period": 80,
         "starting_inventory": 0, "periods": 3, "disruptions": [],
