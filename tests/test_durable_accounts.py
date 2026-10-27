@@ -189,8 +189,8 @@ def test_login_throttle_contract_is_server_only_and_atomic():
 
     assert _source_contract_contains(edge_source, 'loginThrottleBuckets(usernameLc,req)')
     assert _source_contract_contains(edge_source, 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")')
-    assert _source_contract_contains(edge_source, 'response({error:"Too many sign-in attempts. Please wait and try again."},429)')
-    assert _source_contract_contains(edge_source, 'response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
+    assert _source_contract_contains(edge_source, 'sendResponse({error:"Too many sign-in attempts. Please wait and try again."},429)')
+    assert _source_contract_contains(edge_source, 'sendResponse({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
     assert 'SECURITY INVOKER' in migration
     assert 'pg_advisory_xact_lock' in migration
     assert 'ALTER TABLE public.shoir_login_throttle ENABLE ROW LEVEL SECURITY' in migration
