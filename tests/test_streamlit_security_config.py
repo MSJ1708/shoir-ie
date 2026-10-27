@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".streamlit" / "config.toml"
+REQUIREMENTS = ROOT / "requirements.txt"
 
 EXPECTED_ORIGINS = {
     "https://shoir-ie-app.streamlit.app",
@@ -21,6 +22,13 @@ EXPECTED_HOSTS = {
     "127.0.0.1",
     "localhost",
 }
+
+
+def test_streamlit_version_supports_trusted_hosts_configuration():
+    requirements = REQUIREMENTS.read_text(encoding="utf-8")
+    assert "streamlit>=1.61,<2" in requirements, (
+        "The trusted-host allowlist requires Streamlit 1.61 or later."
+    )
 
 
 def test_streamlit_cors_and_xsrf_are_enabled_with_narrow_origin_and_host_allowlists():
