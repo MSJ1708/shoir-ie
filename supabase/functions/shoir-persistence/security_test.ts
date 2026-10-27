@@ -2,13 +2,13 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
-  shouldAutoAssignReferralCode,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
+  shouldAutoAssignReferralCode,
 } from "./security.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -205,7 +205,10 @@ Deno.test("persistence CORS allows only exact configured browser origins", () =>
     "http://localhost:8501",
   ];
   for (const origin of origins) {
-    assert(isAllowedBrowserOrigin(origin), `Expected allowlisted origin: ${origin}`);
+    assert(
+      isAllowedBrowserOrigin(origin),
+      `Expected allowlisted origin: ${origin}`,
+    );
     const headers = corsHeadersForOrigin(origin);
     assert(
       headers.get("Access-Control-Allow-Origin") === origin,
