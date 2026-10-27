@@ -212,3 +212,16 @@ Production performance advisors also returned 16 informational unused-index find
 6. Accountable release owner/platform operator: provide current backup and successful restore evidence, rollback window/operator and explicit production approval before any production database/function rollout; gate cleared: production authorization.
 
 **Decision remains HOLD / NO-GO for both paid general availability and a controlled beta that depends on the unverified staging candidate.** A later controlled-beta GO can only cover the exact restricted pilot scope that passes all mandatory technical, hosted, tenant-isolation, recovery and approval gates. No such GO is authorized by this addendum.
+
+### Artifact-level export inspection — completed 27 October 2026
+
+Retrieved and independently inspected the artifact from [PR #217 validation run 40496541791](https://github.com/MSJ1708/shoir-ie/actions/runs/40496541791). Artifact [shoir-ie-report-export-validation (ID 12731026975)](https://github.com/MSJ1708/shoir-ie/actions/artifacts/12731026975) was ZIP-tested and matched the reported archive hash:
+
+- ZIP SHA-256: `640c3491adcee8f7c11d0fc0df8402a7b4f6d71abb6a9c588f401be17e8d6ffd`
+- Manifest source commit: `231001c7b985ab34c110060df19e6c77fd708fa5` (the exact PR #217 candidate)
+- `synthetic_data_only=true`; no customer data in the artifact.
+- PDF SHA-256: `1aaf1b7b3e1b899acf19464e90551164c9ae40248b4569084c1885e5e9c7b84f`; 3 A4 landscape pages. Re-parsed all page text and confirmed all expected identifiers ROW-001 through ROW-067 exist; page ranges were 001–023, 024–050, and 051–067. Rendered and visually inspected all three pages. Headers repeat on each page; no row clipping/omission observed. Text is compact for a 67-row synthetic table but legible at full page view.
+- PPTX SHA-256: `dc83f4dfb17c06b533a962f990323d277a514b41a0f696ab84fa53a4e3b77f7e`; 16:9 presentation with one cover and 10 continued-table slides. Parsed the actual PPTX, verified 67 ordered row identifiers, a repeated Metric/Value header on every table slide, no shape extending outside slide bounds, and no missing rows. All 11 pre-rendered slide images were visually inspected; no clipping or hidden rows observed.
+- The manifest's hashes for the PDF and PPTX independently matched the file bytes. ZIP contents passed integrity test.
+
+**Export gate: PASS for this synthetic artifact and exact PR #217 source SHA.** This is not proof of export behavior on a hosted production/staging app or on arbitrary customer workbooks. The live-deployment-smoke job for the PR remains SKIPPED.
