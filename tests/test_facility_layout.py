@@ -303,3 +303,10 @@ def test_blank_slp_relationship_remains_missing_not_a_fabricated_score(
     matrix = facility._matrix(departments, slp)
     assert matrix.loc["D1", "D2"] == ""
     assert pd.isna(facility._slp_heatmap_values(matrix).loc["D1", "D2"])
+
+
+def test_slp_export_handles_flows_without_reason_column():
+    flows = _flows().drop(columns=["reason"])
+    slp = _slp_frame(_departments(), flows)
+    row = slp[(slp["From"] == "D1") & (slp["To"] == "D2")].iloc[0]
+    assert row["Reason"] == ""
