@@ -76,7 +76,7 @@ def test_safe_referral_migration_is_additive_and_server_only():
     source = (
         MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
     ).read_text(encoding="utf-8").casefold()
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
     assert "create table if not exists public.shoir_referrals" in executable_sql
