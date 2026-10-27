@@ -4,12 +4,22 @@
 **Review type:** Targeted repository/source review of public legal notices, registration, referral claims and selected persistence code.  
 **Overall status:** **NOT LEGALLY CLEARED FOR COMMERCIAL PRODUCTION.** This document is not legal advice, a compliance certificate, a full security assessment or a formula-by-formula engineering audit. A Saudi-qualified lawyer and appropriately skilled technical reviewers should confirm unresolved items.
 
+## Current release-candidate recheck — October 26, 2026
+
+- Reviewed candidate branch: staging-e2e-20261019, commit 9e3899d6f5147584cf27585d946fa7b5d18d92d5.
+- Authenticated release gate [run #88](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) completed **successfully** on this exact candidate after 14m 57s. The job and evidence upload succeeded; candidate build marker check confirmed shell version 3.2 and that credentials were not submitted before the marker was checked.
+- The older fully-green staging statement later in this register refers to run [39861471413](https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413) on an earlier candidate. It is historical evidence only, not proof that run #88 or this candidate has passed.
+- Current run #88 redacted artifact `shoir-ie-authenticated-release-evidence` (artifact ID `12672656752`) reports backend **24/24 PASS**, browser shell/Excel/logout **7/7 PASS**, and module-route/default-state rendering **96/96 PASS**. Backend cases include current-consent enforcement, stale-policy rejection, unknown-referral rejection, invalid credentials, admin-action denial, cross-workspace load/save denial, workspace save/re-login restore, expired-subscription restrictions, renewal-reference validation, login-throttle blocking, inactive-account denial and session revocation. The 96-module report explicitly does **not** establish calculation correctness or complete data-I/O/export acceptance.
+
+- Current policy identifiers are Terms 2026-10-21-beta-v1, Privacy 2026-10-21-v1, Refund 2026-10-23-v2, and Cookie 2026-10-21-v1. The prior Refund v1 value in this register was stale and is corrected here. The policy-consistency regression test compares public notices, embedded application copies, server enforcement, the latest approval-guard migration and the authenticated staging probe.
+
+
 ## Beta terms and user notices
 
 Current branch drafts are versioned in:
 - [Terms and Conditions](TERMS_AND_CONDITIONS.md) — version 2026-10-21-beta-v1
 - [Privacy Policy](PRIVACY_POLICY.md) — version 2026-10-21-v1
-- [Refund Policy](REFUND_POLICY.md) — version 2026-10-21-v1
+- [Refund Policy](REFUND_POLICY.md) — version 2026-10-23-v2
 - [Cookie Policy](COOKIE_POLICY.md) — version 2026-10-21-v1
 
 The public app displays a beta warning; the terms explain that calculations, AI responses, simulations, reports, integrations and stored work may be incomplete or wrong; the output disclaimers require independent verification; and the limitation-of-liability wording expressly preserves legal rights that cannot be excluded. The current referral copy no longer promises a 15% discount or displays invented referral counts. Rewards are inactive unless separate program rules are published.
