@@ -179,6 +179,19 @@ export function corsHeadersForOrigin(origin: string | null): Headers {
 }
 
 /**
+ * Existing account codes may be normalized for ordinary users, but the
+ * reserved administrator is never mutated as a side effect of login or
+ * referral-summary reads. Any repair of its metadata is a reviewed operation.
+ */
+export function shouldAutoAssignReferralCode(
+  usernameLc: string,
+  referralCode: string,
+): boolean {
+  if (usernameLc.trim().toLowerCase() === "sho") return false;
+  return !referralCode || referralCode.startsWith("AFF-");
+}
+
+/**
  * Validate the reserved master-administrator invariant without mutating the
  * account. Any discrepancy must fail closed and be corrected through a reviewed
  * operational procedure rather than as a side effect of login.

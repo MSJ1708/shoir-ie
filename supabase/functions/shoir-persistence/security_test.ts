@@ -2,6 +2,7 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
+  shouldAutoAssignReferralCode,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizeWorkspaceStateJson,
@@ -244,4 +245,32 @@ Deno.test("persistence CORS allows only exact configured browser origins", () =>
       "Rejected origins must never receive an allow-origin header.",
     );
   }
+});
+
+
+Deno.test("reserved administrator referral metadata is never auto-assigned", () => {
+  assert(
+    !shouldAutoAssignReferralCode("sho", ""),
+    "A blank reserved-admin referral code must not trigger a write.",
+  );
+  assert(
+    !shouldAutoAssignReferralCode("sho", "AFF-LEGACY"),
+    "A legacy reserved-admin referral code must not trigger a rewrite.",
+  );
+  assert(
+    !shouldAutoAssignReferralCode("SHO", ""),
+    "The reserved-admin guard must be case-insensitive.",
+  );
+  assert(
+    shouldAutoAssignReferralCode("ordinary-user", ""),
+    "An ordinary account without a referral code may receive a code.",
+  );
+  assert(
+    shouldAutoAssignReferralCode("ordinary-user", "AFF-LEGACY"),
+    "An ordinary account's legacy code may be normalized.",
+  );
+  assert(
+    !shouldAutoAssignReferralCode("ordinary-user", "SHR-CURRENT"),
+    "An ordinary account's existing canonical code must be preserved.",
+  );
 });

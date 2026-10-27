@@ -4,6 +4,7 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
+  shouldAutoAssignReferralCode,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   readBoundedJsonObject,
@@ -434,7 +435,7 @@ Deno.serve(async (req) => {
       const username = String(body.username || "").trim();
       const row = await getSession(String(body.token || ""), username);
       let referralCode = String(row.affiliate_code || "").trim().toUpperCase();
-      if (!referralCode || referralCode.startsWith("AFF-")) {
+      if (shouldAutoAssignReferralCode(row.username_lc, referralCode)) {
         let assigned = false;
         for (let attempt = 0; attempt < 6 && !assigned; attempt++) {
           const candidate = "SHR-" +
