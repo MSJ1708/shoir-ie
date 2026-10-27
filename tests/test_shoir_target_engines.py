@@ -2465,13 +2465,13 @@ def test_industrial_disruption_scenario_tracks_backlog_recovery_and_rejects_inva
         "baseline_capacity_per_period": 100,
         "demand_per_period": 80,
         "starting_inventory": 0,
-        "periods": 6,
+        "periods": 7,
         "disruptions": [{"name": "Supplier interruption", "start_period": 2, "end_period": 3, "capacity_fraction": 0.4}],
     })
     assert result["status"] == "DETERMINISTIC_SCENARIO_COMPLETED"
     assert result["period_results"][1]["capacity"] == pytest.approx(40.0)
     assert result["ending_backlog"] == pytest.approx(0.0)
-    assert result["recovery_period"] == 6
+    assert result["recovery_period"] == 7
     no_shock = simulate_industrial_disruption({
         "baseline_capacity_per_period": 100, "demand_per_period": 80,
         "starting_inventory": 0, "periods": 3, "disruptions": [],
