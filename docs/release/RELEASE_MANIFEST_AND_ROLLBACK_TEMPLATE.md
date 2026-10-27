@@ -5,6 +5,15 @@
 > **Current evidence note — 27 October 2026:** staging baseline `76419a9842f88292f94d706ca9b20bab63c45550` passed general validation ([40480842355](https://github.com/MSJ1708/shoir-ie/actions/runs/40480842355)) and authenticated staging gate ([40480842338](https://github.com/MSJ1708/shoir-ie/actions/runs/40480842338)). These checks apply only to the pre-#207/#208 candidate. This template remains NOT APPROVED and must be completed against the final exact commit before any deployment. Production changes and migrations remain on hold.
 
 
+
+## Latest live parity note — 27 October 2026
+
+This is a **current recheck observation, not release approval**. The production `shoir-persistence` Edge Function is v8 (source SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`) and its login handler still contains the master-admin tier/`updated_at` auto-repair update. Staging is v10 (source SHA-256 `5605d40e61feac6d010e7e1097565a7090bdf3325c862cc09de32af650b5a232`) and its source has the read-only canonical-admin invariant check. A read-only query observed the reserved admin row matching the required role, tier, active state and 2099-01-01 UTC expiry in both projects; this does not make production v8 safe or parity-complete.
+
+Production migration history currently ends at `20261019140600_atomic_subscription_request_decisions`. Staging records three extra migrations for beta legal/referral, approval guard and refund-policy version refresh; production lacks the legal-acceptance columns and `public.shoir_referrals` table. The older referral migration is documented as rewriting affiliate codes and `updated_at` values, so **do not replay it against production**. Do not deploy staging v10 to production until a reviewed, schema-compatible function/migration manifest and an isolated production-shaped forward/recovery/restore rehearsal have passed.
+
+The tool integration candidate PR #208 is not yet a release candidate accepted by the release gate: its head is two commits behind current staging, exact-head validation was queued at recheck, and live deployment smoke was skipped. The exact final release SHA, successful authenticated staging gate, backup/restore evidence, reviewed branch protection/status-check requirements, legal/privacy approvals and accountable release-owner authorization must be attached before this template can be marked approved. See the dated evidence in `PAID_READINESS_GATE.md`.
+
 ## Release identity
 
 | Field | Required value |
