@@ -83,6 +83,6 @@ def test_additive_referral_migration_does_not_rewrite_existing_account_identifie
     assert "set affiliate_code" not in executable_sql
     assert "set updated_at" not in executable_sql
     assert "create unique index if not exists idx_shoir_accounts_affiliate_code_unique" in executable_sql
-    assert "on public.shoir_accounts (lower(affiliate_code))" in executable_sql
+    assert "on public.shoir_accounts (lower(btrim(affiliate_code)))" in executable_sql
     assert "where affiliate_code is not null and btrim(affiliate_code) <> ''" in executable_sql
     assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in executable_sql
