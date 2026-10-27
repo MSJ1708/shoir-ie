@@ -18,6 +18,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from shoir_upgrade import literalize_untrusted_formula_cells
+from shoir_tool_registry import require_tool_access
 
 
 DB_PATH = "enterprise_full_workspace.db"
@@ -1028,7 +1029,33 @@ def _export_workbook(
         literalize_untrusted_formula_cells(writer.book)
     return out.getvalue()
 
+def _require_facility_tool_access(tier: str, username: str) -> dict[str, Any]:
+    """Require an authenticated matching actor and the canonical T065 entitlement."""
+    actor = str(st.session_state.get("current_user") or "").strip()
+    requested_user = str(username or "").strip()
+    raw_tier = str(tier or "").strip()
+    known_tier_markers = (
+        "starter", "mid-tier pro", "professional", "enterprise", "research",
+    )
+    if not raw_tier or not any(marker in raw_tier.casefold() for marker in known_tier_markers):
+        raise PermissionError("Unable to verify this package. Facility Layout access is denied.")
+    if (
+        st.session_state.get("authenticated") is not True
+        or not actor
+        or actor.casefold() in {"guest", "guest visitor", "anonymous", "unknown"}
+        or not requested_user
+        or actor.casefold() != requested_user.casefold()
+    ):
+        raise PermissionError("Sign in with your own active account before editing Facility Layout.")
+    return require_tool_access(raw_tier, "T065")
+
+
 def render_facility_layout(tier: str, username: str) -> None:
+    try:
+        _require_facility_tool_access(tier, username)
+    except PermissionError as exc:
+        st.error(str(exc))
+        return
     owner, workspace = str(username), _workspace(username)
     depts, flows = _seed_or_migrate(owner, workspace)
 
