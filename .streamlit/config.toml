@@ -8,5 +8,19 @@ font = "sans serif"
 
 [server]
 headless = true
-enableCORS = false
+enableCORS = true
 enableXsrfProtection = true
+corsAllowedOrigins = [
+  "https://shoir-ie-app.streamlit.app",
+  "https://shoirieverified.streamlit.app",
+  "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+  "http://127.0.0.1:8501",
+  "http://localhost:8501",
+]
+allowedHosts = [
+  "shoir-ie-app.streamlit.app",
+  "shoirieverified.streamlit.app",
+  "shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+  "127.0.0.1",
+  "localhost",
+]
