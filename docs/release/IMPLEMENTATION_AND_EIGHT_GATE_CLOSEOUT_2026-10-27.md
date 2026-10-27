@@ -118,6 +118,30 @@ This addendum supersedes earlier candidate SHA/check-status details above where 
 - **PR #217 export candidate** remains at `231001c7b985ab34c110060df19e6c77fd708fa5`; at last check, 6 jobs were queued/in progress and 2 hosted-smoke jobs were skipped. No export artifact is accepted until the exact-head workflow finishes and all PDF pages / every PPTX slide are visually reviewed.
 - **PR #211 evidence branch** now includes this disposition document (commit `8a68bb2155247cdc4715eb3f404c2b0c69ea2c32`). Its validation tests were queued and hosted smoke was skipped after this commit.
 
+## Read-only Supabase control-plane recheck — 27 October 2026
+
+I re-read project metadata, migration history, the deployed `shoir-persistence` Edge Function inventory/source, selected schema metadata, and Supabase Advisors through the connected Supabase tools. No SQL changes, deployments, or user/account mutations were performed.
+
+| Check | Production (`gcsamrdaeraxieaagsta`) | Staging (`hfhrosthswcybccepmak`) |
+|---|---|---|
+| Project state | `ACTIVE_HEALTHY` | `ACTIVE_HEALTHY` |
+| Database region | `eu-central-1` | `eu-central-1` |
+| Deployed `shoir-persistence` | ACTIVE, version 8 | ACTIVE, version 10 |
+| Deployed source SHA-256 | `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` | `5605d40e61feac6d010e7e1097565a7090bdf3325c862cc09de32af650b5a232` |
+| Migration history count | 14 | 17 |
+| Consent column count on `shoir_subscription_requests` | 0 of 6 | 6 of 6 |
+| `public.shoir_referrals` | Absent | Present |
+| Referral table grants to `anon`/`authenticated` | None (table absent) | None |
+| Referral RLS policies | Table absent | 0 (RLS enabled) |
+
+Source inspection confirms production v8 still contains login-time tier/updated_at mutation for the reserved administrator and does not contain referral-handling code. Staging v10 contains a fail-closed protected-admin check and referral-handling code. This is a live compatibility mismatch, not merely stale documentation.
+
+Supabase Security Advisors returned no security lint rows for production and one informational `rls_enabled_no_policy` lint for staging's `public.shoir_referrals`. The migration and metadata show this table has RLS enabled and no direct table grants to `anon` or `authenticated`, consistent with intended server-only access. Keep that access model explicit and retain the advisor finding as a tracked intentional exception only after confirming every caller runs through reviewed server logic. Do not “fix” this by adding public grants or broad policies.
+
+Performance advisors reported unused-index informational findings (16 in production, 19 in staging). Do not drop indexes based on this snapshot alone; it is not enough workload evidence to establish safe removal.
+
+These direct checks strengthen the Gate 7 NO-GO rationale. Follow the current Supabase guidance to verify function and migration deployments as one controlled change; project health or a successful deployment operation alone is not proof of schema/application compatibility. Reference: [Supabase deployment guide](https://supabase.com/docs/guides/deployment) and [database migrations guide](https://supabase.com/docs/guides/local-development/database-migrations).
+
 ## Final recommendation
 
 **NO-GO for production deployment or paid general availability today.** Keep beta/manual-payment boundaries and synthetic-only test data. Do not claim 100 verified tools, live SAP/Oracle connectivity, validated savings, legal compliance or current hosted staging acceptance without evidence.
