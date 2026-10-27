@@ -68,11 +68,13 @@ This ledger separates current implementation candidates from superseded drafts. 
 
 | PR | Recommendation and disposition | Required action |
 |---|---|---|
-| #208 | Current focused Workbench integration: T006/T020/T037/T039/T044/T046 and additional bounded methods. Matrix is 98 IMPLEMENTED_NEEDS_VALIDATION, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 VERIFIED_WORKING. | Refresh against the latest staging base (the head was 2 commits behind when checked); pass exact-head CI, then rerun the authenticated release gate and hosted tests on the integrated SHA. |
+| #208 | Original focused Workbench integration recommendation and patch source. Its implementation has been selectively ported to clean current-base PR #215. | Treat #215 as the current staging candidate; close #208 as superseded only after #215 passes exact-head CI and release acceptance. |
+| #215 | Current clean staging integration candidate: #208's focused tool diff plus #184's unique mobile/tab geometry fix from #212, based on staging SHA `0558c23d59a3f0b79558a8d3407869d0238aceaf`. | Run exact-head full CI, local desktop/mobile smoke, authenticated release gate, cross-workspace/save-reload and export parsing before any merge or release. |
 | #211 | This recheck and rollback-manifest update. | Keep draft until documentation/validation checks pass and the dated live evidence has independent review. |
-| #212 | Unique mobile auth-tab wrapping and tab geometry checks selectively ported from #184. | Pass exact-head tests and run desktop plus 390px mobile hosted smoke; smoke was skipped in the workflow state last queried. |
-| #213 | Main-based source fix to make protected administrator login read-only and fail closed on invariant drift. | Pass Python/Deno tests and review; do not deploy until production schema/function parity, rollback and release approval are separately satisfied. |
-| #214 | Main-based Streamlit CORS/XSRF and known-host allowlist hardening, with config regression tests. | Pass exact-head tests and verify the actual hosted domains/configuration; source change alone does not update the live app. |
+| #212 | Source branch for the unique mobile auth-tab wrapping and tab geometry checks from #184; all three file changes are included in #215. | Do not merge separately. Close as superseded only after #215 validation or retain temporarily for patch provenance. |
+| #213 | Original main-based protected-administrator source fix; now included in clean combined main PR #216. | Keep as provenance only until #216 exact-head tests pass; the Edge Function has not been deployed. |
+| #214 | Original main-based Streamlit CORS/XSRF and host allowlist change; now included in clean combined main PR #216. | Keep as provenance only until #216 exact-head tests pass; the live app is unchanged. |
+| #216 | Current clean main-based security consolidation: protected-admin fail-closed behavior plus Streamlit origin/host allowlists and tests. | Pass full exact-head Python/Deno/security/engine/platform CI and peer review. Deployment requires a separate approved production compatibility and rollback plan. |
 | #199 | Historical live-state/parity snapshot on main; its findings were the basis of the newer, dated #211 recheck. | Preserve for history; do not treat it as current evidence or merge an old snapshot into staging. |
 | #191 | Older main-based T006 recovery, T020 lineage and T039 registry draft. | These areas are now represented in the newer #208 staging candidate. Do not merge the stale stack independently; compare only for uncovered changes after #208 validation. |
 | #189 | Earlier staging release-candidate verification branch. | Superseded by the newer candidate; run acceptance on the final integrated SHA rather than reuse old results. |
@@ -97,6 +99,8 @@ This ledger separates current implementation candidates from superseded drafts. 
 | #210 | Paid-readiness, PDPL inventory, pilot acceptance, rollback and legal-review templates integrated in staging. | Documentation is not verification. Counsel/privacy review, actual operator facts and all acceptance evidence remain outstanding. |
 
 The open-stack history is deliberately not being merged wholesale. The reviewed base is heavily diverged: the last comparison found staging and main differ by 106 versus 412 commits from their merge base. Every integration must use a clean base and preserve exact-head CI and scope boundaries.
+
+Current consolidation route: use **#215** as the staging code candidate and **#216** as the main-branch security candidate. PRs #208/#212 and #213/#214 remain original patch sources until the consolidated candidates pass; no merge, deployment or migration is implied by this ledger.
 
 **Release recommendation: NO-GO for paid launch or production deployment on the evidence available at this recheck.**
 
