@@ -119,3 +119,35 @@ def test_clean_new_workspace_is_labeled_synthetic(tmp_path, monkeypatch):
     facility._seed_or_migrate("alice", "line-a")
 
     assert facility._get_data_origin("alice", "line-a") == "SYNTHETIC_STARTER_DATA"
+
+
+def test_facility_access_requires_authenticated_matching_owner(monkeypatch):
+    monkeypatch.setattr(
+        facility.st,
+        "session_state",
+        {"authenticated": False, "current_user": "alice"},
+    )
+    with pytest.raises(PermissionError, match="Sign in"):
+        facility._require_facility_tool_access("Starter Tier", "alice")
+
+    monkeypatch.setattr(
+        facility.st,
+        "session_state",
+        {"authenticated": True, "current_user": "alice"},
+    )
+    with pytest.raises(PermissionError, match="own active account"):
+        facility._require_facility_tool_access("Starter Tier", "bob")
+
+
+def test_facility_access_uses_canonical_stable_tool_id(monkeypatch):
+    monkeypatch.setattr(
+        facility.st,
+        "session_state",
+        {"authenticated": True, "current_user": "alice"},
+    )
+    tool = facility._require_facility_tool_access("Starter Tier", "alice")
+    assert tool["tool_id"] == "T065"
+    assert tool["target_minimum_tier"] == "Starter"
+
+    with pytest.raises(PermissionError, match="Unable to verify"):
+        facility._require_facility_tool_access("Unknown package", "alice")
