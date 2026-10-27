@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_referrals_created_at
 -- null/blank legacy rows. If duplicates appear after preflight, this index creation
 -- fails transactionally rather than silently rewriting account data.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shoir_accounts_affiliate_code_unique
-    ON public.shoir_accounts (LOWER(affiliate_code))
+    ON public.shoir_accounts (LOWER(BTRIM(affiliate_code)))
     WHERE affiliate_code IS NOT NULL AND BTRIM(affiliate_code) <> '';
 
 ALTER TABLE public.shoir_referrals ENABLE ROW LEVEL SECURITY;
