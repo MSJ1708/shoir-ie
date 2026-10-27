@@ -60,7 +60,42 @@ The staging `public.shoir_referrals` table has RLS enabled and no policies. Read
 7. Produce successful backup/restore and rollback evidence for the exact release candidate; verify the Streamlit deployment branch, commit, entry point and secret/configuration presence without disclosing values.
 8. Obtain qualified Saudi legal/privacy review of the actual operator identity, commercial registration, PDPL/data flows and retention/transfers, customer notices, calculation limitations, refund/cancellation, copyright/IP and commercial terms. Populate the accountable owner's facts and obtain explicit release-owner approval before enabling paid access.
 
-PR disposition: #206 contains the source-level administrator invariant/security hardening and staging reports v10, but production still runs v8; #207 is a specification-only read-only ERP foundation, not a live SAP/Oracle connection; #210 supplies unapproved evidence/legal templates, not counsel approval. PR #208 remains the current focused-engine integration candidate until its exact-head and authenticated acceptance gates pass. Do not mass-merge older stacked drafts (#170, #178–#191) into a branch simply because they remain open; select only changes not already superseded, reconcile them on a clean base, and retain their test and scope boundaries.
+## PR recommendation disposition ledger — 27 October 2026
+
+This ledger separates current implementation candidates from superseded drafts. It is not merge authorization and does not replace reviewing the actual patch, exact-head checks or deployment evidence.
+
+### Active integration/release PRs
+
+| PR | Recommendation and disposition | Required action |
+|---|---|---|
+| #208 | Current focused Workbench integration: T006/T020/T037/T039/T044/T046 and additional bounded methods. Matrix is 98 IMPLEMENTED_NEEDS_VALIDATION, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 VERIFIED_WORKING. | Refresh against the latest staging base (the head was 2 commits behind when checked); pass exact-head CI, then rerun the authenticated release gate and hosted tests on the integrated SHA. |
+| #211 | This recheck and rollback-manifest update. | Keep draft until documentation/validation checks pass and the dated live evidence has independent review. |
+| #212 | Unique mobile auth-tab wrapping and tab geometry checks selectively ported from #184. | Pass exact-head tests and run desktop plus 390px mobile hosted smoke; smoke was skipped in the workflow state last queried. |
+| #213 | Main-based source fix to make protected administrator login read-only and fail closed on invariant drift. | Pass Python/Deno tests and review; do not deploy until production schema/function parity, rollback and release approval are separately satisfied. |
+| #199 | Historical live-state/parity snapshot on main; its findings were the basis of the newer, dated #211 recheck. | Preserve for history; do not treat it as current evidence or merge an old snapshot into staging. |
+| #191 | Older main-based T006 recovery, T020 lineage and T039 registry draft. | These areas are now represented in the newer #208 staging candidate. Do not merge the stale stack independently; compare only for uncovered changes after #208 validation. |
+| #189 | Earlier staging release-candidate verification branch. | Superseded by the newer candidate; run acceptance on the final integrated SHA rather than reuse old results. |
+| #188 | Older stacked RNLE/T046 implementation. | T046 is present in #208; do not merge this stale branch without a target-level audit proving unique code. |
+| #184 | T044 RCM plus mobile smoke/landing fixes on an older stacked base. | T044 work overlaps #208. The distinct mobile tab/geometry tests have been ported to #212; keep the old stack out of the merge path. |
+| #182 | Nine focused methods on the old `audit/shoir-100-tools-20261023` base. | Compare T015/T033/T036/T037/T049/T052/T058/T062/T071 against the current target registry and tests. Cherry-pick only unique, reviewed methods. |
+| #181 / #180 | Earlier waves of 100-tool methods on older main-based branches. | Audit target-by-target against merged method libraries and #208's runtime registry; do not wholesale merge shared Workbench/registry files. |
+| #179 | Earlier unit-converter and fail-closed readiness foundation. | Verify whether any recommendation is still uncovered in the current implementation before selectively porting; preserve the canonical tier-gate tests. |
+| #178 / #175 / #174 / #173 / #172 | Earlier competing grouped-tool-library/registry/runner stacks. | Treat as superseded candidates pending a file/target comparison with merged #183/#193 and current #208. Do not merge the old stacks as-is. |
+| #170 | Main-based legal notice, consent and referral draft. | Do not merge or publish unchanged. Align it with the safer migration path, actual product behavior, migration history, and qualified Saudi legal/privacy review. Referral attribution is not a promised reward/discount program. |
+
+### Previously integrated recommendations — still subject to release gates
+
+| PR | Integrated scope | Remaining boundary |
+|---|---|---|
+| #200 | Authenticated release-gate logic now fails closed when mandatory probes are skipped/unknown. | The current integrated candidate still needs a fresh gate; skipped live smoke is not a pass. |
+| #202 | PDF/PPTX pagination/readability correction. | Inspect the exact-candidate generated PDF pages and every PPTX slide, including continuation pages, with parseable artifacts attached. |
+| #203 | XLSX formula/URL injection safeguards. | Re-test all relevant export paths with hostile synthetic strings and parse the produced workbook. |
+| #205 | Non-destructive additive referral/legal schema path and rehearsal plan was added to the staging line. | The migration has not been authorized/applied to production; historical staging migration rewrote data and must not be replayed in production. |
+| #206 | Admin invariant, Streamlit security settings and regression tests are integrated in staging; deployed staging function is v10. | Production still serves v8 and its login handler still auto-repairs the reserved admin. PR #213 carries the source-level correction to a main-based branch; no production deploy has occurred. |
+| #207 | Read-only SAP/Oracle adapter and product/IT specification integrated in staging. | Specification-only; no provider transport, credentials, customer tenant, live sync or writes. Do not market the connectors as connected. |
+| #210 | Paid-readiness, PDPL inventory, pilot acceptance, rollback and legal-review templates integrated in staging. | Documentation is not verification. Counsel/privacy review, actual operator facts and all acceptance evidence remain outstanding. |
+
+The open-stack history is deliberately not being merged wholesale. The reviewed base is heavily diverged: the last comparison found staging and main differ by 106 versus 412 commits from their merge base. Every integration must use a clean base and preserve exact-head CI and scope boundaries.
 
 **Release recommendation: NO-GO for paid launch or production deployment on the evidence available at this recheck.**
 
