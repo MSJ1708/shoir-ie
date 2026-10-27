@@ -1588,6 +1588,52 @@ if not st.session_state.get("current_user"):
         )
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
     st.warning("BETA — Shoir-IE is still in testing. Independently validate source data, formulas and outputs before operational decisions; do not rely on beta output alone for safety-critical work.")
+    # Streamlit's tab bar is horizontally scrollable by default. On narrow phones this
+    # can leave the first or last auth tab label partially clipped. Wrap only the
+    # public landing-page tabs on small screens; desktop layout stays unchanged.
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 600px) {
+          div[data-testid="stTabs"] [role="tablist"],
+          div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) !important;
+            align-items: stretch !important;
+            gap: 0.25rem !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            overflow-x: visible !important;
+            white-space: normal !important;
+            box-sizing: border-box !important;
+          }
+          div[data-testid="stTabs"] [role="tab"],
+          div[data-testid="stTabs"] [data-baseweb="tab"] {
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            height: auto !important;
+            min-height: 2.5rem !important;
+            padding: 0.45rem 0.55rem !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            text-align: center !important;
+            box-sizing: border-box !important;
+          }
+          div[data-testid="stTabs"] [role="tab"] [data-testid="stMarkdownContainer"],
+          div[data-testid="stTabs"] [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+          }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------
