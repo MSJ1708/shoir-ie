@@ -3010,11 +3010,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.dataframe(pd.DataFrame([
                                 {"Measure": "Sample A mean", "Value": result["mean_a"]},
                                 {"Measure": "Sample B mean", "Value": result["mean_b"]},
-                                {"Measure": "Degrees of freedom", "Value": result["degrees_of_freedom"]},
-                                {"Measure": "Descriptive standardized difference", "Value": result["descriptive_standardized_difference"]},
+                                {"Measure": "Degrees of freedom", "Value": result["degrees_freedom"]},
+                                {"Measure": "Descriptive standardized difference", "Value": result["effect_size_cohens_d"]},
                             ]), use_container_width=True, hide_index=True)
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
+                            st.caption(result["hypothesis"])
+                            st.warning(" ".join(result["warnings"]))
                     elif selected_tool["tool_id"] == "T051":
                         result = st.session_state.get("shoir_tool_result_T051")
                         if result:
