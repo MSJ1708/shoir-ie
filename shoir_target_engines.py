@@ -6052,3 +6052,1058 @@ def assess_capa_8d_records(
         "warning": "This register checks record completeness and status only. It does not verify the truth of root-cause claims, action effectiveness, regulatory compliance or engineering safety.",
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
+
+
+def build_rcm_decision_register(
+    failure_modes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Validate a user-authored RCM decision register and flag review needs.
+
+    This is a structured worksheet with limited completeness/mismatch rules. It
+    does not run or certify a complete Reliability-Centered Maintenance method,
+    and it never selects or approves a maintenance task on the user's behalf.
+    """
+    if isinstance(failure_modes, (str, bytes)) or not isinstance(failure_modes, Sequence) or not failure_modes:
+        raise ValueError("Provide a non-empty JSON list of failure-mode decision objects.")
+
+    consequence_labels = {
+        "safety_environmental": "Safety / environmental",
+        "operational": "Operational",
+        "non_operational": "Non-operational",
+        "hidden_function": "Hidden-function",
+    }
+    strategy_labels = {
+        "condition_directed": "Condition-directed task",
+        "scheduled_restoration": "Scheduled restoration",
+        "scheduled_discard": "Scheduled discard",
+        "failure_finding": "Failure-finding task",
+        "run_to_failure": "Run to failure",
+        "redesign": "Redesign / one-time change",
+        "undecided": "Undecided",
+    }
+    required_text = (
+        "asset", "function", "failure_mode", "failure_effect",
+        "consequence_rationale", "proposed_task", "evidence_reference",
+    )
+    seen: set[tuple[str, str, str]] = set()
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(failure_modes, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Failure-mode record {index} must be an object.")
+        missing = [key for key in required_text if not str(item.get(key) or "").strip()]
+        if missing:
+            raise ValueError(
+                f"Failure-mode record {index} is missing required fields: {', '.join(missing)}."
+            )
+        asset = str(item["asset"]).strip()
+        function = str(item["function"]).strip()
+        failure_mode = str(item["failure_mode"]).strip()
+        key = (asset.casefold(), function.casefold(), failure_mode.casefold())
+        if key in seen:
+            raise ValueError(
+                f"Duplicate asset/function/failure-mode record at item {index}: "
+                f"{asset} / {function} / {failure_mode}."
+            )
+        seen.add(key)
+
+        raw_consequence = str(item.get("consequence_category") or "").strip().casefold()
+        consequence = raw_consequence.replace("-", "_").replace(" ", "_")
+        if consequence not in consequence_labels:
+            raise ValueError(
+                f"Failure-mode record {index} consequence_category must be one of: "
+                + ", ".join(consequence_labels)
+                + "."
+            )
+        raw_strategy = str(item.get("task_strategy") or "").strip().casefold()
+        strategy = raw_strategy.replace("-", "_").replace(" ", "_")
+        if strategy not in strategy_labels:
+            raise ValueError(
+                f"Failure-mode record {index} task_strategy must be one of: "
+                + ", ".join(strategy_labels)
+                + "."
+            )
+
+        interval_value = item.get("task_interval_days")
+        interval_days = None
+        if interval_value not in (None, ""):
+            if isinstance(interval_value, bool):
+                raise ValueError(f"Failure-mode record {index} task_interval_days must be a positive whole number.")
+            interval_number = _finite_number(interval_value, f"Failure-mode record {index} task interval")
+            if interval_number <= 0 or not interval_number.is_integer():
+                raise ValueError(f"Failure-mode record {index} task_interval_days must be a positive whole number.")
+            interval_days = int(interval_number)
+
+        condition_indicator = str(item.get("condition_indicator") or "").strip()
+        interval_strategies = {"scheduled_restoration", "scheduled_discard", "failure_finding"}
+        if strategy in interval_strategies and interval_days is None:
+            raise ValueError(
+                f"Failure-mode record {index} task_interval_days is required for "
+                f"{strategy_labels[strategy].lower()}."
+            )
+        if strategy == "condition_directed" and not condition_indicator:
+            raise ValueError(
+                f"Failure-mode record {index} condition_indicator is required for a condition-directed task."
+            )
+
+        flags: list[str] = []
+        if strategy == "undecided":
+            flags.append("TASK_STRATEGY_UNDECIDED")
+        if consequence == "hidden_function" and strategy != "failure_finding":
+            flags.append("HIDDEN_FUNCTION_FAILURE_FINDING_REVIEW")
+        if strategy == "failure_finding" and consequence != "hidden_function":
+            flags.append("FAILURE_FINDING_APPLICABILITY_REVIEW")
+        if strategy == "run_to_failure" and consequence in {
+            "safety_environmental", "operational", "hidden_function"
+        }:
+            flags.append("HIGH_CONSEQUENCE_RUN_TO_FAILURE_REQUIRES_FORMAL_REVIEW")
+
+        rows.append({
+            "Asset": asset,
+            "Function": function,
+            "Failure mode": failure_mode,
+            "Failure effect": str(item["failure_effect"]).strip(),
+            "Consequence category": consequence_labels[consequence],
+            "Consequence rationale": str(item["consequence_rationale"]).strip(),
+            "Proposed task": str(item["proposed_task"]).strip(),
+            "Task strategy": strategy_labels[strategy],
+            "Task interval (days)": interval_days,
+            "Condition indicator": condition_indicator,
+            "Evidence reference": str(item["evidence_reference"]).strip(),
+            "Decision flags": "; ".join(flags) if flags else "No rule-based flags; human review still required",
+            "Human review status": "PENDING",
+            "Owner": str(item.get("owner") or "").strip(),
+        })
+
+    register = pd.DataFrame(rows)
+    flags = register["Decision flags"].astype(str)
+    return {
+        "status": "STRUCTURED_FOR_HUMAN_REVIEW",
+        "method": "Structured RCM worksheet with limited completeness and task/consequence mismatch checks",
+        "failure_mode_count": int(len(register)),
+        "unique_asset_count": int(register["Asset"].nunique()),
+        "open_review_count": int(len(register)),
+        "unresolved_strategy_count": int((register["Task strategy"] == strategy_labels["undecided"]).sum()),
+        "high_consequence_run_to_failure_count": int(flags.str.contains(
+            "HIGH_CONSEQUENCE_RUN_TO_FAILURE_REQUIRES_FORMAL_REVIEW", regex=False
+        ).sum()),
+        "rule_flag_count": int((flags != "No rule-based flags; human review still required").sum()),
+        "human_review_required": True,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+        "provenance_warning": "Failure descriptions, consequence categories, task strategies and evidence references are user-supplied and have not been independently verified.",
+        "review_register": register,
+        "formula": "No numeric risk score or task recommendation is computed; the tool validates required fields and emits explicit rule-based review flags.",
+        "assumptions": "Failure descriptions, consequence categories, selected strategies and evidence references are user supplied. The tool does not validate the source evidence, determine task applicability, estimate failure probabilities or approve maintenance policy.",
+        "warning": "This is not a complete or certified RCM analysis and is not a substitute for the organization's approved RCM method or qualified engineering/safety review. Every row remains PENDING until the accountable review occurs outside this calculator.",
+    }
+
+
+def manage_recovery_snapshot_history(
+    history_state: Mapping[str, Any] | None,
+    *,
+    action: str,
+    new_snapshot: Any = None,
+    target_revision: int | None = None,
+    max_history: int = 25,
+    max_snapshot_bytes: int = 32768,
+) -> dict[str, Any]:
+    """Checkpoint, undo, redo or restore bounded JSON snapshots for this tool only."""
+    import json
+
+    if isinstance(max_history, bool) or not isinstance(max_history, int) or not 2 <= max_history <= 100:
+        raise ValueError("max_history must be an integer from 2 to 100.")
+    if isinstance(max_snapshot_bytes, bool) or not isinstance(max_snapshot_bytes, int) or not 256 <= max_snapshot_bytes <= 1_000_000:
+        raise ValueError("max_snapshot_bytes must be an integer from 256 to 1,000,000.")
+
+    action_value = str(action or "").strip().lower()
+    aliases = {"checkpoint": "checkpoint", "create_checkpoint": "checkpoint", "undo": "undo",
+               "redo": "redo", "restore": "restore", "restore_revision": "restore"}
+    if action_value not in aliases:
+        raise ValueError("Recovery action must be checkpoint, undo, redo or restore.")
+    action_value = aliases[action_value]
+
+    def copy_snapshot(value: Any, field: str) -> Any:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be valid JSON-compatible data without NaN or Infinity.") from exc
+        if len(encoded.encode("utf-8")) > max_snapshot_bytes:
+            raise ValueError(f"{field} exceeds the {max_snapshot_bytes}-byte snapshot limit.")
+        cloned = json.loads(encoded)
+        if not isinstance(cloned, (dict, list)):
+            raise ValueError(f"{field} must be a JSON object or array.")
+        return cloned
+
+    if history_state is None:
+        past: list[Any] = []
+        future: list[Any] = []
+        current: Any = None
+        has_current = False
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Recovery history state must be an object.")
+        past_raw = history_state.get("past", [])
+        future_raw = history_state.get("future", [])
+        has_current = history_state.get("has_current", "current" in history_state)
+        if not isinstance(past_raw, list) or not isinstance(future_raw, list) or not isinstance(has_current, bool):
+            raise ValueError("Recovery history requires past/future lists and a Boolean has_current flag.")
+        past = [copy_snapshot(item, "Prior snapshot") for item in past_raw]
+        future = [copy_snapshot(item, "Redo snapshot") for item in future_raw]
+        current = copy_snapshot(history_state.get("current"), "Current snapshot") if has_current else None
+        if len(past) + len(future) + int(has_current) > max_history:
+            raise ValueError(f"Recovery history exceeds the {max_history}-revision limit.")
+        if not has_current and (past or future):
+            raise ValueError("Recovery history cannot contain past/future snapshots without a current snapshot.")
+
+    if action_value == "checkpoint":
+        checkpoint = copy_snapshot(new_snapshot, "New snapshot")
+        if not has_current:
+            current, has_current, past, future = checkpoint, True, [], []
+            status = "SNAPSHOT_CREATED"
+        elif current == checkpoint:
+            status = "SNAPSHOT_UNCHANGED"
+        else:
+            past = (past + [current])[-(max_history - 1):]
+            current, future = checkpoint, []
+            status = "SNAPSHOT_CHECKPOINTED"
+    elif action_value == "undo":
+        if not has_current or not past:
+            raise ValueError("No earlier snapshot is available to undo.")
+        future.append(current)
+        current = past.pop()
+        status = "SNAPSHOT_UNDONE"
+    elif action_value == "redo":
+        if not has_current or not future:
+            raise ValueError("No undone snapshot is available to redo.")
+        past.append(current)
+        current = future.pop()
+        status = "SNAPSHOT_REDONE"
+    else:
+        if not has_current:
+            raise ValueError("No snapshot is available to restore.")
+        if isinstance(target_revision, bool) or not isinstance(target_revision, int):
+            raise ValueError("Target revision must be an integer using 1-based numbering.")
+        timeline_values = [*past, current, *reversed(future)]
+        if target_revision < 1 or target_revision > len(timeline_values):
+            raise ValueError(f"Target revision must be between 1 and {len(timeline_values)}.")
+        past = timeline_values[:target_revision - 1]
+        current = timeline_values[target_revision - 1]
+        future = list(reversed(timeline_values[target_revision:]))
+        status = "REVISION_RESTORED"
+
+    timeline_values = [*past, current, *reversed(future)] if has_current else []
+    timeline = [{"revision": i + 1, "is_current": i == len(past), "snapshot": item}
+                for i, item in enumerate(timeline_values)]
+    updated_history = {"past": past, "current": current, "future": future,
+                       "has_current": has_current, "max_history": max_history}
+    return {
+        "status": status,
+        "action": action_value,
+        "current_revision": len(past) + 1 if has_current else None,
+        "revision_count": len(timeline_values),
+        "can_undo": bool(has_current and past),
+        "can_redo": bool(has_current and future),
+        "current_snapshot": current if has_current else None,
+        "timeline": timeline,
+        "history_state": updated_history,
+        "limitations": [
+            "History covers only JSON snapshots explicitly entered into this recovery tool.",
+            "It does not intercept arbitrary edits in other Shoir-IE modules or roll back external-system side effects.",
+            "Authenticated managed-workspace persistence, re-login recovery and cross-workspace isolation require staging verification.",
+        ],
+    }
+
+
+def manage_dataset_version_lineage(
+    history_state: Mapping[str, Any] | None,
+    *,
+    dataset_payload: Any = None,
+    source_signature: str | None = None,
+    source_metadata: Mapping[str, Any] | None = None,
+    transformations: Sequence[Mapping[str, Any]] | None = None,
+    downstream_runs: Sequence[Mapping[str, Any]] | None = None,
+    max_versions: int = 100,
+    max_metadata_bytes: int = 65536,
+) -> dict[str, Any]:
+    """Record bounded dataset source/recipe versions and classify supplied downstream runs.
+
+    A supplied source_signature is treated as an upstream identifier, not independently
+    certified data content. When omitted, a signature is computed from JSON snapshot data.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    if isinstance(max_versions, bool) or not isinstance(max_versions, int) or not 2 <= max_versions <= 1000:
+        raise ValueError("max_versions must be an integer from 2 to 1000.")
+    if isinstance(max_metadata_bytes, bool) or not isinstance(max_metadata_bytes, int) or not 1024 <= max_metadata_bytes <= 2_000_000:
+        raise ValueError("max_metadata_bytes must be an integer from 1,024 to 2,000,000.")
+
+    def canonical_json(value: Any, field: str) -> tuple[str, Any]:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False, separators=(",", ":"), default=None)
+            packed = json.loads(encoded)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be finite, valid JSON-compatible data.") from exc
+        if len(encoded.encode("utf-8")) > max_metadata_bytes:
+            raise ValueError(f"{field} exceeds the {max_metadata_bytes}-byte metadata limit.")
+        return encoded, packed
+
+    if source_signature is None or not str(source_signature).strip():
+        encoded_payload, packed_payload = canonical_json(dataset_payload, "Dataset snapshot")
+        if not isinstance(packed_payload, (dict, list)):
+            raise ValueError("Dataset snapshot must be a JSON object or array when no source signature is provided.")
+        source_sig = hashlib.sha256(encoded_payload.encode("utf-8")).hexdigest()
+        payload_provenance = "JSON_SNAPSHOT_HASHED_BY_TOOL"
+    else:
+        source_sig = str(source_signature).strip().lower()
+        if len(source_sig) > 256 or any(ord(ch) < 32 for ch in source_sig):
+            raise ValueError("Source signature must be a printable identifier no longer than 256 characters.")
+        payload_provenance = "UPSTREAM_SIGNATURE_NOT_INDEPENDENTLY_REHASHED"
+        packed_payload = None
+
+    if source_metadata is None:
+        metadata: dict[str, Any] = {}
+    elif not isinstance(source_metadata, Mapping):
+        raise ValueError("Source metadata must be a JSON object.")
+    else:
+        metadata = dict(source_metadata)
+    _, metadata = canonical_json(metadata, "Source metadata")
+    # Dataset identity must remain stable when the content/version signature changes.
+    dataset_identity = str(
+        metadata.get("dataset_id")
+        or metadata.get("dataset_name")
+        or metadata.get("filename")
+        or metadata.get("source_name")
+        or (
+            packed_payload.get("dataset_id")
+            or packed_payload.get("dataset")
+            or packed_payload.get("name")
+            if isinstance(packed_payload, dict)
+            else ""
+        )
+        or source_sig
+    ).strip()
+    metadata["dataset_id"] = dataset_identity
+    if not metadata.get("schema_fingerprint") and not metadata.get("schemas") and isinstance(packed_payload, (dict, list)):
+        schema_source: Any = packed_payload
+        if isinstance(schema_source, dict):
+            if isinstance(schema_source.get("records"), list):
+                schema_source = schema_source["records"]
+            elif isinstance(schema_source.get("rows"), list):
+                schema_source = schema_source["rows"]
+        if isinstance(schema_source, list):
+            sample_rows = [item for item in schema_source[:500] if isinstance(item, dict)]
+            schema_keys = sorted({str(key) for item in sample_rows for key in item})
+            inferred_schema = {
+                key: sorted({
+                    (
+                        "boolean" if isinstance(item.get(key), bool) else
+                        "integer" if isinstance(item.get(key), int) else
+                        "number" if isinstance(item.get(key), float) else
+                        "array" if isinstance(item.get(key), list) else
+                        "object" if isinstance(item.get(key), dict) else
+                        "string"
+                    )
+                    for item in sample_rows
+                    if key in item and item.get(key) is not None
+                })
+                for key in schema_keys
+            }
+            metadata["schema_fingerprint"] = inferred_schema or {"array_item_type": "unknown_or_empty"}
+        elif isinstance(schema_source, dict):
+            metadata["schema_fingerprint"] = {
+                str(key): (
+                    "null" if value is None else
+                    "boolean" if isinstance(value, bool) else
+                    "integer" if isinstance(value, int) else
+                    "number" if isinstance(value, float) else
+                    "array" if isinstance(value, list) else
+                    "object" if isinstance(value, dict) else "string"
+                )
+                for key, value in schema_source.items()
+                if key not in {"dataset_id", "dataset", "name"}
+            }
+    if transformations is None:
+        transformation_list: list[Any] = []
+    else:
+        if not isinstance(transformations, Sequence) or isinstance(transformations, (str, bytes)):
+            raise ValueError("Transformations must be a JSON list of objects.")
+        if any(not isinstance(item, Mapping) for item in transformations):
+            raise ValueError("Each transformation entry must be an object.")
+        _, transformation_list = canonical_json(list(transformations), "Transformations")
+    if downstream_runs is None:
+        run_list: list[Any] = []
+    else:
+        if not isinstance(downstream_runs, Sequence) or isinstance(downstream_runs, (str, bytes)):
+            raise ValueError("Downstream runs must be a JSON list of objects.")
+        if any(not isinstance(item, Mapping) for item in downstream_runs):
+            raise ValueError("Each downstream run must be an object.")
+        _, run_list = canonical_json(list(downstream_runs), "Downstream runs")
+
+    schema_bytes = metadata.get("schema_fingerprint") or metadata.get("schemas") or metadata.get("table_catalog") or {}
+    schema_json, _ = canonical_json(schema_bytes, "Schema fingerprint")
+    recipe_json, _ = canonical_json(transformation_list, "Transformations")
+    version_material = json.dumps(
+        {
+            "source_signature": source_sig,
+            "source_metadata": metadata,
+            "transformations": transformation_list,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    version_signature = hashlib.sha256(version_material.encode("utf-8")).hexdigest()
+
+    if history_state is None:
+        versions: list[dict[str, Any]] = []
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Lineage history state must be an object.")
+        raw_versions = history_state.get("versions", [])
+        if not isinstance(raw_versions, list):
+            raise ValueError("Lineage history versions must be a list.")
+        _, copied_versions = canonical_json(raw_versions, "Lineage versions")
+        if any(not isinstance(v, dict) for v in copied_versions):
+            raise ValueError("Each prior lineage version must be an object.")
+        versions = copied_versions
+        if len(versions) > max_versions:
+            raise ValueError(f"Lineage history exceeds the {max_versions}-version limit.")
+
+    current = versions[-1] if versions else None
+    if current and current.get("version_signature") == version_signature:
+        version = current
+        status = "VERSION_UNCHANGED"
+    else:
+        version_no = int(current.get("version_number", len(versions))) + 1 if current else 1
+        version = {
+            "version_number": version_no,
+            "dataset_id": "DS-" + hashlib.sha256(str(metadata.get("dataset_id", source_sig)).encode("utf-8")).hexdigest()[:16].upper(),
+            "version_signature": version_signature,
+            "source_signature": source_sig,
+            "source_metadata": metadata,
+            "schema_fingerprint": hashlib.sha256(schema_json.encode("utf-8")).hexdigest(),
+            "transformation_signature": hashlib.sha256(recipe_json.encode("utf-8")).hexdigest(),
+            "transformations": transformation_list,
+            "payload_provenance": payload_provenance,
+            "recorded_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        versions.append(version)
+        versions = versions[-max_versions:]
+        status = "VERSION_CREATED" if len(versions) > 1 else "VERSION_CREATED_INITIAL"
+
+    current_signature = str(version["version_signature"])
+    classified_runs = []
+    for item in run_list:
+        run_id = str(item.get("run_id", item.get("id", ""))).strip()
+        if not run_id:
+            raise ValueError("Each downstream run needs a non-empty run_id or id.")
+        version_link = str(item.get("version_signature", "")).strip()
+        dataset_link = str(item.get("dataset_signature", "")).strip()
+        source_link = str(item.get("source_signature", "")).strip()
+        linked_signature = version_link or dataset_link or source_link
+        if not linked_signature:
+            run_status = "UNVERIFIABLE_NO_SOURCE_SIGNATURE"
+        elif version_link and version_link == current_signature:
+            run_status = "CURRENT"
+        elif version_link:
+            run_status = "STALE_REQUIRES_RERUN"
+        elif (dataset_link or source_link) and linked_signature == source_sig:
+            # A matching raw-source fingerprint is insufficient to prove that the
+            # downstream run used the current transformation recipe and schema.
+            run_status = "SOURCE_MATCH_VERSION_UNVERIFIED"
+        else:
+            run_status = "STALE_REQUIRES_RERUN"
+        classified_runs.append({
+            "run_id": run_id,
+            "source_signature": linked_signature or None,
+            "signature_kind": (
+                "version_signature" if version_link else
+                "dataset_signature" if dataset_link else
+                "source_signature" if source_link else "missing"
+            ),
+            "status": run_status,
+            "method": "Only an exact version_signature match is marked CURRENT; raw source matches do not certify the transformation recipe.",
+        })
+
+    state = {
+        "versions": versions,
+        "current_version_number": version.get("version_number"),
+        "current_version_signature": current_signature,
+        "max_versions": max_versions,
+    }
+    return {
+        "status": status,
+        "dataset_id": version["dataset_id"],
+        "version_number": version["version_number"],
+        "version_signature": current_signature,
+        "source_signature": source_sig,
+        "schema_fingerprint": version["schema_fingerprint"],
+        "transformation_signature": version["transformation_signature"],
+        "transformations": transformation_list,
+        "source_metadata": metadata,
+        "payload_provenance": payload_provenance,
+        "version_count": len(versions),
+        "version_history": versions,
+        "downstream_runs": classified_runs,
+        "stale_run_count": sum(1 for item in classified_runs if item["status"] == "STALE_REQUIRES_RERUN"),
+        "unverifiable_run_count": sum(1 for item in classified_runs if item["status"] in {"UNVERIFIABLE_NO_SOURCE_SIGNATURE", "SOURCE_MATCH_VERSION_UNVERIFIED"}),
+        "lineage_state": state,
+        "limitations": [
+            "Upstream source signatures and downstream run references are supplied by the caller; their authenticity is not independently established here.",
+            "A downstream run is marked stale only when it supplies a non-matching signature; missing signatures remain unverifiable.",
+            "Durable hosted persistence, linkage to every core dataset consumer and cross-workspace isolation require staging verification.",
+        ],
+    }
+
+
+
+def solve_supply_chain_network(network: Mapping[str, Any]) -> dict[str, Any]:
+    """Solve a bounded minimum-cost single-commodity flow network.
+
+    This is a deterministic flow model, not a live ERP/network integration.
+    Each edge carries one nonnegative flow up to its stated capacity.
+    """
+    from scipy.optimize import linprog
+
+    if not isinstance(network, Mapping):
+        raise ValueError("Network input must be a JSON object.")
+    nodes = network.get("nodes")
+    edges = network.get("edges")
+    if not isinstance(nodes, list) or not 2 <= len(nodes) <= 100:
+        raise ValueError("Network must contain between 2 and 100 nodes.")
+    if not isinstance(edges, list) or not 1 <= len(edges) <= 500:
+        raise ValueError("Network must contain between 1 and 500 edges.")
+
+    by_name: dict[str, dict[str, float]] = {}
+    for i, node in enumerate(nodes):
+        if not isinstance(node, Mapping):
+            raise ValueError("Every network node must be an object.")
+        name = str(node.get("name", "")).strip()
+        if not name or len(name) > 120 or name in by_name:
+            raise ValueError("Network node names must be non-empty, unique and at most 120 characters.")
+        supply = _finite_number(node.get("supply", 0), f"Node {name} supply")
+        demand = _finite_number(node.get("demand", 0), f"Node {name} demand")
+        if supply < 0 or demand < 0:
+            raise ValueError("Node supply and demand must be nonnegative.")
+        by_name[name] = {"supply": supply, "demand": demand}
+
+    total_supply = sum(n["supply"] for n in by_name.values())
+    total_demand = sum(n["demand"] for n in by_name.values())
+    if not math.isclose(total_supply, total_demand, rel_tol=1e-9, abs_tol=1e-7):
+        raise ValueError("Total network supply must equal total demand for this balanced model.")
+
+    edge_rows: list[dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, Mapping):
+            raise ValueError("Every network edge must be an object.")
+        source, target = str(edge.get("source", "")).strip(), str(edge.get("target", "")).strip()
+        if source not in by_name or target not in by_name or source == target:
+            raise ValueError("Every edge must connect two different declared nodes.")
+        capacity = _finite_number(edge.get("capacity"), "Edge capacity")
+        cost = _finite_number(edge.get("unit_cost"), "Edge unit cost")
+        if capacity <= 0 or cost < 0:
+            raise ValueError("Edge capacity must be positive and unit cost must be nonnegative.")
+        edge_rows.append({"source": source, "target": target, "capacity": capacity, "unit_cost": cost})
+
+    names = list(by_name)
+    positions = {name: i for i, name in enumerate(names)}
+    a_eq = np.zeros((len(names), len(edge_rows)), dtype=float)
+    for j, edge in enumerate(edge_rows):
+        a_eq[positions[edge["source"]], j] += 1.0
+        a_eq[positions[edge["target"]], j] -= 1.0
+    b_eq = np.array([by_name[name]["supply"] - by_name[name]["demand"] for name in names], dtype=float)
+    solved = linprog(
+        c=np.array([edge["unit_cost"] for edge in edge_rows], dtype=float),
+        A_eq=a_eq,
+        b_eq=b_eq,
+        bounds=[(0.0, edge["capacity"]) for edge in edge_rows],
+        method="highs",
+    )
+    if not solved.success:
+        return {
+            "status": "INFEASIBLE" if solved.status == 2 else "SOLVER_ERROR",
+            "solver_status": int(solved.status),
+            "message": "No feasible capacity-respecting flow was found." if solved.status == 2 else "The flow solver did not return a verified solution.",
+            "total_supply": total_supply,
+            "total_demand": total_demand,
+            "flows": [],
+            "model_scope": "single_commodity_minimum_cost_flow",
+            "limitations": ["No lead-time, multi-commodity, facility-opening, uncertainty, or live-system constraints are included."],
+        }
+
+    flows = []
+    for edge, value in zip(edge_rows, solved.x):
+        flow = float(value)
+        flows.append({
+            **edge,
+            "flow": flow,
+            "unused_capacity": max(0.0, edge["capacity"] - flow),
+            "edge_cost": flow * edge["unit_cost"],
+        })
+    return {
+        "status": "OPTIMAL",
+        "solver_status": int(solved.status),
+        "total_supply": total_supply,
+        "total_demand": total_demand,
+        "total_cost": float(solved.fun),
+        "flows": flows,
+        "node_balance_residual": float(np.max(np.abs(a_eq @ solved.x - b_eq))),
+        "model_scope": "single_commodity_minimum_cost_flow",
+        "data_origin": str(network.get("data_origin", "USER_ENTERED")).upper(),
+        "limitations": ["Deterministic single-commodity flow only; input costs/capacities are assumptions, not verified supplier or transport data."],
+    }
+
+
+def calibrate_digital_twin_outputs(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Fit a linear output correction to supplied simulated/measured pairs.
+
+    This is a first-order output-fit diagnostic, not physics-based parameter
+    estimation and not a connection to a live plant.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError("Calibration input must be a JSON object.")
+    pairs = payload.get("pairs")
+    if not isinstance(pairs, list) or not 3 <= len(pairs) <= 5000:
+        raise ValueError("Calibration requires between 3 and 5,000 simulated/measured pairs.")
+    origin = str(payload.get("data_origin", "")).strip().upper()
+    if origin not in {"SYNTHETIC", "IMPORTED", "USER_ENTERED"}:
+        raise ValueError("Data origin must be SYNTHETIC, IMPORTED, or USER_ENTERED; live data is not verified by this tool.")
+    simulated, measured = [], []
+    for row in pairs:
+        if not isinstance(row, Mapping):
+            raise ValueError("Every calibration pair must be an object.")
+        simulated.append(_finite_number(row.get("simulated"), "Simulated output"))
+        measured.append(_finite_number(row.get("measured"), "Measured output"))
+    x = np.asarray(simulated, dtype=float)
+    y = np.asarray(measured, dtype=float)
+    x_centered, y_centered = x - float(x.mean()), y - float(y.mean())
+    denominator = float(np.dot(x_centered, x_centered))
+    if denominator <= 1e-12:
+        raise ValueError("Simulated outputs must vary to fit a gain and bias.")
+    gain = float(np.dot(x_centered, y_centered) / denominator)
+    bias = float(y.mean() - gain * x.mean())
+    predicted = gain * x + bias
+    residuals = y - predicted
+    ss_total = float(np.dot(y_centered, y_centered))
+    ss_residual = float(np.dot(residuals, residuals))
+    return {
+        "status": "CALIBRATION_DIAGNOSTIC_CREATED",
+        "method": "ordinary_least_squares_affine_output_correction",
+        "data_origin": origin,
+        "observation_count": int(len(pairs)),
+        "gain": gain,
+        "bias": bias,
+        "r_squared": None if ss_total <= 1e-12 else float(1.0 - ss_residual / ss_total),
+        "mae": float(np.mean(np.abs(residuals))),
+        "rmse": float(np.sqrt(np.mean(np.square(residuals)))),
+        "residuals": [
+            {"observation": i + 1, "simulated": float(x[i]), "measured": float(y[i]), "calibrated_estimate": float(predicted[i]), "residual": float(residuals[i])}
+            for i in range(len(pairs))
+        ],
+        "limitations": [
+            "Fits output gain and bias only; it does not identify physical parameters or validate model structure.",
+            "No live plant data source is configured or verified. An R-squared value is not proof of predictive validity.",
+        ],
+    }
+
+
+def simulate_industrial_disruption(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Run a deterministic period-based capacity-shock and backlog scenario."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("Disruption scenario must be a JSON object.")
+    baseline = _finite_number(payload.get("baseline_capacity_per_period"), "Baseline capacity")
+    demand = _finite_number(payload.get("demand_per_period"), "Demand per period")
+    starting_inventory = _finite_number(payload.get("starting_inventory", 0), "Starting inventory")
+    periods_raw = payload.get("periods")
+    if isinstance(periods_raw, bool) or not isinstance(periods_raw, int) or not 1 <= periods_raw <= 500:
+        raise ValueError("Periods must be an integer from 1 to 500.")
+    if baseline <= 0 or demand < 0 or starting_inventory < 0:
+        raise ValueError("Baseline capacity must be positive; demand and inventory must be nonnegative.")
+    events = payload.get("disruptions", [])
+    if not isinstance(events, list) or len(events) > 100:
+        raise ValueError("Disruptions must be a list containing at most 100 events.")
+    normalized: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            raise ValueError("Every disruption event must be an object.")
+        start, end = event.get("start_period"), event.get("end_period")
+        if any(isinstance(v, bool) or not isinstance(v, int) for v in (start, end)):
+            raise ValueError("Disruption start/end periods must be integers.")
+        fraction = _finite_number(event.get("capacity_fraction"), "Capacity fraction")
+        if not 1 <= start <= end <= periods_raw or not 0 <= fraction <= 1:
+            raise ValueError("Disruption periods must fit the horizon and capacity fractions must be between 0 and 1.")
+        normalized.append({"name": str(event.get("name", "Disruption"))[:100], "start_period": start, "end_period": end, "capacity_fraction": fraction})
+
+    inventory, backlog = starting_inventory, 0.0
+    rows = []
+    total_demand_served = 0.0
+    maximum_backlog = 0.0
+    last_disruption_end = max((event["end_period"] for event in normalized), default=0)
+    recovery_period = None
+    for period in range(1, periods_raw + 1):
+        active = [e for e in normalized if e["start_period"] <= period <= e["end_period"]]
+        capacity_fraction = math.prod(e["capacity_fraction"] for e in active) if active else 1.0
+        capacity = baseline * capacity_fraction
+        available = inventory + capacity
+        backlog_served = min(backlog, available)
+        available -= backlog_served
+        current_served = min(demand, available)
+        inventory = max(0.0, available - current_served)
+        backlog = max(0.0, backlog - backlog_served) + max(0.0, demand - current_served)
+        total_demand_served += current_served
+        maximum_backlog = max(maximum_backlog, backlog)
+        if last_disruption_end > 0 and not active and backlog <= 1e-9 and recovery_period is None and period > last_disruption_end:
+            recovery_period = period
+        rows.append({
+            "period": period,
+            "active_disruptions": [e["name"] for e in active],
+            "effective_capacity_fraction": capacity_fraction,
+            "capacity": capacity,
+            "current_demand": demand,
+            "current_demand_served": current_served,
+            "inventory_end": inventory,
+            "backlog_end": backlog,
+        })
+    total_demand = demand * periods_raw
+    return {
+        "status": "DETERMINISTIC_SCENARIO_COMPLETED",
+        "data_origin": str(payload.get("data_origin", "USER_ENTERED")).upper(),
+        "periods": periods_raw,
+        "total_demand": total_demand,
+        "total_current_demand_served": total_demand_served,
+        "service_percent": 100.0 if total_demand <= 0 else 100.0 * total_demand_served / total_demand,
+        "ending_inventory": inventory,
+        "ending_backlog": backlog,
+        "maximum_backlog": maximum_backlog,
+        "recovery_period": recovery_period,
+        "period_results": rows,
+        "limitations": ["Deterministic capacity/backlog scenario only; no probabilistic failure, lead-time, routing, workforce, cost or real-time plant model is included."],
+    }
+
+
+def evaluate_kpi_thresholds(payload: Mapping[str, Any], *, as_of_utc: Any = None) -> dict[str, Any]:
+    """Evaluate freshness-aware KPI thresholds without persisting or sending alerts."""
+    from datetime import datetime, timezone
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("KPI alert input must be a JSON object.")
+    records = payload.get("kpis")
+    if not isinstance(records, list) or not 1 <= len(records) <= 500:
+        raise ValueError("Provide between 1 and 500 KPI records.")
+    as_of = as_of_utc or datetime.now(timezone.utc)
+    if isinstance(as_of, str):
+        as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    if not isinstance(as_of, datetime) or as_of.tzinfo is None:
+        raise ValueError("As-of time must be timezone-aware UTC.")
+    as_of = as_of.astimezone(timezone.utc)
+    seen: set[tuple[str, str]] = set()
+    results = []
+    for row in records:
+        if not isinstance(row, Mapping):
+            raise ValueError("Every KPI record must be an object.")
+        name, period = str(row.get("name", "")).strip(), str(row.get("period", "")).strip()
+        if not name or len(name) > 120 or not period or len(period) > 80:
+            raise ValueError("KPI name and period are required and must be bounded.")
+        key = (name.casefold(), period)
+        if key in seen:
+            raise ValueError("Duplicate KPI name/period records are not allowed.")
+        seen.add(key)
+        value = _finite_number(row.get("value"), f"{name} value")
+        threshold = _finite_number(row.get("threshold"), f"{name} threshold")
+        max_age = _finite_number(row.get("max_age_hours"), f"{name} maximum age")
+        comparison = str(row.get("comparison", "")).strip().lower()
+        if comparison not in {"above", "below"} or max_age <= 0:
+            raise ValueError("Comparison must be above/below and maximum age must be positive.")
+        stamp_raw = str(row.get("measured_at_utc", "")).strip()
+        try:
+            stamp = datetime.fromisoformat(stamp_raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"{name} measurement time must be ISO-8601 with a timezone.") from exc
+        if stamp.tzinfo is None:
+            raise ValueError(f"{name} measurement time must include a timezone.")
+        age = (as_of - stamp.astimezone(timezone.utc)).total_seconds() / 3600.0
+        if age < -1e-6:
+            raise ValueError(f"{name} measurement time cannot be in the future.")
+        stale = age > max_age
+        threshold_breached = value > threshold if comparison == "above" else value < threshold
+        status = "STALE_DATA" if stale else ("ALERT" if threshold_breached else "OK")
+        results.append({
+            "name": name, "period": period, "value": value, "unit": str(row.get("unit", ""))[:40],
+            "threshold": threshold, "comparison": comparison, "measured_at_utc": stamp.astimezone(timezone.utc).isoformat(),
+            "age_hours": age, "maximum_age_hours": max_age, "status": status,
+        })
+    return {
+        "status": "KPI_THRESHOLDS_EVALUATED",
+        "evaluated_count": len(results),
+        "alert_count": sum(r["status"] == "ALERT" for r in results),
+        "stale_count": sum(r["status"] == "STALE_DATA" for r in results),
+        "kpis": results,
+        "delivery_status": "NOT_SENT",
+        "limitations": ["Results are calculated from supplied KPI values only; no source connector, durable alert state, recipient routing, or notification delivery is configured."],
+    }
+
+
+def validate_api_plugin_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a read-only plugin manifest; never calls the endpoint or executes code."""
+    import re
+    from urllib.parse import urlsplit
+
+    if not isinstance(manifest, Mapping):
+        raise ValueError("Plugin manifest must be a JSON object.")
+    plugin_id = str(manifest.get("plugin_id", "")).strip()
+    version = str(manifest.get("version", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,79}", plugin_id):
+        raise ValueError("Plugin ID must be 2-80 safe ASCII characters.")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("Plugin version must use semantic major.minor.patch form.")
+    method = str(manifest.get("method", "")).strip().upper()
+    if method != "GET":
+        raise ValueError("Only read-only GET plugin descriptors are accepted.")
+    endpoint = str(manifest.get("endpoint_url", "")).strip()
+    try:
+        parsed = urlsplit(endpoint)
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
+        port = parsed.port or 443
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("Plugin endpoint has an invalid host or port.") from exc
+    if parsed.scheme.lower() != "https" or not host or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("Plugin endpoint must be HTTPS without embedded credentials, query or fragment.")
+    allowlist = manifest.get("approved_hosts")
+    if not isinstance(allowlist, list) or not allowlist:
+        raise ValueError("An explicit approved host allowlist is required.")
+    allowed = set()
+    for entry in allowlist:
+        value = str(entry).strip().lower().rstrip(".")
+        if not value or "/" in value or "@" in value or any(ch.isspace() for ch in value):
+            raise ValueError("Approved hosts must be exact hostnames, optionally with a port.")
+        allowed.add(value)
+    endpoint_key = host if port == 443 else f"{host}:{port}"
+    if endpoint_key not in allowed:
+        raise ValueError("Plugin endpoint host is not present in the explicit allowlist.")
+    required_scopes = manifest.get("required_scopes", [])
+    granted_scopes = manifest.get("granted_scopes", [])
+    if not isinstance(required_scopes, list) or not required_scopes or not all(isinstance(s, str) and s.strip() for s in required_scopes):
+        raise ValueError("At least one explicit required scope is needed.")
+    if not isinstance(granted_scopes, list) or not all(isinstance(s, str) and s.strip() for s in granted_scopes):
+        raise ValueError("Granted scopes must be a list of non-empty strings.")
+    if not set(required_scopes).issubset(set(granted_scopes)):
+        raise ValueError("Granted scopes do not cover the required plugin scopes.")
+    timeout = _finite_number(manifest.get("timeout_seconds"), "Timeout")
+    rate_limit = manifest.get("rate_limit_per_minute")
+    if isinstance(rate_limit, bool) or not isinstance(rate_limit, int) or not 1 <= rate_limit <= 600:
+        raise ValueError("Rate limit must be an integer from 1 to 600 requests per minute.")
+    if not 1 <= timeout <= 60:
+        raise ValueError("Timeout must be between 1 and 60 seconds.")
+    return {
+        "status": "MANIFEST_VALIDATED_REVIEW_REQUIRED",
+        "plugin_id": plugin_id, "version": version, "endpoint_host": endpoint_key,
+        "method": "GET", "required_scopes": sorted(set(required_scopes)),
+        "granted_scopes": sorted(set(granted_scopes)), "timeout_seconds": timeout,
+        "rate_limit_per_minute": rate_limit, "network_request_sent": False,
+        "plugin_executed": False, "write_capability": False,
+        "limitations": ["This validates metadata only; it does not register, authenticate, invoke or sandbox a plugin/API. A separate reviewed server-side transport is required."],
+    }
+
+
+def audit_data_governance_recovery(payload: Mapping[str, Any], *, as_of_utc: Any = None) -> dict[str, Any]:
+    """Audit supplied workspace retention and recovery evidence without mutating data."""
+    from datetime import datetime, timezone
+    import re
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("Governance input must be a JSON object.")
+    workspace_id = str(payload.get("workspace_id", "")).strip()
+    records = payload.get("records")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", workspace_id):
+        raise ValueError("A bounded workspace reference is required.")
+    if not isinstance(records, list) or not 1 <= len(records) <= 1000:
+        raise ValueError("Provide between 1 and 1,000 governance records.")
+    max_restore_age = payload.get("max_restore_test_age_days", 90)
+    if isinstance(max_restore_age, bool) or not isinstance(max_restore_age, int) or not 1 <= max_restore_age <= 3650:
+        raise ValueError("Maximum restore-test age must be an integer from 1 to 3,650 days.")
+    as_of = as_of_utc or datetime.now(timezone.utc)
+    if isinstance(as_of, str):
+        as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    if not isinstance(as_of, datetime) or as_of.tzinfo is None:
+        raise ValueError("As-of time must include a timezone.")
+    as_of = as_of.astimezone(timezone.utc)
+
+    ids: set[str] = set()
+    findings = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Every governance record must be an object.")
+        record_id = str(record.get("record_id", "")).strip()
+        record_workspace = str(record.get("workspace_id", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", record_id) or record_id in ids:
+            raise ValueError("Governance record IDs must be bounded and unique.")
+        ids.add(record_id)
+        if record_workspace != workspace_id:
+            raise ValueError("Every record must belong to the requested workspace.")
+        classification = str(record.get("classification", "")).strip().upper()
+        if classification not in {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"}:
+            raise ValueError("Classification must be PUBLIC, INTERNAL, CONFIDENTIAL, or RESTRICTED.")
+        retention = record.get("retention_days")
+        if isinstance(retention, bool) or not isinstance(retention, int) or not 0 <= retention <= 36500:
+            raise ValueError("Retention days must be an integer between 0 and 36,500.")
+        try:
+            created = datetime.fromisoformat(str(record.get("created_at_utc", "")).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Created time must be ISO-8601 with a timezone.") from exc
+        if created.tzinfo is None:
+            raise ValueError("Created time must include a timezone.")
+        age_days = (as_of - created.astimezone(timezone.utc)).total_seconds() / 86400.0
+        if age_days < -1e-6:
+            raise ValueError("Created time cannot be in the future.")
+        legal_hold = record.get("legal_hold", False)
+        backup_verified = record.get("backup_verified", False)
+        if not isinstance(legal_hold, bool) or not isinstance(backup_verified, bool):
+            raise ValueError("Legal-hold and backup-verified flags must be booleans.")
+        if legal_hold:
+            retention_status = "LEGAL_HOLD_REQUIRES_HUMAN_REVIEW"
+        elif age_days > retention:
+            retention_status = "RETENTION_DUE_REQUIRES_APPROVAL"
+        else:
+            retention_status = "WITHIN_RETENTION"
+        backup_ref = str(record.get("backup_ref", "")).strip()
+        restore_raw = str(record.get("last_restore_test_utc", "")).strip()
+        restore_test_age = None
+        if not backup_ref or not backup_verified:
+            recovery_status = "BACKUP_EVIDENCE_MISSING_OR_UNVERIFIED"
+        elif not restore_raw:
+            recovery_status = "RESTORE_TEST_MISSING"
+        else:
+            try:
+                restore_time = datetime.fromisoformat(restore_raw.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Restore-test time must be ISO-8601 with a timezone.") from exc
+            if restore_time.tzinfo is None:
+                raise ValueError("Restore-test time must include a timezone.")
+            restore_test_age = (as_of - restore_time.astimezone(timezone.utc)).total_seconds() / 86400.0
+            if restore_test_age < -1e-6:
+                raise ValueError("Restore-test time cannot be in the future.")
+            recovery_status = "RESTORE_TEST_STALE" if restore_test_age > max_restore_age else "RESTORE_EVIDENCE_FRESH"
+        findings.append({
+            "record_id": record_id, "classification": classification, "age_days": age_days,
+            "retention_status": retention_status, "recovery_status": recovery_status,
+            "restore_test_age_days": restore_test_age,
+        })
+    return {
+        "status": "GOVERNANCE_PREFLIGHT_COMPLETED",
+        "workspace_id": workspace_id, "record_count": len(findings),
+        "retention_due_count": sum(f["retention_status"] == "RETENTION_DUE_REQUIRES_APPROVAL" for f in findings),
+        "legal_hold_count": sum(f["retention_status"] == "LEGAL_HOLD_REQUIRES_HUMAN_REVIEW" for f in findings),
+        "recovery_not_ready_count": sum(f["recovery_status"] != "RESTORE_EVIDENCE_FRESH" for f in findings),
+        "findings": findings,
+        "mutations_performed": False, "delete_performed": False, "restore_performed": False,
+        "limitations": ["Metadata preflight only; no data export, deletion, backup creation, restore, legal approval or durable audit event is performed."],
+    }
+
+
+
+def run_hypothesis_test(
+    test_type: str,
+    sample_a: Sequence[float],
+    sample_b: Sequence[float] | None = None,
+    *,
+    null_mean: float = 0.0,
+    alpha: float = 0.05,
+) -> dict[str, Any]:
+    """Run supported two-sided one-sample, independent Welch, or paired t-tests."""
+    test = str(test_type or "").strip().lower()
+    if test not in {"one_sample_t", "welch_t", "paired_t"}:
+        raise ValueError("Supported test types are one_sample_t, welch_t and paired_t.")
+    alpha_value = _finite_number(alpha, "Alpha")
+    if not 0 < alpha_value < 1:
+        raise ValueError("Alpha must be strictly between zero and one.")
+    values_a = [_finite_number(value, "Sample A value") for value in sample_a]
+    if len(values_a) < 2:
+        raise ValueError("Sample A must contain at least two finite observations.")
+    values_b = None
+    if test != "one_sample_t":
+        if sample_b is None:
+            raise ValueError("Sample B is required for the selected two-sample test.")
+        values_b = [_finite_number(value, "Sample B value") for value in sample_b]
+        if len(values_b) < 2:
+            raise ValueError("Sample B must contain at least two finite observations.")
+
+    from scipy.stats import t as t_distribution
+    a = np.asarray(values_a, dtype=float)
+    mean_a = float(a.mean())
+    warnings = [
+        "Two-sided t-test only. Confirm sampling design, independence/pairing and distribution assumptions before interpreting results.",
+        "P-values do not measure practical importance or prove causation.",
+    ]
+
+    if test == "one_sample_t":
+        null_value = _finite_number(null_mean, "Null mean")
+        difference = mean_a - null_value
+        sd_a = float(np.std(a, ddof=1))
+        se = sd_a / math.sqrt(len(a))
+        degrees_freedom = len(a) - 1
+        method = "One-sample t-test"
+        mean_b = None
+        n_b = None
+        hypothesis = f"Two-sided H0: population mean = {null_value:g}; H1: population mean differs from {null_value:g}."
+        effect_size = difference / sd_a if sd_a > 0 else None
+    elif test == "welch_t":
+        b = np.asarray(values_b, dtype=float)
+        mean_b = float(b.mean())
+        var_a = float(np.var(a, ddof=1))
+        var_b = float(np.var(b, ddof=1))
+        difference = mean_a - mean_b
+        var_mean_a = var_a / len(a)
+        var_mean_b = var_b / len(b)
+        se = math.sqrt(var_mean_a + var_mean_b)
+        denominator = (var_mean_a ** 2 / (len(a) - 1)) + (var_mean_b ** 2 / (len(b) - 1))
+        degrees_freedom = ((var_mean_a + var_mean_b) ** 2 / denominator) if denominator > 0 else float(len(a) + len(b) - 2)
+        method = "Independent two-sample Welch t-test"
+        n_b = len(b)
+        pooled_sd = math.sqrt(((len(a) - 1) * var_a + (len(b) - 1) * var_b) / (len(a) + len(b) - 2))
+        effect_size = difference / pooled_sd if pooled_sd > 0 else None
+        hypothesis = "Two-sided H0: group means are equal; H1: group means differ."
+    else:
+        b = np.asarray(values_b, dtype=float)
+        if len(a) != len(b):
+            raise ValueError("Paired t-test requires sample A and B to have the same number of aligned observations.")
+        differences = a - b
+        difference = float(differences.mean())
+        sd_difference = float(np.std(differences, ddof=1))
+        se = sd_difference / math.sqrt(len(differences))
+        degrees_freedom = len(differences) - 1
+        method = "Paired two-sample t-test"
+        mean_b = float(b.mean())
+        n_b = len(b)
+        effect_size = difference / sd_difference if sd_difference > 0 else None
+        hypothesis = "Two-sided H0: mean paired difference is zero; H1: mean paired difference differs from zero."
+
+    if not math.isfinite(se) or se <= np.finfo(float).eps:
+        raise ValueError("The standard error is zero or non-finite; the selected t-test statistic and confidence interval are not estimable.")
+    statistic = difference / se
+    p_value = float(2.0 * t_distribution.sf(abs(statistic), degrees_freedom))
+    critical = float(t_distribution.ppf(1.0 - alpha_value / 2.0, degrees_freedom))
+    ci_low, ci_high = difference - critical * se, difference + critical * se
+    return {
+        "status": "HYPOTHESIS_TEST_CALCULATED",
+        "method": method,
+        "hypothesis": hypothesis,
+        "alpha": alpha_value,
+        "sample_size_a": len(a),
+        "sample_size_b": n_b,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "mean_difference": difference,
+        "test_statistic": statistic,
+        "degrees_freedom": float(degrees_freedom),
+        "p_value": p_value,
+        "confidence_level_pct": 100.0 * (1.0 - alpha_value),
+        "confidence_interval_low": float(ci_low),
+        "confidence_interval_high": float(ci_high),
+        "effect_size_cohens_d": float(effect_size) if effect_size is not None else None,
+        "reject_null_hypothesis": bool(p_value < alpha_value),
+        "decision_rule": "Reject H0 when p-value < alpha; otherwise fail to reject H0.",
+        "warnings": warnings,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
