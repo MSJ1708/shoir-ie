@@ -97,3 +97,25 @@ def test_export_reopens_with_flow_metrics_and_provenance_sheets(flows):
     provenance_rows = list(workbook["Provenance"].iter_rows(values_only=True))
     assert any(row[0] == "Facility data-origin status" and row[1] == "IMPORTED_OR_UPSERTED" for row in provenance_rows[1:])
     workbook.close()
+
+
+def test_legacy_session_flows_prevent_synthetic_provenance_label(tmp_path, monkeypatch):
+    monkeypatch.setattr(facility, "DB_PATH", str(tmp_path / "facility-legacy-flow.db"))
+    monkeypatch.setattr(
+        facility.st,
+        "session_state",
+        {"facility_flows_df": pd.DataFrame([{"loads_day": 4, "distance_m": 12}])},
+    )
+
+    facility._seed_or_migrate("alice", "line-a")
+
+    assert facility._get_data_origin("alice", "line-a") == "EXISTING_DATA_ORIGIN_UNVERIFIED"
+
+
+def test_clean_new_workspace_is_labeled_synthetic(tmp_path, monkeypatch):
+    monkeypatch.setattr(facility, "DB_PATH", str(tmp_path / "facility-new-seed.db"))
+    monkeypatch.setattr(facility.st, "session_state", {})
+
+    facility._seed_or_migrate("alice", "line-a")
+
+    assert facility._get_data_origin("alice", "line-a") == "SYNTHETIC_STARTER_DATA"
