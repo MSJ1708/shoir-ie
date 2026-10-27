@@ -6,9 +6,15 @@
 
 The staging-applied migration `20261021130000_shoir_beta_legal_referrals.sql` changes existing `shoir_accounts.affiliate_code` and `updated_at` values for blank/legacy/duplicate codes. It has already been applied in staging. Do not rerun it there, attempt an unplanned rollback, or assume its original values can be reconstructed.
 
+## Read-only preflight — October 27, 2026
+
+Aggregate-only queries found no duplicate **nonblank** referral-code groups in either live project at the time checked. Staging reported 9 accounts, 1 blank code, and 0 duplicate nonblank groups. Production reported 5 accounts, 5 blank codes, and 0 duplicate nonblank groups. No individual referral codes, account identifiers, password hashes, or other account-row contents were selected for this check.
+
+This is a time-bounded preflight, not a permanent guarantee. Repeat the same duplicate check against an isolated production-shaped copy immediately before any approved migration. If any duplicate exists, abort rather than rewriting account data to force uniqueness.
+
 ## Safe replacement
 
-`supabase/migrations/20261026110000_safe_beta_legal_referrals.sql` is an additive replacement candidate. It adds legal-acceptance columns, the server-only referral table and lookup indexes without rewriting existing account identifiers or timestamps. It intentionally does not enforce global affiliate-code uniqueness until duplicate inventory and remediation are separately approved.
+`supabase/migrations/20261026110000_safe_beta_legal_referrals.sql` is an additive replacement candidate. It adds legal-acceptance columns, the server-only referral table, and a case-insensitive **partial unique index for populated referral codes**. It excludes null/blank legacy rows and does not rewrite any existing account identifier or timestamp. Index creation must fail transactionally if duplicate populated codes have appeared; it must not attempt to repair them.
 
 ## Required reconciliation before production
 
