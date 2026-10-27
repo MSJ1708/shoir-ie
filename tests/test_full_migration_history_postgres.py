@@ -237,7 +237,7 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
             WHERE ns.nspname = 'public'
               AND tbl.relname = 'shoir_accounts'
-              AND idx.relname = 'idx_shoir_accounts_affiliate_code_unique';
+              AND idx.relname = 'idx_shoir_accounts_affiliate_code_trimmed_unique';
             """,
         )
         assert (
@@ -428,7 +428,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
                 WHERE ns.nspname = 'public'
                   AND tbl.relname = 'shoir_accounts'
-                  AND idx.relname = 'idx_shoir_accounts_affiliate_code_unique';
+                  AND idx.relname = 'idx_shoir_accounts_affiliate_code_trimmed_unique';
                 """,
             )
             assert unique_code_index == (True,), (
