@@ -2392,3 +2392,171 @@ def test_dataset_version_lineage_rejects_invalid_payloads_and_run_links():
         manage_dataset_version_lineage(None, dataset_payload={"x": 1}, downstream_runs=[{"version_signature": "v1"}])
     with pytest.raises(ValueError, match="finite, valid JSON-compatible"):
         manage_dataset_version_lineage(None, dataset_payload={"x": float("nan")})
+
+
+
+def test_supply_chain_network_solves_minimum_cost_flow_and_reports_infeasible_capacity():
+    from shoir_target_engines import solve_supply_chain_network
+
+    network = {
+        "data_origin": "SYNTHETIC",
+        "nodes": [
+            {"name": "Source", "supply": 5, "demand": 0},
+            {"name": "Hub", "supply": 0, "demand": 0},
+            {"name": "Customer", "supply": 0, "demand": 5},
+        ],
+        "edges": [
+            {"source": "Source", "target": "Customer", "capacity": 2, "unit_cost": 5},
+            {"source": "Source", "target": "Hub", "capacity": 5, "unit_cost": 1},
+            {"source": "Hub", "target": "Customer", "capacity": 5, "unit_cost": 1},
+        ],
+    }
+    result = solve_supply_chain_network(network)
+    assert result["status"] == "OPTIMAL"
+    assert result["total_cost"] == pytest.approx(16.0)
+    assert result["node_balance_residual"] <= 1e-8
+    assert sum(row["flow"] for row in result["flows"] if row["source"] == "Source") == pytest.approx(5.0)
+
+    network["edges"] = [{"source": "Source", "target": "Customer", "capacity": 2, "unit_cost": 1}]
+    infeasible = solve_supply_chain_network(network)
+    assert infeasible["status"] == "INFEASIBLE"
+    assert infeasible["flows"] == []
+    with pytest.raises(ValueError, match="supply must equal total demand"):
+        solve_supply_chain_network({
+            "nodes": [{"name": "Source", "supply": 6, "demand": 0}, {"name": "Customer", "supply": 0, "demand": 5}],
+            "edges": [{"source": "Source", "target": "Customer", "capacity": 10, "unit_cost": 1}],
+        })
+
+
+def test_digital_twin_output_calibration_matches_known_gain_bias_and_rejects_live_claim():
+    from shoir_target_engines import calibrate_digital_twin_outputs
+
+    result = calibrate_digital_twin_outputs({
+        "data_origin": "SYNTHETIC",
+        "pairs": [
+            {"simulated": 1, "measured": 3},
+            {"simulated": 2, "measured": 5},
+            {"simulated": 3, "measured": 7},
+            {"simulated": 4, "measured": 9},
+        ],
+    })
+    assert result["status"] == "CALIBRATION_DIAGNOSTIC_CREATED"
+    assert result["gain"] == pytest.approx(2.0)
+    assert result["bias"] == pytest.approx(1.0)
+    assert result["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["r_squared"] == pytest.approx(1.0)
+    with pytest.raises(ValueError, match="Data origin"):
+        calibrate_digital_twin_outputs({
+            "data_origin": "LIVE",
+            "pairs": [{"simulated": i, "measured": i} for i in (1, 2, 3)],
+        })
+    with pytest.raises(ValueError, match="must vary"):
+        calibrate_digital_twin_outputs({
+            "data_origin": "USER_ENTERED",
+            "pairs": [{"simulated": 1, "measured": i} for i in (1, 2, 3)],
+        })
+
+
+def test_industrial_disruption_scenario_tracks_backlog_recovery_and_rejects_invalid_windows():
+    from shoir_target_engines import simulate_industrial_disruption
+
+    result = simulate_industrial_disruption({
+        "data_origin": "SYNTHETIC",
+        "baseline_capacity_per_period": 100,
+        "demand_per_period": 80,
+        "starting_inventory": 0,
+        "periods": 6,
+        "disruptions": [{"name": "Supplier interruption", "start_period": 2, "end_period": 3, "capacity_fraction": 0.4}],
+    })
+    assert result["status"] == "DETERMINISTIC_SCENARIO_COMPLETED"
+    assert result["period_results"][1]["capacity"] == pytest.approx(40.0)
+    assert result["ending_backlog"] == pytest.approx(0.0)
+    assert result["recovery_period"] == 6
+    no_shock = simulate_industrial_disruption({
+        "baseline_capacity_per_period": 100, "demand_per_period": 80,
+        "starting_inventory": 0, "periods": 3, "disruptions": [],
+    })
+    assert no_shock["recovery_period"] is None
+    with pytest.raises(ValueError, match="must fit the horizon"):
+        simulate_industrial_disruption({
+            "baseline_capacity_per_period": 100, "demand_per_period": 80,
+            "starting_inventory": 0, "periods": 3,
+            "disruptions": [{"start_period": 2, "end_period": 4, "capacity_fraction": 0.5}],
+        })
+
+
+def test_freshness_aware_kpi_thresholds_distinguish_alerts_from_stale_data():
+    from shoir_target_engines import evaluate_kpi_thresholds
+
+    result = evaluate_kpi_thresholds({
+        "kpis": [
+            {"name": "Scrap", "period": "W43", "value": 3.2, "unit": "%", "threshold": 2.0, "comparison": "above", "measured_at_utc": "2026-10-26T12:00:00Z", "max_age_hours": 96},
+            {"name": "OEE", "period": "W43", "value": 88, "unit": "%", "threshold": 80, "comparison": "below", "measured_at_utc": "2026-10-24T00:00:00Z", "max_age_hours": 24},
+        ],
+    }, as_of_utc="2026-10-27T00:00:00Z")
+    assert result["alert_count"] == 1
+    assert result["stale_count"] == 1
+    assert [row["status"] for row in result["kpis"]] == ["ALERT", "STALE_DATA"]
+    assert result["delivery_status"] == "NOT_SENT"
+    with pytest.raises(ValueError, match="Duplicate KPI"):
+        evaluate_kpi_thresholds({
+            "kpis": [
+                {"name": "OEE", "period": "W43", "value": 88, "threshold": 80, "comparison": "below", "measured_at_utc": "2026-10-26T12:00:00Z", "max_age_hours": 24},
+                {"name": "OEE", "period": "W43", "value": 89, "threshold": 80, "comparison": "below", "measured_at_utc": "2026-10-26T13:00:00Z", "max_age_hours": 24},
+            ],
+        }, as_of_utc="2026-10-27T00:00:00Z")
+
+
+def test_read_only_plugin_manifest_validator_never_calls_or_executes_plugin():
+    from shoir_target_engines import validate_api_plugin_manifest
+
+    manifest = {
+        "plugin_id": "plant-metrics-readonly",
+        "version": "1.0.0",
+        "method": "GET",
+        "endpoint_url": "https://api.example.com/v1/status",
+        "approved_hosts": ["api.example.com"],
+        "required_scopes": ["metrics.read"],
+        "granted_scopes": ["metrics.read"],
+        "timeout_seconds": 5,
+        "rate_limit_per_minute": 60,
+    }
+    result = validate_api_plugin_manifest(manifest)
+    assert result["status"] == "MANIFEST_VALIDATED_REVIEW_REQUIRED"
+    assert result["network_request_sent"] is False
+    assert result["plugin_executed"] is False
+    assert result["write_capability"] is False
+    with pytest.raises(ValueError, match="Only read-only GET"):
+        validate_api_plugin_manifest({**manifest, "method": "POST"})
+    with pytest.raises(ValueError, match="explicit allowlist"):
+        validate_api_plugin_manifest({**manifest, "approved_hosts": ["evil.example.com"]})
+    with pytest.raises(ValueError, match="do not cover"):
+        validate_api_plugin_manifest({**manifest, "granted_scopes": []})
+
+
+def test_data_governance_preflight_flags_retention_and_restore_evidence_without_mutation():
+    from shoir_target_engines import audit_data_governance_recovery
+
+    result = audit_data_governance_recovery({
+        "workspace_id": "DEMO-WORKSPACE",
+        "max_restore_test_age_days": 90,
+        "records": [
+            {"record_id": "SYNTH-001", "workspace_id": "DEMO-WORKSPACE", "classification": "INTERNAL",
+             "created_at_utc": "2026-01-01T00:00:00Z", "retention_days": 365, "legal_hold": False,
+             "backup_ref": "SYNTH-BACKUP-001", "backup_verified": True, "last_restore_test_utc": "2026-09-15T00:00:00Z"},
+            {"record_id": "SYNTH-002", "workspace_id": "DEMO-WORKSPACE", "classification": "CONFIDENTIAL",
+             "created_at_utc": "2024-01-01T00:00:00Z", "retention_days": 365, "legal_hold": False,
+             "backup_ref": "", "backup_verified": False, "last_restore_test_utc": ""},
+        ],
+    }, as_of_utc="2026-10-27T00:00:00Z")
+    assert result["retention_due_count"] == 1
+    assert result["recovery_not_ready_count"] == 1
+    assert result["mutations_performed"] is False
+    assert result["delete_performed"] is False
+    assert result["restore_performed"] is False
+    with pytest.raises(ValueError, match="requested workspace"):
+        audit_data_governance_recovery({
+            "workspace_id": "WORKSPACE-A",
+            "records": [{"record_id": "R1", "workspace_id": "WORKSPACE-B", "classification": "INTERNAL",
+                         "created_at_utc": "2026-01-01T00:00:00Z", "retention_days": 30}],
+        }, as_of_utc="2026-10-27T00:00:00Z")
