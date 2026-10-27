@@ -8,7 +8,7 @@
 
 The current candidate adds focused, bounded workflows for T006 recovery, T020 dataset lineage, a limited T039 CAPA/8D register, the T044 RCM review register and T046 single-task RNLE screening. These methods are explicitly marked `IMPLEMENTED_NEEDS_VALIDATION` in both runtime registry and implementation matrix. The matrix is synchronized with the runtime registry in this candidate.
 
-Matrix status counts after synchronization: 92 IMPLEMENTED_NEEDS_VALIDATION, 6 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED. These are implementation classifications, **not a pass rate** and not a count of tools verified in production. T006 undo/redo does not reverse external side effects; T020 does not independently authenticate source signatures or invalidate every consumer; T039 is not a complete CAPA lifecycle; T044 leaves decisions pending human review; T046 is a single-task screen with stated applicability/limits. Hosted persistence, cross-workspace/re-login behavior, independent method review and final integrated staging acceptance remain release gates.
+Matrix status counts after the 27 October integration: 98 IMPLEMENTED_NEEDS_VALIDATION, 0 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED. These are implementation classifications, not verified-pass counts. These are implementation classifications, **not a pass rate** and not a count of tools verified in production. T006 undo/redo does not reverse external side effects; T020 does not independently authenticate source signatures or invalidate every consumer; T039 is not a complete CAPA lifecycle; T044 leaves decisions pending human review; T046 is a single-task screen with stated applicability/limits. Hosted persistence, cross-workspace/re-login behavior, independent method review and final integrated staging acceptance remain release gates.
 
 ## UI and architecture preserved
 
@@ -199,3 +199,8 @@ Before this may be considered for merge or deployment, the exact final head must
 ## Release position
 
 **DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the remaining foundation-only capabilities and the mandatory release checks are completed.
+
+
+### Additional bounded target engines — 27 October 2026
+
+The same candidate now adds focused first-pass engine/Workbench wiring and golden/boundary tests for T060 minimum-cost single-commodity network flow, T074 affine digital-twin output-fit diagnostics, T080 deterministic capacity-shock/backlog scenarios, T094 freshness-aware KPI threshold evaluation, T097 read-only plugin-manifest validation, and T099 workspace-scoped retention/restore-evidence preflight. These targets are classified **IMPLEMENTED_NEEDS_VALIDATION** because bounded executable workflows now exist. T097 does not register or invoke plugins; T099 does not export, delete, create backups or restore data; T094 does not persist or send alerts; T074 does not identify physics-based parameters or connect to live telemetry; and T060/T080 use deterministic user-supplied assumptions. No target is marked VERIFIED_WORKING. Full CI, authenticated tier/direct-action checks, hosted persistence/tenant testing and independent domain/security review remain required.
