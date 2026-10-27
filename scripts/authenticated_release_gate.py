@@ -36,6 +36,58 @@ def record(case: str, account_class: str, passed: bool | None, detail: str) -> N
     print(f"[{status}] {case} ({account_class}): {detail}")
 
 
+# A passing aggregate must include every required logical case and account class.
+# The workspace-load and workspace-round-trip cases are explicitly recorded below.
+REQUIRED_CASES = frozenset({
+    ("active_login", "active"),
+    ("invalid_password", "active"),
+    ("second_login", "second"),
+    ("starter_tier", "starter"),
+    ("admin_action_denied", "active"),
+    ("cross_owner_load_denied", "active"),
+    ("cross_owner_save_denied", "active"),
+    ("workspace_load", "active"),
+    ("workspace_round_trip", "active"),
+    ("workspace_save", "active"),
+    ("workspace_relogin_restore", "active"),
+    ("workspace_restore", "active"),
+    ("expired_login_renewal_only", "expired"),
+    ("expired_workspace_load_denied", "expired"),
+    ("expired_workspace_save_denied", "expired"),
+    ("renewal_requires_reference", "expired"),
+    ("login_throttle_blocks_excess_attempts", "synthetic"),
+    ("inactive_account_denied", "inactive"),
+    ("session_revocation", "active"),
+    ("session_revocation", "active-fresh"),
+    ("session_revocation", "second"),
+    ("session_revocation", "starter"),
+    ("session_revocation", "expired"),
+})
+
+
+def summarize_results(
+    results: list[dict[str, Any]],
+    required_cases: set[tuple[str, str]] | frozenset[tuple[str, str]] | None = None,
+) -> tuple[str, int]:
+    """Return an honest aggregate status and process code for the release gate.
+
+    Explicit failures are FAIL. Skipped/unknown statuses or absent mandatory
+    case/account-class records are BLOCKED, never a successful release gate.
+    """
+    statuses = [str(item.get("status") or "SKIP").upper() for item in results]
+    required = REQUIRED_CASES if required_cases is None else frozenset(required_cases)
+    observed = {
+        (str(item.get("case") or ""), str(item.get("account_class") or ""))
+        for item in results
+    }
+    missing_cases = sorted(required - observed)
+    if "FAIL" in statuses:
+        return "FAIL", 1
+    if not statuses or any(status != "PASS" for status in statuses) or missing_cases:
+        return "BLOCKED", 2
+    return "PASS", 0
+
+
 def require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -103,6 +155,42 @@ def login_failure_detail(status: int | None, data: dict[str, Any], expected: str
     if status == 200:
         return f"{expected}; HTTP 200 was returned but the session/tier metadata did not satisfy the release-gate contract."
     return f"{expected}; staging Edge API returned unexpected HTTP {status}. Response details were suppressed."
+
+
+def verify_session_revocation(api: EdgeAPI, username: str, token: str) -> tuple[bool, str]:
+    """Prove a disposable session is valid, revoke it, then prove reuse is denied.
+
+    The renewal probe omits its payment reference deliberately. A valid workspace
+    or renewal-scoped session reaches the endpoint's no-write validation and
+    returns HTTP 400 before any request or payment proof is persisted. After
+    logout the same token must receive HTTP 401, including for expired accounts
+    whose valid token is limited to renewal scope.
+    """
+    payload = {"username": username, "token": token}
+    expected_validation_error = "A transaction/payment reference is required for renewal review."
+
+    try:
+        before_status, before_data = api.call("renew_request", payload)
+    except Exception as exc:
+        return False, f"Pre-logout session probe failed ({type(exc).__name__}); response details suppressed."
+    if before_status != 400 or before_data.get("error") != expected_validation_error:
+        return False, f"Pre-logout session probe did not reach the expected no-write validation (HTTP {before_status}); details suppressed."
+
+    try:
+        logout_status, logout_data = api.call("logout", payload)
+    except Exception as exc:
+        return False, f"Logout failed ({type(exc).__name__}); response details suppressed."
+    if logout_status != 200 or logout_data.get("ok") is not True or logout_data.get("revoked") is not True:
+        return False, f"Logout did not confirm revocation (HTTP {logout_status}); response details suppressed."
+
+    try:
+        reuse_status, reuse_data = api.call("renew_request", payload)
+    except Exception as exc:
+        return False, f"Post-logout token-reuse probe failed ({type(exc).__name__}); response details suppressed."
+    if reuse_status != 401 or reuse_data.get("error") != "Unauthorized session.":
+        return False, f"Post-logout token reuse was not denied as unauthorized (HTTP {reuse_status}); response details suppressed."
+
+    return True, "Logout revoked the dedicated session; reuse of the same token was rejected with HTTP 401."
 
 
 def main() -> int:
@@ -295,9 +383,12 @@ def main() -> int:
             original_workspace = data.get("state_json") if workspace_was_loaded else None
             if not workspace_was_loaded:
                 record("workspace_load", "active", False, "Could not load the active test workspace.")
-            elif original_workspace is not None and (not isinstance(original_workspace, str) or len(original_workspace) > 1_000_000):
-                record("workspace_round_trip", "active", False, "Workspace is not a small string suitable for a safe test-account probe.")
             else:
+                record("workspace_load", "active", True, "Active test workspace loaded under its authenticated owner.")
+
+            if workspace_was_loaded and original_workspace is not None and (not isinstance(original_workspace, str) or len(original_workspace) > 1_000_000):
+                record("workspace_round_trip", "active", False, "Workspace is not a small string suitable for a safe test-account probe.")
+            elif workspace_was_loaded:
                 try:
                     prior_state = json.loads(original_workspace) if original_workspace else {}
                     if not isinstance(prior_state, dict):
@@ -305,6 +396,7 @@ def main() -> int:
                 except Exception:
                     record("workspace_round_trip", "active", False, "Workspace is not a JSON object; refusing to overwrite it.")
                 else:
+                    record("workspace_round_trip", "active", True, "Workspace payload is a JSON object and is safe for a temporary round-trip probe.")
                     prior_state.pop(sentinel_key, None)
                     restore_expected = original_workspace if original_workspace else "{}"
                     probe_state = dict(prior_state)
@@ -432,7 +524,8 @@ def main() -> int:
             else:
                 record("workspace_restore_retry", "active", False, "No valid test session remained to restore the workspace.")
 
-        # Never leave probe sessions active after the test.
+        # Never leave probe sessions active after the test. For each issued token,
+        # prove it works before logout, require deletion, then reuse it and require HTTP 401.
         for label, username, token in (
             ("active", active_user, active_token),
             ("active-fresh", active_user, reload_token),
@@ -441,21 +534,22 @@ def main() -> int:
             ("expired", expired_user, expired_token),
         ):
             if token:
-                try:
-                    status, data = api.call("logout", {"username": username, "token": token})
-                    record("session_revocation", label, status == 200 and data.get("ok") is True,
-                           "Dedicated test session revoked.")
-                except Exception:
-                    record("session_revocation", label, False, "Could not confirm cleanup of a dedicated test session.")
+                passed, detail = verify_session_revocation(api, username, token)
+                record("session_revocation", label, passed, detail)
+            else:
+                record("session_revocation", label, False, "No disposable session token was issued; revocation could not be verified.")
 
+    overall, exit_code = summarize_results(RESULTS, REQUIRED_CASES)
     REPORT_PATH.write_text(json.dumps({
         "run_at_utc": datetime.now(timezone.utc).isoformat(),
         "target": edge_url,
-        "overall": "PASS" if all(item["status"] != "FAIL" for item in RESULTS) else "FAIL",
+        "overall": overall,
         "cases": RESULTS,
     }, indent=2), encoding="utf-8")
     print(f"Report written to {REPORT_PATH}")
-    return 0 if all(item["status"] != "FAIL" for item in RESULTS) else 1
+    if overall == "BLOCKED":
+        print("[BLOCKED] One or more mandatory release-gate cases were skipped or had no result.", file=sys.stderr)
+    return exit_code
 
 
 if __name__ == "__main__":

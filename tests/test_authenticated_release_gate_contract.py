@@ -72,7 +72,8 @@ def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_befor
     assert "WAIT_SECONDS = 90" in candidate
     assert "python scripts/staging_candidate_build_preflight.py" in workflow
     assert "steps.candidate_build.conclusion == 'success'" in workflow
-    assert "steps.backend_check.conclusion == 'success'" in workflow
+    assert "steps.backend_check.conclusion == 'success'" not in workflow
+    assert "always()" in workflow
 
 
 def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
@@ -205,3 +206,16 @@ def test_authenticated_registration_probes_use_current_refund_policy_version():
     script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
     assert '"refund_policy_version": "2026-10-23-v2"' in script
     assert '"referral code"' in script
+
+def test_inactive_test_account_is_required_and_restricted_to_disposable_prefix():
+    workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
+    required_line = next(line for line in workflow.splitlines() if line.strip().startswith("required=("))
+    account_prefix_line = next(
+        line for line in workflow.splitlines()
+        if "for name in SHOIR_E2E_ACTIVE_USERNAME" in line
+    )
+
+    assert "SHOIR_E2E_INACTIVE_USERNAME" in required_line
+    assert "SHOIR_E2E_INACTIVE_PASSWORD" in required_line
+    assert "SHOIR_E2E_INACTIVE_USERNAME" in account_prefix_line
+    assert "shoir-e2e-*" in workflow
