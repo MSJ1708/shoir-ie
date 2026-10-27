@@ -330,6 +330,41 @@ def render_enterprise_integration(tier: str, username: str) -> None:
     with tabs[0]:
         st.markdown("### Enterprise integration map")
         st.caption("The map distinguishes provisioned/live systems from configuration-ready adapters. No connector is presented as live without an explicit status.")
+        # ERP product selection lives inside the existing T096 Integration Map.
+        # This catalogue is informational until provider auth/transport, durable
+        # import, and live non-production acceptance are implemented and verified.
+        try:
+            from shoir_erp_connectors import product_catalog
+        except ImportError:
+            st.caption("The SAP/Oracle product catalogue is not included in this build; the existing connector registry remains available.")
+        else:
+            erp_products = product_catalog()
+            if erp_products:
+                with st.expander("SAP / Oracle ERP product coverage and setup", expanded=False):
+                    product_labels = [item["label"] for item in erp_products]
+                    selected_label = st.selectbox(
+                        "Choose the exact ERP product and deployment",
+                        product_labels,
+                        key="ei_erp_product_profile",
+                    )
+                    selected_product = next(
+                        item for item in erp_products if item["label"] == selected_label
+                    )
+                    st.caption(f"Product ID: {selected_product['product_id']}")
+                    st.info(
+                        "Not configured — specification only. No provider connection or live data read has been verified. "
+                        "This MVP is read-only; ERP records cannot be created or updated."
+                    )
+                    st.markdown(
+                        f"[Open official product/API documentation]({selected_product['api_catalog']})"
+                    )
+                    st.markdown(
+                        "[Customer IT setup and non-production acceptance guide]"
+                        "(https://github.com/MSJ1708/shoir-ie/blob/staging-e2e-20261019/docs/integrations/ERP_CUSTOMER_IT_SETUP.md)"
+                    )
+                    st.caption(
+                        "A saved URL, secret reference, or health check alone will not mark an ERP capability as connected."
+                    )
         systems=list(connectors.to_dict("records"))
         if health is not None and not health.empty:
             for r in health.head(9).to_dict("records"):
