@@ -1041,3 +1041,41 @@ def test_workbench_runs_bounded_network_calibration_disruption_kpi_plugin_and_go
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
         assert result is not None, f"{tool_id} did not produce a result"
         assert result["status"] == expected_status, (tool_id, result.get("status"))
+
+
+
+def test_workbench_runs_all_three_t037_hypothesis_test_designs():
+    """Exercise one-sample, independent Welch and paired t-tests through the Research Pack UI."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "synthetic-hypothesis-test-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="shoir_100_tool_inspector").select("T037 · Hypothesis Testing Assistant")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    designs = [
+        ("One-sample t-test", "2, 4, 6, 8", "8, 9, 10, 11"),
+        ("Independent Welch t-test", "1, 2, 3", "5, 6, 7"),
+        ("Paired t-test", "5, 7, 8, 10", "4, 6, 6, 9"),
+    ]
+    for design, sample_a, sample_b in designs:
+        at.selectbox(key="tool037_test_type").select(design)
+        at.text_input(key="tool037_sample_a").set_value(sample_a)
+        at.text_input(key="tool037_sample_b").set_value(sample_b)
+        at.button(key="tool037_run").click()
+        at.run(timeout=90)
+        at.run(timeout=90)
+        assert not at.exception, f"{design}: " + "\\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get("shoir_tool_result_T037")
+        assert result is not None and result["status"] == "HYPOTHESIS_TEST_CALCULATED"
+        assert result["method"] in {
+            "One-sample t-test",
+            "Independent two-sample Welch t-test",
+            "Paired two-sample t-test",
+        }
