@@ -372,6 +372,7 @@ def build_ultimate_workbook(
         engine="xlsxwriter",
         datetime_format="yyyy-mm-dd hh:mm",
         date_format="yyyy-mm-dd",
+        engine_kwargs={"options": {"strings_to_formulas": False, "strings_to_urls": False}},
     ) as writer:
         workbook = writer.book
         workbook.set_properties({
@@ -1419,7 +1420,13 @@ def build_ultimate_workbook(
     cross_sheet_map = cross_sheet_map or []
 
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter", datetime_format="yyyy-mm-dd hh:mm", date_format="yyyy-mm-dd") as writer:
+    with pd.ExcelWriter(
+        buf,
+        engine="xlsxwriter",
+        datetime_format="yyyy-mm-dd hh:mm",
+        date_format="yyyy-mm-dd",
+        engine_kwargs={"options": {"strings_to_formulas": False, "strings_to_urls": False}},
+    ) as writer:
         workbook = writer.book
         workbook.set_properties({
             "title": title,

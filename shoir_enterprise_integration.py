@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from shoir_upgrade import literalize_untrusted_formula_cells
 
 
 DB_PATH = "enterprise_full_workspace.db"
@@ -255,6 +256,23 @@ def _publish_active(df: pd.DataFrame, filename: str, sheet: str, digest: str = "
         st.session_state["shoir_data_status"]="IMPORTED"
         st.session_state["shoir_data_source"]=f"{filename} · {sheet}"
         st.session_state["shoir_data_source_key"]="upload"
+
+
+def _build_enterprise_workspace_pack(
+    connectors: pd.DataFrame,
+    assets: pd.DataFrame,
+    activity: pd.DataFrame,
+    audit_rows: list[dict[str, Any]],
+) -> bytes:
+    """Create a data-only workspace pack with all untrusted strings stored literally."""
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        connectors.to_excel(writer, index=False, sheet_name="Connectors")
+        assets.to_excel(writer, index=False, sheet_name="Shared_Assets")
+        activity.to_excel(writer, index=False, sheet_name="Collaboration")
+        pd.DataFrame(audit_rows).to_excel(writer, index=False, sheet_name="Audit")
+        literalize_untrusted_formula_cells(writer.book)
+    return out.getvalue()
 
 
 def render_enterprise_integration(tier: str, username: str) -> None:
@@ -593,11 +611,6 @@ def render_enterprise_integration(tier: str, username: str) -> None:
             {"Area":"Live connector claims","Value":int(live_status),"State":"Only explicit statuses"},
         ]
         st.dataframe(pd.DataFrame(audit_rows),use_container_width=True,hide_index=True)
-        out=io.BytesIO()
-        with pd.ExcelWriter(out,engine="openpyxl") as writer:
-            connectors.to_excel(writer,index=False,sheet_name="Connectors")
-            assets.to_excel(writer,index=False,sheet_name="Shared_Assets")
-            activity.to_excel(writer,index=False,sheet_name="Collaboration")
-            pd.DataFrame(audit_rows).to_excel(writer,index=False,sheet_name="Audit")
-        st.download_button("📥 Download Enterprise Workspace Pack",data=out.getvalue(),file_name="shoir_ie_enterprise_workspace.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="ei_export_pack")
+        out = _build_enterprise_workspace_pack(connectors, assets, activity, audit_rows)
+        st.download_button("📥 Download Enterprise Workspace Pack",data=out,file_name="shoir_ie_enterprise_workspace.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="ei_export_pack")
         st.download_button("📄 Download collaboration CSV",data=activity.to_csv(index=False).encode("utf-8"),file_name="enterprise_collaboration.csv",mime="text/csv",use_container_width=True,key="ei_export_collab")

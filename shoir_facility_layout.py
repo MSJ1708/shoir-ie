@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from shoir_upgrade import literalize_untrusted_formula_cells
 
 
 DB_PATH = "enterprise_full_workspace.db"
@@ -859,6 +860,7 @@ def _export_workbook(depts: pd.DataFrame, flows: pd.DataFrame, slp: pd.DataFrame
         slp.to_excel(writer, index=False, sheet_name="SLP_Relationships")
         matrix=_matrix(depts,slp)
         matrix.to_excel(writer, sheet_name="SLP_Matrix")
+        literalize_untrusted_formula_cells(writer.book)
     return out.getvalue()
 
 
