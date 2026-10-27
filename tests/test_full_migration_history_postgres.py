@@ -41,6 +41,8 @@ EXPECTED_VERSIONS = [
     "20261021130000",
     "20261022110000",
     "20261023130000",
+    "20261026110000",
+    "20261027120000",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -71,6 +73,222 @@ def _fetchone(conn, sql: str, args=()):
     with conn.cursor() as cursor:
         cursor.execute(sql, args)
         return cursor.fetchone()
+
+
+SAFE_MIGRATION_TARGET_DATABASE = "shoir_safe_referral_preservation_test"
+
+
+def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
+    """Exercise the additive migration against existing synthetic account rows."""
+    _parsed_url()
+    base = _connect_base()
+    target = None
+    try:
+        base.autocommit = True
+        with base.cursor() as cursor:
+            cursor.execute(
+                "SELECT rolname FROM pg_roles WHERE rolname = ANY(%s);",
+                (["anon", "authenticated", "service_role"],),
+            )
+            existing_roles = {row[0] for row in cursor.fetchall()}
+            for role in ("anon", "authenticated", "service_role"):
+                if role not in existing_roles:
+                    cursor.execute(f"CREATE ROLE {role};")
+            cursor.execute("ALTER ROLE service_role BYPASSRLS;")
+            cursor.execute(
+                f'DROP DATABASE IF EXISTS "{SAFE_MIGRATION_TARGET_DATABASE}" WITH (FORCE);'
+            )
+            cursor.execute(f'CREATE DATABASE "{SAFE_MIGRATION_TARGET_DATABASE}";')
+
+        parsed = _parsed_url()
+        target_url = parsed._replace(
+            path=f"/{SAFE_MIGRATION_TARGET_DATABASE}"
+        ).geturl()
+        target = psycopg2.connect(target_url, connect_timeout=5)
+        with target.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA storage;")
+            cursor.execute(
+                """
+                CREATE TABLE storage.buckets (
+                    id text PRIMARY KEY,
+                    name text NOT NULL UNIQUE,
+                    public boolean NOT NULL DEFAULT false,
+                    file_size_limit bigint,
+                    allowed_mime_types text[]
+                );
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE storage.objects (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    bucket_id text NOT NULL,
+                    name text NOT NULL,
+                    owner_id text,
+                    created_at timestamptz NOT NULL DEFAULT now(),
+                    UNIQUE (bucket_id, name)
+                );
+                ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+                GRANT USAGE, CREATE ON SCHEMA storage TO service_role;
+                GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role;
+                GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO service_role;
+                GRANT USAGE, CREATE ON SCHEMA public TO service_role;
+                ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+                    GRANT ALL ON TABLES TO service_role;
+                ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+                    GRANT ALL ON SEQUENCES TO service_role;
+                ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage
+                    GRANT ALL ON TABLES TO service_role;
+                ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage
+                    GRANT ALL ON SEQUENCES TO service_role;
+                """
+            )
+        target.commit()
+
+        # Build the account/request schema immediately before the historical
+        # data-rewriting referral migration. Do not execute that historical file.
+        base_migrations = [
+            migration for migration in sorted(MIGRATIONS.glob("*.sql"))
+            if migration.name.split("_", 1)[0] < "20261021130000"
+        ]
+        assert base_migrations, "No pre-referral schema migrations were found."
+        for migration in base_migrations:
+            sql = migration.read_text(encoding="utf-8")
+            if not sql.strip():
+                pytest.fail(f"Migration file is empty: {migration.name}")
+            with target.cursor() as cursor:
+                cursor.execute(sql)
+            target.commit()
+
+        with target.cursor() as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO public.shoir_accounts (
+                    username, username_lc, password_hash, role, tier, email,
+                    created_at, subscription_expires_at, affiliate_code, active, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """,
+                [
+                    (
+                        "keep-code", "keep-code", ("a" * 32) + "$" + ("b" * 64),
+                        "User", "Starter Tier ($29)", "keep-code@example.invalid",
+                        "2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z",
+                        "KEEP-CASE-001", True, "2021-01-02T03:04:05Z",
+                    ),
+                    (
+                        "blank-code-a", "blank-code-a", ("c" * 32) + "$" + ("d" * 64),
+                        "User", "Starter Tier ($29)", "blank-a@example.invalid",
+                        "2020-02-01T00:00:00Z", "2099-01-01T00:00:00Z",
+                        "", True, "2021-02-03T04:05:06Z",
+                    ),
+                    (
+                        "blank-code-b", "blank-code-b", ("e" * 32) + "$" + ("f" * 64),
+                        "User", "Starter Tier ($29)", "blank-b@example.invalid",
+                        "2020-03-01T00:00:00Z", "2099-01-01T00:00:00Z",
+                        None, True, "2021-03-04T05:06:07Z",
+                    ),
+                    (
+                        "legacy-code", "legacy-code", ("g" * 32) + "$" + ("h" * 64),
+                        "User", "Starter Tier ($29)", "legacy@example.invalid",
+                        "2020-04-01T00:00:00Z", "2099-01-01T00:00:00Z",
+                        "AFF-LEGACY-15", True, "2021-04-05T06:07:08Z",
+                    ),
+                ],
+            )
+        target.commit()
+
+        before = _fetchone(
+            target,
+            """
+            SELECT array_agg(
+                ROW(username_lc, affiliate_code, updated_at)::text
+                ORDER BY username_lc
+            )
+            FROM public.shoir_accounts;
+            """,
+        )[0]
+
+        safe_migration = MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
+        with target.cursor() as cursor:
+            cursor.execute(safe_migration.read_text(encoding="utf-8"))
+        target.commit()
+
+        after = _fetchone(
+            target,
+            """
+            SELECT array_agg(
+                ROW(username_lc, affiliate_code, updated_at)::text
+                ORDER BY username_lc
+            )
+            FROM public.shoir_accounts;
+            """,
+        )[0]
+        assert after == before, (
+            "The additive migration rewrote existing affiliate_code or updated_at values."
+        )
+
+        index = _fetchone(
+            target,
+            """
+            SELECT i.indisunique, pg_get_expr(i.indpred, i.indrelid),
+                   pg_get_indexdef(i.indexrelid)
+            FROM pg_index i
+            JOIN pg_class idx ON idx.oid = i.indexrelid
+            JOIN pg_class tbl ON tbl.oid = i.indrelid
+            JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+            WHERE ns.nspname = 'public'
+              AND tbl.relname = 'shoir_accounts'
+              AND idx.relname = 'idx_shoir_accounts_affiliate_code_trimmed_unique';
+            """,
+        )
+        assert (
+            index
+            and index[0] is True
+            and "affiliate_code IS NOT NULL" in index[1]
+            and "lower(btrim(affiliate_code))" in index[2].casefold()
+        ), (
+            "The additive migration must create a unique partial index for "
+            "whitespace-normalized populated codes."
+        )
+
+        # A case-insensitive duplicate must be rejected by PostgreSQL itself,
+        # not just by an application-level pre-check.
+        with target.cursor() as cursor:
+            cursor.execute("SAVEPOINT referral_duplicate_guard")
+            with pytest.raises(psycopg2.Error) as duplicate_error:
+                cursor.execute(
+                    "UPDATE public.shoir_accounts SET affiliate_code=%s WHERE username_lc=%s;",
+                    (" KEEP-CASE-001 ", "legacy-code"),
+                )
+            assert duplicate_error.value.pgcode == "23505"
+            cursor.execute("ROLLBACK TO SAVEPOINT referral_duplicate_guard")
+        target.commit()
+
+        after_duplicate_attempt = _fetchone(
+            target,
+            """
+            SELECT array_agg(
+                ROW(username_lc, affiliate_code, updated_at)::text
+                ORDER BY username_lc
+            )
+            FROM public.shoir_accounts;
+            """,
+        )[0]
+        assert after_duplicate_attempt == before, (
+            "A rejected duplicate attempt must not change any account code or timestamp."
+        )
+    finally:
+        if target is not None:
+            target.close()
+        if not base.closed:
+            try:
+                base.autocommit = True
+                with base.cursor() as cursor:
+                    cursor.execute(
+                        f'DROP DATABASE IF EXISTS "{SAFE_MIGRATION_TARGET_DATABASE}" WITH (FORCE);'
+                    )
+            finally:
+                base.close()
 
 
 def test_versioned_migration_history_replays_from_clean_local_postgres():
