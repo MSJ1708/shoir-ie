@@ -21,11 +21,43 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-      - name: Install dependencies
+      - name: Install application and test dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pip-audit
+      - name: Generate CycloneDX SBOM for the resolved Python CI environment
+        id: sbom
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/cyclonedx-tool"
+          "$RUNNER_TEMP/cyclonedx-tool/bin/python" -m pip install --disable-pip-version-check cyclonedx-bom==7.5.0
+          mkdir -p artifacts/sbom
+          "$RUNNER_TEMP/cyclonedx-tool/bin/cyclonedx-py" environment "$(python -c 'import sys; print(sys.executable)')" --output-file artifacts/sbom/shoir-ie-python-ci-environment.cdx.json --output-reproducible
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/sbom/shoir-ie-python-ci-environment.cdx.json")
+          document = json.loads(path.read_text(encoding="utf-8"))
+          if document.get("bomFormat") != "CycloneDX":
+              raise SystemExit("SBOM is not a CycloneDX document.")
+          components = document.get("components")
+          if not isinstance(components, list) or len(components) < 10:
+              raise SystemExit("SBOM is incomplete: expected at least 10 resolved components.")
+          if not document.get("metadata"):
+              raise SystemExit("SBOM metadata is missing.")
+          print(f"Validated CycloneDX environment SBOM with {len(components)} components.")
+          PY
+          echo "generated=true" >> "$GITHUB_OUTPUT"
+      - name: Upload CycloneDX SBOM artifact
+        if: ${{ always() && steps.sbom.outputs.generated == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-python-ci-sbom-${{ github.sha }}
+          path: artifacts/sbom/shoir-ie-python-ci-environment.cdx.json
+          if-no-files-found: error
+      - name: Install dependency audit tool
+        run: pip install pip-audit
       - name: Compile
         run: python -m compileall -q .
       - name: Regression tests
