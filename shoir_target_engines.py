@@ -6740,6 +6740,7 @@ def simulate_industrial_disruption(payload: Mapping[str, Any]) -> dict[str, Any]
     rows = []
     total_demand_served = 0.0
     maximum_backlog = 0.0
+    last_disruption_end = max((event["end_period"] for event in normalized), default=0)
     recovery_period = None
     for period in range(1, periods_raw + 1):
         active = [e for e in normalized if e["start_period"] <= period <= e["end_period"]]
@@ -6753,7 +6754,7 @@ def simulate_industrial_disruption(payload: Mapping[str, Any]) -> dict[str, Any]
         backlog = max(0.0, backlog - backlog_served) + max(0.0, demand - current_served)
         total_demand_served += current_served
         maximum_backlog = max(maximum_backlog, backlog)
-        if not active and backlog <= 1e-9 and recovery_period is None and period >= max([e["end_period"] for e in normalized], default=0):
+        if last_disruption_end > 0 and not active and backlog <= 1e-9 and recovery_period is None and period > last_disruption_end:
             recovery_period = period
         rows.append({
             "period": period,
