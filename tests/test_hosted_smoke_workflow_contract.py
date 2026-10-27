@@ -135,3 +135,12 @@ def test_tab_bar_layout_validator_allows_desktop_whitespace_when_not_clipped():
         "tabCount": 3, "tabs": tabs,
     }
     _validate_tab_bar_layout(layout, 1440)
+
+def test_staging_push_and_dispatch_probe_the_staging_host():
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "github.ref_name == 'staging-e2e-20261019'" in source
+    assert "https://shoirieverified.streamlit.app/" in source
+    assert "SHOIR_LIVE_URL:" in source
+    assert "https://shoir-ie-app.streamlit.app/" in source
+
