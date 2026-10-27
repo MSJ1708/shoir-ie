@@ -1,8 +1,14 @@
 # Shoir-IE 100-tool integration report
 
-**Branch:** `agent/shoir-100-release-gates-verify-20261025`  
+**Branch:** `feature/data-lineage-recovery-20261027` (candidate PR #208)  
 **Scope:** code-grounded 100-target Workbench additions, automated authorization coverage, and persistence Edge Function hardening; no production deployment  
 **Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
+
+## Current Workbench integration addendum — 27 October 2026
+
+The current candidate adds focused, bounded workflows for T006 recovery, T020 dataset lineage, a limited T039 CAPA/8D register, the T044 RCM review register and T046 single-task RNLE screening. These methods are explicitly marked `IMPLEMENTED_NEEDS_VALIDATION` in both runtime registry and implementation matrix. The matrix is synchronized with the runtime registry in this candidate.
+
+Matrix status counts after synchronization: 92 IMPLEMENTED_NEEDS_VALIDATION, 6 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED. These are implementation classifications, **not a pass rate** and not a count of tools verified in production. T006 undo/redo does not reverse external side effects; T020 does not independently authenticate source signatures or invalidate every consumer; T039 is not a complete CAPA lifecycle; T044 leaves decisions pending human review; T046 is a single-task screen with stated applicability/limits. Hosted persistence, cross-workspace/re-login behavior, independent method review and final integrated staging acceptance remain release gates.
 
 ## UI and architecture preserved
 
