@@ -4,6 +4,13 @@
 **Scope:** code-grounded 100-target Workbench additions, automated authorization coverage, and persistence Edge Function hardening; no production deployment  
 **Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
 
+## Clean-candidate provenance — 27 October 2026
+
+This integration branch is based on staging commit `0558c23d59a3f0b79558a8d3407869d0238aceaf`. It selectively ports the reviewed file-level changes from PR #208 onto that current base, then adds the separate public mobile-tab and geometry-smoke changes carried in PR #212. It deliberately does not carry forward the old 31-commit PR #208 branch history. This is a cleaner integration candidate, not a merge or release approval.
+
+The matrix currently classifies 98 targets as `IMPLEMENTED_NEEDS_VALIDATION`, two as `EXTERNAL_CONFIGURATION_REQUIRED`, and none as `VERIFIED_WORKING`. Exact-head validation, local desktop/mobile browser smoke, authenticated staging acceptance, persistence and cross-workspace tests, and parsed PDF/PPTX export inspection are still required for this integrated candidate. Do not interpret this matrix as a 98% pass rate.
+
+
 ## Current Workbench integration addendum — 27 October 2026
 
 The current candidate adds focused, bounded workflows for T006 recovery, T020 dataset lineage, a limited T039 CAPA/8D register, the T044 RCM review register and T046 single-task RNLE screening. These methods are explicitly marked `IMPLEMENTED_NEEDS_VALIDATION` in both runtime registry and implementation matrix. The matrix is synchronized with the runtime registry in this candidate.
