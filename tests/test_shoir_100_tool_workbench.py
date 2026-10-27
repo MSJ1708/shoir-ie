@@ -949,3 +949,61 @@ def test_workbench_t020_tracks_dataset_versions_and_stale_runs(monkeypatch):
     history_keys_after_failed_save = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
     assert history_keys_after_failed_save == history_keys
     assert at.session_state[history_keys_after_failed_save[0]] == lineage_before_failed_save
+
+
+def test_workbench_runs_rnle_ergonomics_screen():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rnle-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T046 · Ergonomics Assessment Toolkit")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # Scope confirmation is explicit: the method must not run on an unchecked default.
+    at.checkbox(key="tool046_confirm_scope").check()
+    at.button(key="tool046_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T046")
+    assert result is not None, "T046 did not produce a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "CALCULATED_SCREENING"
+    assert result["recommended_weight_limit_kg"] > 0
+    assert result["lifting_index"] > 0
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert result["_workspace_persistence"] in {
+        "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+        "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+    }
+
+def test_workbench_t044_rcm_decision_register_keeps_human_review_required(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
+    at = AppTest.from_file(ROOT / "pages" / "Industrial_Engineering_Workbench.py", default_timeout=90)
+    at.session_state["current_user"] = "rcm-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T044 · Reliability-Centered Maintenance Assistant")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool044_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T044")
+    assert result is not None, "T044 did not produce a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "STRUCTURED_FOR_HUMAN_REVIEW"
+    assert result["human_review_required"] is True
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
