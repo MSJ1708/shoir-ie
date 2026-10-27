@@ -500,7 +500,7 @@ def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     hypothesis = at.session_state.get("shoir_tool_result_T037")
     assert hypothesis is not None
-    assert hypothesis["mean_difference_a_minus_b"] == pytest.approx(-6)
+    assert hypothesis["mean_difference"] == pytest.approx(-6)
     assert hypothesis["p_value"] < 0.01
 
     at.session_state["user_tier"] = "Enterprise Plus Tier ($399)"
