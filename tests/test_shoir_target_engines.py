@@ -2560,3 +2560,53 @@ def test_data_governance_preflight_flags_retention_and_restore_evidence_without_
             "records": [{"record_id": "R1", "workspace_id": "WORKSPACE-B", "classification": "INTERNAL",
                          "created_at_utc": "2026-01-01T00:00:00Z", "retention_days": 30}],
         }, as_of_utc="2026-10-27T00:00:00Z")
+
+
+
+def test_supported_hypothesis_tests_match_reference_statistics_and_decision_rule():
+    from scipy import stats
+    from shoir_target_engines import run_hypothesis_test
+
+    one_sample = run_hypothesis_test("one_sample_t", [2, 4, 6, 8], null_mean=4, alpha=0.05)
+    reference_one = stats.ttest_1samp([2, 4, 6, 8], popmean=4)
+    assert one_sample["test_statistic"] == pytest.approx(reference_one.statistic)
+    assert one_sample["p_value"] == pytest.approx(reference_one.pvalue)
+    assert one_sample["reject_null_hypothesis"] is False
+    assert one_sample["confidence_interval_low"] < one_sample["mean_difference"] < one_sample["confidence_interval_high"]
+
+    welch = run_hypothesis_test("welch_t", [1, 2, 3], [5, 6, 7], alpha=0.05)
+    reference_welch = stats.ttest_ind([1, 2, 3], [5, 6, 7], equal_var=False)
+    assert welch["test_statistic"] == pytest.approx(reference_welch.statistic)
+    assert welch["p_value"] == pytest.approx(reference_welch.pvalue)
+    assert welch["reject_null_hypothesis"] is True
+
+    paired = run_hypothesis_test("paired_t", [5, 7, 8, 10], [4, 6, 6, 9], alpha=0.05)
+    reference_paired = stats.ttest_rel([5, 7, 8, 10], [4, 6, 6, 9])
+    assert paired["test_statistic"] == pytest.approx(reference_paired.statistic)
+    assert paired["p_value"] == pytest.approx(reference_paired.pvalue)
+    assert paired["sample_size_a"] == paired["sample_size_b"] == 4
+    assert paired["effect_size_cohens_d"] is not None
+
+
+def test_hypothesis_test_rejects_unsupported_designs_and_mismatched_pairs():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="Supported test types"):
+        run_hypothesis_test("chi_square", [1, 2, 3])
+    with pytest.raises(ValueError, match="same number"):
+        run_hypothesis_test("paired_t", [1, 2, 3], [1, 2])
+    with pytest.raises(ValueError, match="strictly between"):
+        run_hypothesis_test("one_sample_t", [1, 2, 3], alpha=1.0)
+    with pytest.raises(ValueError, match="at least two"):
+        run_hypothesis_test("welch_t", [1], [2, 3])
+
+
+def test_hypothesis_tests_reject_zero_standard_error_instead_of_fabricating_significance():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("one_sample_t", [5, 5, 5], null_mean=1)
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("welch_t", [1, 1, 1], [5, 5, 5])
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("paired_t", [5, 7, 9], [4, 6, 8])
