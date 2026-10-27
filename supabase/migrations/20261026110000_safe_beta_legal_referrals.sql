@@ -37,11 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_shoir_referrals_referrer_status
 CREATE INDEX IF NOT EXISTS idx_shoir_referrals_created_at
     ON public.shoir_referrals(created_at DESC);
 
--- Do not enforce global affiliate-code uniqueness until a separate read-only
--- duplicate audit and explicitly approved remediation are complete. Preserve all
--- existing codes and timestamps in the meantime.
-CREATE INDEX IF NOT EXISTS idx_shoir_accounts_affiliate_code_lookup
-    ON public.shoir_accounts(LOWER(affiliate_code))
+-- Enforce case-insensitive uniqueness for populated codes without rewriting
+-- existing identifiers or timestamps. The partial predicate intentionally ignores
+-- null/blank legacy rows. If duplicates appear after preflight, this index creation
+-- fails transactionally rather than silently rewriting account data.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shoir_accounts_affiliate_code_unique
+    ON public.shoir_accounts (LOWER(affiliate_code))
     WHERE affiliate_code IS NOT NULL AND BTRIM(affiliate_code) <> '';
 
 ALTER TABLE public.shoir_referrals ENABLE ROW LEVEL SECURITY;
