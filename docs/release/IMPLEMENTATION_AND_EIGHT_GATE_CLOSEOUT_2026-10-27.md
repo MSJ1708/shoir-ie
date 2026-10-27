@@ -225,3 +225,40 @@ Retrieved and independently inspected the artifact from [PR #217 validation run 
 - The manifest's hashes for the PDF and PPTX independently matched the file bytes. ZIP contents passed integrity test.
 
 **Export gate: PASS for this synthetic artifact and exact PR #217 source SHA.** This is not proof of export behavior on a hosted production/staging app or on arbitrary customer workbooks. The live-deployment-smoke job for the PR remains SKIPPED.
+
+## Latest execution update — 27 October 2026, approximately 12:47 UTC
+
+This is the latest exact-head update; earlier rows above describe the pre-hardening commits and must not be interpreted as checks for the current candidate heads. This update was assembled from live GitHub API and connected Supabase reads. No production deployment or write occurred.
+
+### Current candidate heads and checks
+
+| PR | Current exact head | Exact-head checks observed | Decision |
+|---|---|---|---|
+| [#215 staging/workbench/mobile integration](https://github.com/MSJ1708/shoir-ie/pull/215) | `701c5ee0c167df35539bfba70ac751b45dd0e5df` | [tests 40503170856](https://github.com/MSJ1708/shoir-ie/actions/runs/40503170856) PASS; [engine regression 40503170787](https://github.com/MSJ1708/shoir-ie/actions/runs/40503170787) PASS; [security/quality 40503170729](https://github.com/MSJ1708/shoir-ie/actions/runs/40503170729) IN PROGRESS; [validation 40503170743](https://github.com/MSJ1708/shoir-ie/actions/runs/40503170743) IN PROGRESS, with another validation/test attempt queued; live smoke SKIPPED. | Partially validated; do not promote yet. |
+| [#216 security, CORS, reserved-admin protection and SBOM workflow](https://github.com/MSJ1708/shoir-ie/pull/216) | `80ac709fb173d1ccc098c5346346abad653459cf` | Latest-head engine, Edge Function, tests and security/quality checks are QUEUED, with one test job IN PROGRESS; e.g. [security/quality 40504818823](https://github.com/MSJ1708/shoir-ie/actions/runs/40504818823), [Edge Function 40504818935](https://github.com/MSJ1708/shoir-ie/actions/runs/40504818935), [engine 40504819009](https://github.com/MSJ1708/shoir-ie/actions/runs/40504819009). Hosted smoke SKIPPED. | Not yet CI-passed; source fix prepared only, not deployed. |
+| [#217 PDF/PPTX and XLSX export protections](https://github.com/MSJ1708/shoir-ie/pull/217) | `7c0ddde187c36c53e591c3742a5d770b1b0703f9` | New test, platform, engine and security/quality runs [40505702284](https://github.com/MSJ1708/shoir-ie/actions/runs/40505702284), [40505702266](https://github.com/MSJ1708/shoir-ie/actions/runs/40505702266), [40505702256](https://github.com/MSJ1708/shoir-ie/actions/runs/40505702256), [40505702421](https://github.com/MSJ1708/shoir-ie/actions/runs/40505702421), [40505702519](https://github.com/MSJ1708/shoir-ie/actions/runs/40505702519) are QUEUED. Hosted smoke SKIPPED. | The synthetic PDF/PPTX artifact inspection passes for source SHA `231001c...`; formula/URL defenses and the new five-test XLSX suite are committed to `7c0ddde...` but await CI. The earlier artifact PASS does not transfer to the new code SHA. |
+| [#218 safe legal/referral migration](https://github.com/MSJ1708/shoir-ie/pull/218) | `0866687b12443ec9237547ee65f8f02ed4630fc1` | Validation [405? latest historical checks include 40499158757](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158757), tests [40499158841](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158841), platform tests [40499158867](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158867), engine regression [40499158851](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158851) and Postgres transaction contract [40499158915](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158915) PASS. Security/quality [40499158822](https://github.com/MSJ1708/shoir-ie/actions/runs/40499158822) remains QUEUED; live smoke SKIPPED. | Migration code tests partly PASS; not sufficient for production because security gate, independent review, duplicate-code preflight and restore rehearsal remain. |
+| [#211 release closeout](https://github.com/MSJ1708/shoir-ie/pull/211) | Prior source head `bd1d3fbbd7f693d384b6f97db4c7dcf7c62e6d51`; this report update produces a new commit. | Latest observed report-validation runs [40504059868](https://github.com/MSJ1708/shoir-ie/actions/runs/40504059868) and [40504054219](https://github.com/MSJ1708/shoir-ie/actions/runs/40504054219) are QUEUED. The report cannot self-certify. | Awaiting the new documentation head's own CI. |
+
+### Source changes prepared since prior snapshot
+
+- **#216**: current branch contains exact-origin CORS enforcement, tests for allowlisted and rejected origins, insert-only reserved-admin metadata initialization (no password/role/tier/email repair of existing row), no local SQLite sync on reserved-admin login, no legacy affiliate-code rotation for `sho`, 2099-01-01 UTC expiry on insert-only local defaults, and CycloneDX generation for the *resolved Python CI environment*. None of these changes is deployed; current-head CI is queued/in progress. The SBOM is not a hosted-runtime inventory or a license clearance.
+- **#215**: the original security/quality failure from prior SHA `d96abd6...` was traced to the test asking `run_hypothesis_test` for the wrong return key. Commit `701c5ee...` changes only the field key to `mean_difference`; expected value remains `-6`. On that exact head both the main test run and engine regression now PASS; security/quality and validation are still in progress.
+- **#217**: commits `cee7ecbe1bb1b389c00987d5a4a883713b81a742` and `7c0ddde187c36c53e591c3742a5d770b1b0703f9` port the staging XLSX injection controls into the main-based export candidate: XlsxWriter formula/URL conversion disabled in export/persistence writers; formula-typed user strings literalized in data-only OpenPyXL reports; five regression tests for the affected paths. This is statically present but not test-passed yet. The prior PDF/PPTX artifact evidence is for earlier exact source SHA `231001c...`; regeneration is required if later code alters PDF/PPTX output behavior. The latest formula changes are XLSX-only, but final exact-head validation still applies.
+- **#218**: source review confirms the safe proposed migration does not rewrite current affiliate codes or timestamps, unlike the earlier #170 migration. Still no production migration or Edge Function deploy occurred.
+
+### CI queue evidence and limits
+
+The latest-head PR checks created around 12:34–12:41 UTC were still queued at the latest read, while multiple unrelated historical PR runs remained queued or in progress. This is a verified backlog; the exact root cause (runner capacity, GitHub service delay or organization concurrency limits) is not available from permitted metadata. No rerun was forced because these checks were queued rather than failed and the connected GitHub integration does not expose a supported dispatch/cancel action. Continue to classify queued as NOT PASSED.
+
+### Final status at this point
+
+- **GO — controlled beta: NOT AUTHORIZED.**
+- **GO — paid general availability: NOT AUTHORIZED.**
+- Export artifact integrity for the synthetic old-head PDF/PPTX: PASS.
+- Current-head XLSX formula/URL injection suite: NOT RUN to completion / QUEUED.
+- Current-head CORS/admin source fix: NOT RUN to completion / QUEUED.
+- Hosted application, desktop/mobile browser acceptance, authenticated two-user tenant-isolation, live save/reload/re-login and live download acceptance: NOT RUN in this execution.
+- Production deployed CORS/admin mutation issues remain until #216 is reviewed, merged and deployed under explicit authorization.
+
+The mandatory human actions at the end of this document remain unchanged: owner must enforce branch protection and named checks; independent security/code review; safe migration rehearsal and rollback/restore sign-off; authorized staging operator must run hosted acceptance with disposable accounts; Saudi legal/privacy counsel and operator must approve actual policies and business facts; release owner must authorize any production rollout.
