@@ -734,6 +734,8 @@ def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: S
         pagesize=landscape(A4),
         leftMargin=0.25 * inch,
         rightMargin=0.25 * inch,
+        topMargin=0.5 * inch,
+        bottomMargin=0.5 * inch,
     )
     styles = getSampleStyleSheet()
     story = [Paragraph(html.escape(str(title or ""), quote=False), styles["Title"]), Spacer(1, 8)]
