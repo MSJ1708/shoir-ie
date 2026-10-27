@@ -75,7 +75,12 @@ def test_additive_referral_migration_does_not_rewrite_existing_account_identifie
     source = (
         MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
     ).read_text(encoding="utf-8").casefold()
-    assert "create table if not exists public.shoir_referrals" in source
-    assert "affiliate_code" not in source
-    assert "update public.shoir_accounts" not in source
-    assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in source
+    # Comments and safe lookup indexes may mention the existing code column.
+    # The invariant is that this additive migration performs no data rewrite.
+    executable_sql = "\n".join(line.split("--", 1)[0] for line in source.splitlines())
+    assert "create table if not exists public.shoir_referrals" in executable_sql
+    assert "update public.shoir_accounts" not in executable_sql
+    assert "set affiliate_code" not in executable_sql
+    assert "set updated_at" not in executable_sql
+    assert "on public.shoir_accounts(lower(affiliate_code))" in executable_sql
+    assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in executable_sql
