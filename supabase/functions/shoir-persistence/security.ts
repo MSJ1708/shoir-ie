@@ -140,6 +140,25 @@ export function normalizeWorkspaceStateJson(
   return serialized;
 }
 
+/**
+ * Validate the protected master-administrator invariant without mutating the account.
+ * Use this only for the reserved administrator identity before issuing a session.
+ */
+export function hasCanonicalMasterAdminInvariant(
+  account: Record<string, unknown>,
+): boolean {
+  const expectedExpiry = Date.parse("2099-01-01T00:00:00Z");
+  const actualExpiry = typeof account.subscription_expires_at === "string"
+    ? Date.parse(account.subscription_expires_at)
+    : Number.NaN;
+  return account.username_lc === "sho" &&
+    account.role === "Enterprise Admin" &&
+    account.tier === "Enterprise Plus Tier ($399)" &&
+    account.active === true &&
+    Number.isFinite(actualExpiry) &&
+    actualExpiry === expectedExpiry;
+}
+
 export function publicErrorFor(
   error: unknown,
 ): { status: number; message: string } {
