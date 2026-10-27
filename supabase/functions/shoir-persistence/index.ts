@@ -4,10 +4,10 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
-  shouldAutoAssignReferralCode,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   readBoundedJsonObject,
+  shouldAutoAssignReferralCode,
 } from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -536,7 +536,10 @@ Deno.serve(async (req) => {
           }, 400);
         }
         if (String(referrer.username_lc).toLowerCase() === usernameLc) {
-          return sendResponse({ error: "Self-referrals are not allowed." }, 400);
+          return sendResponse(
+            { error: "Self-referrals are not allowed." },
+            400,
+          );
         }
         referrerUsernameLc = String(referrer.username_lc).toLowerCase();
         const { data: priorReferral, error: priorReferralError } =
@@ -587,7 +590,10 @@ Deno.serve(async (req) => {
         return sendResponse({ error: "Enter a valid email address." }, 400);
       }
       if (!allowedTiers.has(tier)) {
-        return sendResponse({ error: "Select a valid subscription tier." }, 400);
+        return sendResponse(
+          { error: "Select a valid subscription tier." },
+          400,
+        );
       }
       if (paymentMethod !== "STC Pay (QR)") {
         return sendResponse(
@@ -766,7 +772,9 @@ Deno.serve(async (req) => {
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
-      if (!token || !usernameLc) return sendResponse({ ok: true, revoked: false });
+      if (!token || !usernameLc) {
+        return sendResponse({ ok: true, revoked: false });
+      }
       const tokenHash = bytesToHex(
         await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
       );
@@ -868,7 +876,10 @@ Deno.serve(async (req) => {
       }
       const objectPath = storedPath.slice(prefix.length);
       if (!objectPath.startsWith("renewals/") || objectPath.includes("..")) {
-        return sendResponse({ error: "Invalid private payment proof path." }, 400);
+        return sendResponse(
+          { error: "Invalid private payment proof path." },
+          400,
+        );
       }
       const { data, error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET)
         .createSignedUrl(objectPath, 300);
