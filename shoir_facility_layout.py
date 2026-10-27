@@ -205,7 +205,12 @@ def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataF
     depts = _load_departments(owner, workspace)
     flows = _load_flows(owner, workspace)
     was_empty = depts.empty and flows.empty
-    legacy_rows_present = isinstance(st.session_state.get("facility_depts"), list) and bool(st.session_state.get("facility_depts"))
+    legacy_rows_present = (
+        isinstance(st.session_state.get("facility_depts"), list)
+        and bool(st.session_state.get("facility_depts"))
+    )
+    legacy_flow_state = st.session_state.get("facility_flows_df")
+    legacy_flows_present = isinstance(legacy_flow_state, pd.DataFrame) and not legacy_flow_state.empty
     if depts.empty:
         legacy = st.session_state.get("facility_depts")
         rows = legacy if isinstance(legacy, list) and legacy else _default_departments()
@@ -242,7 +247,12 @@ def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataF
         _set_data_origin(
             owner, workspace,
             "SYNTHETIC_STARTER_DATA"
-            if was_empty and not legacy_rows_present and not depts.empty
+            if (
+                was_empty
+                and not legacy_rows_present
+                and not legacy_flows_present
+                and not depts.empty
+            )
             else "EXISTING_DATA_ORIGIN_UNVERIFIED",
         )
     st.session_state["facility_depts"] = depts.to_dict("records")
