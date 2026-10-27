@@ -19,6 +19,51 @@ This section supersedes conflicting historical candidate/status statements later
 - The successful staging gate does not establish legal clearance, independent formula validation, PDPL compliance, database recovery readiness, or authorization for paid access.
 
 
+## Latest live service recheck — 27 October 2026, 10:40 UTC
+
+**Decision remains HOLD / NO-GO.** This dated recheck is read-only operational evidence. It does not approve production changes, legal text, paid access or a deployment.
+
+### Exact candidate and tests
+
+- Current staging branch head observed in the GitHub comparison: `0558c23d59a3f0b79558a8d3407869d0238aceaf`.
+- PR #208 head: `5f0215d4d2ac0cde925bbd59e020810216e45598`. It is 31 commits ahead of the merge base and 2 commits behind staging; the merge base is `76419a9842f88292f94d706ca9b20bab63c45550`. Do not treat the PR-head test as final integrated-candidate acceptance.
+- Exact-head validation run [40487656400](https://github.com/MSJ1708/shoir-ie/actions/runs/40487656400) was **queued** at recheck. The `test` job was queued and `live-deployment-smoke` was **skipped**. No final pass is claimed.
+- The 100-row tool matrix reports **98 IMPLEMENTED_NEEDS_VALIDATION, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 VERIFIED_WORKING**. These are implementation states, not a production verification rate.
+- Staging and main have diverged. Do not merge the staging line into main as a shortcut; reconcile source history deliberately after current-candidate validation.
+
+### Read-only Supabase state
+
+Project refs are identifiers only; no credentials were read.
+
+| Check | Production | Staging |
+|---|---|---|
+| Project | `gcsamrdaeraxieaagsta` | `hfhrosthswcybccepmak` |
+| Database | PostgreSQL 17.6.1.166 | PostgreSQL 17.11.0.003 |
+| `shoir-persistence` | v8, SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` | v10, SHA-256 `5605d40e61feac6d010e7e1097565a7090bdf3325c862cc09de32af650b5a232` |
+| Canonical-admin protection in deployed function source | Missing; login still contains a tier/`updated_at` auto-repair update | Present; invalid protected-admin state fails closed and is not auto-repaired |
+| Migration history | Through `20261019140600_atomic_subscription_request_decisions` | Includes the same history plus three additional migration records |
+
+A read-only query found the reserved account invariant currently matches in both projects: role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, active `true`, expiry `2099-01-01 00:00:00 UTC`. No administrator login or account mutation was performed. The matching row does **not** make production's auto-repair code safe; the deployed production function remains older than staging.
+
+Staging has the legacy `20261021130000_shoir_beta_legal_referrals` migration, `20261022110000_enforce_beta_legal_acceptance`, and a policy refresh recorded as `20261025164602` with name `20261023130000_refresh_refund_policy_acceptance_version`. Production lacks the legal-acceptance columns and `public.shoir_referrals` table. The earlier referral migration is documented as rewriting existing affiliate codes and timestamps. **Do not replay it in production. Do not deploy staging function v10 directly to production while schema/function compatibility is unresolved.** First approve a migration/function manifest, perform isolated preservation and restore rehearsal, and verify the actual deployed source.
+
+The staging `public.shoir_referrals` table has RLS enabled and no policies. Read-only privilege checks showed `anon` and `authenticated` have no table privileges while `service_role` has the required server-only CRUD privileges. The Supabase security advisor flags the missing policy as informational; retain the server-only model and independently verify the grants rather than adding broad client policies just to silence the advisory. Production's security advisor returned no security lints in this snapshot; this is not a security certification. Performance advisors returned informational unused-index findings (16 production, 19 staging), which should be reviewed, not blindly deleted.
+
+### Eight closeout gates
+
+1. Refresh/reconcile PR #208 against current staging, then obtain a successful exact-head full validation result.
+2. Run a fresh authenticated staging release gate on that exact integrated candidate using disposable `shoir-e2e-*` accounts; ensure mandatory probes fail closed and hosted smoke is not skipped.
+3. Verify save/reload/re-login, revoked-session behavior, six-package entitlement boundaries, direct-route/action denial and two-user cross-workspace isolation on the hosted candidate.
+4. Round-trip synthetic XLSX, PDF, PPTX and ZIP artifacts; open/parse all outputs and inspect every PDF page and PowerPoint continuation slide, units, formulas, labels, assumptions, warnings and provenance.
+5. Configure and verify required reviews and named status checks for `main` and `staging-e2e-20261019`. The latest documented 26 October branch-settings snapshot said the required-check contexts were empty (and staging enforcement was off); re-check the actual current settings before calling this complete.
+6. Approve a production-compatible Edge Function/migration plan, preserve the canonical administrator without login-time mutation, reconcile the migration ledger and prove forward/rollback compatibility in an isolated production-shaped rehearsal.
+7. Produce successful backup/restore and rollback evidence for the exact release candidate; verify the Streamlit deployment branch, commit, entry point and secret/configuration presence without disclosing values.
+8. Obtain qualified Saudi legal/privacy review of the actual operator identity, commercial registration, PDPL/data flows and retention/transfers, customer notices, calculation limitations, refund/cancellation, copyright/IP and commercial terms. Populate the accountable owner's facts and obtain explicit release-owner approval before enabling paid access.
+
+PR disposition: #206 contains the source-level administrator invariant/security hardening and staging reports v10, but production still runs v8; #207 is a specification-only read-only ERP foundation, not a live SAP/Oracle connection; #210 supplies unapproved evidence/legal templates, not counsel approval. PR #208 remains the current focused-engine integration candidate until its exact-head and authenticated acceptance gates pass. Do not mass-merge older stacked drafts (#170, #178–#191) into a branch simply because they remain open; select only changes not already superseded, reconcile them on a clean base, and retain their test and scope boundaries.
+
+**Release recommendation: NO-GO for paid launch or production deployment on the evidence available at this recheck.**
+
 ## 1. Technical launch gate
 
 | Requirement | Status | Evidence / action to close |
