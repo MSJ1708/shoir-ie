@@ -1007,3 +1007,37 @@ def test_workbench_t044_rcm_decision_register_keeps_human_review_required(monkey
     assert result["status"] == "STRUCTURED_FOR_HUMAN_REVIEW"
     assert result["human_review_required"] is True
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+
+def test_workbench_runs_bounded_network_calibration_disruption_kpi_plugin_and_governance_tools():
+    """Render and execute the six bounded replacements using synthetic inputs only."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "synthetic-workbench-acceptance"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    targets = [
+        ("T060", "Supply Chain Network Planner", "tool060_run", "OPTIMAL"),
+        ("T074", "Digital Twin Calibration Studio", "tool074_run", "CALIBRATION_DIAGNOSTIC_CREATED"),
+        ("T080", "Industrial Disruption Simulator", "tool080_run", "DETERMINISTIC_SCENARIO_COMPLETED"),
+        ("T094", "KPI Dashboard and Alert Center", "tool094_run", "KPI_THRESHOLDS_EVALUATED"),
+        ("T097", "API, SDK, and Plugin Toolkit", "tool097_run", "MANIFEST_VALIDATED_REVIEW_REQUIRED"),
+        ("T099", "Data Governance and Recovery Center", "tool099_run", "GOVERNANCE_PREFLIGHT_COMPLETED"),
+    ]
+    for tool_id, label, run_key, expected_status in targets:
+        at.selectbox(key="shoir_100_tool_inspector").select(f"{tool_id} · {label}")
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} failed to render: " + "\\n".join(str(error.value) for error in at.exception)
+        at.button(key=run_key).click()
+        at.run(timeout=90)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} raised: " + "\\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} did not produce a result"
+        assert result["status"] == expected_status, (tool_id, result.get("status"))
