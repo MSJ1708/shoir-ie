@@ -414,7 +414,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T020", "T044", "T046", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T020", "T044", "T046", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T097", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -837,6 +837,54 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             slotting_items_json = st.text_area("Items (JSON list: sku, picks_per_day, storage_units, compatibility_group, current_distance_m)", value='[{"sku":"SKU-A","picks_per_day":10,"storage_units":4,"compatibility_group":"food","current_distance_m":10},{"sku":"SKU-B","picks_per_day":4,"storage_units":9,"compatibility_group":"chemical","current_distance_m":20}]', key="tool059_items")
                             slotting_slots_json = st.text_area("Slots (JSON list: slot_id, distance_m, capacity_units, compatibility_group)", value='[{"slot_id":"near-food","distance_m":2,"capacity_units":5,"compatibility_group":"food"},{"slot_id":"near-chemical","distance_m":3,"capacity_units":10,"compatibility_group":"chemical"},{"slot_id":"far-general","distance_m":8,"capacity_units":10,"compatibility_group":"*"}]', key="tool059_slots")
                             run_method = st.form_submit_button("Assign nearest compatible slots", type="primary", use_container_width=True, key="tool059_run")
+                        elif selected_tool["tool_id"] == "T060":
+                            st.caption("Deterministic minimum-cost single-commodity flow. Capacities and costs are assumptions entered here; this is not a live supply-chain connection.")
+                            supply_network_json = st.text_area(
+                                "Network JSON (nodes with name/supply/demand; edges with source/target/capacity/unit_cost)",
+                                value='{"data_origin":"SYNTHETIC","nodes":[{"name":"Plant A","supply":30,"demand":0},{"name":"Hub B","supply":0,"demand":0},{"name":"Customer","supply":0,"demand":30}],"edges":[{"source":"Plant A","target":"Customer","capacity":10,"unit_cost":2},{"source":"Plant A","target":"Hub B","capacity":30,"unit_cost":1},{"source":"Hub B","target":"Customer","capacity":30,"unit_cost":1}]}',
+                                key="tool060_network_json",
+                            )
+                            run_method = st.form_submit_button("Solve supply network flow", type="primary", use_container_width=True, key="tool060_run")
+                        elif selected_tool["tool_id"] == "T074":
+                            st.caption("First-order affine output-fit diagnostic; it does not identify physical model parameters or connect to plant telemetry.")
+                            digital_twin_json = st.text_area(
+                                "Calibration JSON (data_origin plus pairs of simulated/measured outputs)",
+                                value='{"data_origin":"SYNTHETIC","pairs":[{"simulated":1,"measured":2.1},{"simulated":2,"measured":4.0},{"simulated":3,"measured":6.2},{"simulated":4,"measured":7.9}]}',
+                                key="tool074_calibration_json",
+                            )
+                            run_method = st.form_submit_button("Fit calibration output diagnostic", type="primary", use_container_width=True, key="tool074_run")
+                        elif selected_tool["tool_id"] == "T080":
+                            st.caption("Deterministic capacity-shock/backlog scenario only. No forecast, live control, or probabilistic reliability claim is made.")
+                            disruption_json = st.text_area(
+                                "Disruption scenario JSON",
+                                value='{"data_origin":"SYNTHETIC","baseline_capacity_per_period":100,"demand_per_period":85,"starting_inventory":25,"periods":8,"disruptions":[{"name":"Supplier interruption","start_period":2,"end_period":3,"capacity_fraction":0.35}]}',
+                                key="tool080_disruption_json",
+                            )
+                            run_method = st.form_submit_button("Run disruption scenario", type="primary", use_container_width=True, key="tool080_run")
+                        elif selected_tool["tool_id"] == "T094":
+                            st.caption("Freshness-aware threshold evaluation on supplied values. Alerts are not saved, deduplicated across runs, or delivered to recipients.")
+                            kpi_alerts_json = st.text_area(
+                                "KPI JSON (name, period, value, unit, threshold, comparison, measured_at_utc, max_age_hours)",
+                                value='{"kpis":[{"name":"Scrap rate","period":"2026-W43","value":3.2,"unit":"%","threshold":2.0,"comparison":"above","measured_at_utc":"2026-10-26T12:00:00Z","max_age_hours":96},{"name":"OEE","period":"2026-W43","value":78,"unit":"%","threshold":70,"comparison":"below","measured_at_utc":"2026-10-26T12:00:00Z","max_age_hours":96}]}',
+                                key="tool094_kpis_json",
+                            )
+                            run_method = st.form_submit_button("Evaluate KPI freshness and thresholds", type="primary", use_container_width=True, key="tool094_run")
+                        elif selected_tool["tool_id"] == "T097":
+                            st.caption("Read-only manifest validation only. No HTTP request, plugin execution, secret lookup, or SDK call is performed.")
+                            plugin_manifest_json = st.text_area(
+                                "Plugin manifest JSON (endpoint, exact approved_hosts, required/granted scopes and request limits)",
+                                value='{"plugin_id":"plant-metrics-readonly","version":"1.0.0","method":"GET","endpoint_url":"https://api.example.com/v1/status","approved_hosts":["api.example.com"],"required_scopes":["metrics.read"],"granted_scopes":["metrics.read"],"timeout_seconds":5,"rate_limit_per_minute":60}',
+                                key="tool097_manifest_json",
+                            )
+                            run_method = st.form_submit_button("Validate read-only plugin manifest", type="primary", use_container_width=True, key="tool097_run")
+                        elif selected_tool["tool_id"] == "T099":
+                            st.caption("Workspace-scoped metadata preflight only. This never deletes, exports, backs up, or restores a record.")
+                            governance_json = st.text_area(
+                                "Governance/recovery metadata JSON (workspace_id and records with retention, legal-hold and restore-test evidence)",
+                                value='{"workspace_id":"DEMO-WORKSPACE","max_restore_test_age_days":90,"records":[{"record_id":"SYNTH-001","workspace_id":"DEMO-WORKSPACE","classification":"INTERNAL","created_at_utc":"2026-01-01T00:00:00Z","retention_days":365,"legal_hold":false,"backup_ref":"SYNTH-BACKUP-001","backup_verified":true,"last_restore_test_utc":"2026-09-15T00:00:00Z"},{"record_id":"SYNTH-002","workspace_id":"DEMO-WORKSPACE","classification":"CONFIDENTIAL","created_at_utc":"2024-01-01T00:00:00Z","retention_days":365,"legal_hold":false,"backup_ref":"","backup_verified":false,"last_restore_test_utc":""}]}',
+                                key="tool099_governance_json",
+                            )
+                            run_method = st.form_submit_button("Audit governance and recovery evidence", type="primary", use_container_width=True, key="tool099_run")
                         elif selected_tool["tool_id"] == "T063":
                             st.caption("One-to-one minimum-cost assignment only; no calendars, precedence, multi-period or skill constraints.")
                             assignment_tasks_json = st.text_area("Task names (JSON list)", '["Task A","Task B","Task C"]', key="tool063_tasks")
@@ -1485,6 +1533,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
                     elif selected_tool["tool_id"] == "T059":
                         current_tool_inputs = {"items_json": slotting_items_json, "slots_json": slotting_slots_json}
+                    elif selected_tool["tool_id"] == "T060":
+                        current_tool_inputs = {"network_json_bytes": len(supply_network_json.encode("utf-8")), "raw_input_snapshot_persisted": False}
+                    elif selected_tool["tool_id"] == "T074":
+                        current_tool_inputs = {"calibration_json_bytes": len(digital_twin_json.encode("utf-8")), "raw_input_snapshot_persisted": False}
+                    elif selected_tool["tool_id"] == "T080":
+                        current_tool_inputs = {"scenario_json_bytes": len(disruption_json.encode("utf-8")), "raw_input_snapshot_persisted": False}
+                    elif selected_tool["tool_id"] == "T094":
+                        current_tool_inputs = {"kpi_json_bytes": len(kpi_alerts_json.encode("utf-8")), "raw_input_snapshot_persisted": False}
+                    elif selected_tool["tool_id"] == "T097":
+                        current_tool_inputs = {"manifest_json_bytes": len(plugin_manifest_json.encode("utf-8")), "raw_input_snapshot_persisted": False}
+                    elif selected_tool["tool_id"] == "T099":
+                        current_tool_inputs = {"governance_json_bytes": len(governance_json.encode("utf-8")), "raw_input_snapshot_persisted": False}
                     elif selected_tool["tool_id"] == "T063":
                         current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "costs_json": assignment_costs_json}
                     elif selected_tool["tool_id"] == "T077":
@@ -1619,6 +1679,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 manage_dataset_version_lineage,
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
+                                solve_supply_chain_network,
+                                calibrate_digital_twin_outputs,
+                                simulate_industrial_disruption,
+                                evaluate_kpi_thresholds,
+                                validate_api_plugin_manifest,
+                                audit_data_governance_recovery,
                             )
                             if selected_tool["tool_id"] == "T006":
                                 recovery_snapshot = None
@@ -2094,6 +2160,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     applicability_confirmed=rnle_applicability_confirmed,
                                 )
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T060":
+                                result = solve_supply_chain_network(json.loads(supply_network_json))
+                            elif selected_tool["tool_id"] == "T074":
+                                result = calibrate_digital_twin_outputs(json.loads(digital_twin_json))
+                            elif selected_tool["tool_id"] == "T080":
+                                result = simulate_industrial_disruption(json.loads(disruption_json))
+                            elif selected_tool["tool_id"] == "T094":
+                                result = evaluate_kpi_thresholds(json.loads(kpi_alerts_json))
+                            elif selected_tool["tool_id"] == "T097":
+                                result = validate_api_plugin_manifest(json.loads(plugin_manifest_json))
+                            elif selected_tool["tool_id"] == "T099":
+                                result = audit_data_governance_recovery(json.loads(governance_json))
                             elif selected_tool["tool_id"] == "T047":
                                 parsed_hazards = json.loads(hazard_json)
                                 if not isinstance(parsed_hazards, list):
@@ -2382,7 +2460,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     st.session_state[key] = previous_value
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T006", "T007", "T020", "T044", "T046", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T020", "T044", "T046", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T097", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
