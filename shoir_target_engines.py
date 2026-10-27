@@ -7000,3 +7000,110 @@ def audit_data_governance_recovery(payload: Mapping[str, Any], *, as_of_utc: Any
         "mutations_performed": False, "delete_performed": False, "restore_performed": False,
         "limitations": ["Metadata preflight only; no data export, deletion, backup creation, restore, legal approval or durable audit event is performed."],
     }
+
+
+
+def run_hypothesis_test(
+    test_type: str,
+    sample_a: Sequence[float],
+    sample_b: Sequence[float] | None = None,
+    *,
+    null_mean: float = 0.0,
+    alpha: float = 0.05,
+) -> dict[str, Any]:
+    """Run supported two-sided one-sample, independent Welch, or paired t-tests."""
+    test = str(test_type or "").strip().lower()
+    if test not in {"one_sample_t", "welch_t", "paired_t"}:
+        raise ValueError("Supported test types are one_sample_t, welch_t and paired_t.")
+    alpha_value = _finite_number(alpha, "Alpha")
+    if not 0 < alpha_value < 1:
+        raise ValueError("Alpha must be strictly between zero and one.")
+    values_a = [_finite_number(value, "Sample A value") for value in sample_a]
+    if len(values_a) < 2:
+        raise ValueError("Sample A must contain at least two finite observations.")
+    values_b = None
+    if test != "one_sample_t":
+        if sample_b is None:
+            raise ValueError("Sample B is required for the selected two-sample test.")
+        values_b = [_finite_number(value, "Sample B value") for value in sample_b]
+        if len(values_b) < 2:
+            raise ValueError("Sample B must contain at least two finite observations.")
+
+    from scipy.stats import t as t_distribution
+    a = np.asarray(values_a, dtype=float)
+    mean_a = float(a.mean())
+    warnings = [
+        "Two-sided t-test only. Confirm sampling design, independence/pairing and distribution assumptions before interpreting results.",
+        "P-values do not measure practical importance or prove causation.",
+    ]
+
+    if test == "one_sample_t":
+        null_value = _finite_number(null_mean, "Null mean")
+        difference = mean_a - null_value
+        sd_a = float(np.std(a, ddof=1))
+        se = sd_a / math.sqrt(len(a))
+        degrees_freedom = len(a) - 1
+        method = "One-sample t-test"
+        mean_b = None
+        n_b = None
+        hypothesis = f"Two-sided H0: population mean = {null_value:g}; H1: population mean differs from {null_value:g}."
+        effect_size = difference / sd_a if sd_a > 0 else None
+    elif test == "welch_t":
+        b = np.asarray(values_b, dtype=float)
+        mean_b = float(b.mean())
+        var_a = float(np.var(a, ddof=1))
+        var_b = float(np.var(b, ddof=1))
+        difference = mean_a - mean_b
+        var_mean_a = var_a / len(a)
+        var_mean_b = var_b / len(b)
+        se = math.sqrt(var_mean_a + var_mean_b)
+        denominator = (var_mean_a ** 2 / (len(a) - 1)) + (var_mean_b ** 2 / (len(b) - 1))
+        degrees_freedom = ((var_mean_a + var_mean_b) ** 2 / denominator) if denominator > 0 else float(len(a) + len(b) - 2)
+        method = "Independent two-sample Welch t-test"
+        n_b = len(b)
+        pooled_sd = math.sqrt(((len(a) - 1) * var_a + (len(b) - 1) * var_b) / (len(a) + len(b) - 2))
+        effect_size = difference / pooled_sd if pooled_sd > 0 else None
+        hypothesis = "Two-sided H0: group means are equal; H1: group means differ."
+    else:
+        b = np.asarray(values_b, dtype=float)
+        if len(a) != len(b):
+            raise ValueError("Paired t-test requires sample A and B to have the same number of aligned observations.")
+        differences = a - b
+        difference = float(differences.mean())
+        sd_difference = float(np.std(differences, ddof=1))
+        se = sd_difference / math.sqrt(len(differences))
+        degrees_freedom = len(differences) - 1
+        method = "Paired two-sample t-test"
+        mean_b = float(b.mean())
+        n_b = len(b)
+        effect_size = difference / sd_difference if sd_difference > 0 else None
+        hypothesis = "Two-sided H0: mean paired difference is zero; H1: mean paired difference differs from zero."
+
+    if not math.isfinite(se) or se <= np.finfo(float).eps:
+        raise ValueError("The standard error is zero or non-finite; the selected t-test statistic and confidence interval are not estimable.")
+    statistic = difference / se
+    p_value = float(2.0 * t_distribution.sf(abs(statistic), degrees_freedom))
+    critical = float(t_distribution.ppf(1.0 - alpha_value / 2.0, degrees_freedom))
+    ci_low, ci_high = difference - critical * se, difference + critical * se
+    return {
+        "status": "HYPOTHESIS_TEST_CALCULATED",
+        "method": method,
+        "hypothesis": hypothesis,
+        "alpha": alpha_value,
+        "sample_size_a": len(a),
+        "sample_size_b": n_b,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "mean_difference": difference,
+        "test_statistic": statistic,
+        "degrees_freedom": float(degrees_freedom),
+        "p_value": p_value,
+        "confidence_level_pct": 100.0 * (1.0 - alpha_value),
+        "confidence_interval_low": float(ci_low),
+        "confidence_interval_high": float(ci_high),
+        "effect_size_cohens_d": float(effect_size) if effect_size is not None else None,
+        "reject_null_hypothesis": bool(p_value < alpha_value),
+        "decision_rule": "Reject H0 when p-value < alpha; otherwise fail to reject H0.",
+        "warnings": warnings,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
