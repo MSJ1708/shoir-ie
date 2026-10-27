@@ -43,6 +43,6 @@ def test_streamlit_version_range_supports_the_security_config():
     streamlit_specs = [
         line.strip().replace(" ", "")
         for line in requirements.splitlines()
-        if line.strip().lower().startswith("streamlit")
+        if line.strip().lower().startswith("streamlit=")
     ]
     assert streamlit_specs == ["streamlit>=1.61,<2"]
