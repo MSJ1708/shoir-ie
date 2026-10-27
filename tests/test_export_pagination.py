@@ -103,7 +103,7 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         for slide in presentation.slides
         if any(getattr(shape, "has_table", False) for shape in slide.shapes)
     ]
-    assert len(table_slides) == (len(rows) + 9) // 10
+    assert len(table_slides) == (len(rows) + 6) // 7
 
     exported_metrics = []
     exported_values = []
@@ -111,7 +111,7 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         table_shapes = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
         assert len(table_shapes) == 1
         table = table_shapes[0].table
-        assert len(table.rows) <= 11  # header + no more than 10 data rows
+        assert len(table.rows) <= 8  # header + no more than 7 data rows
         assert sum(row.height for row in table.rows) <= Inches(5.2)
         assert all(row.height > 0 for row in table.rows)
         assert table.cell(0, 0).text == "Metric"
