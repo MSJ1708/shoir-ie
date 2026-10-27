@@ -1320,14 +1320,23 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             run_method = st.form_submit_button("Run regression / ANOVA", type="primary", use_container_width=True, key="tool036_run")
                         elif selected_tool["tool_id"] == "T037":
-                            st.caption("Research Pack method: Welch's two-sided t-test for two independent samples. The method does not assume equal population variances.")
+                            st.caption("Research Pack methods: two-sided one-sample, independent Welch, and paired t-tests. Confirm design assumptions and aligned pairs before use.")
+                            hypothesis_test_type = st.selectbox(
+                                "Test design",
+                                ["Independent Welch t-test", "One-sample t-test", "Paired t-test"],
+                                key="tool037_test_type",
+                            )
                             hypothesis_sample_a = st.text_input("Sample A (comma-separated numeric observations)", "2, 3, 4, 5", key="tool037_sample_a")
-                            hypothesis_sample_b = st.text_input("Sample B (comma-separated numeric observations)", "8, 9, 10, 11", key="tool037_sample_b")
+                            hypothesis_sample_b = st.text_input("Sample B (comma-separated numeric observations; paired tests require aligned order)", "8, 9, 10, 11", key="tool037_sample_b")
+                            hypothesis_null_mean = st.number_input(
+                                "Hypothesized population mean (one-sample test only)",
+                                value=0.0, step=0.5, key="tool037_null_mean",
+                            )
                             hypothesis_alpha = st.number_input(
                                 "Significance level (alpha)", min_value=0.001, max_value=0.5,
                                 value=0.05, step=0.01, key="tool037_alpha",
                             )
-                            run_method = st.form_submit_button("Run Welch t-test", type="primary", use_container_width=True, key="tool037_run")
+                            run_method = st.form_submit_button("Run selected t-test", type="primary", use_container_width=True, key="tool037_run")
                         elif selected_tool["tool_id"] == "T051":
                             st.caption("Chronological holdout comparison of naïve, training-mean and trailing moving-average baselines. Forecast intervals and seasonal models are not included.")
                             demand_history_text = st.text_area("Demand history in chronological order (comma-separated)", "10, 12, 13, 15, 17, 20, 23, 25, 26, 28", key="tool051_history")
@@ -1575,7 +1584,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     elif selected_tool["tool_id"] == "T036":
                         current_tool_inputs = {"mode": regression_mode, "observations_json": regression_observations_json, "groups_json": anova_groups_json, "alpha": regression_alpha}
                     elif selected_tool["tool_id"] == "T037":
-                        current_tool_inputs = {"sample_a": hypothesis_sample_a, "sample_b": hypothesis_sample_b, "alpha": hypothesis_alpha}
+                        current_tool_inputs = {"test_type": hypothesis_test_type, "sample_a": hypothesis_sample_a, "sample_b": hypothesis_sample_b, "null_mean": hypothesis_null_mean, "alpha": hypothesis_alpha}
                     elif selected_tool["tool_id"] == "T051":
                         current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
                     elif selected_tool["tool_id"] == "T072":
@@ -1663,7 +1672,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_weibull_reliability, analyze_spare_parts_criticality,
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
-                                fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
+                                fit_simple_linear_regression, run_one_way_anova, run_welch_t_test, run_hypothesis_test,
                                 forecast_demand_baselines, simulate_monte_carlo_net_value,
                                 map_industrial_fields, prioritize_maintenance_backlog,
                                 reconcile_sop_plan, score_supplier_performance,
@@ -2245,8 +2254,19 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     sample_a_values = [float(item.strip()) for item in hypothesis_sample_a.split(",") if item.strip()]
                                     sample_b_values = [float(item.strip()) for item in hypothesis_sample_b.split(",") if item.strip()]
                                 except ValueError as exc:
-                                    raise ValueError("Both samples must be comma-separated numeric observations.") from exc
-                                result = run_welch_t_test(sample_a_values, sample_b_values, alpha=hypothesis_alpha)
+                                    raise ValueError("Samples must be comma-separated numeric observations.") from exc
+                                test_code = {
+                                    "Independent Welch t-test": "welch_t",
+                                    "One-sample t-test": "one_sample_t",
+                                    "Paired t-test": "paired_t",
+                                }[hypothesis_test_type]
+                                result = run_hypothesis_test(
+                                    test_code,
+                                    sample_a_values,
+                                    None if test_code == "one_sample_t" else sample_b_values,
+                                    null_mean=hypothesis_null_mean,
+                                    alpha=hypothesis_alpha,
+                                )
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T051":
                                 try:
@@ -2977,10 +2997,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             _show_focused_tool_persistence("T037", result, current_tool_inputs)
                             m1, m2, m3 = st.columns(3)
                             m1.metric("Two-sided p-value", f"{result['p_value']:.4g}")
-                            m2.metric("t statistic", f"{result['t_statistic']:.4g}")
-                            m3.metric("Mean difference A − B", f"{result['mean_difference_a_minus_b']:.4g}")
-                            st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
-                            st.caption(f"95% confidence interval for mean difference: {result['mean_difference_confidence_interval']}")
+                            m2.metric("t statistic", f"{result['test_statistic']:.4g}")
+                            difference_label = {
+                                "One-sample t-test": "Mean − null mean",
+                                "Independent two-sample Welch t-test": "Mean difference A − B",
+                                "Paired two-sample t-test": "Mean paired difference",
+                            }.get(result["method"], "Mean difference")
+                            m3.metric(difference_label, f"{result['mean_difference']:.4g}")
+                            decision_text = "Reject H0" if result["reject_null_hypothesis"] else "Fail to reject H0"
+                            st.markdown(f"**Decision at alpha={result['alpha']}:** {decision_text}")
+                            st.caption(f"{result['confidence_level_pct']:.1f}% confidence interval for the tested difference: {result['confidence_interval_low']:.4g} to {result['confidence_interval_high']:.4g}")
                             st.dataframe(pd.DataFrame([
                                 {"Measure": "Sample A mean", "Value": result["mean_a"]},
                                 {"Measure": "Sample B mean", "Value": result["mean_b"]},
