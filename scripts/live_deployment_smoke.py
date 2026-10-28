@@ -126,7 +126,7 @@ def _tab_bar_layout(app_frame) -> dict:
                         : (Number.isFinite(rightValue) ? buttonRect.right - rightValue - width : buttonRect.left);
                     let top = Number.isFinite(topValue) ? buttonRect.top + topValue
                         : (Number.isFinite(bottomValue) ? buttonRect.bottom - bottomValue - height : buttonRect.top);
-                    const matrix = style.transform.match(/matrix\\(([^)]+)\\)/);
+                    const matrix = style.transform.match(/matrix\(([^)]+)\)/);
                     if (matrix) {
                         const values = matrix[1].split(",").map(Number);
                         if (values.length === 6) { left += values[4] || 0; top += values[5] || 0; }
