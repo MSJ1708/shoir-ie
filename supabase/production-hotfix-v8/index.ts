@@ -48,7 +48,6 @@ function hasCanonicalMasterAdminInvariant(
     actualExpiry === expectedExpiry;
 }
 
-
 async function ensurePaymentProofBucket() {
   const { data, error } = await supabase.storage.getBucket(
     PAYMENT_PROOF_BUCKET,
