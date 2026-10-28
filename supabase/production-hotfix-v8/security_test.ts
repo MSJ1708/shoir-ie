@@ -1,6 +1,7 @@
 import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
 } from "./security.ts";
 
@@ -91,5 +92,35 @@ Deno.test("v8 hotfix accepts the exact reserved administrator invariant read-onl
   assert(
     canonical.tier === "Enterprise Plus Tier ($399)",
     "check must not mutate the supplied account object",
+  );
+});
+
+Deno.test("reserved administrator list requires exactly one canonical active admin", () => {
+  const canonical = {
+    username_lc: "sho",
+    role: "Enterprise Admin",
+    tier: "Enterprise Plus Tier ($399)",
+    active: true,
+    subscription_expires_at: "2099-01-01T00:00:00Z",
+  };
+  assert(
+    hasExactlyOneCanonicalMasterAdmin([canonical]),
+    "one canonical active administrator must pass",
+  );
+  assert(
+    !hasExactlyOneCanonicalMasterAdmin([]),
+    "missing active administrator must fail closed",
+  );
+  assert(
+    !hasExactlyOneCanonicalMasterAdmin([canonical, canonical]),
+    "multiple active administrators must fail closed",
+  );
+  assert(
+    !hasExactlyOneCanonicalMasterAdmin([{ ...canonical, username_lc: "other" }]),
+    "a different administrator identity must fail closed",
+  );
+  assert(
+    !hasExactlyOneCanonicalMasterAdmin([{ ...canonical, active: false }]),
+    "inactive reserved administrator must fail closed",
   );
 });
