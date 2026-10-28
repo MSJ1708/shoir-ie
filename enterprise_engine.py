@@ -38,24 +38,24 @@ def secure_audit_log(required_role: str):
 
 
 # =====================================================================
-# PILLAR 4: NATIVE ERP & WMS CONNECTORS (SAP / Oracle / Manhattan)
+# PILLAR 4: ERP / WMS INTEGRATION PLACEHOLDER — NO LIVE CONNECTOR
 # =====================================================================
 class EnterpriseConnectorStub:
-    """Simulates native bidirectional API connectors for SAP S/4HANA, Oracle Cloud ERP, and WMS."""
+    """Fail-closed placeholder. No native SAP, Oracle, or WMS connector is implemented."""
     def __init__(self, system_name: str):
         self.system_name = system_name
 
     def fetch_live_ledger(self) -> Dict[str, Any]:
-        logger.info(f"Syncing live inventory and ledger data from {self.system_name}...")
-        return {
-            "warehouses": {"North_Riyadh": 12000, "West_Hub": 18000, "South_Depot": 9500},
-            "demand": {"Client_A": 4500, "Client_B": 7200, "Client_C": 3100}
-        }
+        """Refuse a purported live read instead of returning fabricated inventory/demand."""
+        raise NotImplementedError(
+            "Native SAP/Oracle/WMS read integration is not implemented; no live ledger was read."
+        )
 
     def push_transaction_back(self, execution_results: Dict[str, Any]) -> bool:
-        logger.info(f"Pushing optimized allocation orders back to {self.system_name} ledger successfully.")
-        return True
-
+        """Refuse a purported write instead of logging an unperformed transaction as successful."""
+        raise NotImplementedError(
+            "Native SAP/Oracle/WMS write integration is not implemented; no transaction was sent."
+        )
 
 # =====================================================================
 # PILLAR 1, 3, & 5: CORE ENGINE (MILP + CARBON + DES + IoT STREAMING)
