@@ -3,6 +3,8 @@
 These tests ensure the legacy supply-chain shell cannot present synthetic hard-coded
 inventory as a live ERP read or report an unperformed write as successful.
 """
+import asyncio
+
 import pytest
 
 from enterprise_engine import EnterpriseConnectorStub, EnterpriseSupplyChainEngine
@@ -26,6 +28,8 @@ def test_supply_chain_optimization_does_not_run_from_fake_erp_values():
     engine = EnterpriseSupplyChainEngine()
 
     with pytest.raises(NotImplementedError, match="no live ledger was read"):
-        engine.optimize_network_flow(
-            user_context={"role": "enterprise_controller", "user": "synthetic-reviewer"}
+        asyncio.run(
+            engine.optimize_network_flow(
+                user_context={"role": "enterprise_controller", "user": "synthetic-reviewer"}
+            )
         )
