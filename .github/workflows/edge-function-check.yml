@@ -25,9 +25,11 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Check Edge Function and security helper formatting
-        run: deno fmt --check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security.ts supabase/functions/shoir-persistence/security_test.ts
-      - name: Type-check Edge Function and security helper tests
-        run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security_test.ts
-      - name: Test bounded request parsing and safe error mapping
+      - name: Check Edge Function, request security and OIDC helper formatting
+        run: deno fmt --check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security.ts supabase/functions/shoir-persistence/security_test.ts supabase/functions/shoir-persistence/oidc.ts supabase/functions/shoir-persistence/oidc_test.ts
+      - name: Type-check Edge Function and security/OIDC helper tests
+        run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security_test.ts supabase/functions/shoir-persistence/oidc_test.ts
+      - name: Test bounded request parsing, safe errors and protected administrator invariants
         run: deno test supabase/functions/shoir-persistence/security_test.ts
+      - name: Test OIDC signature, claims, replay bounds and MFA enforcement
+        run: deno test supabase/functions/shoir-persistence/oidc_test.ts
