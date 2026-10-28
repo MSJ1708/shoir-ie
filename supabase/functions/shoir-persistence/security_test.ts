@@ -250,7 +250,6 @@ Deno.test("persistence CORS allows only exact configured browser origins", () =>
   }
 });
 
-
 Deno.test("reserved administrator referral metadata is never auto-assigned", () => {
   assert(
     !shouldAutoAssignReferralCode("sho", ""),
