@@ -159,7 +159,6 @@ Deno.test("public error mapping does not expose internal infrastructure details"
   );
 });
 
-
 Deno.test("protected administrator invariant is read-only and fails closed on drift", () => {
   const canonical = Object.freeze({
     username_lc: "sho",
