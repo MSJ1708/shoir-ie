@@ -17,7 +17,7 @@ def test_optional_streamlit_oidc_is_config_gated_and_keeps_existing_password_log
     assert 'st.login("enterprise")' in app
     assert "oidc_configuration_status(st.secrets)" in app
     assert "get_verified_streamlit_id_token(st.user)" in app
-    assert "edge_oidc_login(_oidc_id_token)" in app
+    assert "edge_oidc_login(_oidc_id_token, _oidc_display_hint)" in app
     assert 'if not _oidc_status.get("ready")' in app
     assert 'action === "login"' in EDGE.read_text(encoding="utf-8")
     assert 'return _edge_call("oidc_login", {"id_token": token})' in store
