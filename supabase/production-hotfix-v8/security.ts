@@ -16,7 +16,8 @@ export function isAllowedBrowserOrigin(origin: string | null): boolean {
 export function corsHeadersForOrigin(origin: string | null): Headers {
   const headers = new Headers({
     "Content-Type": "application/json",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   });
