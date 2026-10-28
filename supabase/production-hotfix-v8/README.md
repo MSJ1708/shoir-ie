@@ -11,7 +11,7 @@ A live Supabase Management API read returned:
 - Active version: **9**
 - Active source SHA-256: `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`
 - Observed production behavior: the response helper still emits `Access-Control-Allow-Origin: *`; it now advertises `POST, OPTIONS`, but does not enforce exact browser origins or emit `Vary: Origin`.
-- The currently active function uses `req.json()`; this candidate preserves that parser. A request-body byte limit was not established in the production source snapshot and remains a separate hardening item for review.
+- The active production-v9 function uses `req.json()` and no effective byte limit was established in the source snapshot. This candidate **replaces** that parser with a streamed, bounded UTF-8 JSON-object reader capped at 12 MiB; exact behavior remains subject to the pending candidate tests.
 
 The candidate source `index.ts` was refreshed from that exact v9 payload and then modified for CORS, protected-administrator login handling, bounded request parsing, and safe error responses. The folder name `production-hotfix-v8` is historical; it must not be interpreted as the active function version. This branch does not deploy any code.
 
