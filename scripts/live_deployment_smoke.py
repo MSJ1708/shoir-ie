@@ -19,6 +19,7 @@ from playwright.sync_api import sync_playwright
 
 
 URL = os.environ.get("SHOIR_LIVE_URL", "https://shoir-ie-app.streamlit.app/")
+EXPECT_STAGING = os.environ.get("SHOIR_EXPECT_STAGING", "").strip().casefold() in {"1", "true", "yes", "on"}
 OUTPUT = Path("artifacts/live-deployment-smoke")
 VIEWPORTS = (
     ("desktop", {"width": 1440, "height": 1000}),
@@ -175,6 +176,13 @@ def main() -> int:
                             page.wait_for_timeout(500)
                         body = "\n".join(rendered_bodies)
                         folded_body = body.casefold()
+                        item["staging_environment_marker_found"] = (
+                            "staging test environment" in folded_body
+                        )
+                        if EXPECT_STAGING and not item["staging_environment_marker_found"]:
+                            item["failure_reasons"].append(
+                                "Required staging banner 'STAGING TEST ENVIRONMENT' was not rendered."
+                            )
                         item["frames"] = frame_records
                         item["rendered_text_length"] = len(body)
                         item["rendered_text_preview"] = " ".join(body.split())[:500]
