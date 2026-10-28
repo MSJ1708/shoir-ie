@@ -19,13 +19,13 @@ function assert(condition: unknown, message: string): asserts condition {
 
 async function expectOidcError(
   action: () => unknown | Promise<unknown>,
-  code: string,
+  expectedCode: string,
 ): Promise<void> {
   try {
     await action();
   } catch (error) {
     assert(error instanceof OidcVerificationError, "Expected OidcVerificationError.");
-    assert(error.code === code, `Expected ${code}, received ${error.code}.`);
+    assert(error.code === expectedCode, `Expected ${expectedCode}, received ${error.code}.`);
     return;
   }
   throw new Error("Expected OIDC validation to reject the input.");
@@ -53,25 +53,24 @@ publicJwk.alg = "RS256";
 publicJwk.use = "sig";
 const localJwks = createLocalJWKSet({ keys: [publicJwk] });
 
-async function token(
+async function makeToken(
   overrides: Record<string, unknown> = {},
-  opts: { issuer?: string; audience?: string; expiresIn?: string; alg?: string } = {},
+  opts: { issuer?: string; audience?: string; expiresIn?: string } = {},
 ): Promise<string> {
-  const body = {
+  const body: Record<string, unknown> = {
     email: "approved-user@example.invalid",
     email_verified: true,
     amr: ["pwd", "mfa"],
     ...overrides,
   };
-  const alg = opts.alg || "RS256";
-  const builder = new SignJWT(body)
-    .setProtectedHeader({ alg, kid: "oidc-test-key" })
+  return await new SignJWT(body)
+    .setProtectedHeader({ alg: "RS256", kid: "oidc-test-key" })
     .setIssuer(opts.issuer || ISSUER)
     .setAudience(opts.audience || CLIENT_ID)
     .setSubject("subject-synthetic-001")
     .setIssuedAt()
-    .setExpirationTime(opts.expiresIn || "5m");
-  return await builder.sign(privateKey);
+    .setExpirationTime(opts.expiresIn || "5m")
+    .sign(privateKey);
 }
 
 Deno.test("OIDC configuration is disabled or incomplete by default", () => {
@@ -86,7 +85,7 @@ Deno.test("OIDC configuration is disabled or incomplete by default", () => {
   assert(partial.issuer === "" && partial.clientId === "", "Partial OIDC must not expose usable configuration.");
 });
 
-Deno.test("OIDC configuration requires HTTPS DNS endpoints and same configured host", () => {
+Deno.test("OIDC configuration requires HTTPS DNS endpoints and the same configured host", () => {
   const values: Record<string, string> = {
     SHOIR_OIDC_ENABLED: "true",
     SHOIR_OIDC_ISSUER: ISSUER,
@@ -119,20 +118,16 @@ Deno.test("OIDC configuration requires HTTPS DNS endpoints and same configured h
 });
 
 Deno.test("OIDC ID token verifies signature, issuer, audience, and verified email", async () => {
-  const idToken = await token();
-  const identity = await verifyOidcIdToken(
-    idToken,
-    config,
-    localJwks as never,
-  );
+  const idToken = await makeToken();
+  const identity = await verifyOidcIdToken(idToken, config, localJwks as never);
   assert(identity.issuer === ISSUER, "Verified issuer was not returned.");
   assert(identity.subject === "subject-synthetic-001", "Verified subject was not returned.");
   assert(identity.email === "approved-user@example.invalid", "Verified email was not normalized.");
   assert(identity.mfaVerified, "MFA claim should be recognized.");
 
   await expectOidcError(
-    async async async () => verifyOidcIdToken(
-      await token({}, { issuer: "https://attacker.example.invalid" }),
+    async () => await verifyOidcIdToken(
+      await makeToken({}, { issuer: "https://attacker.example.invalid" }),
       config,
       localJwks as never,
     ),
@@ -140,8 +135,8 @@ Deno.test("OIDC ID token verifies signature, issuer, audience, and verified emai
   );
 
   await expectOidcError(
-    async async async () => verifyOidcIdToken(
-      await token({}, { audience: "different-client" }),
+    async () => await verifyOidcIdToken(
+      await makeToken({}, { audience: "different-client" }),
       config,
       localJwks as never,
     ),
@@ -152,7 +147,7 @@ Deno.test("OIDC ID token verifies signature, issuer, audience, and verified emai
 Deno.test("OIDC rejects expired, overlong, unverified-email, and missing-MFA tokens", async () => {
   await expectOidcError(
     async () => await verifyOidcIdToken(
-      await token({}, { expiresIn: "-1s" }),
+      await makeToken({}, { expiresIn: "-1s" }),
       config,
       localJwks as never,
     ),
@@ -160,23 +155,32 @@ Deno.test("OIDC rejects expired, overlong, unverified-email, and missing-MFA tok
   );
 
   await expectOidcError(
-    () => verifyOidcIdToken("x".repeat(MAX_OIDC_ID_TOKEN_CHARS + 1), config, localJwks as never),
+    () => verifyOidcIdToken(
+      "x".repeat(MAX_OIDC_ID_TOKEN_CHARS + 1),
+      config,
+      localJwks as never,
+    ),
     "invalid_token_shape",
   );
 
   await expectOidcError(
-    async async async () => verifyOidcIdToken(
-      await token({ email_verified: false }),
+    async () => await verifyOidcIdToken(
+      await makeToken({ email_verified: false }),
       config,
       localJwks as never,
     ),
     "unverified_email",
   );
 
-  const mfaConfig = { ...config, requireMfa: true, allowedMfaAmr: ["mfa"], allowedMfaAcr: [] };
+  const mfaConfig: OidcVerifierConfig = {
+    ...config,
+    requireMfa: true,
+    allowedMfaAmr: ["mfa"],
+    allowedMfaAcr: [],
+  };
   await expectOidcError(
-    async async async () => verifyOidcIdToken(
-      await token({ amr: ["pwd"] }),
+    async () => await verifyOidcIdToken(
+      await makeToken({ amr: ["pwd"] }),
       mfaConfig,
       localJwks as never,
     ),
