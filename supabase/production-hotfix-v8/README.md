@@ -13,7 +13,7 @@ A live Supabase Management API read returned:
 - Observed production behavior: the response helper still emits `Access-Control-Allow-Origin: *`; it now advertises `POST, OPTIONS`, but does not enforce exact browser origins or emit `Vary: Origin`.
 - The currently active function uses `req.json()`; this candidate preserves that parser. A request-body byte limit was not established in the production source snapshot and remains a separate hardening item for review.
 
-The candidate source `index.ts` was refreshed from that exact v9 payload and then modified only for the CORS request/response policy and protected-administrator login handling. The folder name `production-hotfix-v8` is historical; it must not be interpreted as the active function version. This branch does not deploy any code.
+The candidate source `index.ts` was refreshed from that exact v9 payload and then modified for CORS, protected-administrator login handling, bounded request parsing, and safe error responses. The folder name `production-hotfix-v8` is historical; it must not be interpreted as the active function version. This branch does not deploy any code.
 
 ## Narrow source changes in this candidate
 
@@ -21,7 +21,8 @@ The candidate source `index.ts` was refreshed from that exact v9 payload and the
 2. **Preflight/method handling.** Approved `OPTIONS` receives HTTP 204; the API action handler accepts POST only and returns 405 for other methods. Responses include the reviewed request headers, `POST, OPTIONS`, and `Vary: Origin`.
 3. **No fabricated origin.** Origin-free callers can still use the API's POST path, but receive no `Access-Control-Allow-Origin`; authentication/authorization remains enforced by each action.
 4. **Protected administrator fails closed.** If an account matches either protected marker (reserved username or Enterprise Admin role) but does not meet the complete expected username, role, active status, Enterprise Plus tier and exact expiry invariant, login returns a generic 503 and creates no session. No login-time tier or `updated_at` mutation remains.
-5. **Schema scope.** This candidate was rebuilt from the active production v9 function, which contains no referral-table or legal-acceptance-column references. It does not require the missing `shoir_referrals` table or the six production-missing legal fields. It does not run a database migration.
+5. **Bounded request parsing and safe errors.** The candidate uses the existing reviewed 12 MiB streamed JSON-body limit, validates JSON object shape and UTF-8, returns HTTP 400/413 for malformed or oversized input, and uses an allowlisted public error mapper so infrastructure details are not returned to callers.
+6. **Schema scope.** This candidate was rebuilt from the active production v9 function, which contains no referral-table or legal-acceptance-column references. It does not require the missing `shoir_referrals` table or the six production-missing legal fields. It does not run a database migration.
 
 The reserved administrator is never used as a test identity and this change does not change its stored values.
 
@@ -29,7 +30,7 @@ The reserved administrator is never used as a test identity and this change does
 
 - Active source baseline: production version 9, SHA-256 `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`.
 - Candidate commit in the hotfix branch: see this PR's current head; verify the exact head and artifact links directly in GitHub.
-- The candidate has contract tests that reject wildcard CORS, require the exact origin policy and 204 preflight, check that login-time admin repair is absent, and verify that this source does not depend on the missing production schema.
+- The candidate has contract tests that reject wildcard CORS, require the exact origin policy and 204 preflight, check that login-time admin repair is absent, verify the unique active-admin invariant, exercise bounded JSON parsing and safe error redaction, and confirm that this source does not depend on the missing production schema.
 - Helper tests cover exact approved origin, unapproved origins including both staging hosts and localhost, origin-free server calls, `Vary: Origin`, the method allowlist, and valid/invalid admin invariant values.
 
 Any previous green result belongs to a previous source revision and does not substitute for fresh exact-head checks. The live-deployment-smoke job on ordinary feature/draft PRs is configured to be skipped; that result is not a pass.
