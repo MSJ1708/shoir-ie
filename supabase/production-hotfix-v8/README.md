@@ -4,7 +4,7 @@
 
 ## Exact scope
 
-- Replace wildcard CORS with exact approved-origin handling, HTTP 403 for unapproved Origin values, HTTP 204 for allowed OPTIONS preflight, and no fabricated `Access-Control-Allow-Origin` header when Origin is absent.
+- Replace wildcard CORS with the exact production origin `https://shoir-ie-app.streamlit.app`, HTTP 403 for every other browser Origin (including both staging hosts and localhost), HTTP 204 for allowed OPTIONS preflight, and no fabricated `Access-Control-Allow-Origin` header when Origin is absent.
 - Remove login-time tier/`updated_at` mutation of the reserved `sho` administrator. If the canonical invariant is wrong, return a generic HTTP 503 and do not issue a session.
 - Preserve the v8 handler's existing database action set. This candidate does not reference `shoir_referrals` or the six legal-acceptance columns missing in production.
 

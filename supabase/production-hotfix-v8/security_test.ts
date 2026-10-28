@@ -34,15 +34,22 @@ Deno.test("v8 hotfix CORS uses exact approved origins and never a wildcard", () 
 });
 
 Deno.test("v8 hotfix rejects an unapproved origin and emits no allow-origin header", () => {
-  const origin = "https://unapproved-origin.example";
-  assert(
-    !isAllowedBrowserOrigin(origin),
-    "unapproved browser origin must be rejected before handling",
-  );
-  assert(
-    !corsHeadersForOrigin(origin).has("Access-Control-Allow-Origin"),
-    "unapproved origin must not receive ACAO",
-  );
+  const rejectedOrigins = [
+    "https://unapproved-origin.example",
+    "https://shoirieverified.streamlit.app",
+    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+    "http://localhost:8501",
+  ];
+  for (const origin of rejectedOrigins) {
+    assert(
+      !isAllowedBrowserOrigin(origin),
+      `unapproved browser origin ${origin} must be rejected before handling`,
+    );
+    assert(
+      !corsHeadersForOrigin(origin).has("Access-Control-Allow-Origin"),
+      `unapproved origin ${origin} must not receive ACAO`,
+    );
+  }
 });
 
 Deno.test("v8 hotfix keeps origin-free server-to-server calls possible without ACAO", () => {

@@ -33,6 +33,10 @@ def test_v8_hotfix_has_explicit_origin_and_admin_regression_cases():
     security = SECURITY.read_text(encoding="utf-8")
     tests = DENO_TESTS.read_text(encoding="utf-8")
     assert "https://shoir-ie-app.streamlit.app" in security
+    assert "https://shoirieverified.streamlit.app" not in security
+    assert "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app" not in security
+    assert "localhost:8501" not in security
+    assert "127.0.0.1:8501" not in security
     assert "Access-Control-Allow-Origin" in security
     assert 'origin === null' in security
     assert "2099-01-01T00:00:00Z" in security

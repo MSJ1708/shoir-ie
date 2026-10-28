@@ -1,10 +1,8 @@
 /** Minimal security helpers for an exact-schema production v8 hotfix. */
+// This candidate is specifically for production. Do not permit staging or local
+// development browser origins to call the production API.
 const ALLOWED_BROWSER_ORIGINS = new Set<string>([
   "https://shoir-ie-app.streamlit.app",
-  "https://shoirieverified.streamlit.app",
-  "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
-  "http://127.0.0.1:8501",
-  "http://localhost:8501",
 ]);
 
 /** Browser origins must match exactly; missing Origin remains available for server-to-server calls. */
