@@ -5,6 +5,7 @@ import {
   hasCanonicalMasterAdminInvariant,
   hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
+  isProtectedAdministratorTarget,
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
@@ -610,10 +611,11 @@ Deno.serve(async (req) => {
       ).select("*").eq("username_lc", request.username_lc).maybeSingle();
       // Subscription approvals must never mutate the reserved admin, even if a
       // stale or malformed pending request already exists for that identity.
-      const protectedTarget = request.username_lc === "sho" ||
-        existing?.username_lc === "sho" ||
-        existing?.role === "Enterprise Admin" ||
-        pendingCred?.username_lc === "sho";
+      const protectedTarget = isProtectedAdministratorTarget(
+        request,
+        existing,
+        pendingCred,
+      );
       if (protectedTarget) {
         return sendResponse({
           error: "Protected administrator changes are blocked.",
