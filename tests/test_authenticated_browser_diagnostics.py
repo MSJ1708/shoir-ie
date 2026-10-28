@@ -36,7 +36,7 @@ def test_browser_error_diagnostics_redact_tokens_and_url_query_values():
         stack="Error: diagnostic\n    at start (https://example.test/app.js?key=secret:3:4)",
     )
 
-    result = _safe_javascript_error(error)
+    result = safe_javascript_error(error)
     combined = " ".join([result["message"], result["stack_frames"]])
 
     assert secret_token not in combined
