@@ -5,6 +5,8 @@ import {
   hasCanonicalMasterAdminInvariant,
   hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
+  PublicRequestError,
+  readBoundedJsonObject,
 } from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -332,7 +334,7 @@ Deno.serve(async (req) => {
     return sendResponse({ error: "Method not allowed." }, 405);
   }
   try {
-    const body = await req.json();
+    const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
 
     if (action === "login") {
@@ -657,6 +659,9 @@ Deno.serve(async (req) => {
 
     return sendResponse({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
+    if (err instanceof PublicRequestError) {
+      return sendResponse({ error: err.message }, err.status);
+    }
     return sendResponse(
       { error: err instanceof Error ? err.message : String(err) },
       500,
