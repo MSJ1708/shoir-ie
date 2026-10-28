@@ -521,7 +521,7 @@ def normalize_connector_health(df: pd.DataFrame) -> pd.DataFrame:
 def render_connectivity_extension() -> None:
     from shoir_enterprise_layer import (
         connector_health_frame, connector_run_frame, connector_schedule_frame,
-        test_connector_profile, validate_connector_profile, fetch_connector_sample,
+        test_connector_profile, validate_connector_profile,
     )
 
     username = st.session_state.get("current_user", "unknown")
@@ -595,24 +595,16 @@ def render_connectivity_extension() -> None:
         st.dataframe(schedules, use_container_width=True, hide_index=True)
         st.warning("Due connector execution is disabled until an approved provider adapter is implemented and verified.")
 
-    last_test = st.session_state.get("connector_last_test") or {}
-    if last_test.get("connector_id") and str(last_test.get("status")) == "Healthy" and str(protocol).upper() in {"REST","ODATA","HTTPS","SQL","JDBC"}:
-        with st.expander("📥 Pull bounded sample + map canonical fields", expanded=False):
-            sample_query = ""
-            if str(protocol).upper() in {"SQL","JDBC"}:
-                sample_query = st.text_area("Read-only SQL query", value="SELECT * FROM your_table", key="conn_sample_query")
-            sample_limit = st.number_input("Sample limit", 1, 10000, 1000, 100, key="conn_sample_limit")
-            if st.button("📥 Fetch sample", use_container_width=True, key="conn_sample_fetch"):
-                result = fetch_connector_sample(username, str(last_test["connector_id"]), protocol, endpoint, secret_ref, sample_query, workspace, int(sample_limit), float(timeout))
-                st.session_state["connector_sample_result"] = result
-            sample = st.session_state.get("connector_sample_result")
-            if isinstance(sample, dict):
-                st.caption(str(sample.get("detail", "")))
-                frame = sample.get("frame")
-                if isinstance(frame, pd.DataFrame) and not frame.empty:
-                    st.dataframe(frame.head(100), use_container_width=True, hide_index=True)
-                    st.json(sample.get("schema_mapping", {}))
-                    st.session_state["connector_sample_df"] = frame.copy(deep=True)
+    # Clear any legacy sample payload left in this browser session. The former
+    # unrestricted sample reader could persist arbitrary endpoint responses; never
+    # re-render those cached records after the legacy connector path is disabled.
+    st.session_state.pop("connector_sample_result", None)
+    st.session_state.pop("connector_sample_df", None)
+    st.info(
+        "Live connector sample import is disabled in this legacy surface. "
+        "Use only the secure T096 HTTPS REST verifier for an approved, allowlisted, read-only connection; "
+        "vendor-specific adapters require separate implementation and acceptance evidence."
+    )
     if health.empty:
         st.info("Register or test a connector above to begin health monitoring.")
     else:
