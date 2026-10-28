@@ -500,7 +500,7 @@ def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     hypothesis = at.session_state.get("shoir_tool_result_T037")
     assert hypothesis is not None
-    assert hypothesis["mean_difference_a_minus_b"] == pytest.approx(-6)
+    assert hypothesis["mean_difference"] == pytest.approx(-6)
     assert hypothesis["p_value"] < 0.01
 
     at.session_state["user_tier"] = "Enterprise Plus Tier ($399)"
@@ -793,3 +793,289 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+
+def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    # Isolate this Workbench test from live Edge configuration. AppTest has no
+    # remote session token; simulate a confirmed save for the normal action flow.
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "recovery-history-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T006 · Undo, Redo, and Recovery")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T006")
+    assert result is not None and result["status"] == "SNAPSHOT_CREATED"
+    assert result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    at.text_area(key="tool006_snapshot_json").set_value('{"asset_id":"P-101","inspection_state":"COMPLETE"}')
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state["shoir_tool_result_T006"]["status"] == "SNAPSHOT_CHECKPOINTED"
+
+    # Streamlit forms submit all edited controls together. Do not rerun between
+    # selecting an action and submitting, or the unsubmitted selection resets.
+    at.selectbox(key="tool006_action").select("Undo")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "SNAPSHOT_UNDONE" and result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    at.selectbox(key="tool006_action").select("Redo")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state["shoir_tool_result_T006"]["current_snapshot"]["inspection_state"] == "COMPLETE"
+
+    at.selectbox(key="tool006_action").select("Restore selected revision")
+    at.number_input(key="tool006_target_revision").set_value(1)
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "REVISION_RESTORED" and result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    # A malformed attempted checkpoint must not discard the last valid output or history.
+    at.selectbox(key="tool006_action").select("Create checkpoint")
+    at.run(timeout=90)
+    at.text_area(key="tool006_snapshot_json").set_value("{invalid json")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    preserved = at.session_state["shoir_tool_result_T006"]
+    assert preserved["status"] == "REVISION_RESTORED"
+    assert preserved["current_snapshot"]["inspection_state"] == "PENDING"
+
+    # A valid action whose durable write fails must keep the last confirmed
+    # result and its snapshot history, and must not claim that it was saved.
+    history_key = next(key for key in at.session_state if key.startswith("shoir_recovery_history_T006_"))
+    history_before_failed_save = at.session_state[history_key]
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: False)
+    at.text_area(key="tool006_snapshot_json").set_value('{"asset_id":"P-101","inspection_state":"NEW_UNSAVED"}')
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Workspace save failed" in str(item.value) for item in at.error)
+    preserved_after_failed_save = at.session_state["shoir_tool_result_T006"]
+    assert preserved_after_failed_save["status"] == "REVISION_RESTORED"
+    assert preserved_after_failed_save["current_snapshot"]["inspection_state"] == "PENDING"
+    assert at.session_state[history_key] == history_before_failed_save
+
+
+def test_workbench_t020_tracks_dataset_versions_and_stale_runs(monkeypatch):
+    import json
+    from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    # Avoid sending synthetic AppTest state to any configured remote backend.
+    # This test covers the method flow and explicitly tests failed-save rollback.
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "lineage-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T020 · Dataset Versioning and Lineage")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="tool020_source_mode").select("Manual JSON snapshot")
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":10}]}')
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    first = at.session_state.get("shoir_tool_result_T020")
+    assert first is not None
+    assert first["status"] == "VERSION_CREATED_INITIAL"
+    assert first["version_number"] == 1
+
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":12}]}')
+    at.text_area(key="tool020_downstream_runs_json").set_value(json.dumps([
+        {"run_id": "RUN-OLD", "version_signature": first["version_signature"]},
+        {"run_id": "RUN-NO-LINK"},
+    ]))
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    changed = at.session_state.get("shoir_tool_result_T020")
+    assert changed["status"] == "VERSION_CREATED"
+    assert changed["version_number"] == 2
+    assert changed["stale_run_count"] == 1
+    assert changed["unverifiable_run_count"] == 1
+    assert any(key.startswith("shoir_dataset_lineage_T020_") for key in at.session_state)
+
+    # Invalid input must not destroy the last successful version/result.
+    at.text_area(key="tool020_snapshot_json").set_value("{invalid json")
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    preserved = at.session_state["shoir_tool_result_T020"]
+    assert preserved["status"] == "VERSION_CREATED"
+    assert preserved["version_number"] == 2
+    history_keys = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
+    assert len(history_keys) == 1
+    assert len(at.session_state[history_keys[0]]["versions"]) == 2
+
+    # Failed persistence must preserve the confirmed v2 lineage and not retain
+    # a phantom v3 version in the session.
+    lineage_before_failed_save = at.session_state[history_keys[0]]
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: False)
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":14}]}')
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Workspace save failed" in str(item.value) for item in at.error)
+    preserved_after_failed_save = at.session_state["shoir_tool_result_T020"]
+    assert preserved_after_failed_save["status"] == "VERSION_CREATED"
+    assert preserved_after_failed_save["version_number"] == 2
+    history_keys_after_failed_save = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
+    assert history_keys_after_failed_save == history_keys
+    assert at.session_state[history_keys_after_failed_save[0]] == lineage_before_failed_save
+
+
+def test_workbench_runs_rnle_ergonomics_screen():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rnle-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T046 · Ergonomics Assessment Toolkit")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # Scope confirmation is explicit: the method must not run on an unchecked default.
+    at.checkbox(key="tool046_confirm_scope").check()
+    at.button(key="tool046_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T046")
+    assert result is not None, "T046 did not produce a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "CALCULATED_SCREENING"
+    assert result["recommended_weight_limit_kg"] > 0
+    assert result["lifting_index"] > 0
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert result["_workspace_persistence"] in {
+        "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+        "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+    }
+
+def test_workbench_t044_rcm_decision_register_keeps_human_review_required(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
+    at = AppTest.from_file(ROOT / "pages" / "Industrial_Engineering_Workbench.py", default_timeout=90)
+    at.session_state["current_user"] = "rcm-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T044 · Reliability-Centered Maintenance Assistant")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool044_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T044")
+    assert result is not None, "T044 did not produce a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "STRUCTURED_FOR_HUMAN_REVIEW"
+    assert result["human_review_required"] is True
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+
+def test_workbench_runs_bounded_network_calibration_disruption_kpi_plugin_and_governance_tools():
+    """Render and execute the six bounded replacements using synthetic inputs only."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "synthetic-workbench-acceptance"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    targets = [
+        ("T060", "Supply Chain Network Planner", "tool060_run", "OPTIMAL"),
+        ("T074", "Digital Twin Calibration Studio", "tool074_run", "CALIBRATION_DIAGNOSTIC_CREATED"),
+        ("T080", "Industrial Disruption Simulator", "tool080_run", "DETERMINISTIC_SCENARIO_COMPLETED"),
+        ("T094", "KPI Dashboard and Alert Center", "tool094_run", "KPI_THRESHOLDS_EVALUATED"),
+        ("T097", "API, SDK, and Plugin Toolkit", "tool097_run", "MANIFEST_VALIDATED_REVIEW_REQUIRED"),
+        ("T099", "Data Governance and Recovery Center", "tool099_run", "GOVERNANCE_PREFLIGHT_COMPLETED"),
+    ]
+    for tool_id, label, run_key, expected_status in targets:
+        at.selectbox(key="shoir_100_tool_inspector").select(f"{tool_id} · {label}")
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} failed to render: " + "\\n".join(str(error.value) for error in at.exception)
+        at.button(key=run_key).click()
+        at.run(timeout=90)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} raised: " + "\\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} did not produce a result"
+        assert result["status"] == expected_status, (tool_id, result.get("status"))
+
+
+
+def test_workbench_runs_all_three_t037_hypothesis_test_designs():
+    """Exercise one-sample, independent Welch and paired t-tests through the Research Pack UI."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "synthetic-hypothesis-test-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="shoir_100_tool_inspector").select("T037 · Hypothesis Testing Assistant")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    designs = [
+        ("One-sample t-test", "2, 4, 6, 8", "8, 9, 10, 11"),
+        ("Independent Welch t-test", "1, 2, 3", "5, 6, 7"),
+        ("Paired t-test", "5, 7, 8, 10", "4, 6, 6, 9"),
+    ]
+    for design, sample_a, sample_b in designs:
+        at.selectbox(key="tool037_test_type").select(design)
+        at.text_input(key="tool037_sample_a").set_value(sample_a)
+        at.text_input(key="tool037_sample_b").set_value(sample_b)
+        at.button(key="tool037_run").click()
+        at.run(timeout=90)
+        at.run(timeout=90)
+        assert not at.exception, f"{design}: " + "\\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get("shoir_tool_result_T037")
+        assert result is not None and result["status"] == "HYPOTHESIS_TEST_CALCULATED"
+        assert result["method"] in {
+            "One-sample t-test",
+            "Independent two-sample Welch t-test",
+            "Paired two-sample t-test",
+        }

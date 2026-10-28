@@ -18,6 +18,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from shoir_upgrade import literalize_untrusted_formula_cells
+from shoir_tool_registry import require_tool_access
 
 
 DB_PATH = "enterprise_full_workspace.db"
@@ -104,6 +105,48 @@ def ensure_facility_schema() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS facility_workspace_metadata(
+                owner TEXT NOT NULL,
+                workspace TEXT NOT NULL,
+                data_origin TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(owner, workspace)
+            )
+            """
+        )
+        conn.commit()
+
+
+def _get_data_origin(owner: str, workspace: str) -> str:
+    ensure_facility_schema()
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT data_origin FROM facility_workspace_metadata WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchone()
+    return str(row[0]) if row else "EXISTING_DATA_ORIGIN_UNVERIFIED"
+
+
+def _set_data_origin(owner: str, workspace: str, data_origin: str) -> None:
+    allowed = {
+        "SYNTHETIC_STARTER_DATA",
+        "USER_EDITED_OR_MIXED",
+        "IMPORTED_OR_UPSERTED",
+        "EXISTING_DATA_ORIGIN_UNVERIFIED",
+    }
+    if data_origin not in allowed:
+        raise ValueError("Unsupported facility data-origin status.")
+    ensure_facility_schema()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO facility_workspace_metadata(owner,workspace,data_origin,updated_at)
+            VALUES(?,?,?,?)
+            """,
+            (owner, workspace, data_origin, _now()),
+        )
         conn.commit()
 
 
@@ -162,6 +205,13 @@ def _save_departments(owner: str, workspace: str, rows: list[dict[str, Any]]) ->
 def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     depts = _load_departments(owner, workspace)
     flows = _load_flows(owner, workspace)
+    was_empty = depts.empty and flows.empty
+    legacy_rows_present = (
+        isinstance(st.session_state.get("facility_depts"), list)
+        and bool(st.session_state.get("facility_depts"))
+    )
+    legacy_flow_state = st.session_state.get("facility_flows_df")
+    legacy_flows_present = isinstance(legacy_flow_state, pd.DataFrame) and not legacy_flow_state.empty
     if depts.empty:
         legacy = st.session_state.get("facility_depts")
         rows = legacy if isinstance(legacy, list) and legacy else _default_departments()
@@ -187,9 +237,93 @@ def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataF
                     )
                 conn.commit()
             flows = _load_flows(owner, workspace)
+    # Brand-new auto-populated examples are labelled synthetic. Existing rows
+    # predating the provenance table remain explicitly unverified.
+    with _db() as conn:
+        origin_row = conn.execute(
+            "SELECT data_origin FROM facility_workspace_metadata WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchone()
+    if origin_row is None:
+        _set_data_origin(
+            owner, workspace,
+            "SYNTHETIC_STARTER_DATA"
+            if (
+                was_empty
+                and not legacy_rows_present
+                and not legacy_flows_present
+                and not depts.empty
+            )
+            else "EXISTING_DATA_ORIGIN_UNVERIFIED",
+        )
     st.session_state["facility_depts"] = depts.to_dict("records")
     st.session_state["facility_flows_df"] = flows.copy(deep=True)
     return depts, flows
+
+
+def _flow_distance_metrics(
+    flows: pd.DataFrame, cost_per_load_meter_sar: float | None = None
+) -> dict[str, Any]:
+    """Compute daily weighted flow-distance and optional uniform-rate cost."""
+    if flows is None or flows.empty:
+        if cost_per_load_meter_sar is not None:
+            rate = float(cost_per_load_meter_sar)
+            if not math.isfinite(rate) or rate <= 0:
+                raise ValueError("Handling cost rate must be finite and greater than zero.")
+        else:
+            rate = None
+        return {
+            "status": "NO_DATA",
+            "connection_count": 0,
+            "weighted_flow_distance_load_m_per_day": 0.0,
+            "cost_rate_sar_per_load_meter": rate,
+            "estimated_daily_handling_cost_sar": None,
+            "formula": "weighted flow-distance = sum(loads/day × distance in metres)",
+            "provenance": "No flow records are available.",
+            "warnings": ["Add validated directed flow records before interpreting flow-distance or handling cost."],
+        }
+    required = {"loads_day", "distance_m"}
+    if not required.issubset(flows.columns):
+        raise ValueError(f"Flow metrics require columns {sorted(required)}.")
+    weighted = 0.0
+    for index, row in flows.iterrows():
+        try:
+            loads = float(row["loads_day"])
+            distance = float(row["distance_m"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Flow row {index!r} has a non-numeric load or distance.") from exc
+        if not math.isfinite(loads) or not math.isfinite(distance):
+            raise ValueError(f"Flow row {index!r} has a non-finite load or distance.")
+        if loads < 0 or distance < 0:
+            raise ValueError(f"Flow row {index!r} has a negative load or distance.")
+        weighted += loads * distance
+    if not math.isfinite(weighted):
+        raise ValueError("Weighted flow-distance is not finite; review input magnitudes.")
+    rate: float | None = None
+    estimated_cost: float | None = None
+    warnings = []
+    if cost_per_load_meter_sar is not None:
+        rate = float(cost_per_load_meter_sar)
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError("Handling cost rate must be finite and greater than zero.")
+        estimated_cost = weighted * rate
+        if not math.isfinite(estimated_cost):
+            raise ValueError("Estimated handling cost is not finite; review rate and flow magnitudes.")
+        warnings.append(
+            "Cost is an estimate using one user-provided uniform SAR per load-metre rate for every flow; actual transport/handling differences are not modelled."
+        )
+    else:
+        warnings.append("Handling cost is not calculated until a positive, user-approved rate is supplied.")
+    return {
+        "status": "COMPLETED",
+        "connection_count": int(len(flows)),
+        "weighted_flow_distance_load_m_per_day": weighted,
+        "cost_rate_sar_per_load_meter": rate,
+        "estimated_daily_handling_cost_sar": estimated_cost,
+        "formula": "weighted flow-distance = Σ(loads/day × distance (m)); estimated daily cost = weighted flow-distance × user-supplied SAR per load-metre rate",
+        "provenance": "User/workspace flow records; no real-world cost rate is inferred.",
+        "warnings": warnings,
+    }
 
 
 def _distance(a: pd.Series, b: pd.Series) -> float:
@@ -376,7 +510,7 @@ def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
                 "Distance (m)": float(row.distance_m),
                 "REL": rel,
                 "Score": rel_scores.get(rel),
-                "Reason": str(row.reason or ""),
+                "Reason": str(getattr(row, "reason", "") or ""),
                 "Status": "Connected",
             })
     return pd.DataFrame(records)
@@ -848,23 +982,80 @@ def _import_data(
                     row["reason"], row["transport"], _now(),
                 ),
             )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO facility_workspace_metadata(owner,workspace,data_origin,updated_at)
+            VALUES(?,?,?,?)
+            """,
+            (owner, workspace, "IMPORTED_OR_UPSERTED", _now()),
+        )
         conn.commit()
 
     return len(department_rows), len(flow_rows)
 
-def _export_workbook(depts: pd.DataFrame, flows: pd.DataFrame, slp: pd.DataFrame) -> bytes:
+def _export_workbook(
+    depts: pd.DataFrame,
+    flows: pd.DataFrame,
+    slp: pd.DataFrame,
+    data_origin: str = "EXISTING_DATA_ORIGIN_UNVERIFIED",
+    cost_per_load_meter_sar: float | None = None,
+) -> bytes:
     out = io.BytesIO()
+    metrics = _flow_distance_metrics(flows, cost_per_load_meter_sar)
+    flow_metrics = pd.DataFrame([
+        {"Metric": "Status", "Value": metrics["status"]},
+        {"Metric": "Connection count", "Value": metrics["connection_count"]},
+        {"Metric": "Weighted flow-distance (load·m/day)", "Value": metrics["weighted_flow_distance_load_m_per_day"]},
+        {"Metric": "Handling rate (SAR/load·m)", "Value": metrics["cost_rate_sar_per_load_meter"]},
+        {"Metric": "Estimated handling cost (SAR/day)", "Value": metrics["estimated_daily_handling_cost_sar"]},
+        {"Metric": "Formula", "Value": metrics["formula"]},
+        {"Metric": "Provenance", "Value": metrics["provenance"]},
+        {"Metric": "Limitations / warnings", "Value": " ".join(metrics["warnings"])},
+    ])
+    provenance = pd.DataFrame([
+        {"Field": "Facility data-origin status", "Value": data_origin},
+        {"Field": "Export generated (UTC)", "Value": _now()},
+        {"Field": "Flow-distance definition", "Value": "Σ(Loads/day × distance in metres)"},
+        {"Field": "Handling-cost basis", "Value": "User-provided uniform rate per load-metre; omitted when no positive rate is configured."},
+        {"Field": "Interpretation", "Value": "An imported, edited, synthetic, or unverified dataset is not automatically validated plant data."},
+    ])
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         depts.to_excel(writer, index=False, sheet_name="Departments")
         flows.to_excel(writer, index=False, sheet_name="From_To_Flows")
         slp.to_excel(writer, index=False, sheet_name="SLP_Relationships")
-        matrix=_matrix(depts,slp)
-        matrix.to_excel(writer, sheet_name="SLP_Matrix")
+        _matrix(depts,slp).to_excel(writer, sheet_name="SLP_Matrix")
+        flow_metrics.to_excel(writer, index=False, sheet_name="Flow_Metrics")
+        provenance.to_excel(writer, index=False, sheet_name="Provenance")
         literalize_untrusted_formula_cells(writer.book)
     return out.getvalue()
 
+def _require_facility_tool_access(tier: str, username: str) -> dict[str, Any]:
+    """Require an authenticated matching actor and the canonical T065 entitlement."""
+    actor = str(st.session_state.get("current_user") or "").strip()
+    requested_user = str(username or "").strip()
+    raw_tier = str(tier or "").strip()
+    known_tier_markers = (
+        "starter", "mid-tier pro", "professional", "enterprise", "research",
+    )
+    if not raw_tier or not any(marker in raw_tier.casefold() for marker in known_tier_markers):
+        raise PermissionError("Unable to verify this package. Facility Layout access is denied.")
+    if (
+        st.session_state.get("authenticated") is not True
+        or not actor
+        or actor.casefold() in {"guest", "guest visitor", "anonymous", "unknown"}
+        or not requested_user
+        or actor.casefold() != requested_user.casefold()
+    ):
+        raise PermissionError("Sign in with your own active account before editing Facility Layout.")
+    return require_tool_access(raw_tier, "T065")
+
 
 def render_facility_layout(tier: str, username: str) -> None:
+    try:
+        _require_facility_tool_access(tier, username)
+    except PermissionError as exc:
+        st.error(str(exc))
+        return
     owner, workspace = str(username), _workspace(username)
     depts, flows = _seed_or_migrate(owner, workspace)
 
@@ -886,6 +1077,16 @@ def render_facility_layout(tier: str, username: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    data_origin = _get_data_origin(owner, workspace)
+    if data_origin == "SYNTHETIC_STARTER_DATA":
+        st.warning("SYNTHETIC starter example · The initial departments and flows are illustrative only. Replace them with verified plant measurements before making operational decisions.")
+    elif data_origin == "IMPORTED_OR_UPSERTED":
+        st.info("IMPORTED data · Source rows are preserved through this facility model, but import success does not independently validate plant measurements.")
+    elif data_origin == "USER_EDITED_OR_MIXED":
+        st.info("USER-EDITED / MIXED data · This workspace contains edited or combined values. Verify source measurements and assumptions before relying on results.")
+    else:
+        st.warning("DATA ORIGIN UNVERIFIED · This facility data predates origin tracking or its source is unknown. Validate it before operational use.")
 
     if depts.empty:
         st.warning("No departments are registered. Add the first department in Block Layout & CRUD.")
@@ -922,7 +1123,8 @@ def render_facility_layout(tier: str, username: str) -> None:
                     elif did in set(depts["id"].astype(str)): st.error(f"Department ID {did} already exists.")
                     else:
                         _save_departments(owner,workspace,[{"id":did,"name":name,"x":x,"y":y,"area_sqm":area}])
-                        st.success(f"{name} ({did}) is now part of the live department registry. It will appear in From-To and SLP immediately.")
+                        _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
+                        st.success(f"{name} ({did}) is now part of the persistent department registry. It will appear in From-To and SLP immediately.")
                         st.rerun()
             elif action=="Edit":
                 ids=depts["id"].astype(str).tolist()
@@ -937,6 +1139,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                         save=st.form_submit_button("💾 Save department",type="primary",use_container_width=True)
                     if save:
                         _save_departments(owner,workspace,[{"id":selected,"name":name,"x":x,"y":y,"area_sqm":area}])
+                        _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                         st.success("Department updated. Connected flows and SLP read the same persistent registry.")
                         st.rerun()
                 else: st.info("Add a department first.")
@@ -949,6 +1152,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                         conn.execute("UPDATE facility_departments SET active=0,updated_at=? WHERE owner=? AND workspace=? AND dept_id=?",( _now(),owner,workspace,target))
                         conn.execute("DELETE FROM facility_flows WHERE owner=? AND workspace=? AND (from_id=? OR to_id=?)",(owner,workspace,target,target))
                         conn.commit()
+                    _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                     st.success("Department and dependent connections removed from the active process model.")
                     st.rerun()
 
@@ -960,6 +1164,34 @@ def render_facility_layout(tier: str, username: str) -> None:
             use_container_width=True,
         )
         st.caption("Every connection below feeds the From-To table, process map, SLP relationship matrix, and what-if routing. Direction matters; the route model also uses the connection as a navigable edge.")
+        flow_rate = st.number_input(
+            "Uniform handling cost rate (SAR per load-metre; enter 0 until a rate is approved)",
+            min_value=0.0, value=0.0, step=0.001, format="%.6f",
+            key="fl_handling_cost_rate",
+            help="This rate is applied uniformly to all flows. Use only a plant-approved rate; the app does not invent transport costs.",
+        )
+        try:
+            flow_metrics = _flow_distance_metrics(
+                flows, float(flow_rate) if float(flow_rate) > 0 else None
+            )
+        except ValueError as exc:
+            st.error(f"Flow-distance calculation is unavailable until the flow data are corrected: {exc}")
+        else:
+            mc1, mc2 = st.columns(2)
+            mc1.metric(
+                "Weighted flow-distance",
+                f"{flow_metrics['weighted_flow_distance_load_m_per_day']:,.2f} load·m/day",
+            )
+            if flow_metrics["estimated_daily_handling_cost_sar"] is None:
+                mc2.metric("Estimated handling cost", "Rate not configured")
+            else:
+                mc2.metric(
+                    "Estimated daily handling cost",
+                    f"SAR {flow_metrics['estimated_daily_handling_cost_sar']:,.2f}",
+                )
+            st.caption(flow_metrics["formula"])
+            for warning in flow_metrics["warnings"]:
+                st.caption("Assumption / limitation: " + warning)
         a,b=st.columns([1.1,1.4])
         ids=depts["id"].astype(str).tolist()
         with a:
@@ -987,7 +1219,8 @@ def render_facility_layout(tier: str, username: str) -> None:
                             (owner,workspace,flow_id,frm,to,loads,distance,rel,reason,transport,_now()),
                         )
                         conn.commit()
-                    st.success(f"Connected {frm} → {to}. The live From-To and SLP surfaces are updated.")
+                    _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
+                    st.success(f"Connected {frm} → {to}. The From-To and SLP surfaces are updated.")
                     st.rerun()
         with b:
             st.plotly_chart(_flow_process_figure(depts,flows),use_container_width=True,config={"displayModeBar":False})
@@ -1040,12 +1273,14 @@ def render_facility_layout(tier: str, username: str) -> None:
                                 (frm2,to2,loads2,dist2,rel2,reason2,mode2,_now(),owner,workspace,fid),
                             )
                             conn.commit()
+                        _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                         st.success("Connection updated; all dependent views use the new edge.")
                         st.rerun()
             if st.button("🗑️ Remove connection",use_container_width=True,key="fl_delete_flow"):
                 with _db() as conn:
                     conn.execute("DELETE FROM facility_flows WHERE owner=? AND workspace=? AND flow_id=?",(owner,workspace,fid))
                     conn.commit()
+                _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                 st.success("Connection removed.")
                 st.rerun()
             flow_view=flows.copy()
@@ -1128,10 +1363,14 @@ def render_facility_layout(tier: str, username: str) -> None:
             except Exception as exc:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
         st.markdown("#### Export current facility model")
-        export=_export_workbook(depts,flows,slp)
+        export_rate = st.session_state.get("fl_handling_cost_rate", 0.0)
+        export=_export_workbook(
+            depts, flows, slp, data_origin,
+            float(export_rate) if float(export_rate) > 0 else None,
+        )
         st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="fl_export_workbook")
         st.download_button("📄 Download From-To CSV",data=flows.to_csv(index=False).encode("utf-8"),file_name="facility_from_to.csv",mime="text/csv",use_container_width=True,key="fl_export_fromto")
-        st.caption("The workbook contains Departments, From_To_Flows, SLP_Relationships and SLP_Matrix sheets.")
+        st.caption("The workbook contains Departments, From_To_Flows, SLP_Relationships, SLP_Matrix, Flow_Metrics and Provenance sheets.")
 
     # Keep the legacy state contract synchronized for older modules that read it.
     st.session_state["facility_depts"]=depts.to_dict("records")

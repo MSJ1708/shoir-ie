@@ -49,6 +49,149 @@ FATAL_TEXT_MARKERS = (
 )
 
 
+def _tab_bar_layout(app_frame) -> dict:
+    """Capture tab-list and tab-label geometry so clipped mobile labels fail smoke."""
+    tab_list = app_frame.locator('[role="tablist"], div[data-testid="stTabs"] [data-baseweb="tab-list"]').first
+    if tab_list.count() == 0:
+        raise AssertionError("Streamlit public tab list was not found.")
+    tab_list.wait_for(state="visible", timeout=8_000)
+    return tab_list.evaluate(
+        """element => {
+            const listRect = element.getBoundingClientRect();
+            const tabButtons = Array.from(new Set(element.querySelectorAll('[role="tab"], [data-baseweb="tab"]')));
+            const tabs = tabButtons.map(button => {
+                const rect = button.getBoundingClientRect();
+                // Measure the actual paragraph text box, not its full-width Markdown wrapper;
+                // otherwise the normal desktop underline could falsely intersect a wrapper box.
+                const label = button.querySelector('[data-testid="stMarkdownContainer"] p')
+                    || button.querySelector('[data-testid="stMarkdownContainer"]')
+                    || button;
+                const labelRect = label.getBoundingClientRect();
+                return {
+                    label: (button.innerText || button.textContent || '').trim(),
+                    left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+                    clientWidth: button.clientWidth, scrollWidth: button.scrollWidth,
+                    clientHeight: button.clientHeight, scrollHeight: button.scrollHeight,
+                    labelLeft: labelRect.left, labelRight: labelRect.right,
+                    labelTop: labelRect.top, labelBottom: labelRect.bottom,
+                    labelClientWidth: label.clientWidth, labelScrollWidth: label.scrollWidth,
+                    labelClientHeight: label.clientHeight, labelScrollHeight: label.scrollHeight,
+                    whiteSpace: getComputedStyle(button).whiteSpace,
+                    labelWhiteSpace: getComputedStyle(label).whiteSpace
+                };
+            });
+            const indicators = [];
+            const isVisibleThinLine = (rect, style) =>
+                style.display !== "none"
+                && Number.parseFloat(style.opacity || "1") > 0
+                && rect.width >= 12 && rect.height > 0 && rect.height <= 8;
+            // Streamlit 1.59+ no longer uses the old BaseWeb tab-highlight element.
+            // Capture semantic indicator nodes plus any thin absolute line in the tablist.
+            for (const node of Array.from(element.querySelectorAll("*"))) {
+                const style = getComputedStyle(node);
+                const rect = node.getBoundingClientRect();
+                const identity = [
+                    node.getAttribute("data-baseweb") || "",
+                    node.getAttribute("data-testid") || "",
+                    typeof node.className === "string" ? node.className : ""
+                ].join(" ");
+                const semanticIndicator = /highlight|indicator|underline|tab-border/i.test(identity);
+                if (semanticIndicator || (style.position === "absolute" && isVisibleThinLine(rect, style))) {
+                    indicators.push({
+                        source: "element", identity: identity.slice(0, 240),
+                        left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+                        width: rect.width, height: rect.height, display: style.display,
+                        position: style.position, transform: style.transform
+                    });
+                }
+            }
+            // Some Streamlit releases render the active underline using a pseudo-element.
+            // Estimate its viewport box from computed offsets so the overlap assertion can
+            // cover both old BaseWeb markup and the newer React-Aria tab markup.
+            for (const button of tabButtons) {
+                const buttonRect = button.getBoundingClientRect();
+                for (const pseudo of ["::before", "::after"]) {
+                    const style = getComputedStyle(button, pseudo);
+                    const width = Number.parseFloat(style.width);
+                    const height = Number.parseFloat(style.height);
+                    if (style.display === "none" || style.position !== "absolute"
+                        || !Number.isFinite(width) || !Number.isFinite(height)
+                        || width < 12 || height <= 0 || height > 8
+                        || Number.parseFloat(style.opacity || "1") <= 0) continue;
+                    const leftValue = Number.parseFloat(style.left);
+                    const rightValue = Number.parseFloat(style.right);
+                    const topValue = Number.parseFloat(style.top);
+                    const bottomValue = Number.parseFloat(style.bottom);
+                    let left = Number.isFinite(leftValue) ? buttonRect.left + leftValue
+                        : (Number.isFinite(rightValue) ? buttonRect.right - rightValue - width : buttonRect.left);
+                    let top = Number.isFinite(topValue) ? buttonRect.top + topValue
+                        : (Number.isFinite(bottomValue) ? buttonRect.bottom - bottomValue - height : buttonRect.top);
+                    const matrix = style.transform.match(/matrix\(([^)]+)\)/);
+                    if (matrix) {
+                        const values = matrix[1].split(",").map(Number);
+                        if (values.length === 6) { left += values[4] || 0; top += values[5] || 0; }
+                    }
+                    indicators.push({
+                        source: pseudo, identity: String(button.innerText || button.textContent || "").trim().slice(0, 120),
+                        left, right: left + width, top, bottom: top + height,
+                        width, height, display: style.display, position: style.position, transform: style.transform
+                    });
+                }
+            }
+            return {
+                viewportWidth: window.innerWidth, listLeft: listRect.left,
+                listRight: listRect.right, listWidth: listRect.width,
+                clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+                scrollLeft: element.scrollLeft, tabCount: tabs.length, tabs, indicators
+            };
+        }"""
+    )
+
+
+def _validate_tab_bar_layout(layout: dict, viewport_width: int) -> None:
+    """Fail on a horizontally scrollable tab strip or clipped/overflowing labels."""
+    if layout.get("tabCount", 0) < 3:
+        raise AssertionError(f"Expected all three public tabs to render: {layout}")
+    if layout["scrollWidth"] > layout["clientWidth"] + 2:
+        raise AssertionError(f"Public tab list requires horizontal scrolling: {layout}")
+    for tab in layout["tabs"]:
+        if tab["left"] < layout["listLeft"] - 2 or tab["right"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab falls outside its tab-list bounds: {tab}")
+        if tab["scrollWidth"] > tab["clientWidth"] + 2:
+            raise AssertionError(f"Public tab label is horizontally clipped: {tab}")
+        if tab["scrollHeight"] > tab["clientHeight"] + 2:
+            raise AssertionError(f"Public tab label is vertically clipped: {tab}")
+        if tab["labelClientWidth"] <= 0 or tab["labelClientHeight"] <= 0:
+            raise AssertionError(f"Public tab label has no visible layout box: {tab}")
+        if tab["labelScrollWidth"] > tab["labelClientWidth"] + 2:
+            raise AssertionError(f"Inner public tab label is horizontally clipped: {tab}")
+        if tab["labelScrollHeight"] > tab["labelClientHeight"] + 2:
+            raise AssertionError(f"Inner public tab label is vertically clipped: {tab}")
+        if tab["labelLeft"] < tab["left"] - 2 or tab["labelRight"] > tab["right"] + 2:
+            raise AssertionError(f"Public tab label extends beyond its button: {tab}")
+        if tab["labelRight"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab label extends beyond the visible tab-list: {tab}")
+    for indicator in layout.get("indicators", []):
+        if indicator["display"] == "none" or indicator["width"] <= 0 or indicator["height"] <= 0:
+            continue
+        for tab in layout["tabs"]:
+            overlaps_label = (
+                indicator["left"] < tab["labelRight"]
+                and indicator["right"] > tab["labelLeft"]
+                and indicator["top"] < tab["labelBottom"]
+                and indicator["bottom"] > tab["labelTop"]
+            )
+            if overlaps_label:
+                raise AssertionError(
+                    f"Public tab highlight overlaps a visible text label: indicator={indicator}, tab={tab}"
+                )
+    if viewport_width <= 600 and any(
+        tab["whiteSpace"] == "nowrap" or tab["labelWhiteSpace"] == "nowrap"
+        for tab in layout["tabs"]
+    ):
+        raise AssertionError(f"Mobile tab labels are configured not to wrap: {layout}")
+
+
 def main() -> int:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     report: dict = {
@@ -230,6 +373,9 @@ def main() -> int:
                                 try:
                                     app_frame.get_by_role("tab", name=scenario["tab"]).click(timeout=8_000)
                                     app_frame.get_by_text(scenario["marker"]).wait_for(timeout=10_000)
+                                    tab_layout = _tab_bar_layout(app_frame)
+                                    check["tab_bar_layout"] = tab_layout
+                                    _validate_tab_bar_layout(tab_layout, viewport["width"])
                                     # Tab clicks trigger a Streamlit websocket rerun. Wait for
                                     # the expected form controls/content to attach before asserting;
                                     # immediate locator.count() calls can race that rerun on mobile.

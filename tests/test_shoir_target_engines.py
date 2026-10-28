@@ -2134,3 +2134,479 @@ def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dat
         assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
     with pytest.raises(ValueError, match="between 1 and 5,000"):
         assess_capa_8d_records([])
+
+def test_rcm_decision_register_requires_human_review_and_flags_high_consequence_choices():
+    from shoir_target_engines import build_rcm_decision_register
+
+    result = build_rcm_decision_register([
+        {
+            "asset": "Press-01",
+            "function": "Form parts within approved dimensions",
+            "failure_mode": "Ram-position drift",
+            "failure_effect": "Out-of-spec parts and production interruption",
+            "consequence_category": "operational",
+            "consequence_rationale": "Synthetic screening example; quality impact requires site confirmation.",
+            "proposed_task": "Inspect the position trend against approved limits",
+            "task_strategy": "condition_directed",
+            "condition_indicator": "Trend exceeds the approved guard band",
+            "evidence_reference": "SYNTHETIC example only; replace with approved inspection/work-order evidence",
+            "owner": "Maintenance planner",
+        },
+        {
+            "asset": "Boiler-01",
+            "function": "Contain and transfer process heat",
+            "failure_mode": "Pressure boundary degradation",
+            "failure_effect": "Potential hazardous release",
+            "consequence_category": "safety_environmental",
+            "consequence_rationale": "Illustrative high-consequence case; qualified site review is mandatory.",
+            "proposed_task": "No planned maintenance task",
+            "task_strategy": "run_to_failure",
+            "evidence_reference": "SYNTHETIC example only; replace with approved engineering evidence",
+        },
+    ])
+
+    assert result["status"] == "STRUCTURED_FOR_HUMAN_REVIEW"
+    assert result["failure_mode_count"] == 2
+    assert result["unique_asset_count"] == 2
+    assert result["open_review_count"] == 2
+    assert result["high_consequence_run_to_failure_count"] == 1
+    assert result["human_review_required"] is True
+    register = result["review_register"]
+    assert register.iloc[0]["Human review status"] == "PENDING"
+    assert register.iloc[0]["Decision flags"] == "No rule-based flags; human review still required"
+    assert "HIGH_CONSEQUENCE_RUN_TO_FAILURE_REQUIRES_FORMAL_REVIEW" in register.iloc[1]["Decision flags"]
+    assert "not a complete or certified rcm analysis" in result["warning"].lower()
+
+
+def test_rcm_decision_register_rejects_duplicate_modes_missing_evidence_and_invalid_task_inputs():
+    from shoir_target_engines import build_rcm_decision_register
+
+    base = {
+        "asset": "CNC-01",
+        "function": "Cut material",
+        "failure_mode": "Spindle stops",
+        "failure_effect": "Production is interrupted",
+        "consequence_category": "operational",
+        "consequence_rationale": "Synthetic example only.",
+        "proposed_task": "Review vibration trend",
+        "task_strategy": "condition_directed",
+        "condition_indicator": "Vibration exceeds approved threshold",
+        "evidence_reference": "SYNTHETIC; replace with actual records",
+    }
+    with pytest.raises(ValueError, match="non-empty JSON list"):
+        build_rcm_decision_register([])
+    with pytest.raises(ValueError, match="evidence_reference"):
+        build_rcm_decision_register([{**base, "evidence_reference": ""}])
+    with pytest.raises(ValueError, match="Duplicate asset/function/failure-mode"):
+        build_rcm_decision_register([base, base])
+    with pytest.raises(ValueError, match="condition_indicator"):
+        build_rcm_decision_register([{**base, "condition_indicator": ""}])
+    with pytest.raises(ValueError, match="positive whole number"):
+        build_rcm_decision_register([{
+            **base,
+            "task_strategy": "scheduled_restoration",
+            "task_interval_days": 0,
+        }])
+    with pytest.raises(ValueError, match="task_interval_days is required"):
+        build_rcm_decision_register([{
+            **base,
+            "task_strategy": "failure_finding",
+            "consequence_category": "hidden_function",
+        }])
+
+
+def test_recovery_snapshot_history_checkpoints_undoes_redoes_and_restores_revision():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    first = manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"asset_id": "P-101", "count": 1})
+    assert first["status"] == "SNAPSHOT_CREATED"
+    assert first["current_revision"] == 1
+    assert first["can_undo"] is False
+    second = manage_recovery_snapshot_history(first["history_state"], action="checkpoint", new_snapshot={"asset_id": "P-101", "count": 2})
+    assert second["status"] == "SNAPSHOT_CHECKPOINTED"
+    assert second["current_revision"] == 2
+    undone = manage_recovery_snapshot_history(second["history_state"], action="undo")
+    assert undone["status"] == "SNAPSHOT_UNDONE"
+    assert undone["current_snapshot"]["count"] == 1
+    assert undone["can_redo"] is True
+    redone = manage_recovery_snapshot_history(undone["history_state"], action="redo")
+    assert redone["status"] == "SNAPSHOT_REDONE"
+    assert redone["current_snapshot"]["count"] == 2
+    restored = manage_recovery_snapshot_history(redone["history_state"], action="restore", target_revision=1)
+    assert restored["status"] == "REVISION_RESTORED"
+    assert restored["current_snapshot"]["count"] == 1
+    assert restored["can_redo"] is True
+    assert [row["revision"] for row in restored["timeline"]] == [1, 2]
+
+
+def test_recovery_snapshot_history_clears_redo_on_new_checkpoint_and_bounds_history():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    state = None
+    for value in range(1, 8):
+        state = manage_recovery_snapshot_history(state, action="checkpoint", new_snapshot={"value": value}, max_history=4)["history_state"]
+    bounded = manage_recovery_snapshot_history(state, action="undo", max_history=4)
+    assert bounded["revision_count"] <= 4
+    assert bounded["current_snapshot"]["value"] == 6
+    branched = manage_recovery_snapshot_history(bounded["history_state"], action="checkpoint", new_snapshot={"value": 99}, max_history=4)
+    assert branched["can_redo"] is False
+    assert branched["current_snapshot"]["value"] == 99
+    assert branched["revision_count"] <= 4
+
+
+def test_recovery_snapshot_history_rejects_invalid_actions_data_and_revisions():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    with pytest.raises(ValueError, match="valid JSON-compatible"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"bad": float("nan")})
+    with pytest.raises(ValueError, match="byte snapshot limit"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"large": "x" * 33000})
+    with pytest.raises(ValueError, match="No earlier snapshot"):
+        manage_recovery_snapshot_history(None, action="undo")
+    with pytest.raises(ValueError, match="No undone snapshot"):
+        manage_recovery_snapshot_history(None, action="redo")
+    state = manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"value": 1})["history_state"]
+    with pytest.raises(ValueError, match="between 1 and 1"):
+        manage_recovery_snapshot_history(state, action="restore", target_revision=2)
+    with pytest.raises(ValueError, match="must be checkpoint, undo, redo or restore"):
+        manage_recovery_snapshot_history(state, action="future")
+
+
+def test_dataset_version_lineage_creates_versions_and_marks_supplied_stale_runs():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    first = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"records": [{"id": "A1", "value": 10}]},
+        source_metadata={"dataset_id": "fixture-dataset", "schema_fingerprint": ["id", "value"]},
+        transformations=[{"transformation": "clean headers", "method_version": "1"}],
+    )
+    assert first["status"] == "VERSION_CREATED_INITIAL"
+    assert first["version_number"] == 1
+    assert first["version_count"] == 1
+
+    changed = manage_dataset_version_lineage(
+        first["lineage_state"],
+        dataset_payload={"records": [{"id": "A1", "value": 12}]},
+        source_metadata={"dataset_id": "fixture-dataset", "schema_fingerprint": ["id", "value"]},
+        transformations=[{"transformation": "clean headers", "method_version": "1"}],
+        downstream_runs=[
+            {"run_id": "RUN-CURRENT-AT-V1", "version_signature": first["version_signature"]},
+            {"run_id": "RUN-OLD", "version_signature": "000000000000"},
+            {"run_id": "RUN-UNKNOWN"},
+        ],
+    )
+    assert changed["status"] == "VERSION_CREATED"
+    assert changed["version_number"] == 2
+    assert changed["version_count"] == 2
+    assert changed["dataset_id"] == first["dataset_id"]
+    assert changed["stale_run_count"] == 2
+    assert changed["unverifiable_run_count"] == 1
+    assert [run["status"] for run in changed["downstream_runs"]] == [
+        "STALE_REQUIRES_RERUN", "STALE_REQUIRES_RERUN", "UNVERIFIABLE_NO_SOURCE_SIGNATURE"
+    ]
+
+
+def test_dataset_version_lineage_is_canonical_and_recipe_changes_make_new_version():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    first = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"a": 1, "b": [2, 3]},
+        source_metadata={"dataset_id": "DS-1", "schema_fingerprint": {"a": "int"}},
+        transformations=[],
+    )
+    same = manage_dataset_version_lineage(
+        first["lineage_state"],
+        dataset_payload={"b": [2, 3], "a": 1},
+        source_metadata={"schema_fingerprint": {"a": "int"}, "dataset_id": "DS-1"},
+        transformations=[],
+    )
+    assert same["status"] == "VERSION_UNCHANGED"
+    assert same["version_count"] == 1
+    recipe_change = manage_dataset_version_lineage(
+        same["lineage_state"],
+        dataset_payload={"a": 1, "b": [2, 3]},
+        source_metadata={"dataset_id": "DS-1", "schema_fingerprint": {"a": "int"}},
+        transformations=[{"transformation": "rename field", "method_version": "2"}],
+    )
+    assert recipe_change["status"] == "VERSION_CREATED"
+    assert recipe_change["version_number"] == 2
+    assert recipe_change["version_signature"] != first["version_signature"]
+
+
+
+
+
+def test_dataset_version_lineage_inferrs_stable_identity_and_schema_from_snapshot():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    first = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"dataset": "orders", "rows": [{"id": "A1", "qty": 10}]},
+    )
+    changed = manage_dataset_version_lineage(
+        first["lineage_state"],
+        dataset_payload={"dataset": "orders", "rows": [{"id": "A1", "qty": 12}]},
+    )
+    assert first["source_metadata"]["dataset_id"] == "orders"
+    assert first["source_metadata"]["schema_fingerprint"] == {"id": ["string"], "qty": ["integer"]}
+    assert changed["dataset_id"] == first["dataset_id"]
+    assert changed["version_signature"] != first["version_signature"]
+
+
+def test_dataset_version_lineage_does_not_treat_raw_source_match_as_fully_current():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    initial = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"rows": [{"id": "A1"}]},
+        source_metadata={"schema_fingerprint": ["id"]},
+        transformations=[{"transformation": "normalize", "method_version": "1"}],
+    )
+    checked = manage_dataset_version_lineage(
+        initial["lineage_state"],
+        dataset_payload={"rows": [{"id": "A1"}]},
+        source_metadata={"schema_fingerprint": ["id"]},
+        transformations=[{"transformation": "normalize", "method_version": "1"}],
+        downstream_runs=[
+            {"run_id": "RUN-RAW-SOURCE", "source_signature": initial["source_signature"]},
+            {"run_id": "RUN-VERSION", "version_signature": initial["version_signature"]},
+        ],
+    )
+    assert checked["stale_run_count"] == 0
+    assert checked["unverifiable_run_count"] == 1
+    assert [run["status"] for run in checked["downstream_runs"]] == [
+        "SOURCE_MATCH_VERSION_UNVERIFIED", "CURRENT"
+    ]
+
+
+def test_dataset_version_lineage_rejects_invalid_payloads_and_run_links():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    with pytest.raises(ValueError, match="must be a JSON object or array"):
+        manage_dataset_version_lineage(None, dataset_payload="not a structured snapshot")
+    with pytest.raises(ValueError, match="Transformations must be a JSON list"):
+        manage_dataset_version_lineage(None, dataset_payload={"x": 1}, transformations={"bad": "shape"})
+    with pytest.raises(ValueError, match="needs a non-empty run_id"):
+        manage_dataset_version_lineage(None, dataset_payload={"x": 1}, downstream_runs=[{"version_signature": "v1"}])
+    with pytest.raises(ValueError, match="finite, valid JSON-compatible"):
+        manage_dataset_version_lineage(None, dataset_payload={"x": float("nan")})
+
+
+
+def test_supply_chain_network_solves_minimum_cost_flow_and_reports_infeasible_capacity():
+    from shoir_target_engines import solve_supply_chain_network
+
+    network = {
+        "data_origin": "SYNTHETIC",
+        "nodes": [
+            {"name": "Source", "supply": 5, "demand": 0},
+            {"name": "Hub", "supply": 0, "demand": 0},
+            {"name": "Customer", "supply": 0, "demand": 5},
+        ],
+        "edges": [
+            {"source": "Source", "target": "Customer", "capacity": 2, "unit_cost": 5},
+            {"source": "Source", "target": "Hub", "capacity": 5, "unit_cost": 1},
+            {"source": "Hub", "target": "Customer", "capacity": 5, "unit_cost": 1},
+        ],
+    }
+    result = solve_supply_chain_network(network)
+    assert result["status"] == "OPTIMAL"
+    assert result["total_cost"] == pytest.approx(10.0)
+    assert result["node_balance_residual"] <= 1e-8
+    assert sum(row["flow"] for row in result["flows"] if row["source"] == "Source") == pytest.approx(5.0)
+
+    network["edges"] = [{"source": "Source", "target": "Customer", "capacity": 2, "unit_cost": 1}]
+    infeasible = solve_supply_chain_network(network)
+    assert infeasible["status"] == "INFEASIBLE"
+    assert infeasible["flows"] == []
+    with pytest.raises(ValueError, match="supply must equal total demand"):
+        solve_supply_chain_network({
+            "nodes": [{"name": "Source", "supply": 6, "demand": 0}, {"name": "Customer", "supply": 0, "demand": 5}],
+            "edges": [{"source": "Source", "target": "Customer", "capacity": 10, "unit_cost": 1}],
+        })
+
+
+def test_digital_twin_output_calibration_matches_known_gain_bias_and_rejects_live_claim():
+    from shoir_target_engines import calibrate_digital_twin_outputs
+
+    result = calibrate_digital_twin_outputs({
+        "data_origin": "SYNTHETIC",
+        "pairs": [
+            {"simulated": 1, "measured": 3},
+            {"simulated": 2, "measured": 5},
+            {"simulated": 3, "measured": 7},
+            {"simulated": 4, "measured": 9},
+        ],
+    })
+    assert result["status"] == "CALIBRATION_DIAGNOSTIC_CREATED"
+    assert result["gain"] == pytest.approx(2.0)
+    assert result["bias"] == pytest.approx(1.0)
+    assert result["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["r_squared"] == pytest.approx(1.0)
+    with pytest.raises(ValueError, match="Data origin"):
+        calibrate_digital_twin_outputs({
+            "data_origin": "LIVE",
+            "pairs": [{"simulated": i, "measured": i} for i in (1, 2, 3)],
+        })
+    with pytest.raises(ValueError, match="must vary"):
+        calibrate_digital_twin_outputs({
+            "data_origin": "USER_ENTERED",
+            "pairs": [{"simulated": 1, "measured": i} for i in (1, 2, 3)],
+        })
+
+
+def test_industrial_disruption_scenario_tracks_backlog_recovery_and_rejects_invalid_windows():
+    from shoir_target_engines import simulate_industrial_disruption
+
+    result = simulate_industrial_disruption({
+        "data_origin": "SYNTHETIC",
+        "baseline_capacity_per_period": 100,
+        "demand_per_period": 80,
+        "starting_inventory": 0,
+        "periods": 7,
+        "disruptions": [{"name": "Supplier interruption", "start_period": 2, "end_period": 3, "capacity_fraction": 0.4}],
+    })
+    assert result["status"] == "DETERMINISTIC_SCENARIO_COMPLETED"
+    assert result["period_results"][1]["capacity"] == pytest.approx(40.0)
+    assert result["ending_backlog"] == pytest.approx(0.0)
+    assert result["recovery_period"] == 6
+    no_shock = simulate_industrial_disruption({
+        "baseline_capacity_per_period": 100, "demand_per_period": 80,
+        "starting_inventory": 0, "periods": 3, "disruptions": [],
+    })
+    assert no_shock["recovery_period"] is None
+    with pytest.raises(ValueError, match="must fit the horizon"):
+        simulate_industrial_disruption({
+            "baseline_capacity_per_period": 100, "demand_per_period": 80,
+            "starting_inventory": 0, "periods": 3,
+            "disruptions": [{"start_period": 2, "end_period": 4, "capacity_fraction": 0.5}],
+        })
+
+
+def test_freshness_aware_kpi_thresholds_distinguish_alerts_from_stale_data():
+    from shoir_target_engines import evaluate_kpi_thresholds
+
+    result = evaluate_kpi_thresholds({
+        "kpis": [
+            {"name": "Scrap", "period": "W43", "value": 3.2, "unit": "%", "threshold": 2.0, "comparison": "above", "measured_at_utc": "2026-10-26T12:00:00Z", "max_age_hours": 96},
+            {"name": "OEE", "period": "W43", "value": 88, "unit": "%", "threshold": 80, "comparison": "below", "measured_at_utc": "2026-10-24T00:00:00Z", "max_age_hours": 24},
+        ],
+    }, as_of_utc="2026-10-27T00:00:00Z")
+    assert result["alert_count"] == 1
+    assert result["stale_count"] == 1
+    assert [row["status"] for row in result["kpis"]] == ["ALERT", "STALE_DATA"]
+    assert result["delivery_status"] == "NOT_SENT"
+    with pytest.raises(ValueError, match="Duplicate KPI"):
+        evaluate_kpi_thresholds({
+            "kpis": [
+                {"name": "OEE", "period": "W43", "value": 88, "threshold": 80, "comparison": "below", "measured_at_utc": "2026-10-26T12:00:00Z", "max_age_hours": 24},
+                {"name": "OEE", "period": "W43", "value": 89, "threshold": 80, "comparison": "below", "measured_at_utc": "2026-10-26T13:00:00Z", "max_age_hours": 24},
+            ],
+        }, as_of_utc="2026-10-27T00:00:00Z")
+
+
+def test_read_only_plugin_manifest_validator_never_calls_or_executes_plugin():
+    from shoir_target_engines import validate_api_plugin_manifest
+
+    manifest = {
+        "plugin_id": "plant-metrics-readonly",
+        "version": "1.0.0",
+        "method": "GET",
+        "endpoint_url": "https://api.example.com/v1/status",
+        "approved_hosts": ["api.example.com"],
+        "required_scopes": ["metrics.read"],
+        "granted_scopes": ["metrics.read"],
+        "timeout_seconds": 5,
+        "rate_limit_per_minute": 60,
+    }
+    result = validate_api_plugin_manifest(manifest)
+    assert result["status"] == "MANIFEST_VALIDATED_REVIEW_REQUIRED"
+    assert result["network_request_sent"] is False
+    assert result["plugin_executed"] is False
+    assert result["write_capability"] is False
+    with pytest.raises(ValueError, match="Only read-only GET"):
+        validate_api_plugin_manifest({**manifest, "method": "POST"})
+    with pytest.raises(ValueError, match="explicit allowlist"):
+        validate_api_plugin_manifest({**manifest, "approved_hosts": ["evil.example.com"]})
+    with pytest.raises(ValueError, match="do not cover"):
+        validate_api_plugin_manifest({**manifest, "granted_scopes": []})
+
+
+def test_data_governance_preflight_flags_retention_and_restore_evidence_without_mutation():
+    from shoir_target_engines import audit_data_governance_recovery
+
+    result = audit_data_governance_recovery({
+        "workspace_id": "DEMO-WORKSPACE",
+        "max_restore_test_age_days": 90,
+        "records": [
+            {"record_id": "SYNTH-001", "workspace_id": "DEMO-WORKSPACE", "classification": "INTERNAL",
+             "created_at_utc": "2026-01-01T00:00:00Z", "retention_days": 365, "legal_hold": False,
+             "backup_ref": "SYNTH-BACKUP-001", "backup_verified": True, "last_restore_test_utc": "2026-09-15T00:00:00Z"},
+            {"record_id": "SYNTH-002", "workspace_id": "DEMO-WORKSPACE", "classification": "CONFIDENTIAL",
+             "created_at_utc": "2024-01-01T00:00:00Z", "retention_days": 365, "legal_hold": False,
+             "backup_ref": "", "backup_verified": False, "last_restore_test_utc": ""},
+        ],
+    }, as_of_utc="2026-10-27T00:00:00Z")
+    assert result["retention_due_count"] == 1
+    assert result["recovery_not_ready_count"] == 1
+    assert result["mutations_performed"] is False
+    assert result["delete_performed"] is False
+    assert result["restore_performed"] is False
+    with pytest.raises(ValueError, match="requested workspace"):
+        audit_data_governance_recovery({
+            "workspace_id": "WORKSPACE-A",
+            "records": [{"record_id": "R1", "workspace_id": "WORKSPACE-B", "classification": "INTERNAL",
+                         "created_at_utc": "2026-01-01T00:00:00Z", "retention_days": 30}],
+        }, as_of_utc="2026-10-27T00:00:00Z")
+
+
+
+def test_supported_hypothesis_tests_match_reference_statistics_and_decision_rule():
+    from scipy import stats
+    from shoir_target_engines import run_hypothesis_test
+
+    one_sample = run_hypothesis_test("one_sample_t", [2, 4, 6, 8], null_mean=4, alpha=0.05)
+    reference_one = stats.ttest_1samp([2, 4, 6, 8], popmean=4)
+    assert one_sample["test_statistic"] == pytest.approx(reference_one.statistic)
+    assert one_sample["p_value"] == pytest.approx(reference_one.pvalue)
+    assert one_sample["reject_null_hypothesis"] is False
+    assert one_sample["confidence_interval_low"] < one_sample["mean_difference"] < one_sample["confidence_interval_high"]
+
+    welch = run_hypothesis_test("welch_t", [1, 2, 3], [5, 6, 7], alpha=0.05)
+    reference_welch = stats.ttest_ind([1, 2, 3], [5, 6, 7], equal_var=False)
+    assert welch["test_statistic"] == pytest.approx(reference_welch.statistic)
+    assert welch["p_value"] == pytest.approx(reference_welch.pvalue)
+    assert welch["reject_null_hypothesis"] is True
+
+    paired = run_hypothesis_test("paired_t", [5, 7, 8, 10], [4, 6, 6, 9], alpha=0.05)
+    reference_paired = stats.ttest_rel([5, 7, 8, 10], [4, 6, 6, 9])
+    assert paired["test_statistic"] == pytest.approx(reference_paired.statistic)
+    assert paired["p_value"] == pytest.approx(reference_paired.pvalue)
+    assert paired["sample_size_a"] == paired["sample_size_b"] == 4
+    assert paired["effect_size_cohens_d"] is not None
+
+
+def test_hypothesis_test_rejects_unsupported_designs_and_mismatched_pairs():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="Supported test types"):
+        run_hypothesis_test("chi_square", [1, 2, 3])
+    with pytest.raises(ValueError, match="same number"):
+        run_hypothesis_test("paired_t", [1, 2, 3], [1, 2])
+    with pytest.raises(ValueError, match="strictly between"):
+        run_hypothesis_test("one_sample_t", [1, 2, 3], alpha=1.0)
+    with pytest.raises(ValueError, match="at least two"):
+        run_hypothesis_test("welch_t", [1], [2, 3])
+
+
+def test_hypothesis_tests_reject_zero_standard_error_instead_of_fabricating_significance():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("one_sample_t", [5, 5, 5], null_mean=1)
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("welch_t", [1, 1, 1], [5, 5, 5])
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("paired_t", [5, 7, 9], [4, 6, 8])
