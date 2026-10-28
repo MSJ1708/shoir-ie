@@ -22,8 +22,7 @@ def test_subscription_approval_cannot_overwrite_the_protected_administrator():
     approval = source[start:end]
 
     assert "const protectedTarget =" in approval
-    assert 'request.username_lc === "sho"' in approval
-    assert 'existing?.role === "Enterprise Admin"' in approval
+    assert "isProtectedAdministratorTarget(" in approval
     assert "if (protectedTarget)" in approval
     assert "}, 403);" in approval
     assert approval.index("if (protectedTarget)") < approval.index(".upsert(payload")
