@@ -321,3 +321,57 @@ Current matrix evidence on #215:
 This is not a subjective score. Both a restricted controlled beta and paid general availability remain unauthorized while the latest #216 security/admin fixes and #217 XLSX injection suite await exact-head CI, hosted smoke is skipped/not checked, branch protection is incomplete, and production/staging schema/function parity and recovery approval are unresolved.
 
 No production write/deploy, legal sign-off, external security audit, hosted acceptance or rollback rehearsal was performed in this execution. The controlled beta can be reconsidered only for the explicitly scoped, tested features after all mandatory gates above pass and required human approvals are documented. Paid general availability requires separate technical, legal/privacy, IP, commercial and operational sign-off.
+
+---
+
+## Fresh execution snapshot — 28 October 2026
+
+**Disposition remains NO-GO.** This snapshot supersedes older live-state claims where the current read-only observations differ. It is evidence documentation, not an authorization to deploy.
+
+### Exact-head security fix
+
+- PR #216: removed one extra blank line in `supabase/functions/shoir-persistence/security_test.ts`; no logic changed.
+- Fix commit: `21a8d786485c11a415df1158d851bc43f9705c24`.
+- Exact-head Edge Function verification: **PASS**, run [40681094339](https://github.com/MSJ1708/shoir-ie/actions/runs/40681094339).
+- Exact-head Engine Regression: **PASS**, run [40681094423](https://github.com/MSJ1708/shoir-ie/actions/runs/40681094423).
+- At snapshot time, validation [40681094502](https://github.com/MSJ1708/shoir-ie/actions/runs/40681094502), Platform Tests [40681094434](https://github.com/MSJ1708/shoir-ie/actions/runs/40681094434), security/quality [40681094361](https://github.com/MSJ1708/shoir-ie/actions/runs/40681094361), and tests [40681094334](https://github.com/MSJ1708/shoir-ie/actions/runs/40681094334) were still running. The local/browser validation job reported `live-deployment-smoke` as skipped. Do not infer final success from in-progress runs or claim hosted release acceptance from the local smoke.
+- PR #216 remains draft; no independent review is recorded. No Edge Function deployment has occurred.
+
+### Fresh read-only Supabase preflight
+
+Read-only management metadata and aggregate SQL were checked on 28 October 2026. No account identifiers, referral codes, credential data, or row-level account contents were selected, and no writes were made.
+
+| Check | Production `gcsamrdaeraxieaagsta` | Staging `hfhrosthswcybccepmak` |
+|---|---:|---:|
+| Database region | `eu-central-1` | `eu-central-1` |
+| PostgreSQL version | `17.6.1.166` | `17.11.0.003` |
+| `shoir-persistence` active version | 8 | 10 |
+| Accounts (aggregate count) | 5 | 9 |
+| Accounts matching legacy referral-code rewrite predicate | 5 | 1 |
+| Duplicate nonblank normalized referral-code groups | 0 | 0 |
+| Referral table present | No | Yes |
+| Legal acceptance columns present | 0 of 6 | 6 of 6 |
+| Approval-guard trigger present | No | Yes |
+
+Production ledger has 14 recorded migrations and ends at `20261019140600`. Staging has 17 entries including the legal/referral and acceptance versions; its refund-policy migration is recorded as version `20261025164602` with a name referring to `20261023130000`. Reconcile the exact applied SQL/schema and ledger before any production change.
+
+**Critical abort condition:** the historical `20261021130000_shoir_beta_legal_referrals.sql` rewrites `affiliate_code` and `updated_at` for rows matching its predicate and includes duplicate-code repair logic. The fresh production aggregate reports all 5 existing accounts match that predicate. Do not replay that migration against production, do not run an unreviewed `supabase db push`, and do not deploy staging function v10 directly. The additive migration in PR #218 is a safer candidate but does not by itself stop the migration runner from processing older unrecorded migration files. The isolated production-shaped rehearsal, reviewed ledger-reconciliation manifest, backup/restore proof, independent DBA/security review and explicit release authorization remain open.
+
+The staging Supabase security advisor reports one informational finding for `public.shoir_referrals` (RLS enabled, no policies). The source/DDL describes the table as server-only with revocations for `PUBLIC`, `anon` and `authenticated`, and service-role grants. Do not add broad client policies merely to silence the notice; independently verify live grants and keep all referral operations server-mediated.
+
+### Current GitHub enforcement metadata
+
+- `main` points to `2ef44057f84162389d39998e922b505dcfe4d3e9`. The branch API says `protected=true`, but exposes empty required-check contexts/checks arrays. The detailed protection endpoint returned HTTP 403 to the connected integration; the repository rulesets list returned an empty array.
+- `staging-e2e-20261019` points to `0558c23d59a3f0b79558a8d3407869d0238aceaf`. The branch API says `protected=true` but reports status-check enforcement `off` and empty contexts/checks arrays.
+- Therefore named mandatory status checks and reviewer requirements are **not verified/configured by the evidence available here**. An authorized repository administrator must configure and verify the saved policies. Do not treat the `protected` boolean alone as proof of a safe release gate.
+
+### Release conclusion
+
+- PR #215's source CI passed on its recorded head, but its hosted deployment smoke was skipped; authenticated staging identity, authorization/cross-workspace denial, persistence/re-login and current deployed-SHA acceptance remain unproven.
+- PR #217's current recorded exact-head synthetic export runs passed; no independent review is recorded. Those artifact results do not prove hosted download behavior or production exports.
+- PR #218's source/tests passed on its recorded head, but the migration/ledger/restore boundary remains blocked. No production migration or function deployment is approved by those passes.
+- The 100-tool readiness matrix remains 98 `IMPLEMENTED_NEEDS_VALIDATION`, 2 `EXTERNAL_CONFIGURATION_REQUIRED`, and 0 `VERIFIED_WORKING`. This is not a verified product pass rate.
+- Paid launch also lacks verified operator/merchant identity, complete provider and data-transfer facts, qualified Saudi legal/privacy approval, IP/license review, payment/refund/invoice evidence, tested restore and support/incident ownership.
+
+**Final disposition at this snapshot: NO-GO — TECHNICAL BLOCKER REMAINS.** Required human actions also remain: independent security/migration review; repository-owner enforcement settings; authorized staging operator's authenticated acceptance using disposable accounts; qualified Saudi legal/privacy review and verified commercial facts; and written release-owner approval. No production write, migration, deployment or billing operation occurred.
+
