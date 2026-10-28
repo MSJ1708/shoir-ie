@@ -165,6 +165,86 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Diagnose currently deployed production CORS (informational only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/production-security-diagnostic
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          endpoint = "https://gcsamrdaeraxieaagsta.supabase.co/functions/v1/shoir-persistence"
+          approved_origin = "https://shoir-ie-app.streamlit.app"
+          rejected_origin = "https://unapproved-origin.example"
+
+          def probe(label, origin=None):
+              headers = {}
+              if origin is not None:
+                  headers["Origin"] = origin
+              req = Request(endpoint, headers=headers, method="OPTIONS")
+              try:
+                  response = urlopen(req, timeout=20)
+              except HTTPError as error:
+                  response = error
+              return {
+                  "probe": label,
+                  "status": int(response.code),
+                  "allow_origin": response.headers.get("Access-Control-Allow-Origin"),
+                  "allow_methods": response.headers.get("Access-Control-Allow-Methods", ""),
+                  "vary": response.headers.get("Vary", ""),
+              }
+
+          results = []
+          probe_error = None
+          try:
+              results = [
+                  probe("approved-production-origin", approved_origin),
+                  probe("unapproved-production-origin", rejected_origin),
+                  probe("origin-omitted", None),
+              ]
+              approved, rejected, missing = results
+              failures = []
+              if approved["allow_origin"] != approved_origin:
+                  failures.append("production did not return the exact approved origin (wildcard or missing header)")
+              if rejected["status"] != 403 or rejected["allow_origin"] is not None:
+                  failures.append("production did not deny the unapproved origin with HTTP 403 and no allow-origin header")
+              if missing["allow_origin"] == "*":
+                  failures.append("origin-free production request still received wildcard allow-origin")
+              overall = "PASS" if not failures else "FAIL"
+          except (URLError, TimeoutError, OSError) as error:
+              probe_error = type(error).__name__
+              failures = ["live production CORS probe could not complete"]
+              overall = "BLOCKED"
+
+          report = {
+              "scope": "non-mutating OPTIONS requests only; no credentials or production data used",
+              "overall": overall,
+              "endpoint": endpoint,
+              "results": results,
+              "failures": failures,
+              "transport_error_type": probe_error,
+              "release_gate": False,
+              "note": "Informational diagnostic. A result of FAIL/BLOCKED is not treated as a PASS or authorization to deploy.",
+          }
+          Path("artifacts/production-security-diagnostic").mkdir(parents=True, exist_ok=True)
+          Path("artifacts/production-security-diagnostic/production-cors-report.json").write_text(
+              json.dumps(report, indent=2) + "\\n", encoding="utf-8"
+          )
+          print(json.dumps(report, indent=2))
+          if overall != "PASS":
+              print(f"::warning::Production CORS diagnostic is {overall}; inspect report artifact. This diagnostic does not authorize or perform production changes.")
+          PY
+      - name: Upload production CORS diagnostic (not a release gate)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-production-cors-diagnostic
+          path: artifacts/production-security-diagnostic/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Probe deployed staging Edge Function CORS and preflight
         shell: bash
         run: |
