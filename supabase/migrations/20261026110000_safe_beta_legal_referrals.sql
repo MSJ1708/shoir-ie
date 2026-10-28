@@ -53,7 +53,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_shoir_accounts_affiliate_code_trimmed_uniq
     WHERE affiliate_code IS NOT NULL AND BTRIM(affiliate_code) <> '';
 
 ALTER TABLE public.shoir_referrals ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.shoir_referrals FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.shoir_referrals FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.shoir_referrals TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.shoir_referrals_id_seq TO service_role;
 
