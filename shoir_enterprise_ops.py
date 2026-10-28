@@ -547,7 +547,7 @@ def render_connectivity_extension() -> None:
     st.session_state["connectivity_health_df"] = health
 
     st.markdown("### 🔌 Connector Health & Deployment Readiness")
-    st.caption("One governed adapter surface for SAP · Oracle · WMS · MES · ERP · REST · SQL · MQTT · OPC-UA. Live tests are opt-in; this build validates executable transports only and never stores secret values.")
+    st.caption("Governed connector-profile and readiness surface. Vendor/protocol labels are not proof of a live connection. The reviewed generic T096 adapter is HTTPS REST read-only with server-side secrets and an exact host allowlist; vendor-specific SAP/Oracle/WMS and external SQL/MQTT/OPC-UA adapters require separate implementation and provider-backed validation.")
 
     with st.expander("🧭 Live Connection Wizard", expanded=False):
         left, right = st.columns(2)
