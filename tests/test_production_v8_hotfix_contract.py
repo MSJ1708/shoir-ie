@@ -1,4 +1,4 @@
-"""Contract guards for the schema-compatible production-v8 security hotfix."""
+"""Contract guards for the schema-compatible production-v9-compatible security candidate."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
