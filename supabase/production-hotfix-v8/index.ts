@@ -7,6 +7,7 @@ import {
   isAllowedBrowserOrigin,
   PublicRequestError,
   readBoundedJsonObject,
+  publicErrorFor,
 } from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -659,12 +660,7 @@ Deno.serve(async (req) => {
 
     return sendResponse({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
-    if (err instanceof PublicRequestError) {
-      return sendResponse({ error: err.message }, err.status);
-    }
-    return sendResponse(
-      { error: err instanceof Error ? err.message : String(err) },
-      500,
-    );
+    const failure = publicErrorFor(err);
+    return sendResponse({ error: failure.message }, failure.status);
   }
 });
