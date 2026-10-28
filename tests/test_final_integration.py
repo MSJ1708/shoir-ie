@@ -170,6 +170,10 @@ def test_legacy_external_connector_probes_and_sample_reads_never_network(tmp_pat
     assert sample["frame"].empty
     assert sample["artifact_id"] == ""
 
+    assert ent._connector_sql_test("postgresql://127.0.0.1/private")[0] == "EXTERNAL_TEST_DISABLED"
+    assert ent._connector_mqtt_test("mqtt://127.0.0.1:1883")[0] == "EXTERNAL_TEST_DISABLED"
+    assert ent._connector_opcua_test("opc.tcp://127.0.0.1:4840")[0] == "EXTERNAL_TEST_DISABLED"
+
 
 def test_canonical_store_roundtrip_and_workspace_isolation(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
