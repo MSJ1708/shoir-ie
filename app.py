@@ -1631,7 +1631,8 @@ if not st.session_state.get("current_user"):
           /* Streamlit's absolute tab-highlight can span the whole grid row on mobile.
              Hide only that decorative underline at narrow widths; preserve an explicit
              selected-tab surface and start border so keyboard/visual selection remains clear. */
-          .st-key-shoir_public_auth_tabs [data-baseweb="tab-highlight"] {
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab-highlight"],
+          .st-key-shoir_public_auth_tabs .react-aria-SelectionIndicator {
             display: none !important;
           }
           .st-key-shoir_public_auth_tabs [role="tab"][aria-selected="true"],
