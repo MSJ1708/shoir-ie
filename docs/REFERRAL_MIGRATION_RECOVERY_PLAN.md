@@ -38,3 +38,33 @@ Abort if any existing account identifier/timestamp changes unexpectedly, schema/
 - Verify legal acceptance version checks and approval guard behavior using synthetic accounts.
 - Verify account and timestamp preservation against the pre-migration snapshot.
 - Attach sanitized evidence and hashes to the release record.
+
+
+## Fresh read-only compatibility recheck — October 28, 2026
+
+Aggregate-only queries were rerun against the live production and staging databases. No usernames, account identifiers, referral-code values, password hashes, or row-level account data were selected.
+
+| Check | Production | Staging |
+|---|---:|---:|
+| Account rows | 5 | 9 |
+| Populated referral codes | 0 | 8 |
+| Blank/null referral codes | 5 | 1 |
+| Duplicate populated-code excess | 0 | 0 |
+| `public.shoir_referrals` exists | No | Yes |
+| Current legal-acceptance columns present (6 expected) | 0 | 6 |
+| Referral-table RLS enabled | Not applicable (table absent) | Yes |
+| Referral-table RLS policies | Not applicable | 0 |
+| Browser role grants on referral table (`anon` / `authenticated`) | Not applicable | 0 |
+
+Function inventory after staging-only deployment:
+
+- Production `shoir-persistence`: version **8**, deployed source hash `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`.
+- Staging `shoir-persistence`: version **11**, deployed source hash `a0252769822fd7834c6af67fcf69259ec9bbefce7041ac3a5a36d8d6a9a90397`; source was deployed from security candidate commit `21a8d786485c11a415df1158d851bc43f9705c24`.
+
+The staging function was verified to no longer emit wildcard CORS and no longer auto-repair the reserved administrator during login. Production remains unchanged and still has the older handler. The live staging HTTP CORS/preflight probe now passes via GitHub Actions; hosted public-shell and authenticated tests are recorded separately and must complete successfully before they can count as release evidence.
+
+### Compatibility decision
+
+The present mismatch is real: deploying the staging v11 handler to production before schema rollout is not approved. Production has neither the legal-acceptance columns nor the referral table used by this handler. Normal migration execution is also unsafe until the unrecorded legacy migration path is reconciled because the historical `20261021130000_shoir_beta_legal_referrals.sql` includes data-rewriting updates.
+
+Do not execute production DDL on the basis of this recheck alone. Required next steps remain: exact migration manifest and schema diff; isolated production-shaped rehearsal; account-identifier/code/timestamp preservation proof; backup/PITR and restore/forward-recovery verification; independent database/security review; and explicit release-owner approval. The query results are time-bound and must be repeated immediately before any approved production migration.
