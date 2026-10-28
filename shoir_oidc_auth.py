@@ -6,6 +6,7 @@ is passed server-side to the Edge Function for independent signature validation.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import ipaddress
 from typing import Any
 from urllib.parse import urlparse
 
@@ -28,16 +29,21 @@ def _is_public_https_url(value: Any) -> bool:
     try:
         parsed = urlparse(value.strip())
         host = (parsed.hostname or "").lower()
+        if not host:
+            return False
+        try:
+            ipaddress.ip_address(host)
+            return False
+        except ValueError:
+            pass
         return (
             parsed.scheme.lower() == "https"
-            and bool(host)
             and not parsed.username
             and not parsed.password
             and host != "localhost"
             and not host.endswith(".localhost")
             and not host.endswith(".local")
             and not host.endswith(".internal")
-            and not host.replace(".", "").isdigit()
             and parsed.port in (None, 443)
         )
     except (TypeError, ValueError):
