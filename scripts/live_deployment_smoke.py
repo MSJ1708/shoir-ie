@@ -51,34 +51,37 @@ FATAL_TEXT_MARKERS = (
 
 
 def wake_if_hibernated(page) -> bool:
-    """Wake the hosted Streamlit app when Community Cloud shows its sleep prompt."""
-    prompt = re.compile(
-        r"yes,?\s*get this app back up|this app has gone to sleep|wake.*app|wake up",
-        re.I,
-    )
-    for frame in list(page.frames):
-        candidates = (
-            frame.get_by_role("button", name=prompt),
-            frame.get_by_text(re.compile(r"yes,?\s*get this app back up", re.I)),
-            frame.locator("button").filter(has_text=prompt),
-            frame.locator("a").filter(has_text=prompt),
-            frame.locator("input[type='button'], input[type='submit']"),
-        )
-        for locator in candidates:
+    """Wait for and click Community Cloud's explicit sleep interstitial button."""
+    button_name = re.compile(r"yes,?\s*get this app back up", re.I)
+    sleep_prompt = re.compile(r"this app has gone to sleep|yes,?\s*get this app back up", re.I)
+    deadline = time.monotonic() + 12
+
+    while time.monotonic() < deadline:
+        for frame in list(page.frames):
             try:
-                if not locator.count():
-                    continue
-                candidate = locator.first
-                if not candidate.is_visible(timeout=500):
-                    continue
-                if candidate.evaluate("(el) => el.tagName === 'INPUT'") and not prompt.search(
-                    str(candidate.get_attribute("value") or "")
-                ):
-                    continue
-                candidate.click(timeout=2_000)
-                return True
+                body = frame.locator("body").inner_text(timeout=750)
             except Exception:
+                body = ""
+            if not sleep_prompt.search(body):
                 continue
+
+            # Prefer the accessible button name. Fall back to matching visible button
+            # text because the Cloud interstitial's markup has varied between releases.
+            candidates = (
+                frame.get_by_role("button", name=button_name),
+                frame.locator("button").filter(has_text=button_name),
+                frame.get_by_text(button_name),
+            )
+            for locator in candidates:
+                try:
+                    candidate = locator.first
+                    if locator.count() < 1 or not candidate.is_visible():
+                        continue
+                    candidate.click(timeout=3_000)
+                    return True
+                except Exception:
+                    continue
+        page.wait_for_timeout(400)
     return False
 
 
