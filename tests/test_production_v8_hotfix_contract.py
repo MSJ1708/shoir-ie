@@ -1,7 +1,7 @@
 """Contract guards for the schema-compatible production-v8 security hotfix."""
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 HOTFIX = ROOT / "supabase" / "production-hotfix-v8"
 INDEX = HOTFIX / "index.ts"
 SECURITY = HOTFIX / "security.ts"
