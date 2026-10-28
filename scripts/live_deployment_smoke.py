@@ -53,13 +53,13 @@ FATAL_TEXT_MARKERS = (
 def wake_if_hibernated(page) -> bool:
     """Wake the hosted Streamlit app when Community Cloud shows its sleep prompt."""
     prompt = re.compile(
-        r"yes,?\\s*get this app back up|this app has gone to sleep|wake.*app|wake up",
+        r"yes,?\s*get this app back up|this app has gone to sleep|wake.*app|wake up",
         re.I,
     )
     for frame in list(page.frames):
         candidates = (
             frame.get_by_role("button", name=prompt),
-            frame.get_by_text(re.compile(r"yes,?\\s*get this app back up", re.I)),
+            frame.get_by_text(re.compile(r"yes,?\s*get this app back up", re.I)),
             frame.locator("button").filter(has_text=prompt),
             frame.locator("a").filter(has_text=prompt),
             frame.locator("input[type='button'], input[type='submit']"),
