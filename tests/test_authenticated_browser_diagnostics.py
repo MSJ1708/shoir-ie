@@ -10,8 +10,8 @@ def test_browser_error_diagnostics_preserve_error_name_message_and_source_frames
         name="TypeError",
         message="Cannot read properties of undefined (reading 'map')",
         stack=(
-            "TypeError: Cannot read properties of undefined (reading 'map')\\n"
-            "    at renderWorkbook (https://shoirieverified.streamlit.app/assets/app.js:2:19)\\n"
+            "TypeError: Cannot read properties of undefined (reading 'map')\n"
+            "    at renderWorkbook (https://shoirieverified.streamlit.app/assets/app.js:2:19)\n"
             "    at app (https://shoirieverified.streamlit.app/assets/app.js:5:32)"
         ),
     )
@@ -33,7 +33,7 @@ def test_browser_error_diagnostics_redact_tokens_and_url_query_values():
             f"token={secret_token}; "
             f"request https://shoirieverified.streamlit.app/api?access_token={secret_token}"
         ),
-        stack="Error: diagnostic\\n    at start (https://example.test/app.js?key=secret:3:4)",
+        stack="Error: diagnostic\n    at start (https://example.test/app.js?key=secret:3:4)",
     )
 
     result = _safe_javascript_error(error)
