@@ -2,11 +2,15 @@ name: Authenticated release gate
 
 on:
   workflow_dispatch:
-  # A one-shot opt-in for live staging verification when a fresh manual
-  # dispatch is unavailable. Ordinary pushes remain no-ops for this workflow.
+  # Keep the existing push-marker opt-in. The current release-closeout PR is
+  # additionally allowed to run the same guarded staging-only acceptance.
   push:
     branches:
       - staging-e2e-20261019
+  pull_request:
+    branches:
+      - staging-e2e-20261019
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -20,7 +24,7 @@ jobs:
     # The push event is intentionally opt-in: only a commit message carrying
     # this exact marker may run the stateful staging gate. workflow_dispatch
     # remains available for normal manual runs.
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-authenticated-gate]')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-authenticated-gate]')) || (github.event_name == 'pull_request' && github.base_ref == 'staging-e2e-20261019' && github.head_ref == 'docs/live-release-recheck-20261027' && !github.event.pull_request.head.repo.fork) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -60,13 +64,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_APP_URL SHOIR_E2E_EXPECTED_STAGING_APP_HOST SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_MODULE_PASSWORD SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_PASSWORD SHOIR_E2E_INACTIVE_USERNAME SHOIR_E2E_INACTIVE_PASSWORD)
+          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_APP_URL SHOIR_E2E_EXPECTED_STAGING_APP_HOST SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_MODULE_PASSWORD SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_PASSWORD SHOIR_E2E_INACTIVE_USERNAME SHOIR_E2E_INACTIVE_PASSWORD SHOIR_E2E_VERIFY_LOGIN_THROTTLE)
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required Actions secret/variable: $name"
               exit 2
             fi
           done
+          if [[ "${SHOIR_E2E_VERIFY_LOGIN_THROTTLE,,}" != "true" ]]; then
+            echo "::error::SHOIR_E2E_VERIFY_LOGIN_THROTTLE must be set to true; login-throttle acceptance is a mandatory release probe."
+            exit 2
+          fi
           for name in SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_INACTIVE_USERNAME; do
             value="${!name}"
             if [[ "${value,,}" != shoir-e2e-* ]]; then
