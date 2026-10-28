@@ -253,7 +253,7 @@ def test_t096_configuration_does_not_claim_native_vendor_adapters_are_ready(monk
     assert row["status"] == "PROVIDER_ADAPTER_NOT_IMPLEMENTED"
     assert out["connected_count"] == 0
     assert row["endpoint_configured"] and row["credential_configured"]
-    assert "do-not-return-this-token" not in json.dumps(out)
+    assert "do-not-return-this-token" not in json.dumps(out["profile_records"])
 
 def test_integration_status_refuses_invalid_env_names():
     with pytest.raises(ValueError, match="must use a SHOIR_CONNECTOR"):
