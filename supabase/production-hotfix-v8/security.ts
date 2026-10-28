@@ -53,7 +53,6 @@ export function hasExactlyOneCanonicalMasterAdmin(
 }
 
 
-/** A subscription approval must never mutate the reserved administrator account. */
 function normalizedUsername(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
