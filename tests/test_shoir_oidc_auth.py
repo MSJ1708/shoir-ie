@@ -78,7 +78,7 @@ class _User:
 
 
 def test_id_token_helper_only_returns_bounded_token_for_logged_in_user():
-    assert get_verified_streamlit_id_token(_User("synthetic-token")) == "synthetic-token"
+    assert get_verified_streamlit_id_token(_User("a" * 64)) == "a" * 64
     assert get_verified_streamlit_id_token(_User("x" * 16_385)) == ""
 
 
