@@ -6,6 +6,13 @@ import {
   publicErrorFor,
   readBoundedJsonObject,
 } from "./security.ts";
+import {
+  escapePostgrestLikeLiteral,
+  MAX_OIDC_ID_TOKEN_CHARS,
+  readOidcVerifierConfig,
+  sha256Hex,
+  verifyOidcIdToken,
+} from "./oidc.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -309,6 +316,76 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
     });
   }
   return keys;
+}
+
+
+type OidcAuditOutcome = "success" | "denied" | "expired" | "error";
+
+async function writeOidcAuditEvent(event: {
+  event_type: "oidc_login";
+  outcome: OidcAuditOutcome;
+  actor_username_lc?: string | null;
+  provider_issuer?: string | null;
+  subject_sha256?: string | null;
+  id_token_sha256?: string | null;
+  details?: Record<string, unknown>;
+}) {
+  const { error } = await supabase.from("shoir_security_audit_events").insert({
+    event_type: event.event_type,
+    outcome: event.outcome,
+    actor_username_lc: event.actor_username_lc ?? null,
+    provider_issuer: event.provider_issuer ?? null,
+    subject_sha256: event.subject_sha256 ?? null,
+    id_token_sha256: event.id_token_sha256 ?? null,
+    details: event.details ?? {},
+  });
+  return error;
+}
+
+async function revokeJustCreatedSession(token: string, usernameLc: string) {
+  const tokenHash = await sha256Hex(token);
+  const { error } = await supabase.from("shoir_sessions").delete()
+    .eq("token_hash", tokenHash)
+    .eq("username_lc", usernameLc);
+  if (error) throw new Error("Could not revoke the un-audited session.");
+}
+
+function isUniqueConstraintError(error: { code?: string } | null): boolean {
+  return error?.code === "23505";
+}
+
+async function findAccountByVerifiedOidcEmail(email: string) {
+  const pattern = escapePostgrestLikeLiteral(email);
+  const { data, error } = await supabase.from("shoir_accounts").select(
+    "username,username_lc,role,tier,email,active,subscription_expires_at",
+  ).ilike("email", pattern).limit(5);
+  if (error) throw new Error("The account directory is unavailable.");
+  const matches = (data || []).filter((row) =>
+    typeof row.email === "string" && row.email.trim().toLowerCase() === email
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function recordOidcDenial(
+  issuer: string,
+  reason: string,
+  subject: string | null = null,
+  usernameLc: string | null = null,
+) {
+  try {
+    const error = await writeOidcAuditEvent({
+      event_type: "oidc_login",
+      outcome: "denied",
+      provider_issuer: issuer,
+      subject_sha256: subject ? await sha256Hex(subject) : null,
+      actor_username_lc: usernameLc,
+      details: { reason },
+    });
+    if (error) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 Deno.serve(async (req) => {
