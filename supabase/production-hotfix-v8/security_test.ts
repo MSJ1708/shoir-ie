@@ -3,6 +3,9 @@ import {
   hasCanonicalMasterAdminInvariant,
   hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
+  MAX_REQUEST_BODY_BYTES,
+  PublicRequestError,
+  readBoundedJsonObject,
 } from "./security.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -123,4 +126,66 @@ Deno.test("reserved administrator list requires exactly one canonical active adm
     !hasExactlyOneCanonicalMasterAdmin([{ ...canonical, active: false }]),
     "inactive reserved administrator must fail closed",
   );
+});
+
+async function expectPublicRequestError(
+  action: () => unknown | Promise<unknown>,
+  expectedStatus: number,
+  expectedText: string,
+): Promise<void> {
+  try {
+    await action();
+  } catch (error) {
+    assert(error instanceof PublicRequestError, "Expected PublicRequestError.");
+    assert(error.status === expectedStatus, `Expected status ${expectedStatus}, got ${error.status}.`);
+    assert(error.message.includes(expectedText), `Expected message to include "${expectedText}".`);
+    return;
+  }
+  throw new Error("Expected the action to reject.");
+}
+
+Deno.test("bounded parser accepts a normal object", async () => {
+  const request = new Request("https://example.invalid", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "login", username: "synthetic-user" }),
+  });
+  const parsed = await readBoundedJsonObject(request);
+  assert(parsed.action === "login", "Action was not parsed.");
+  assert(parsed.username === "synthetic-user", "Username was not parsed.");
+});
+
+Deno.test("bounded parser rejects invalid JSON and non-object JSON", async () => {
+  const invalid = new Request("https://example.invalid", {
+    method: "POST",
+    body: "{not-json",
+  });
+  await expectPublicRequestError(
+    () => readBoundedJsonObject(invalid),
+    400,
+    "valid UTF-8 JSON",
+  );
+
+  const array = new Request("https://example.invalid", {
+    method: "POST",
+    body: "[]",
+  });
+  await expectPublicRequestError(
+    () => readBoundedJsonObject(array),
+    400,
+    "JSON object",
+  );
+});
+
+Deno.test("bounded parser enforces actual streamed body byte limit", async () => {
+  const request = new Request("https://example.invalid", {
+    method: "POST",
+    body: JSON.stringify({ data: "x".repeat(128) }),
+  });
+  await expectPublicRequestError(
+    () => readBoundedJsonObject(request, 32),
+    413,
+    "size limit",
+  );
+  assert(MAX_REQUEST_BODY_BYTES > 128, "Default request limit should allow the fixture.");
 });
