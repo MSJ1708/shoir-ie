@@ -116,13 +116,12 @@ jobs:
           if-no-files-found: warn
 
   live-deployment-smoke:
-    # Probe the currently hosted, anonymous shell for audit PRs and after
-    # every main push. This is a service-availability/rendering check, not proof
-    # that the hosted app has deployed the triggering Git SHA. Manual runs on
-    # main allow an explicit post-deployment check without account credentials.
+    # Probe the hosted anonymous production shell for audit candidates, main
+    # updates, and the dedicated release-evidence branch. This is a service
+    # availability/rendering check, not proof that this SHA is deployed.
     if: >-
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
+      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main' || startsWith(github.ref_name, 'docs/live-release-recheck-'))) ||
       (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -151,9 +150,12 @@ jobs:
           if-no-files-found: warn
 
   staging-live-acceptance:
-    # This PR targets staging; exercise the real hosted staging app and deployed
-    # staging Edge Function. This does not claim that the PR SHA itself is deployed.
-    if: ${{ github.event_name == 'pull_request' && github.base_ref == 'staging-e2e-20261019' }}
+    # Exercise the hosted staging shell/function on staging-targeted PRs and on
+    # the dedicated release-evidence branch. Probes are non-mutating and do not
+    # claim that the triggering source SHA is the deployed staging SHA.
+    if: >-
+      (github.event_name == 'pull_request' && github.base_ref == 'staging-e2e-20261019') ||
+      (github.event_name == 'push' && startsWith(github.ref_name, 'docs/live-release-recheck-'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
