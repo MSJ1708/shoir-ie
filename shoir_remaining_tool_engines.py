@@ -990,7 +990,7 @@ def get_tool_example_json(tool_id: str) -> str:
         "T096": {
             "profiles": [
                 {"name": "Plant REST API", "protocol": "REST", "endpoint_env": "SHOIR_CONNECTOR_PLANT_ENDPOINT", "credential_env": "SHOIR_CONNECTOR_PLANT_TOKEN"},
-                {"name": "MES", "protocol": "MES", "endpoint_env": "SHOIR_CONNECTOR_MES_ENDPOINT", "credential_env": "SHOIR_CONNECTOR_MES_CREDENTIAL"},
+                {"name": "MES REST API (generic REST only)", "protocol": "REST", "endpoint_env": "SHOIR_CONNECTOR_MES_ENDPOINT", "credential_env": "SHOIR_CONNECTOR_MES_TOKEN"},
             ],
         },
         "T097": {
