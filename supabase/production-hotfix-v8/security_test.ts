@@ -258,6 +258,30 @@ Deno.test(
       "pending credentials for the reserved admin must be protected",
     );
     assert(
+      isProtectedAdministratorTarget(
+        { username_lc: " SHo " },
+        null,
+        null,
+      ),
+      "mixed-case/whitespace request usernames must still protect the reserved admin",
+    );
+    assert(
+      isProtectedAdministratorTarget(
+        { username_lc: "regular-user" },
+        { username_lc: "regular-user", role: "user" },
+        { username_lc: " SHO " },
+      ),
+      "mixed-case pending credential identity must protect the reserved admin",
+    );
+    assert(
+      isProtectedAdministratorTarget(
+        { username_lc: "regular-user" },
+        { username_lc: "regular-user", role: " enterprise admin " },
+        { username_lc: "regular-user" },
+      ),
+      "mixed-case Enterprise Admin role must be treated as protected",
+    );
+    assert(
       !isProtectedAdministratorTarget(
         { username_lc: "regular-user" },
         { username_lc: "regular-user", role: "User" },
