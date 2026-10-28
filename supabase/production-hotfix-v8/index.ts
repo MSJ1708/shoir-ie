@@ -616,7 +616,7 @@ Deno.serve(async (req) => {
         pendingCred?.username_lc === "sho";
       if (protectedTarget) {
         return sendResponse({
-          error: "The protected administrator account cannot be changed by a subscription request.",
+          error: "Protected administrator changes are blocked.",
         }, 403);
       }
       const now = new Date().toISOString();
