@@ -2,9 +2,10 @@ name: Shoir-IE Edge Function verification
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "feature/**", "hotfix/**"]
     paths:
       - "supabase/functions/**"
+      - "supabase/production-hotfix-v8/**"
       - ".github/workflows/edge-function-check.yml"
   pull_request:
     branches: ["main", "feat/shoir-100-tools-integration-20261025"]
@@ -31,3 +32,9 @@ jobs:
         run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security_test.ts
       - name: Test bounded request parsing and safe error mapping
         run: deno test supabase/functions/shoir-persistence/security_test.ts
+      - name: Format production v8 hotfix candidate
+        run: deno fmt --check supabase/production-hotfix-v8/index.ts supabase/production-hotfix-v8/security.ts supabase/production-hotfix-v8/security_test.ts
+      - name: Type-check production v8 hotfix candidate and tests
+        run: deno check supabase/production-hotfix-v8/index.ts supabase/production-hotfix-v8/security_test.ts
+      - name: Test production v8 CORS and protected-admin invariants
+        run: deno test supabase/production-hotfix-v8/security_test.ts
