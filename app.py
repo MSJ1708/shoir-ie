@@ -1769,7 +1769,7 @@ if not st.session_state.get("current_user"):
                         )
                     else:
                         try:
-                            _oidc_auth = edge_oidc_login(_oidc_id_token)
+                            _oidc_auth = edge_oidc_login(_oidc_id_token, _oidc_display_hint)
                         except Exception:
                             _oidc_auth = {}
                             st.error(
