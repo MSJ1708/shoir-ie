@@ -78,7 +78,7 @@ Abort and remain HOLD if any manifest/ledger difference is unexplained; any exis
 
 ## Current operational disposition
 
-- Staging CORS/preflight and staged public-shell browser acceptance pass on release evidence PR #211's current head.
+- Earlier staging CORS/preflight and public-shell browser checks passed on an older deployed baseline. The latest release-evidence PR #211 head is a newer candidate whose exact-head staging/authenticated jobs are queued; do not carry older pass status forward or call the latest candidate accepted.
 - Staging function v11 source has exact-origin CORS and protected-admin fail-closed behavior.
 - Current production inventory re-read on 2026-10-28 reports `shoir-persistence` v9, source hash `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`. The active source includes `Access-Control-Allow-Methods: POST, OPTIONS`, but still emits `Access-Control-Allow-Origin: *`; exact-origin enforcement and `Vary: Origin` remain unresolved. Do not infer security readiness from the method-header correction.
 - Production release remains **HOLD / NO-GO**. This manifest is preparation, not production authorization.
@@ -96,6 +96,6 @@ A GitHub-hosted runner made non-mutating `OPTIONS` requests directly to the actu
 | Unapproved origin: `https://unapproved-origin.example` | 200 | `*` | FAIL |
 | Origin omitted | 200 | `*` | FAIL |
 
-The recorded GitHub-runner probe showed HTTP 200 with `Access-Control-Allow-Origin: *` for the approved origin, an unapproved origin, and no Origin header. That is a time-stamped live failure. The current management-API source reread still shows wildcard CORS despite now advertising `POST, OPTIONS`; therefore the security blocker remains open. Repeat the direct live HTTP probe after any separately authorized production change. Evidence artifact `shoir-ie-production-cors-diagnostic` was created by PR #211's staging-targeted release check; its JSON report records `overall: FAIL` and `release_gate: false`. Staging's separate approved/rejected origin and public-shell tests pass.
+The recorded GitHub-runner probe showed HTTP 200 with `Access-Control-Allow-Origin: *` for the approved origin, an unapproved origin, and no Origin header. That is a time-stamped live failure. The current management-API source reread still shows wildcard CORS despite now advertising `POST, OPTIONS`; therefore the security blocker remains open. Repeat the direct live HTTP probe after any separately authorized production change. Evidence artifact `shoir-ie-production-cors-diagnostic` was created by PR #211's staging-targeted release check; its JSON report records `overall: FAIL` and `release_gate: false`. The historical staging probe passed on the previously deployed baseline. The latest exact-head staging probe is still pending; it must be rerun after the reviewed candidate is deployed to staging.
 
 This diagnostic used only HTTP OPTIONS requests. No credentials, account content, or production data were sent, and it made no production mutation. The failure is not closed until an exact production-compatible security source is reviewed, the deployment prerequisites in this manifest are met, the authorized change is deployed, and the same direct production probe passes.
