@@ -17,7 +17,9 @@ permissions:
 
 concurrency:
   group: shoir-authenticated-release-gate
-  cancel-in-progress: false
+  # These probes mutate disposable staging sessions/workspace state. Keep one active
+  # run only, and cancel stale-head runs so the newest exact candidate is not queued.
+  cancel-in-progress: true
 
 jobs:
   authenticated-release-gate:
