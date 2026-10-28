@@ -237,7 +237,9 @@ def main() -> int:
             )
             take_evidence_screenshot(page, REPORT.parent / "authenticated-excel-module.png")
 
-            # Verify genuine sign-out by waiting for the public sign-in heading.
+            # Verify genuine sign-out, not just a transient rerender. Streamlit can
+            # briefly expose the sign-in heading while the previous authenticated DOM
+            # is being replaced; require a stable signed-out state across two polls.
             step = "click sidebar logout"
             visible_logout_button(app_frame).click(timeout=15_000)
             step = "verify unauthenticated sign-in after logout"
@@ -246,6 +248,53 @@ def main() -> int:
                     re.compile(r"Sign In to Your Workspace", re.I)
                 ).first.wait_for(state="visible", timeout=45_000)
             except Exception as exc:
+                visible_body = app_frame.locator("body").inner_text(timeout=5_000).casefold()
+                if "server logout could not revoke this session" in visible_body:
+                    raise RuntimeError("App refused logout because server-side session revocation failed.") from exc
+                if "lock / logout workspace" in visible_body:
+                    raise RuntimeError("Logout click left the authenticated workspace visible.") from exc
+                raise RuntimeError("Logout did not return to the sign-in screen; inspect staging deployment/evidence.") from exc
+
+            signout_deadline = time.monotonic() + 20
+            stable_signout_observations = 0
+            signed_out = False
+            signed_out_body = ""
+            logout_button_visible = True
+            username_in_rendered_body = True
+            while time.monotonic() < signout_deadline:
+                signed_out_body = app_frame.locator("body").inner_text(timeout=8_000)
+                folded_body = signed_out_body.casefold()
+                heading_visible = "sign in to your workspace" in folded_body
+                username_in_rendered_body = username.casefold() in folded_body
+                logout_locator = app_frame.get_by_role("button", name="Lock / Logout Workspace")
+                try:
+                    logout_button_visible = logout_locator.count() > 0 and logout_locator.first.is_visible()
+                except Exception:
+                    logout_button_visible = False
+                signed_out = heading_visible and not username_in_rendered_body and not logout_button_visible
+                if signed_out:
+                    stable_signout_observations += 1
+                    if stable_signout_observations >= 2:
+                        break
+                else:
+                    stable_signout_observations = 0
+                page.wait_for_timeout(500)
+
+            take_evidence_screenshot(page, REPORT.parent / "authenticated-logout-state.png")
+            check(
+                "sidebar_logout_returns_to_signin",
+                signed_out and stable_signout_observations >= 2,
+                "Logout returned to a stable unauthenticated sign-in screen."
+                if signed_out and stable_signout_observations >= 2
+                else (
+                    "Logout UI did not settle into the required signed-out state: "
+                    f"heading_visible={heading_visible if signed_out_body else False}, "
+                    f"test_username_visible={username_in_rendered_body}, "
+                    f"logout_button_visible={logout_button_visible}, "
+                    f"stable_polls={stable_signout_observations}."
+                ),
+            )
+        except Exception as exc:
                 visible_body = app_frame.locator("body").inner_text(timeout=5_000).casefold()
                 if "server logout could not revoke this session" in visible_body:
                     raise RuntimeError("App refused logout because server-side session revocation failed.") from exc
