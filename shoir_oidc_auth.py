@@ -63,9 +63,12 @@ def get_verified_streamlit_id_token(user: Any) -> str:
             return ""
         tokens = getattr(user, "tokens", None)
         token = tokens.get("id") if isinstance(tokens, Mapping) else tokens["id"]
-        if not isinstance(token, str) or not token.strip() or len(token) > 16_384:
+        if not isinstance(token, str):
             return ""
-        return token.strip()
+        token = token.strip()
+        if len(token) < 32 or len(token) > 16_384:
+            return ""
+        return token
     except Exception:
         return ""
 
