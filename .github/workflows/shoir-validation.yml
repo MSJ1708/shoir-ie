@@ -183,7 +183,11 @@ jobs:
           rejected_origin = "https://unapproved-origin.example"
 
           def probe(label, origin=None):
-              headers = {}
+              headers = {
+                  "Access-Control-Request-Method": "POST",
+                  "Access-Control-Request-Headers":
+                      "authorization, x-client-info, apikey, content-type",
+              }
               if origin is not None:
                   headers["Origin"] = origin
               req = Request(endpoint, headers=headers, method="OPTIONS")
@@ -196,6 +200,7 @@ jobs:
                   "status": int(response.code),
                   "allow_origin": response.headers.get("Access-Control-Allow-Origin"),
                   "allow_methods": response.headers.get("Access-Control-Allow-Methods", ""),
+                  "allow_headers": response.headers.get("Access-Control-Allow-Headers", ""),
                   "vary": response.headers.get("Vary", ""),
               }
 
@@ -209,12 +214,33 @@ jobs:
               ]
               approved, rejected, missing = results
               failures = []
+              allowed_methods = {
+                  item.strip().upper() for item in approved["allow_methods"].split(",")
+              }
+              allowed_headers = {
+                  item.strip().casefold() for item in approved["allow_headers"].split(",")
+              }
+              varies_by_origin = lambda item: "origin" in {
+                  value.strip().casefold() for value in item["vary"].split(",")
+              }
+              if approved["status"] != 204:
+                  failures.append("approved-origin browser preflight did not return HTTP 204")
               if approved["allow_origin"] != approved_origin:
-                  failures.append("production did not return the exact approved origin (wildcard or missing header)")
+                  failures.append("approved origin did not receive the exact Access-Control-Allow-Origin value")
+              if not {"POST", "OPTIONS"}.issubset(allowed_methods):
+                  failures.append("approved-origin preflight is missing POST/OPTIONS methods")
+              if not {"authorization", "x-client-info", "apikey", "content-type"}.issubset(allowed_headers):
+                  failures.append("approved-origin preflight is missing required request headers")
+              if not varies_by_origin(approved):
+                  failures.append("approved-origin response is missing Vary: Origin")
               if rejected["status"] != 403 or rejected["allow_origin"] is not None:
-                  failures.append("production did not deny the unapproved origin with HTTP 403 and no allow-origin header")
-              if missing["allow_origin"] == "*":
-                  failures.append("origin-free production request still received wildcard allow-origin")
+                  failures.append("unapproved origin was not denied with HTTP 403 and no allow-origin header")
+              if not varies_by_origin(rejected):
+                  failures.append("unapproved-origin response is missing Vary: Origin")
+              if missing["status"] != 204 or missing["allow_origin"] is not None:
+                  failures.append("origin-free OPTIONS must return HTTP 204 without Access-Control-Allow-Origin")
+              if not varies_by_origin(missing):
+                  failures.append("origin-free response is missing Vary: Origin")
               overall = "PASS" if not failures else "FAIL"
           except (URLError, TimeoutError, OSError) as error:
               probe_error = type(error).__name__
