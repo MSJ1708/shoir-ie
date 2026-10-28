@@ -1623,6 +1623,17 @@ if not st.session_state.get("current_user"):
             min-width: 0 !important;
             max-width: 100% !important;
           }
+          /* The global tab highlight is positioned for a horizontal tab row. Hide
+             that underline on the stacked mobile layout and use an explicit selected
+             surface/border instead, so it never crosses the wrapped tab label. */
+          div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+            display: none !important;
+          }
+          div[data-testid="stTabs"] [role="tab"][aria-selected="true"],
+          div[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+            background-color: rgba(37, 99, 235, 0.08) !important;
+            border-inline-start: 3px solid #2563eb !important;
+          }
         }
         </style>
         """,
