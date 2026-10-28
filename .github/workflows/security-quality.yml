@@ -2,9 +2,9 @@ name: Shoir-IE security and quality gates
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "feature/**", "staging-e2e-20261019"]
   pull_request:
-    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
+    branches: ["main", "feat/shoir-100-tools-integration-20261025", "staging-e2e-20261019"]
 
 permissions:
   contents: read
