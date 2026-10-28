@@ -608,6 +608,17 @@ Deno.serve(async (req) => {
       const { data: pendingCred } = await supabase.from(
         "shoir_pending_credentials",
       ).select("*").eq("username_lc", request.username_lc).maybeSingle();
+      // Subscription approvals must never mutate the reserved admin, even if a
+      // stale or malformed pending request already exists for that identity.
+      const protectedTarget = request.username_lc === "sho" ||
+        existing?.username_lc === "sho" ||
+        existing?.role === "Enterprise Admin" ||
+        pendingCred?.username_lc === "sho";
+      if (protectedTarget) {
+        return sendResponse({
+          error: "The protected administrator account cannot be changed by a subscription request.",
+        }, 403);
+      }
       const now = new Date().toISOString();
       const expiry = request.request_type === "Renewal" && existing
         ? expiry30(existing.subscription_expires_at)
