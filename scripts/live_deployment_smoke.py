@@ -68,17 +68,26 @@ def _tab_bar_layout(app_frame) -> dict:
                     clientWidth: button.clientWidth, scrollWidth: button.scrollWidth,
                     clientHeight: button.clientHeight, scrollHeight: button.scrollHeight,
                     labelLeft: labelRect.left, labelRight: labelRect.right,
+                    labelTop: labelRect.top, labelBottom: labelRect.bottom,
                     labelClientWidth: label.clientWidth, labelScrollWidth: label.scrollWidth,
                     labelClientHeight: label.clientHeight, labelScrollHeight: label.scrollHeight,
                     whiteSpace: getComputedStyle(button).whiteSpace,
                     labelWhiteSpace: getComputedStyle(label).whiteSpace
                 };
             });
+            const indicators = Array.from(element.querySelectorAll('[data-baseweb="tab-highlight"]')).map(indicator => {
+                const rect = indicator.getBoundingClientRect();
+                return {
+                    left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+                    width: rect.width, height: rect.height,
+                    display: getComputedStyle(indicator).display
+                };
+            });
             return {
                 viewportWidth: window.innerWidth, listLeft: listRect.left,
                 listRight: listRect.right, listWidth: listRect.width,
                 clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
-                scrollLeft: element.scrollLeft, tabCount: tabs.length, tabs
+                scrollLeft: element.scrollLeft, tabCount: tabs.length, tabs, indicators
             };
         }"""
     )
@@ -107,6 +116,20 @@ def _validate_tab_bar_layout(layout: dict, viewport_width: int) -> None:
             raise AssertionError(f"Public tab label extends beyond its button: {tab}")
         if tab["labelRight"] > layout["listRight"] + 2:
             raise AssertionError(f"Public tab label extends beyond the visible tab-list: {tab}")
+    for indicator in layout.get("indicators", []):
+        if indicator["display"] == "none" or indicator["width"] <= 0 or indicator["height"] <= 0:
+            continue
+        for tab in layout["tabs"]:
+            overlaps_label = (
+                indicator["left"] < tab["labelRight"]
+                and indicator["right"] > tab["labelLeft"]
+                and indicator["top"] < tab["labelBottom"]
+                and indicator["bottom"] > tab["labelTop"]
+            )
+            if overlaps_label:
+                raise AssertionError(
+                    f"Public tab highlight overlaps a visible text label: indicator={indicator}, tab={tab}"
+                )
     if viewport_width <= 600 and any(
         tab["whiteSpace"] == "nowrap" or tab["labelWhiteSpace"] == "nowrap"
         for tab in layout["tabs"]
