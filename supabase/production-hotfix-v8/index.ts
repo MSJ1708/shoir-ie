@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
 } from "./security.ts";
 
@@ -299,6 +300,21 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
   return keys;
 }
 
+async function canonicalMasterAdminConfigurationIsValid(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("shoir_accounts")
+      .select("username_lc, role, tier, active, subscription_expires_at")
+      .eq("role", "Enterprise Admin")
+      .eq("active", true)
+      .limit(2);
+    if (error) return false;
+    return hasExactlyOneCanonicalMasterAdmin(data);
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
   if (!isAllowedBrowserOrigin(origin)) {
@@ -372,7 +388,17 @@ Deno.serve(async (req) => {
             "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
       }
-      // Fail closed on protected-administrator drift; never mutate it on login.
+      // Check the global invariant read-only for every successful login.
+      if (!await canonicalMasterAdminConfigurationIsValid()) {
+        console.error(
+          "Protected administrator configuration requires manual review.",
+        );
+        return sendResponse({
+          error:
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
+        }, 503);
+      }
+      // Fail closed if the account being used is itself a protected marker.
       const isProtectedAdminMarker = row.username_lc === "sho" ||
         row.role === "Enterprise Admin";
       if (
