@@ -229,41 +229,41 @@ Deno.test("public error mapping hides infrastructure errors and keeps known stat
 Deno.test(
   "subscription approval guard protects reserved admin and any Enterprise Admin",
   () => {
-  assert(
-    isProtectedAdministratorTarget({ username_lc: "sho" }, null, null),
-    "reserved admin request must be protected even without an account row",
-  );
-  assert(
-    isProtectedAdministratorTarget(
-      { username_lc: "sho" },
-      { username_lc: "sho", role: "Enterprise Admin" },
-      null,
-    ),
-    "the existing reserved admin must be protected",
-  );
-  assert(
-    isProtectedAdministratorTarget(
-      { username_lc: "another-user" },
-      { username_lc: "another-user", role: "Enterprise Admin" },
-      null,
-    ),
-    "any Enterprise Admin account must be protected",
-  );
-  assert(
-    isProtectedAdministratorTarget(
-      { username_lc: "sho" },
-      null,
-      { username_lc: "sho" },
-    ),
-    "pending credentials for the reserved admin must be protected",
-  );
-  assert(
-    !isProtectedAdministratorTarget(
-      { username_lc: "regular-user" },
-      { username_lc: "regular-user", role: "User" },
-      { username_lc: "regular-user" },
-    ),
-    "an ordinary user must not be classified as protected",
-  );
+    assert(
+      isProtectedAdministratorTarget({ username_lc: "sho" }, null, null),
+      "reserved admin request must be protected even without an account row",
+    );
+    assert(
+      isProtectedAdministratorTarget(
+        { username_lc: "sho" },
+        { username_lc: "sho", role: "Enterprise Admin" },
+        null,
+      ),
+      "the existing reserved admin must be protected",
+    );
+    assert(
+      isProtectedAdministratorTarget(
+        { username_lc: "another-user" },
+        { username_lc: "another-user", role: "Enterprise Admin" },
+        null,
+      ),
+      "any Enterprise Admin account must be protected",
+    );
+    assert(
+      isProtectedAdministratorTarget(
+        { username_lc: "sho" },
+        null,
+        { username_lc: "sho" },
+      ),
+      "pending credentials for the reserved admin must be protected",
+    );
+    assert(
+      !isProtectedAdministratorTarget(
+        { username_lc: "regular-user" },
+        { username_lc: "regular-user", role: "User" },
+        { username_lc: "regular-user" },
+      ),
+      "an ordinary user must not be classified as protected",
+    );
   },
 );
