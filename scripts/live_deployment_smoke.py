@@ -60,7 +60,11 @@ def _tab_bar_layout(app_frame) -> dict:
             const listRect = element.getBoundingClientRect();
             const tabs = Array.from(new Set(element.querySelectorAll('[role="tab"], [data-baseweb="tab"]'))).map(button => {
                 const rect = button.getBoundingClientRect();
-                const label = button.querySelector('[data-testid="stMarkdownContainer"]') || button;
+                // Measure the actual paragraph text box, not its full-width Markdown wrapper;
+                // otherwise the normal desktop underline could falsely intersect a wrapper box.
+                const label = button.querySelector('[data-testid="stMarkdownContainer"] p')
+                    || button.querySelector('[data-testid="stMarkdownContainer"]')
+                    || button;
                 const labelRect = label.getBoundingClientRect();
                 return {
                     label: (button.innerText || button.textContent || '').trim(),
