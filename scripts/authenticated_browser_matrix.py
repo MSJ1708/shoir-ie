@@ -12,6 +12,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from browser_diagnostics import safe_javascript_error
 from staging_e2e_guard import validate_app_from_env
 
 REPORT = Path(os.environ.get("SHOIR_E2E_UI_REPORT", "artifacts/authenticated-release-gate/browser-report.json"))
@@ -96,38 +97,6 @@ def visible_logout_button(frame):
     return button
 
 
-def _safe_javascript_diagnostic(value: object, limit: int = 700) -> str:
-    """Keep enough browser diagnostics to find a runtime fault without storing secrets."""
-    text = str(value or "")
-    text = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
-    text = re.sub(
-        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
-        "[REDACTED_JWT]",
-        text,
-    )
-    text = re.sub(
-        r"(?i)\b(password|passwd|token|secret|api[_-]?key|authorization|cookie)\b\s*[:=]\s*[^\s,;]+",
-        r"\1=[REDACTED]",
-        text,
-    )
-    # Preserve a script origin/path for debugging but never persist query-string values.
-    text = re.sub(r"(https?://[^\s?#]+)\?[^\s#]+", r"\1?[REDACTED_QUERY]", text)
-    return text[:limit]
-
-
-def _safe_javascript_error(error: object) -> dict[str, str]:
-    """Serialize a Playwright pageerror with redaction, bounded size, and source frames."""
-    name = _safe_javascript_diagnostic(getattr(error, "name", type(error).__name__), 100)
-    message = _safe_javascript_diagnostic(getattr(error, "message", ""), 700)
-    raw_stack = str(getattr(error, "stack", "") or "")
-    safe_frames = [
-        _safe_javascript_diagnostic(line.strip(), 320)
-        for line in raw_stack.splitlines()[1:5]
-        if line.strip()
-    ]
-    return {"name": name or "Error", "message": message, "stack_frames": "\n".join(safe_frames)}
-
-
 def take_evidence_screenshot(page, path: Path) -> None:
     """Capture viewport evidence without letting a long page fail functional tests."""
     try:
@@ -164,7 +133,7 @@ def main() -> int:
 
         def record_page_error(error: object) -> None:
             try:
-                page_errors.append(_safe_javascript_error(error))
+                page_errors.append(safe_javascript_error(error))
             except Exception:
                 # Keep the gate fail-closed while avoiding unsafe diagnostic output.
                 page_errors.append({

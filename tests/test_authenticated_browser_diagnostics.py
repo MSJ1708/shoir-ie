@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scripts.authenticated_browser_matrix import _safe_javascript_error
+from scripts.browser_diagnostics import safe_javascript_error
 
 
 def test_browser_error_diagnostics_preserve_error_name_message_and_source_frames():
@@ -16,7 +16,7 @@ def test_browser_error_diagnostics_preserve_error_name_message_and_source_frames
         ),
     )
 
-    result = _safe_javascript_error(error)
+    result = safe_javascript_error(error)
 
     assert result["name"] == "TypeError"
     assert "undefined" in result["message"]
