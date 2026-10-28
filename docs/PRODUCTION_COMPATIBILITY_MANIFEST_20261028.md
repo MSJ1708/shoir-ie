@@ -11,8 +11,8 @@ This manifest records the fresh read-only comparison used for release planning. 
 | Supabase project ref | `gcsamrdaeraxieaagsta` | `hfhrosthswcybccepmak` |
 | Project status | ACTIVE_HEALTHY | ACTIVE_HEALTHY |
 | Region | `eu-central-1` | `eu-central-1` |
-| Persistence function | v8 | v11 |
-| Deployed source SHA-256 | `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` | `a0252769822fd7834c6af67fcf69259ec9bbefce7041ac3a5a36d8d6a9a90397` |
+| Persistence function | v9 | v11 |
+| Deployed source SHA-256 | `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740` | `a0252769822fd7834c6af67fcf69259ec9bbefce7041ac3a5a36d8d6a9a90397` |
 | Migration ledger entries | 14 | 17 |
 
 ## Required schema comparison
@@ -80,7 +80,7 @@ Abort and remain HOLD if any manifest/ledger difference is unexplained; any exis
 
 - Staging CORS/preflight and staged public-shell browser acceptance pass on release evidence PR #211's current head.
 - Staging function v11 source has exact-origin CORS and protected-admin fail-closed behavior.
-- Production function v8 has not been changed by this work; production CORS/admin behavior must not be inferred from staging.
+- Current production inventory re-read on 2026-10-28 reports `shoir-persistence` v9, source hash `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`. The active source includes `Access-Control-Allow-Methods: POST, OPTIONS`, but still emits `Access-Control-Allow-Origin: *`; exact-origin enforcement and `Vary: Origin` remain unresolved. Do not infer security readiness from the method-header correction.
 - Production release remains **HOLD / NO-GO**. This manifest is preparation, not production authorization.
 
 
@@ -96,6 +96,6 @@ A GitHub-hosted runner made non-mutating `OPTIONS` requests directly to the actu
 | Unapproved origin: `https://unapproved-origin.example` | 200 | `*` | FAIL |
 | Origin omitted | 200 | `*` | FAIL |
 
-The endpoint did not deny the unapproved origin and did not return the exact approved origin. The source-level finding is therefore confirmed by deployed HTTP evidence: production v8's wildcard CORS defect is live. Evidence artifact `shoir-ie-production-cors-diagnostic` was created by PR #211's staging-targeted release check; its JSON report records `overall: FAIL` and `release_gate: false`. Staging's separate approved/rejected origin and public-shell tests pass.
+The recorded GitHub-runner probe showed HTTP 200 with `Access-Control-Allow-Origin: *` for the approved origin, an unapproved origin, and no Origin header. That is a time-stamped live failure. The current management-API source reread still shows wildcard CORS despite now advertising `POST, OPTIONS`; therefore the security blocker remains open. Repeat the direct live HTTP probe after any separately authorized production change. Evidence artifact `shoir-ie-production-cors-diagnostic` was created by PR #211's staging-targeted release check; its JSON report records `overall: FAIL` and `release_gate: false`. Staging's separate approved/rejected origin and public-shell tests pass.
 
 This diagnostic used only HTTP OPTIONS requests. No credentials, account content, or production data were sent, and it made no production mutation. The failure is not closed until an exact production-compatible security source is reviewed, the deployment prerequisites in this manifest are met, the authorized change is deployed, and the same direct production probe passes.
