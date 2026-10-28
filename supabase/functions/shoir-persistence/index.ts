@@ -556,7 +556,7 @@ Deno.serve(async (req) => {
         const sessionToken = await createSession(
           usernameLc,
           expired ? "renewal" : "workspace",
-          expired ? 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000,
+          expired ? 60 * 60 * 1000 : 8 * 60 * 60 * 1000,
         );
         const tokenFingerprint = await sha256Hex(idToken);
         const auditError = await writeOidcAuditEvent({
