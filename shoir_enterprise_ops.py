@@ -521,8 +521,7 @@ def normalize_connector_health(df: pd.DataFrame) -> pd.DataFrame:
 def render_connectivity_extension() -> None:
     from shoir_enterprise_layer import (
         connector_health_frame, connector_run_frame, connector_schedule_frame,
-        test_connector_profile, schedule_connector_sync, run_due_connector_syncs,
-        validate_connector_profile, fetch_connector_sample,
+        test_connector_profile, validate_connector_profile, fetch_connector_sample,
     )
 
     username = st.session_state.get("current_user", "unknown")
