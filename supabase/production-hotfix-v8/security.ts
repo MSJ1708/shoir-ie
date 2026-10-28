@@ -1,4 +1,4 @@
-/** Minimal security helpers for an exact-schema production v8 hotfix. */
+/** Minimal security helpers for the production-v9-compatible security candidate. */
 // This candidate is specifically for production. Do not permit staging or local
 // development browser origins to call the production API.
 const ALLOWED_BROWSER_ORIGINS = new Set<string>([
