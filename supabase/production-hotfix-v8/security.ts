@@ -51,3 +51,94 @@ export function hasExactlyOneCanonicalMasterAdmin(
       activeEnterpriseAdmins[0] as Record<string, unknown>,
     );
 }
+
+export const MAX_REQUEST_BODY_BYTES = 12 * 1024 * 1024;
+
+export class PublicRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "PublicRequestError";
+    this.status = status;
+  }
+}
+
+/**
+ * Read a bounded JSON object. Content-Length is an early rejection hint only;
+ * the stream is independently counted because that header is untrusted.
+ */
+export async function readBoundedJsonObject(
+  request: Request,
+  maxBytes = MAX_REQUEST_BODY_BYTES,
+): Promise<Record<string, unknown>> {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) {
+      throw new PublicRequestError("Invalid Content-Length header.", 400);
+    }
+    if (Number(declaredLength) > maxBytes) {
+      throw new PublicRequestError(
+        "Request body exceeds the allowed size limit.",
+        413,
+      );
+    }
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) {
+    throw new PublicRequestError("A JSON request body is required.", 400);
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        try {
+          await reader.cancel("Request body size limit exceeded.");
+        } catch {
+          // Cancellation is best effort; never continue buffering the request.
+        }
+        throw new PublicRequestError(
+          "Request body exceeds the allowed size limit.",
+          413,
+        );
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof PublicRequestError) throw error;
+    throw new PublicRequestError("Request body could not be read.", 400);
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // A reader can already be released by a runtime after cancellation.
+    }
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    );
+  } catch {
+    throw new PublicRequestError("Request body must be valid UTF-8 JSON.", 400);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new PublicRequestError("Request body must be a JSON object.", 400);
+  }
+  return parsed as Record<string, unknown>;
+}
