@@ -14,7 +14,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-Deno.test("v8 hotfix CORS uses exact approved origins and never a wildcard", () => {
+Deno.test("production hotfix CORS uses exact approved origins and never a wildcard", () => {
   const origin = "https://shoir-ie-app.streamlit.app";
   assert(
     isAllowedBrowserOrigin(origin),
@@ -39,7 +39,7 @@ Deno.test("v8 hotfix CORS uses exact approved origins and never a wildcard", () 
   );
 });
 
-Deno.test("v8 hotfix rejects an unapproved origin and emits no allow-origin header", () => {
+Deno.test("production hotfix rejects an unapproved origin and emits no allow-origin header", () => {
   const rejectedOrigins = [
     "https://unapproved-origin.example",
     "https://shoirieverified.streamlit.app",
@@ -58,7 +58,7 @@ Deno.test("v8 hotfix rejects an unapproved origin and emits no allow-origin head
   }
 });
 
-Deno.test("v8 hotfix keeps origin-free server-to-server calls possible without ACAO", () => {
+Deno.test("production hotfix keeps origin-free server-to-server calls possible without ACAO", () => {
   assert(
     isAllowedBrowserOrigin(null),
     "origin-free server-to-server calls remain allowed",
@@ -69,7 +69,7 @@ Deno.test("v8 hotfix keeps origin-free server-to-server calls possible without A
   );
 });
 
-Deno.test("v8 hotfix accepts the exact reserved administrator invariant read-only", () => {
+Deno.test("production hotfix accepts the exact reserved administrator invariant read-only", () => {
   const canonical = {
     username_lc: "sho",
     role: "Enterprise Admin",
