@@ -1,9 +1,9 @@
 name: Shoir-IE tests
 on:
   push:
-    branches: ["feature/platform-upgrade-v2"]
+    branches: ["feature/platform-upgrade-v2", "staging-e2e-20261019"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "staging-e2e-20261019"]
 jobs:
   test:
     runs-on: ubuntu-latest
