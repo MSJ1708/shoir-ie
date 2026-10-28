@@ -131,3 +131,32 @@ The paid-launch blocker is unchanged: company legal identity/contact facts are n
 
 Production CORS, production/schema compatibility, safe migration-ledger reconciliation, backup/PITR plus actual restore rehearsal, hosted authenticated acceptance, staging mobile candidate deployment/verification, complete 100-tool evidence, T096/T098 provider setup or launch-scope exclusion, independent reviews, staging ruleset completion, legal/privacy/commercial review, release-owner authorization, post-deployment smoke, and global BETA removal remain unresolved. Preserve all stop conditions above.
 
+## 6. Recovery update — 2026-10-28, 19:47 UTC
+
+This update records the exact candidate work performed after the prior 19:42 UTC entry. It does not change the release decision.
+
+### New security candidate fixes (PR #220)
+
+- Latest candidate head: `4b886b7fb16f2175001d269e941b4ca23cbd45b0` on `hotfix/production-v8-cors-admin-20261028`; PR #220 remains a draft and is not deployed.
+- The privileged `adminSession` helper now re-checks the global canonical-admin invariant whenever a privileged session is used. This prevents an already-issued admin session from continuing after the invariant drifts; service/DB failure returns a generic fail-closed 503.
+- The subscription-approval path now refuses to approve a stale/malformed request targeting username `sho`, a current `Enterprise Admin` account, or pending credentials under `sho`. This prevents that administrative approval path from overwriting the protected account.
+- Added `tests/test_production_hotfix_admin_session_contract.py` covering privileged-session invariant checks and the protected-target approval guard.
+- Fresh exact-head checks are pending/queued at this timestamp: tests [40757484451](https://github.com/MSJ1708/shoir-ie/actions/runs/40757484451), Edge Function [40757484323](https://github.com/MSJ1708/shoir-ie/actions/runs/40757484323), validation [40757484327](https://github.com/MSJ1708/shoir-ie/actions/runs/40757484327), engine [40757484315](https://github.com/MSJ1708/shoir-ie/actions/runs/40757484315), security/quality [40757484322](https://github.com/MSJ1708/shoir-ie/actions/runs/40757484322), and platform [40757484377](https://github.com/MSJ1708/shoir-ie/actions/runs/40757484377). Previous-head green results do not transfer.
+- PR #220's hosted `live-deployment-smoke` job is still skipped on draft PRs; its CI cannot close the required real post-production-deployment HTTP probe. Production v9 was not changed.
+
+### Hosted-release workflow regression fix (PR #211)
+
+- The current workflow source now explicitly states that the hosted smoke check is “not proof that the triggering Git SHA is deployed.” This fixes the verified contract-test mismatch in which the code said only “this SHA,” while `tests/test_hosted_smoke_workflow_contract.py` requires the precise “triggering Git SHA” qualifier.
+- Latest PR #211 head remains `a5b5666f9e92778067a497695d86bbd4f09cf03b`. Exact-head runs are still queued/pending as of the latest reread: authenticated gate [40756965221](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965221), security/quality [40756965222](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965222), platform [40756965257](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965257), validation [40756965108](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965108), Edge Function [40756965110](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965110), tests [40756965184](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965184), and engine [40756965120](https://github.com/MSJ1708/shoir-ie/actions/runs/40756965120). The prior run's single contract-test failure is diagnosed; the fix remains unverified until a fresh exact-head test passes.
+- The latest staging live acceptance workflow is configured to run non-mutating production CORS diagnostic probes and deployed-staging CORS/browser probes. A future successful job may evidence the state observed at probe time, but does not authorize production or prove the current Git SHA is deployed on hosted Streamlit.
+
+### Current gate disposition
+
+- Production CORS: **FAIL / HOLD** until explicit release authorization, deployment, and direct post-deployment probes.
+- Protected administrator: stored aggregate is currently canonical; candidate runtime protections are **NOT YET CI-VERIFIED** on latest head.
+- Migration compatibility/reconciliation: **BLOCKED**; no production migration was applied.
+- Backup/PITR/isolated restore: **BLOCKED**; no actual restore rehearsal available in current plan/tool access.
+- Hosted authenticated gate: prior baseline passes do not validate the pending final feature candidate; latest run pending.
+- Independent security/database review, branch-ruleset refresh, T096/T098 provider config, full tool matrix, Saudi legal/privacy approval, explicit production authorization, post-deployment verification, and BETA removal: **OPEN**.
+
+No production deployment, production DDL, production record mutation, PR merge, or BETA removal was performed in this update.
