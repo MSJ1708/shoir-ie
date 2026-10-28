@@ -52,7 +52,6 @@ export function hasExactlyOneCanonicalMasterAdmin(
     );
 }
 
-
 function normalizedUsername(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
