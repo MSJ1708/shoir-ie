@@ -54,15 +54,28 @@ export function hasExactlyOneCanonicalMasterAdmin(
 
 
 /** A subscription approval must never mutate the reserved administrator account. */
+function normalizedUsername(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isEnterpriseAdminRole(value: unknown): boolean {
+  return typeof value === "string" &&
+    value.trim().toLowerCase() === "enterprise admin";
+}
+
+/** A subscription approval must never mutate the reserved administrator account. */
 export function isProtectedAdministratorTarget(
   request: Record<string, unknown>,
   existingAccount: Record<string, unknown> | null | undefined,
   pendingCredential: Record<string, unknown> | null | undefined,
 ): boolean {
-  return request.username_lc === "sho" ||
-    existingAccount?.username_lc === "sho" ||
-    existingAccount?.role === "Enterprise Admin" ||
-    pendingCredential?.username_lc === "sho";
+  return normalizedUsername(request.username_lc) === "sho" ||
+    normalizedUsername(request.username) === "sho" ||
+    normalizedUsername(existingAccount?.username_lc) === "sho" ||
+    normalizedUsername(existingAccount?.username) === "sho" ||
+    isEnterpriseAdminRole(existingAccount?.role) ||
+    normalizedUsername(pendingCredential?.username_lc) === "sho" ||
+    normalizedUsername(pendingCredential?.username) === "sho";
 }
 
 export const MAX_REQUEST_BODY_BYTES = 12 * 1024 * 1024;
