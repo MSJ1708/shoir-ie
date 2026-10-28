@@ -160,3 +160,34 @@ This update records the exact candidate work performed after the prior 19:42 UTC
 - Independent security/database review, branch-ruleset refresh, T096/T098 provider config, full tool matrix, Saudi legal/privacy approval, explicit production authorization, post-deployment verification, and BETA removal: **OPEN**.
 
 No production deployment, production DDL, production record mutation, PR merge, or BETA removal was performed in this update.
+
+## 7. Recovery update — 2026-10-28, 19:54 UTC
+
+This section supersedes the earlier #220 head and migration-workflow status recorded above. The release decision remains **NO-GO / HOLD**.
+
+### PR #220 latest v9-compatible candidate
+
+- Current reviewed-source candidate head at this update: `83645d85257c5fedfaa1eade6257066e1db10741` (draft, not deployed): [PR #220](https://github.com/MSJ1708/shoir-ie/pull/220).
+- The title now correctly says production-v9-compatible; the folder `production-hotfix-v8` is retained for history and the README identifies the real v9 baseline hash `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`.
+- Exact candidate source adds exact-origin CORS, 204 OPTIONS/POST-only method handling/405 for unsupported methods, `Vary: Origin`, 12 MiB streamed UTF-8 JSON parsing and safe public errors.
+- Protected-admin hardening now checks the canonical global invariant on successful login and every use of an existing admin session. The subscription approval path calls a unit-tested pure guard and rejects protected `sho`/Enterprise Admin targets before any account upsert.
+- Executable security-helper tests now cover the approved/unapproved/origin-free CORS policy and protected account vs ordinary account classification. The source-contract test also asserts privileged-session invariant enforcement and that approval denial precedes upsert.
+- Exact-head CI is **PENDING/QUEUED**, not passed: Platform [40758265680](https://github.com/MSJ1708/shoir-ie/actions/runs/40758265680), Engine Regression [40758265635](https://github.com/MSJ1708/shoir-ie/actions/runs/40758265635), security/quality [40758265677](https://github.com/MSJ1708/shoir-ie/actions/runs/40758265677), validation [40758265671](https://github.com/MSJ1708/shoir-ie/actions/runs/40758265671), Edge Function [40758265836](https://github.com/MSJ1708/shoir-ie/actions/runs/40758265836), and tests [40758265633](https://github.com/MSJ1708/shoir-ie/actions/runs/40758265633). The validation workflow's `live-deployment-smoke` is **SKIPPED** for this draft PR, so it cannot close any live deployment gate.
+- No independent security review is recorded; PR #220 remains a draft. No production function or account was changed.
+
+### PR #218 isolated PostgreSQL migration evidence
+
+- PR #218 head: `9141ef222277bdc0f9dd6f176175795d7d056f2e` (draft, not merged).
+- [Isolated migration rehearsal run 40757092392](https://github.com/MSJ1708/shoir-ie/actions/runs/40757092392) completed successfully on GitHub-hosted PostgreSQL 17 in a disposable local test database. Its actual pytest output reports **2 passed in 0.35s**:
+  - `test_additive_referral_migration_preserves_existing_codes_and_timestamps` — PASS. Synthetic values for populated, blank and null legacy referral codes and timestamps remained identical; a case-insensitive duplicate update was rejected with SQLSTATE `23505`.
+  - `test_versioned_migration_history_replays_from_clean_local_postgres` — PASS. The tracked SQL history replayed to the expected tables/columns, RLS/role checks and legal-consent approval guard; invalid consent caused the expected `23514` rejection and valid consent permitted approval.
+- The separate subscription transaction contract run [40757092692](https://github.com/MSJ1708/shoir-ie/actions/runs/40757092692) also passed.
+- This is synthetic isolated PostgreSQL evidence only. It is **not** a Supabase production-shaped copy restored from a real production backup; it does not reconcile production's actual migration ledger and does not satisfy the backup/PITR/restore gate. Production DDL remains untouched.
+
+### Ledger freshness and current blockers
+
+This ledger update creates a new PR #211 revision, so all exact-head CI and hosted staging/CORS checks must be reread against the new PR #211 head. Any earlier run on a prior head remains historical evidence only.
+
+Still open: live production wildcard-CORS fail and required post-deployment probe; latest #220 exact-head CI; production schema/ledger compatibility; actual backup/PITR and isolated restore; hosted acceptance against the final integrated candidate; staging mobile tab clipping until fixed candidate is deployed and re-probed; independent security/database reviews; staging ruleset enforcement; evidence-backed validation of the 100-tool matrix; T096/T098 provider configuration or launch-scope exclusion with unsupported claims removed; Saudi legal/privacy/commercial sign-off; explicit production release authorization; post-deployment verification; BETA removal.
+
+No production deployment, migration, record mutation, PR merge, paid launch, or BETA removal was performed.
