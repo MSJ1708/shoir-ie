@@ -104,8 +104,12 @@ export function readOidcVerifierConfig(
 
   const issuerUrl = httpsPublicDnsUrl(issuer, "OIDC issuer");
   const jwksEndpoint = httpsPublicDnsUrl(jwksUrl, "OIDC JWKS endpoint");
-  if (!issuerUrl || !jwksEndpoint || issuerUrl.hostname !== jwksEndpoint.hostname) {
-    throw new Error("OIDC issuer and JWKS endpoint must use the same approved HTTPS host.");
+  if (
+    !issuerUrl || !jwksEndpoint || issuerUrl.hostname !== jwksEndpoint.hostname
+  ) {
+    throw new Error(
+      "OIDC issuer and JWKS endpoint must use the same approved HTTPS host.",
+    );
   }
 
   return {
@@ -131,17 +135,23 @@ export function identityFromVerifiedClaims(
   config: OidcVerifierConfig,
 ): VerifiedOidcIdentity {
   const subject = typeof payload.sub === "string" ? payload.sub.trim() : "";
-  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
-  if (!subject || subject.length > 512) throw new OidcVerificationError("invalid_subject");
+  const email = typeof payload.email === "string"
+    ? payload.email.trim().toLowerCase()
+    : "";
+  if (!subject || subject.length > 512) {
+    throw new OidcVerificationError("invalid_subject");
+  }
   if (!isVerifiedEmail(email) || payload.email_verified !== true) {
     throw new OidcVerificationError("unverified_email");
   }
 
   const amr = Array.isArray(payload.amr)
-    ? payload.amr.filter((value): value is string => typeof value === "string").map((value) => value.toLowerCase())
+    ? payload.amr.filter((value): value is string => typeof value === "string")
+      .map((value) => value.toLowerCase())
     : [];
   const acr = typeof payload.acr === "string" ? payload.acr.toLowerCase() : "";
-  const mfaVerified = amr.some((value) => config.allowedMfaAmr.includes(value)) ||
+  const mfaVerified =
+    amr.some((value) => config.allowedMfaAmr.includes(value)) ||
     (acr !== "" && config.allowedMfaAcr.includes(acr));
   if (config.requireMfa && !mfaVerified) {
     throw new OidcVerificationError("mfa_claim_missing");
@@ -191,7 +201,15 @@ export async function verifyOidcIdToken(
       algorithms: ["RS256", "ES256"],
       clockTolerance: CLOCK_TOLERANCE_SECONDS,
       maxTokenAge: MAX_ID_TOKEN_AGE_SECONDS,
-      requiredClaims: ["iss", "sub", "aud", "exp", "iat", "email", "email_verified"],
+      requiredClaims: [
+        "iss",
+        "sub",
+        "aud",
+        "exp",
+        "iat",
+        "email",
+        "email_verified",
+      ],
     });
     payload = verified.payload;
   } catch {
@@ -204,7 +222,9 @@ export async function verifyOidcIdToken(
 export async function sha256Hex(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(digest)).map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 export function escapePostgrestLikeLiteral(value: string): string {
