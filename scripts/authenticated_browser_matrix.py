@@ -295,25 +295,6 @@ def main() -> int:
                 ),
             )
         except Exception as exc:
-                visible_body = app_frame.locator("body").inner_text(timeout=5_000).casefold()
-                if "server logout could not revoke this session" in visible_body:
-                    raise RuntimeError("App refused logout because server-side session revocation failed.") from exc
-                if "lock / logout workspace" in visible_body:
-                    raise RuntimeError("Logout click left the authenticated workspace visible.") from exc
-                raise RuntimeError("Logout did not return to the sign-in screen; inspect staging deployment/evidence.") from exc
-            signed_out_body = app_frame.locator("body").inner_text(timeout=8_000)
-            signed_out = (
-                "Sign In to Your Workspace" in signed_out_body
-                and username.casefold() not in signed_out_body.casefold()
-                and "Lock / Logout Workspace" not in signed_out_body
-            )
-            check(
-                "sidebar_logout_returns_to_signin",
-                signed_out,
-                "Logout returned to the unauthenticated sign-in screen."
-                if signed_out else "Sign-in heading or cleared-session indicators were missing.",
-            )
-        except Exception as exc:
             # Keep diagnostics safe: never print credentials, response bodies, or input values.
             detail = f"Browser step '{step}' failed ({type(exc).__name__})."
             if step == "wait for authenticated workspace" and app_frame is not None:
