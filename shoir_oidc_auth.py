@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlparse
 
 
 REQUIRED_SHARED_AUTH_KEYS = ("redirect_uri", "cookie_secret")
@@ -19,6 +20,28 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 
 def _nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_public_https_url(value: Any) -> bool:
+    if not _nonempty_string(value):
+        return False
+    try:
+        parsed = urlparse(value.strip())
+        host = (parsed.hostname or "").lower()
+        return (
+            parsed.scheme.lower() == "https"
+            and bool(host)
+            and not parsed.username
+            and not parsed.password
+            and host != "localhost"
+            and not host.endswith(".localhost")
+            and not host.endswith(".local")
+            and not host.endswith(".internal")
+            and not host.replace(".", "").isdigit()
+            and parsed.port in (None, 443)
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def oidc_configuration_status(secrets: Any) -> dict[str, Any]:
@@ -46,6 +69,12 @@ def oidc_configuration_status(secrets: Any) -> dict[str, Any]:
         exposed_tokens = set()
     if "id" not in exposed_tokens:
         missing_shared.append("expose_tokens includes id")
+    if _nonempty_string(auth.get("redirect_uri")) and not _is_public_https_url(auth.get("redirect_uri")):
+        missing_shared.append("redirect_uri must be a public HTTPS URL")
+    if _nonempty_string(auth.get("cookie_secret")) and len(str(auth.get("cookie_secret"))) < 32:
+        missing_shared.append("cookie_secret must contain at least 32 characters")
+    if _nonempty_string(provider.get("server_metadata_url")) and not _is_public_https_url(provider.get("server_metadata_url")):
+        missing_provider.append("server_metadata_url must be a public HTTPS URL")
     ready = not missing_shared and not missing_provider
     return {
         "configured": bool(auth) or bool(provider),
