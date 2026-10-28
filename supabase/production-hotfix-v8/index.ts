@@ -5,8 +5,8 @@ import {
   hasCanonicalMasterAdminInvariant,
   hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
-  PublicRequestError,
   publicErrorFor,
+  PublicRequestError,
   readBoundedJsonObject,
 } from "./security.ts";
 
