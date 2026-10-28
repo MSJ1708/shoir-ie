@@ -123,7 +123,7 @@ Deno.test("OIDC ID token verifies signature, issuer, audience, and verified emai
   const identity = await verifyOidcIdToken(
     idToken,
     config,
-    localJwks as ReturnType<typeof import("npm:jose@6.2.13").createRemoteJWKSet>,
+    localJwks as never,
   );
   assert(identity.issuer === ISSUER, "Verified issuer was not returned.");
   assert(identity.subject === "subject-synthetic-001", "Verified subject was not returned.");
@@ -131,19 +131,19 @@ Deno.test("OIDC ID token verifies signature, issuer, audience, and verified emai
   assert(identity.mfaVerified, "MFA claim should be recognized.");
 
   await expectOidcError(
-    () => verifyOidcIdToken(
+    async async async () => verifyOidcIdToken(
       await token({}, { issuer: "https://attacker.example.invalid" }),
       config,
-      localJwks as ReturnType<typeof import("npm:jose@6.2.13").createRemoteJWKSet>,
+      localJwks as never,
     ),
     "signature_or_standard_claims_invalid",
   );
 
   await expectOidcError(
-    () => verifyOidcIdToken(
+    async async async () => verifyOidcIdToken(
       await token({}, { audience: "different-client" }),
       config,
-      localJwks as ReturnType<typeof import("npm:jose@6.2.13").createRemoteJWKSet>,
+      localJwks as never,
     ),
     "signature_or_standard_claims_invalid",
   );
@@ -154,7 +154,7 @@ Deno.test("OIDC rejects expired, overlong, unverified-email, and missing-MFA tok
     async () => await verifyOidcIdToken(
       await token({}, { expiresIn: "-1s" }),
       config,
-      localJwks as ReturnType<typeof import("npm:jose@6.2.13").createRemoteJWKSet>,
+      localJwks as never,
     ),
     "signature_or_standard_claims_invalid",
   );
@@ -165,7 +165,7 @@ Deno.test("OIDC rejects expired, overlong, unverified-email, and missing-MFA tok
   );
 
   await expectOidcError(
-    () => verifyOidcIdToken(
+    async async async () => verifyOidcIdToken(
       await token({ email_verified: false }),
       config,
       localJwks as never,
@@ -175,7 +175,7 @@ Deno.test("OIDC rejects expired, overlong, unverified-email, and missing-MFA tok
 
   const mfaConfig = { ...config, requireMfa: true, allowedMfaAmr: ["mfa"], allowedMfaAcr: [] };
   await expectOidcError(
-    () => verifyOidcIdToken(
+    async async async () => verifyOidcIdToken(
       await token({ amr: ["pwd"] }),
       mfaConfig,
       localJwks as never,
