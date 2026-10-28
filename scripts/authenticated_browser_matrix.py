@@ -99,19 +99,19 @@ def visible_logout_button(frame):
 def _safe_javascript_diagnostic(value: object, limit: int = 700) -> str:
     """Keep enough browser diagnostics to find a runtime fault without storing secrets."""
     text = str(value or "")
-    text = re.sub(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
+    text = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
     text = re.sub(
-        r"\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b",
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
         "[REDACTED_JWT]",
         text,
     )
     text = re.sub(
-        r"(?i)\\b(password|passwd|token|secret|api[_-]?key|authorization|cookie)\\b\\s*[:=]\\s*[^\\s,;]+",
-        r"\\1=[REDACTED]",
+        r"(?i)\b(password|passwd|token|secret|api[_-]?key|authorization|cookie)\b\s*[:=]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
         text,
     )
     # Preserve a script origin/path for debugging but never persist query-string values.
-    text = re.sub(r"(https?://[^\\s?#]+)\\?[^\\s#]+", r"\\1?[REDACTED_QUERY]", text)
+    text = re.sub(r"(https?://[^\s?#]+)\?[^\s#]+", r"\1?[REDACTED_QUERY]", text)
     return text[:limit]
 
 
@@ -125,7 +125,7 @@ def _safe_javascript_error(error: object) -> dict[str, str]:
         for line in raw_stack.splitlines()[1:5]
         if line.strip()
     ]
-    return {"name": name or "Error", "message": message, "stack_frames": "\\n".join(safe_frames)}
+    return {"name": name or "Error", "message": message, "stack_frames": "\n".join(safe_frames)}
 
 
 def take_evidence_screenshot(page, path: Path) -> None:
