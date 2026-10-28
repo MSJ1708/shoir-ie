@@ -116,13 +116,12 @@ jobs:
           if-no-files-found: warn
 
   live-deployment-smoke:
-    # Probe the currently hosted, anonymous shell for audit PRs and after
-    # every main push. This is a service-availability/rendering check, not proof
-    # that the hosted app has deployed the triggering Git SHA. Manual runs on
-    # main allow an explicit post-deployment check without account credentials.
+    # Probe the hosted anonymous production shell for audit candidates, main
+    # updates, and the dedicated release-evidence branch. This is a service
+    # availability/rendering check, not proof that the triggering Git SHA is deployed.
     if: >-
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
+      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main' || startsWith(github.ref_name, 'docs/live-release-recheck-'))) ||
       (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -150,3 +149,210 @@ jobs:
           path: artifacts/live-deployment-smoke/
           if-no-files-found: warn
 
+  staging-live-acceptance:
+    # Exercise the hosted staging shell/function on staging-targeted PRs and on
+    # the dedicated release-evidence branch. Probes are non-mutating and do not
+    # claim that the triggering source SHA is the deployed staging SHA.
+    if: >-
+      (github.event_name == 'pull_request' && github.base_ref == 'staging-e2e-20261019') ||
+      (github.event_name == 'push' && startsWith(github.ref_name, 'docs/live-release-recheck-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SHOIR_LIVE_URL: https://shoirieverified.streamlit.app/
+      SHOIR_EXPECT_STAGING: "1"
+      SHOIR_E2E_EDGE_URL: https://hfhrosthswcybccepmak.supabase.co/functions/v1/shoir-persistence
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Diagnose currently deployed production CORS (informational only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/production-security-diagnostic
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          endpoint = "https://gcsamrdaeraxieaagsta.supabase.co/functions/v1/shoir-persistence"
+          approved_origin = "https://shoir-ie-app.streamlit.app"
+          rejected_origin = "https://unapproved-origin.example"
+
+          def probe(label, origin=None):
+              headers = {
+                  "Access-Control-Request-Method": "POST",
+                  "Access-Control-Request-Headers":
+                      "authorization, x-client-info, apikey, content-type",
+              }
+              if origin is not None:
+                  headers["Origin"] = origin
+              req = Request(endpoint, headers=headers, method="OPTIONS")
+              try:
+                  response = urlopen(req, timeout=20)
+              except HTTPError as error:
+                  response = error
+              return {
+                  "probe": label,
+                  "status": int(response.code),
+                  "allow_origin": response.headers.get("Access-Control-Allow-Origin"),
+                  "allow_methods": response.headers.get("Access-Control-Allow-Methods", ""),
+                  "allow_headers": response.headers.get("Access-Control-Allow-Headers", ""),
+                  "vary": response.headers.get("Vary", ""),
+              }
+
+          results = []
+          probe_error = None
+          try:
+              results = [
+                  probe("approved-production-origin", approved_origin),
+                  probe("unapproved-production-origin", rejected_origin),
+                  probe("origin-omitted", None),
+              ]
+              approved, rejected, missing = results
+              failures = []
+              allowed_methods = {
+                  item.strip().upper() for item in approved["allow_methods"].split(",")
+              }
+              allowed_headers = {
+                  item.strip().casefold() for item in approved["allow_headers"].split(",")
+              }
+              varies_by_origin = lambda item: "origin" in {
+                  value.strip().casefold() for value in item["vary"].split(",")
+              }
+              if approved["status"] != 204:
+                  failures.append("approved-origin browser preflight did not return HTTP 204")
+              if approved["allow_origin"] != approved_origin:
+                  failures.append("approved origin did not receive the exact Access-Control-Allow-Origin value")
+              if not {"POST", "OPTIONS"}.issubset(allowed_methods):
+                  failures.append("approved-origin preflight is missing POST/OPTIONS methods")
+              if not {"authorization", "x-client-info", "apikey", "content-type"}.issubset(allowed_headers):
+                  failures.append("approved-origin preflight is missing required request headers")
+              if not varies_by_origin(approved):
+                  failures.append("approved-origin response is missing Vary: Origin")
+              if rejected["status"] != 403 or rejected["allow_origin"] is not None:
+                  failures.append("unapproved origin was not denied with HTTP 403 and no allow-origin header")
+              if not varies_by_origin(rejected):
+                  failures.append("unapproved-origin response is missing Vary: Origin")
+              if missing["status"] != 204 or missing["allow_origin"] is not None:
+                  failures.append("origin-free OPTIONS must return HTTP 204 without Access-Control-Allow-Origin")
+              if not varies_by_origin(missing):
+                  failures.append("origin-free response is missing Vary: Origin")
+              overall = "PASS" if not failures else "FAIL"
+          except (URLError, TimeoutError, OSError) as error:
+              probe_error = type(error).__name__
+              failures = ["live production CORS probe could not complete"]
+              overall = "BLOCKED"
+
+          report = {
+              "scope": "non-mutating OPTIONS requests only; no credentials or production data used",
+              "overall": overall,
+              "endpoint": endpoint,
+              "results": results,
+              "failures": failures,
+              "transport_error_type": probe_error,
+              "release_gate": False,
+              "note": "Informational diagnostic. A result of FAIL/BLOCKED is not treated as a PASS or authorization to deploy.",
+          }
+          Path("artifacts/production-security-diagnostic").mkdir(parents=True, exist_ok=True)
+          Path("artifacts/production-security-diagnostic/production-cors-report.json").write_text(
+              json.dumps(report, indent=2) + chr(10), encoding="utf-8"
+          )
+          print(json.dumps(report, indent=2))
+          if overall != "PASS":
+              print(f"::warning::Production CORS diagnostic is {overall}; inspect report artifact. This diagnostic does not authorize or perform production changes.")
+          PY
+      - name: Upload production CORS diagnostic (not a release gate)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-production-cors-diagnostic
+          path: artifacts/production-security-diagnostic/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Probe deployed staging Edge Function CORS and preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          endpoint = os.environ["SHOIR_E2E_EDGE_URL"]
+          approved_origin = "https://shoirieverified.streamlit.app"
+          rejected_origin = "https://unapproved-origin.example"
+
+          def probe(label, origin=None, preflight=False):
+              headers = {}
+              if origin is not None:
+                  headers["Origin"] = origin
+              if preflight:
+                  headers["Access-Control-Request-Method"] = "POST"
+                  headers["Access-Control-Request-Headers"] = "authorization, apikey, content-type"
+              req = Request(endpoint, headers=headers, method="OPTIONS")
+              try:
+                  response = urlopen(req, timeout=20)
+              except HTTPError as error:
+                  response = error
+              result = {
+                  "probe": label,
+                  "status": int(response.code),
+                  "allow_origin": response.headers.get("Access-Control-Allow-Origin"),
+                  "allow_methods": response.headers.get("Access-Control-Allow-Methods", ""),
+                  "allow_headers": response.headers.get("Access-Control-Allow-Headers", ""),
+                  "vary": response.headers.get("Vary", ""),
+              }
+              return result
+
+          results = [
+              probe("approved-origin-preflight", approved_origin, preflight=True),
+              probe("unapproved-origin", rejected_origin, preflight=True),
+              probe("origin-omitted", None, preflight=False),
+          ]
+          print(json.dumps(results, indent=2))
+          approved, rejected, missing = results
+          failures = []
+          if approved["status"] != 204:
+              failures.append("approved origin did not receive HTTP 204 for OPTIONS")
+          if approved["allow_origin"] != approved_origin:
+              failures.append("approved origin did not receive its exact Access-Control-Allow-Origin value")
+          if not {"POST", "OPTIONS"}.issubset({
+              item.strip().upper() for item in approved["allow_methods"].split(",")
+          }):
+              failures.append("approved origin is missing expected POST/OPTIONS methods")
+          allowed_headers = {item.strip().casefold() for item in approved["allow_headers"].split(",")}
+          if not {"authorization", "apikey", "content-type"}.issubset(allowed_headers):
+              failures.append("approved origin is missing required request headers")
+          if rejected["status"] != 403:
+              failures.append("unapproved origin was not denied with HTTP 403")
+          if rejected["allow_origin"] is not None:
+              failures.append("unapproved origin received an Access-Control-Allow-Origin header")
+          if missing["status"] != 204 or missing["allow_origin"] is not None:
+              failures.append("origin-free OPTIONS behavior is unexpected")
+          if failures:
+              raise SystemExit("CORS probe failed: " + "; ".join(failures))
+          print("PASS: live staging CORS origin/preflight probes.")
+          PY
+      - name: Install headless browser
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Smoke-test the actual hosted staging shell at desktop and mobile widths
+        env:
+          SHOIR_LIVE_URL: https://shoirieverified.streamlit.app/
+          SHOIR_EXPECT_STAGING: "1"
+        run: python scripts/live_deployment_smoke.py
+      - name: Upload staging live-acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-staging-live-acceptance
+          path: artifacts/live-deployment-smoke/
+          if-no-files-found: warn
+          retention-days: 14

@@ -19,6 +19,7 @@ from playwright.sync_api import sync_playwright
 
 
 URL = os.environ.get("SHOIR_LIVE_URL", "https://shoir-ie-app.streamlit.app/")
+EXPECT_STAGING = os.environ.get("SHOIR_EXPECT_STAGING", "").strip().casefold() in {"1", "true", "yes", "on"}
 OUTPUT = Path("artifacts/live-deployment-smoke")
 VIEWPORTS = (
     ("desktop", {"width": 1440, "height": 1000}),
@@ -47,6 +48,41 @@ FATAL_TEXT_MARKERS = (
     "internal server error",
     "operationalerror:",
 )
+
+
+def wake_if_hibernated(page) -> bool:
+    """Wait for and click Community Cloud's explicit sleep interstitial button."""
+    button_name = re.compile(r"yes,?\s*get this app back up", re.I)
+    sleep_prompt = re.compile(r"this app has gone to sleep|yes,?\s*get this app back up", re.I)
+    deadline = time.monotonic() + 12
+
+    while time.monotonic() < deadline:
+        for frame in list(page.frames):
+            try:
+                body = frame.locator("body").inner_text(timeout=750)
+            except Exception:
+                body = ""
+            if not sleep_prompt.search(body):
+                continue
+
+            # Prefer the accessible button name. Fall back to matching visible button
+            # text because the Cloud interstitial's markup has varied between releases.
+            candidates = (
+                frame.get_by_role("button", name=button_name),
+                frame.locator("button").filter(has_text=button_name),
+                frame.get_by_text(button_name),
+            )
+            for locator in candidates:
+                try:
+                    candidate = locator.first
+                    if locator.count() < 1 or not candidate.is_visible():
+                        continue
+                    candidate.click(timeout=3_000)
+                    return True
+                except Exception:
+                    continue
+        page.wait_for_timeout(400)
+    return False
 
 
 def main() -> int:
@@ -107,6 +143,13 @@ def main() -> int:
                             URL, wait_until="domcontentloaded", timeout=90_000
                         )
                         item["http_status"] = response.status if response else None
+                        wake_requested = wake_if_hibernated(page)
+                        item["staging_wake_requested"] = wake_requested
+                        if wake_requested:
+                            # Community Cloud returns HTTP 200 with a sleep interstitial.
+                            # Click its explicit wake control, then give the app a longer
+                            # hydration window; the sleep page itself must never pass.
+                            page.wait_for_timeout(5_000)
                         # Streamlit can briefly render only its static header before the
                         # application body hydrates. Do not treat generic product/sidebar
                         # text as readiness: wait for a real sign-in/welcome surface, and
@@ -117,7 +160,7 @@ def main() -> int:
                         app_frame = None
                         stable_frame_key = None
                         stable_observations = 0
-                        readiness_deadline = time.monotonic() + 45
+                        readiness_deadline = time.monotonic() + (120 if wake_requested else 45)
                         while time.monotonic() < readiness_deadline:
                             current_records = []
                             current_bodies = []
@@ -175,6 +218,13 @@ def main() -> int:
                             page.wait_for_timeout(500)
                         body = "\n".join(rendered_bodies)
                         folded_body = body.casefold()
+                        item["staging_environment_marker_found"] = (
+                            "staging test environment" in folded_body
+                        )
+                        if EXPECT_STAGING and not item["staging_environment_marker_found"]:
+                            item["failure_reasons"].append(
+                                "Required staging banner 'STAGING TEST ENVIRONMENT' was not rendered."
+                            )
                         item["frames"] = frame_records
                         item["rendered_text_length"] = len(body)
                         item["rendered_text_preview"] = " ".join(body.split())[:500]

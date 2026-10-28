@@ -19,6 +19,109 @@ This section supersedes conflicting historical candidate/status statements later
 - The successful staging gate does not establish legal clearance, independent formula validation, PDPL compliance, database recovery readiness, or authorization for paid access.
 
 
+## Latest live service recheck — 27 October 2026, 10:40 UTC
+
+**Decision remains HOLD / NO-GO.** This dated recheck is read-only operational evidence. It does not approve production changes, legal text, paid access or a deployment.
+
+### Exact candidate and tests
+
+- Current staging branch head observed in the GitHub comparison: `0558c23d59a3f0b79558a8d3407869d0238aceaf`.
+- PR #208 head: `5f0215d4d2ac0cde925bbd59e020810216e45598`. It is 31 commits ahead of the merge base and 2 commits behind staging; the merge base is `76419a9842f88292f94d706ca9b20bab63c45550`. Do not treat the PR-head test as final integrated-candidate acceptance.
+- Exact-head validation run [40487656400](https://github.com/MSJ1708/shoir-ie/actions/runs/40487656400) was **queued** at recheck. The `test` job was queued and `live-deployment-smoke` was **skipped**. No final pass is claimed.
+- The 100-row tool matrix reports **98 IMPLEMENTED_NEEDS_VALIDATION, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 VERIFIED_WORKING**. These are implementation states, not a production verification rate.
+- Staging and main have diverged. Do not merge the staging line into main as a shortcut; reconcile source history deliberately after current-candidate validation.
+
+### Read-only Supabase state
+
+Project refs are identifiers only; no credentials were read.
+
+| Check | Production | Staging |
+|---|---|---|
+| Project | `gcsamrdaeraxieaagsta` | `hfhrosthswcybccepmak` |
+| Database | PostgreSQL 17.6.1.166 | PostgreSQL 17.11.0.003 |
+| `shoir-persistence` | v8, SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` | v10, SHA-256 `5605d40e61feac6d010e7e1097565a7090bdf3325c862cc09de32af650b5a232` |
+| Canonical-admin protection in deployed function source | Missing; login still contains a tier/`updated_at` auto-repair update | Present; invalid protected-admin state fails closed and is not auto-repaired |
+| Migration history | Through `20261019140600_atomic_subscription_request_decisions` | Includes the same history plus three additional migration records |
+
+A read-only query found the reserved account invariant currently matches in both projects: role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, active `true`, expiry `2099-01-01 00:00:00 UTC`. No administrator login or account mutation was performed. The matching row does **not** make production's auto-repair code safe; the deployed production function remains older than staging.
+
+Staging has the legacy `20261021130000_shoir_beta_legal_referrals` migration, `20261022110000_enforce_beta_legal_acceptance`, and a policy refresh recorded as `20261025164602` with name `20261023130000_refresh_refund_policy_acceptance_version`. Production lacks the legal-acceptance columns and `public.shoir_referrals` table. The earlier referral migration is documented as rewriting existing affiliate codes and timestamps. **Do not replay it in production. Do not deploy staging function v10 directly to production while schema/function compatibility is unresolved.** First approve a migration/function manifest, perform isolated preservation and restore rehearsal, and verify the actual deployed source.
+
+The staging `public.shoir_referrals` table has RLS enabled and no policies. Read-only privilege checks showed `anon` and `authenticated` have no table privileges while `service_role` has the required server-only CRUD privileges. The Supabase security advisor flags the missing policy as informational; retain the server-only model and independently verify the grants rather than adding broad client policies just to silence the advisory. Production's security advisor returned no security lints in this snapshot; this is not a security certification. Performance advisors returned informational unused-index findings (16 production, 19 staging), which should be reviewed, not blindly deleted.
+
+### Follow-up: latest CI and repository-settings recheck — 27 October 2026, 11:10 UTC
+
+This note supersedes neither prior historical snapshots nor the eight gates below; it records later evidence on the current PR candidates.
+
+- **PR #208 failure evidence:** run [40487656400](https://github.com/MSJ1708/shoir-ie/actions/runs/40487656400) completed with 911 passed, 4 failed, 3 skipped and 71 warnings. The failures were: (a) T037 renderer looked for result keys `degrees_of_freedom`, `descriptive_standardized_difference`, `assumptions` and `warning` that `run_hypothesis_test` does not return; (b) supply-chain test expected cost 16 although minimum-cost hub routing produces 10; (c) disruption recovery expected period 7 although the 20 units of initial period-one inventory allow recovery in period 6. These issues were corrected in clean staging candidate PR #215; its new exact-head checks are queued and remain unverified.
+- **PR #215 latest head:** `b00a7bcd8d89c86d239f7847467e31c30a7e0ffb`. The prior head had not yet started all checks. Following the T065 stable-ID authentication/owner gate, 11 additional Workbench dispatch IDs with existing actor/tier gate, matrix reconciliation, and facility provenance tests, current-head exact validation [40496385655](https://github.com/MSJ1708/shoir-ie/actions/runs/40496385655), Security/Quality [40496385636](https://github.com/MSJ1708/shoir-ie/actions/runs/40496385636), Platform Tests [40496385651](https://github.com/MSJ1708/shoir-ie/actions/runs/40496385651) and Engine Regression [40496385715](https://github.com/MSJ1708/shoir-ie/actions/runs/40496385715) were queued at 11:28 UTC; a second validation run [40496378709](https://github.com/MSJ1708/shoir-ie/actions/runs/40496378709) was also queued. Hosted deployment smoke is skipped on PRs and does not count as a pass.
+- **Facility Layout recommendation ported into #215:** the candidate now includes the missing-`reason` SLP rendering guard, workspace-scoped origin metadata, weighted load-distance and explicitly rate-based optional handling cost, `Flow_Metrics` / `Provenance` XLSX sheets, and round-trip/regression tests. The export still calls `literalize_untrusted_formula_cells` after writing the new sheets. The new exact-head CI has not yet validated this facility change.
+- **Latest #215 workflow wiring correction:** the first expanded Engine Regression run [40494213790](https://github.com/MSJ1708/shoir-ie/actions/runs/40494213790) failed before test collection because its command referenced nonexistent `tests/test_shoir_100_tool_registry.py`. The actual staging tree has `tests/test_shoir_100_tool_tier_truth_table.py`; the workflow now runs that test and additionally compiles `shoir_facility_layout.py` and runs `tests/test_facility_layout.py` plus `tests/test_shoir_facility_flow_cost.py`. New current-head runs on `48b36121585f26a9c657400fee2ae86b9cdecb46`: validation [40494562495](https://github.com/MSJ1708/shoir-ie/actions/runs/40494562495), Security/Quality [40494562615](https://github.com/MSJ1708/shoir-ie/actions/runs/40494562615), Platform Tests [40494562503](https://github.com/MSJ1708/shoir-ie/actions/runs/40494562503), and Engine Regression [40494562521](https://github.com/MSJ1708/shoir-ie/actions/runs/40494562521) were queued at this follow-up. Live deployment smoke remains skipped.
+- **PR #212 local validation:** [run 40490986124](https://github.com/MSJ1708/shoir-ie/actions/runs/40490986124) passed its local test job and generated local runtime-smoke and report-export-validation artifacts (artifact IDs `12728948301` and `12728303305`). The runtime artifact reports desktop 1440×1000 and mobile 390×844 public-entry screens PASS, zero horizontal overflow/uncaught JavaScript errors, and all three tabs rendered without clipping. Authenticated module checks are explicitly `NOT RUN`, and hosted deployment smoke was skipped. I downloaded and visually inspected the synthetic export artifact: the PDF is 3 pages with all ROW-001…ROW-067; the PPTX renders to 8 slides, with table rows ROW-001…ROW-067 preserved and no visible clipped content in the slide contact-sheet review. This artifact is sourced from PR #212’s older SHA `f3a24f0dabcb3b1c343ef31e251691f9fd7e3ca7`; it is useful local pagination evidence, not an exact-head #215 export proof or authenticated/hosted acceptance.
+- **PR #216 latest head:** `5ec46249dddc096bf7efecf8d9cd5fc879db8ee9`. On this exact head, Edge Function verification [40494785257](https://github.com/MSJ1708/shoir-ie/actions/runs/40494785257) and Engine Regression [40494785209](https://github.com/MSJ1708/shoir-ie/actions/runs/40494785209) have passed; Security/Quality [40494785272](https://github.com/MSJ1708/shoir-ie/actions/runs/40494785272) and Platform Tests [40494785241](https://github.com/MSJ1708/shoir-ie/actions/runs/40494785241) are still in progress; full tests [40494785213](https://github.com/MSJ1708/shoir-ie/actions/runs/40494785213) and broad validation [40494785521](https://github.com/MSJ1708/shoir-ie/actions/runs/40494785521) remain queued. This is partial CI success, not complete merge/deployment clearance.
+- **Current branch rules read attempt:** GitHub rulesets endpoint `GET /repos/MSJ1708/shoir-ie/rulesets?includes_parents=true` returned an empty list. Both classic branch-protection read endpoints for `main` and `staging-e2e-20261019` returned HTTP 403, “Resource not accessible by integration.” The connection cannot independently read or change classic protection. Earlier 26 October evidence said required contexts were empty and staging enforcement was off. A repository admin must inspect the actual saved settings, enable required reviews and named checks, then provide fresh read-back evidence.
+
+### Additional candidate changes — 27 October 2026, 11:27 UTC
+
+- The clean #215 candidate now enforces T065 at the dedicated Facility Layout route before data access: recognized package, authenticated actor and requested owner match, plus canonical registry gate. The matrix continues to mark the capability `IMPLEMENTED_NEEDS_VALIDATION`, correctly leaving save/reload/re-login, live CRUD, import/export and two-user isolation for authenticated acceptance.
+- The 100-tool matrix still has exactly 100 unique IDs/19 columns; 37 stale references to a missing registry test file were corrected to the actual tier truth-table suite. This improves the evidence map but is not evidence that all 100 tools are working. The explicit stable-ID execution audit now has 74 direct Workbench dispatch IDs; 11 formerly mis-described as unbound have been reconciled to the real actor/tier check, T065 is separately gated at the Facility Layout route, and 25 non-Workbench targets remain expressly unresolved for stable-route/action verification. No row was changed to VERIFIED_WORKING.
+- PR #215’s latest exact-head run is now the required check after these changes; previous runs predate the current Facility/T065/matrix changes and must not be reused as acceptance evidence.
+
+### Eight closeout gates
+
+1. Refresh/reconcile PR #208 against current staging, then obtain a successful exact-head full validation result.
+2. Run a fresh authenticated staging release gate on that exact integrated candidate using disposable `shoir-e2e-*` accounts; ensure mandatory probes fail closed and hosted smoke is not skipped.
+3. Verify save/reload/re-login, revoked-session behavior, six-package entitlement boundaries, direct-route/action denial and two-user cross-workspace isolation on the hosted candidate.
+4. Round-trip synthetic XLSX, PDF, PPTX and ZIP artifacts; open/parse all outputs and inspect every PDF page and PowerPoint continuation slide, units, formulas, labels, assumptions, warnings and provenance.
+5. Configure and verify required reviews and named status checks for `main` and `staging-e2e-20261019`. The latest documented 26 October branch-settings snapshot said the required-check contexts were empty (and staging enforcement was off); re-check the actual current settings before calling this complete.
+6. Approve a production-compatible Edge Function/migration plan, preserve the canonical administrator without login-time mutation, reconcile the migration ledger and prove forward/rollback compatibility in an isolated production-shaped rehearsal.
+7. Produce successful backup/restore and rollback evidence for the exact release candidate; verify the Streamlit deployment branch, commit, entry point and secret/configuration presence without disclosing values.
+8. Obtain qualified Saudi legal/privacy review of the actual operator identity, commercial registration, PDPL/data flows and retention/transfers, customer notices, calculation limitations, refund/cancellation, copyright/IP and commercial terms. Populate the accountable owner's facts and obtain explicit release-owner approval before enabling paid access.
+
+## PR recommendation disposition ledger — 27 October 2026
+
+This ledger separates current implementation candidates from superseded drafts. It is not merge authorization and does not replace reviewing the actual patch, exact-head checks or deployment evidence.
+
+### Active integration/release PRs
+
+| PR | Recommendation and disposition | Required action |
+|---|---|---|
+| #208 | Original focused Workbench integration recommendation and patch source. Its implementation has been selectively ported to clean current-base PR #215. | Treat #215 as the current staging candidate; close #208 as superseded only after #215 passes exact-head CI and release acceptance. |
+| #215 | Current clean staging integration candidate: #208's focused tool diff plus #184's unique mobile/tab geometry fix from #212, based on staging SHA `0558c23d59a3f0b79558a8d3407869d0238aceaf`. | Run exact-head full CI, local desktop/mobile smoke, authenticated release gate, cross-workspace/save-reload and export parsing before any merge or release. |
+| #211 | This recheck and rollback-manifest update. | Keep draft until documentation/validation checks pass and the dated live evidence has independent review. |
+| #212 | Source branch for the unique mobile auth-tab wrapping and tab geometry checks from #184; all three file changes are included in #215. | Do not merge separately. Close as superseded only after #215 validation or retain temporarily for patch provenance. |
+| #213 | Original main-based protected-administrator source fix; now included in clean combined main PR #216. | Keep as provenance only until #216 exact-head tests pass; the Edge Function has not been deployed. |
+| #214 | Original main-based Streamlit CORS/XSRF and host allowlist change; now included in clean combined main PR #216. | Keep as provenance only until #216 exact-head tests pass; the live app is unchanged. |
+| #216 | Current clean main-based security consolidation: protected-admin fail-closed behavior plus Streamlit origin/host allowlists and tests. | Pass full exact-head Python/Deno/security/engine/platform CI and peer review. Deployment requires a separate approved production compatibility and rollback plan. |
+| #199 | Historical live-state/parity snapshot on main; its findings were the basis of the newer, dated #211 recheck. | Preserve for history; do not treat it as current evidence or merge an old snapshot into staging. |
+| #191 | Older main-based T006 recovery, T020 lineage and T039 registry draft. | These areas are now represented in the newer #208 staging candidate. Do not merge the stale stack independently; compare only for uncovered changes after #208 validation. |
+| #189 | Earlier staging release-candidate verification branch. | Superseded by the newer candidate; run acceptance on the final integrated SHA rather than reuse old results. |
+| #188 | Older stacked RNLE/T046 implementation. | T046 is present in #208; do not merge this stale branch without a target-level audit proving unique code. |
+| #184 | T044 RCM plus mobile smoke/landing fixes on an older stacked base. | T044 work overlaps #208. The distinct mobile tab/geometry tests have been ported to #212; keep the old stack out of the merge path. |
+| #182 | Nine focused methods on the old `audit/shoir-100-tools-20261023` base. Current #215 registry/matrix already maps T015/T033/T036/T037/T049/T052/T058/T062/T071 to the shared target-engine/Workbench/test architecture. | Do not merge the old stack. Validate these nine methods through #215’s exact-head tests and authenticated target-level acceptance; port only a demonstrated missing method or test. |
+| #181 / #180 | Earlier waves of 100-tool methods on older main-based branches. Selected #181 Facility Layout fixes have been ported to #215: missing `reason` column safety, workspace-scoped data origin, weighted flow-distance, optional user-provided cost-rate reporting, and the two XLSX evidence sheets while retaining formula-injection protections. Shared method work that already exists remains in the unified target engine. | Validate the port through #215's exact-head CI and inspect the six-sheet workbook round-trip. Do not wholesale merge their old shared registry/Workbench branches. |
+| #179 | Earlier unit-converter and fail-closed readiness foundation. | Verify whether any recommendation is still uncovered in the current implementation before selectively porting; preserve the canonical tier-gate tests. |
+| #178 / #175 / #174 / #173 / #172 | Earlier competing grouped-tool-library/registry/runner stacks. | Treat as superseded candidates pending a file/target comparison with merged #183/#193 and current #208. Do not merge the old stacks as-is. |
+| #170 | Main-based legal notice, consent and referral draft. | Do not merge or publish unchanged. Align it with the safer migration path, actual product behavior, migration history, and qualified Saudi legal/privacy review. Referral attribution is not a promised reward/discount program. |
+
+### Previously integrated recommendations — still subject to release gates
+
+| PR | Integrated scope | Remaining boundary |
+|---|---|---|
+| #200 | Authenticated release-gate logic now fails closed when mandatory probes are skipped/unknown. | The current integrated candidate still needs a fresh gate; skipped live smoke is not a pass. |
+| #202 | PDF/PPTX pagination/readability correction. | Inspect the exact-candidate generated PDF pages and every PPTX slide, including continuation pages, with parseable artifacts attached. |
+| #203 | XLSX formula/URL injection safeguards. | Re-test all relevant export paths with hostile synthetic strings and parse the produced workbook. |
+| #205 | Non-destructive additive referral/legal schema path and rehearsal plan was added to the staging line. | The migration has not been authorized/applied to production; historical staging migration rewrote data and must not be replayed in production. |
+| #206 | Admin invariant, Streamlit security settings and regression tests are integrated in staging; deployed staging function is v10. | Production still serves v8 and its login handler still auto-repairs the reserved admin. PR #213 carries the source-level correction to a main-based branch; no production deploy has occurred. |
+| #207 | Read-only SAP/Oracle adapter and product/IT specification integrated in staging. | Specification-only; no provider transport, credentials, customer tenant, live sync or writes. Do not market the connectors as connected. |
+| #210 | Paid-readiness, PDPL inventory, pilot acceptance, rollback and legal-review templates integrated in staging. | Documentation is not verification. Counsel/privacy review, actual operator facts and all acceptance evidence remain outstanding. |
+
+The open-stack history is deliberately not being merged wholesale. The reviewed base is heavily diverged: the last comparison found staging and main differ by 106 versus 412 commits from their merge base. Every integration must use a clean base and preserve exact-head CI and scope boundaries.
+
+Current consolidation route: use **#215** as the staging code candidate and **#216** as the main-branch security candidate. PRs #208/#212 and #213/#214 remain original patch sources until the consolidated candidates pass; no merge, deployment or migration is implied by this ledger.
+
+**Release recommendation: NO-GO for paid launch or production deployment on the evidence available at this recheck.**
+
 ## 1. Technical launch gate
 
 | Requirement | Status | Evidence / action to close |

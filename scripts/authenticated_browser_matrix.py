@@ -12,6 +12,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from browser_diagnostics import safe_javascript_error
 from staging_e2e_guard import validate_app_from_env
 
 REPORT = Path(os.environ.get("SHOIR_E2E_UI_REPORT", "artifacts/authenticated-release-gate/browser-report.json"))
@@ -128,8 +129,20 @@ def main() -> int:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
         page = context.new_page()
-        page_errors: list[str] = []
-        page.on("pageerror", lambda error: page_errors.append(type(error).__name__))
+        page_errors: list[dict[str, str]] = []
+
+        def record_page_error(error: object) -> None:
+            try:
+                page_errors.append(safe_javascript_error(error))
+            except Exception:
+                # Keep the gate fail-closed while avoiding unsafe diagnostic output.
+                page_errors.append({
+                    "name": "Error",
+                    "message": "Uncaught JavaScript error; safe details unavailable.",
+                    "stack_frames": "",
+                })
+
+        page.on("pageerror", record_page_error)
         step = "load public application"
         try:
             response = page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
@@ -237,7 +250,9 @@ def main() -> int:
             )
             take_evidence_screenshot(page, REPORT.parent / "authenticated-excel-module.png")
 
-            # Verify genuine sign-out by waiting for the public sign-in heading.
+            # Verify genuine sign-out, not just a transient rerender. Streamlit can
+            # briefly expose the sign-in heading while the previous authenticated DOM
+            # is being replaced; require a stable signed-out state across two polls.
             step = "click sidebar logout"
             visible_logout_button(app_frame).click(timeout=15_000)
             step = "verify unauthenticated sign-in after logout"
@@ -252,17 +267,45 @@ def main() -> int:
                 if "lock / logout workspace" in visible_body:
                     raise RuntimeError("Logout click left the authenticated workspace visible.") from exc
                 raise RuntimeError("Logout did not return to the sign-in screen; inspect staging deployment/evidence.") from exc
-            signed_out_body = app_frame.locator("body").inner_text(timeout=8_000)
-            signed_out = (
-                "Sign In to Your Workspace" in signed_out_body
-                and username.casefold() not in signed_out_body.casefold()
-                and "Lock / Logout Workspace" not in signed_out_body
-            )
+
+            signout_deadline = time.monotonic() + 20
+            stable_signout_observations = 0
+            signed_out = False
+            signed_out_body = ""
+            logout_button_visible = True
+            username_in_rendered_body = True
+            while time.monotonic() < signout_deadline:
+                signed_out_body = app_frame.locator("body").inner_text(timeout=8_000)
+                folded_body = signed_out_body.casefold()
+                heading_visible = "sign in to your workspace" in folded_body
+                username_in_rendered_body = username.casefold() in folded_body
+                logout_locator = app_frame.get_by_role("button", name="Lock / Logout Workspace")
+                try:
+                    logout_button_visible = logout_locator.count() > 0 and logout_locator.first.is_visible()
+                except Exception:
+                    logout_button_visible = False
+                signed_out = heading_visible and not username_in_rendered_body and not logout_button_visible
+                if signed_out:
+                    stable_signout_observations += 1
+                    if stable_signout_observations >= 2:
+                        break
+                else:
+                    stable_signout_observations = 0
+                page.wait_for_timeout(500)
+
+            take_evidence_screenshot(page, REPORT.parent / "authenticated-logout-state.png")
             check(
                 "sidebar_logout_returns_to_signin",
-                signed_out,
-                "Logout returned to the unauthenticated sign-in screen."
-                if signed_out else "Sign-in heading or cleared-session indicators were missing.",
+                signed_out and stable_signout_observations >= 2,
+                "Logout returned to a stable unauthenticated sign-in screen."
+                if signed_out and stable_signout_observations >= 2
+                else (
+                    "Logout UI did not settle into the required signed-out state: "
+                    f"heading_visible={heading_visible if signed_out_body else False}, "
+                    f"test_username_visible={username_in_rendered_body}, "
+                    f"logout_button_visible={logout_button_visible}, "
+                    f"stable_polls={stable_signout_observations}."
+                ),
             )
         except Exception as exc:
             # Keep diagnostics safe: never print credentials, response bodies, or input values.
@@ -285,8 +328,15 @@ def main() -> int:
                     pass
             check("browser_walkthrough", False, detail)
         finally:
-            check("no_uncaught_javascript_errors", not page_errors,
-                  "No uncaught JavaScript errors." if not page_errors else f"{len(page_errors)} uncaught JavaScript error(s).")
+            if not page_errors:
+                javascript_detail = "No uncaught JavaScript errors."
+            else:
+                first = page_errors[0]
+                javascript_detail = (
+                    f"{len(page_errors)} uncaught JavaScript error(s); first safe diagnostic: "
+                    f"{first.get('name', 'Error')}: {first.get('message') or 'no message'}"
+                )
+            check("no_uncaught_javascript_errors", not page_errors, javascript_detail)
             try:
                 browser.close()
             except Exception:
@@ -297,6 +347,7 @@ def main() -> int:
         "target": URL,
         "account_class": "dedicated non-admin e2e account",
         "overall": "PASS" if all(c["status"] == "PASS" for c in cases) else "FAIL",
+        "javascript_errors": page_errors,
         "cases": cases,
     }, indent=2), encoding="utf-8")
     return 0 if all(c["status"] == "PASS" for c in cases) else 1

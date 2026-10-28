@@ -6,17 +6,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_authenticated_gate_is_manual_and_has_explicit_one_shot_push_opt_in():
+def test_authenticated_gate_is_manual_with_scoped_release_pr_and_one_shot_push_opt_in():
     workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
     script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
-    assert "pull_request:" not in workflow
-    assert "push:" in workflow
+    assert "cancel-in-progress: true" in workflow
+    assert "pull_request:" in workflow
     assert "branches:" in workflow
+    assert "github.event_name == 'pull_request'" in workflow
+    assert "github.head_ref == 'docs/live-release-recheck-20261027'" in workflow
+    assert "!github.event.pull_request.head.repo.fork" in workflow
+    assert "push:" in workflow
     assert "staging-e2e-20261019" in workflow
     assert "[run-authenticated-gate]" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "SHOIR_E2E_VERIFY_LOGIN_THROTTLE must be set to true" in workflow
     assert "shoir-e2e-*" in workflow
     assert "shoir-e2e-" in script
     assert "admin_approve_session" not in script
@@ -31,6 +36,8 @@ def test_authenticated_browser_gate_checks_module_route_and_shell_logout():
     assert "Excel Data Cleaning & Import" in script
     assert "sidebar_logout_returns_to_signin" in script
     assert "Lock / Logout Workspace" in script
+    assert "stable_signout_observations >= 2" in script
+    assert "authenticated-logout-state.png" in script
 
 
 
