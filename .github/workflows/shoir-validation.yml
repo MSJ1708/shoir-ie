@@ -118,7 +118,7 @@ jobs:
   live-deployment-smoke:
     # Probe the hosted anonymous production shell for audit candidates, main
     # updates, and the dedicated release-evidence branch. This is a service
-    # availability/rendering check, not proof that this SHA is deployed.
+    # availability/rendering check, not proof that the triggering Git SHA is deployed.
     if: >-
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
       (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main' || startsWith(github.ref_name, 'docs/live-release-recheck-'))) ||
