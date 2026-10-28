@@ -92,3 +92,24 @@ def test_id_token_helper_never_returns_token_for_logged_out_or_missing_user():
 def test_oidc_display_hint_is_limited_and_not_used_for_authorization():
     user = _User("unused-token", email="approved-user@example.invalid")
     assert oidc_claims_display_name(user) == "approved-user@example.invalid"
+
+
+def test_oidc_configuration_requires_secure_urls_and_strong_cookie_secret():
+    secrets = _valid_secrets()
+    secrets["auth"]["redirect_uri"] = "http://shoir-ie-app.streamlit.app/oauth2callback"
+    status = oidc_configuration_status(secrets)
+    assert status["ready"] is False
+    assert "redirect_uri must be a public HTTPS URL" in status["missing_shared"]
+
+    secrets = _valid_secrets()
+    secrets["auth"]["cookie_secret"] = "short"
+    status = oidc_configuration_status(secrets)
+    assert status["ready"] is False
+    assert "cookie_secret must contain at least 32 characters" in status["missing_shared"]
+
+    secrets = _valid_secrets()
+    secrets["auth"]["enterprise"]["server_metadata_url"] = "http://idp.example.invalid/metadata"
+    status = oidc_configuration_status(secrets)
+    assert status["ready"] is False
+    assert "server_metadata_url must be a public HTTPS URL" in status["missing_provider"]
+
