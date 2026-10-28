@@ -52,6 +52,19 @@ export function hasExactlyOneCanonicalMasterAdmin(
     );
 }
 
+
+/** A subscription approval must never mutate the reserved administrator account. */
+export function isProtectedAdministratorTarget(
+  request: Record<string, unknown>,
+  existingAccount: Record<string, unknown> | null | undefined,
+  pendingCredential: Record<string, unknown> | null | undefined,
+): boolean {
+  return request.username_lc === "sho" ||
+    existingAccount?.username_lc === "sho" ||
+    existingAccount?.role === "Enterprise Admin" ||
+    pendingCredential?.username_lc === "sho";
+}
+
 export const MAX_REQUEST_BODY_BYTES = 12 * 1024 * 1024;
 
 export class PublicRequestError extends Error {
