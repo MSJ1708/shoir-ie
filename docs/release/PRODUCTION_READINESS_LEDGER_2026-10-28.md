@@ -273,3 +273,29 @@ No production deployment, production migration, production row mutation, review 
 - PR #218 remains draft; latest migration grants revocation is not validated on a completed exact-head PostgreSQL replay yet.
 - PR #215's exact-head unit, engine-regression and security/quality jobs passed, but the hosted public-shell job on the currently deployed staging version failed mobile overflow. The local all-in-one validation job remained in progress at the last check; hosted re-test after deploying candidate code is still required.
 - Do not merge, deploy, migrate, or remove BETA as a consequence of closing the duplicate PR. Release stays **NO-GO / HOLD**.
+
+## 11. T098 provider-backed identity candidate — 2026-10-28, 20:46 UTC
+
+The T098 implementation is now isolated in draft [PR #223](https://github.com/MSJ1708/shoir-ie/pull/223), branch `feature/t098-oidc-audit-20261028`, targeting staging `staging-e2e-20261019`, latest known exact head `b8268408283b8abe31b3b82c07d1a61aa01722c2`. It is not merged or deployed.
+
+### Code now present in the candidate
+
+- `supabase/functions/shoir-persistence/oidc.ts`: optional, disabled-by-default config; HTTPS/DNS hostname checks; independent JWT signature, exact issuer/audience, RS256/ES256 allowlist, expiry/issued-at age and required-claim verification; verified-email enforcement; optional configured `amr`/`acr` MFA-claim requirement; bounded ID token; sanitized errors; token fingerprint helper.
+- `supabase/functions/shoir-persistence/index.ts`: new `oidc_login` branch. It rate-limits before verification, accepts only a signed provider identity, requires one exact existing account for the verified email, denies missing/inactive/ambiguous mappings, rechecks the protected canonical-admin invariant for privileged accounts, and never auto-creates/promotes accounts. Successful regular OIDC app sessions use an 8-hour lifetime; subscription renewal remains restricted. It writes audit success/denial with pseudonymized subject/token hashes and sanitized details; duplicate ID-token fingerprints are rejected. If audit insertion fails, the code withholds the session token and attempts session revocation.
+- `supabase/migrations/20261028190000_shoir_oidc_audit_events.sql`: proposed RLS-enabled append-only audit table. It revokes table/sequence privileges and grants service-role INSERT plus only required sequence USAGE. Browser roles receive no table or sequence privileges.
+- `app.py`, `shoir_oidc_auth.py`, `durable_account_store.py`: optional sign-in flow within the existing login screen, gated on Streamlit secrets, with no token displayed or logged; explicit user action exchanges the token through the Edge Function. OIDC logout first calls server-side session revocation, then `st.logout()`. Existing password login remains available.
+- `tests/test_t098_oidc_integration_contract.py`, `tests/test_shoir_oidc_auth.py`, `supabase/functions/shoir-persistence/oidc_test.ts`: configuration tests, account-mapping/audit contracts, cryptographic token tests (signature, wrong issuer/audience, expiry, verified email, MFA claims, size and bad signatures), and migration privilege assertions. The Edge Function and validation workflows now include the OIDC verifier tests; validation pytest runs include skip reasons.
+- `requirements.txt`: adds the Authlib dependency required by Streamlit's optional login flow. Provider setup instructions are in `docs/T098_OIDC_AUDIT_CONFIGURATION.md`.
+
+### Exact-head check state
+
+Latest read shows these exact-head workflows queued, not passed: Edge Function [40766132907](https://github.com/MSJ1708/shoir-ie/actions/runs/40766132907), validation [40766132906](https://github.com/MSJ1708/shoir-ie/actions/runs/40766132906), subscription transaction integration [40766132916](https://github.com/MSJ1708/shoir-ie/actions/runs/40766132916). The combined commit status API showed no completed status entries. Do not assume syntax, formatting, type-check, tests or migration replay pass until logs/conclusions on this exact SHA are observed.
+
+### External acceptance still required
+
+- No real issuer/client registration, Streamlit client secret/cookie secret, Edge Function OIDC secrets, provider tenant or provider MFA claim evidence has been supplied. No actual provider login has been run. The code remains **unverified / configuration required**, and T098 remains `EXTERNAL_CONFIGURATION_REQUIRED` until provider-backed hosted acceptance and independent security review pass.
+- The current verifier requires the configured JWKS host to match the issuer host and accepts only configured HTTPS DNS URLs. This intentionally limits provider compatibility; validate the chosen provider's real metadata before configuration rather than weakening the allowlist without review.
+- The OIDC migration has not been applied to staging or production. It requires a fresh exact-head Postgres 17 replay, schema/grant verification, independent security review and explicit staging-application approval.
+- Production release remains NO-GO. This candidate is unrelated to and does not close production wildcard CORS, production schema mismatch, lack of actual restore evidence, current ruleset verification, authentication hosted acceptance, legal sign-off or production release authorization.
+
+No hosted identity provider was configured, no user account was created or changed, no production code/schema changed, and BETA remains in place.
