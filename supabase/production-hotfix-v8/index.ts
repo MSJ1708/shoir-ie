@@ -6,8 +6,8 @@ import {
   hasExactlyOneCanonicalMasterAdmin,
   isAllowedBrowserOrigin,
   PublicRequestError,
-  readBoundedJsonObject,
   publicErrorFor,
+  readBoundedJsonObject,
 } from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
