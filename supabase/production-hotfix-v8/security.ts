@@ -142,3 +142,51 @@ export async function readBoundedJsonObject(
   }
   return parsed as Record<string, unknown>;
 }
+
+export function publicErrorFor(
+  error: unknown,
+): { status: number; message: string } {
+  if (error instanceof PublicRequestError) {
+    return { status: error.status, message: error.message };
+  }
+
+  const message = error instanceof Error ? error.message : "";
+  if (message === "Unauthorized session.") {
+    return { status: 401, message: "Unauthorized session." };
+  }
+  if (message === "Session scope does not permit this action.") {
+    return { status: 403, message };
+  }
+  if (message === "Account is inactive.") {
+    return { status: 403, message };
+  }
+  if (message === "Admin authorization failed.") {
+    return { status: 403, message };
+  }
+  if (message === "SUBSCRIPTION_EXPIRED") {
+    return { status: 403, message: "SUBSCRIPTION_EXPIRED" };
+  }
+  if (
+    message === "Authentication protection is temporarily unavailable." ||
+    message ===
+      "Registration request could not be confirmed by the persistence service."
+  ) {
+    return { status: 503, message };
+  }
+
+  const inputErrors = new Set([
+    "Payment proof is empty or exceeds the 512 KiB limit.",
+    "Payment proof is not valid base64 data.",
+    "Payment proof exceeds the 512 KiB limit.",
+    "Payment proof data or content type is invalid.",
+    "Payment proof must be PNG, JPG, JPEG or PDF.",
+    "Payment proof content does not match its declared file type.",
+  ]);
+  if (inputErrors.has(message)) return { status: 400, message };
+
+  return {
+    status: 500,
+    message:
+      "The persistence service could not complete this request. Retry later.",
+  };
+}
