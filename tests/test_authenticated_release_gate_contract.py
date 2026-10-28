@@ -11,6 +11,7 @@ def test_authenticated_gate_is_manual_with_scoped_release_pr_and_one_shot_push_o
     script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
+    assert "cancel-in-progress: true" in workflow
     assert "pull_request:" in workflow
     assert "branches:" in workflow
     assert "github.event_name == 'pull_request'" in workflow
