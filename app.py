@@ -75,6 +75,11 @@ except ImportError:
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
+from shoir_oidc_auth import (
+    get_verified_streamlit_id_token,
+    oidc_claims_display_name,
+    oidc_configuration_status,
+)
 # Load the persistence module first, then validate its complete public contract.
 # A stale Streamlit checkout or partially updated deployment can otherwise raise an
 # opaque ImportError here and prevent even the public sign-in page from rendering.
@@ -83,6 +88,7 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "sync_durable_accounts",
     "sync_remote_requests_to_local",
     "edge_login",
+    "edge_oidc_login",
     "edge_logout",
     "edge_admin_list_requests",
     "edge_admin_approve",
