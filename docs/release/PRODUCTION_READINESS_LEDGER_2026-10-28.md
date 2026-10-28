@@ -221,3 +221,47 @@ This entry supersedes the relevant PR heads and pending-check observations in se
 - **Global BETA label:** retained. No BETA removal is allowed while any mandatory gate above remains open.
 
 No main merge, production deployment, production migration, production record change, paid-launch enablement, or BETA removal was performed by this update.
+
+## 9. Later live-state refresh — 2026-10-28, 20:18 UTC
+
+This entry supersedes earlier candidate status where stated. The release decision remains **NO-GO / HOLD**.
+
+### Read-only production facts captured directly from Supabase
+
+- Project details report production `gcsamrdaeraxieaagsta` and staging `hfhrosthswcybccepmak` as `ACTIVE_HEALTHY`, both in `eu-central-1`, with PostgreSQL 17 (production 17.6.1.166, staging 17.11.0.003). The branch-list APIs returned no development branches for either project; no new branch/project was created and no paid service was enabled.
+- Fresh read-only aggregate on production: `active_enterprise_admin_count=1`, `canonical_admin_match_count=1` for the expected canonical account invariant. No admin login or mutation was performed.
+- Production `to_regclass('public.shoir_referrals')` returned null. No legal-acceptance columns among `terms_accepted`, `terms_version`, `privacy_policy_version`, `refund_policy_version`, `cookie_policy_version`, `accepted_at` were found on `public.shoir_subscription_requests`.
+- Production `supabase_migrations.schema_migrations` contains 14 entries and ends at `20261019140600`. No migration was applied.
+- Latest Supabase security advisor: production reported no security lint findings; staging reported informational `rls_enabled_no_policy` for `public.shoir_referrals`. Staging catalog inspection showed no table privileges for `anon` or `authenticated`, while `service_role` had CRUD plus unnecessary `TRUNCATE`, `REFERENCES`, `TRIGGER` and sequence privileges. PR #218 now explicitly revokes all table/sequence rights and grants only service-role CRUD and sequence USAGE/SELECT; exact-head rehearsal is still queued. RLS enabled without a policy must remain a reviewed server-only access model and not be treated as a general user-facing table.
+
+### Actual hosted browser and CORS artifacts
+
+- [Hosted staging live acceptance run 40758603263](https://github.com/MSJ1708/shoir-ie/actions/runs/40758603263) completed its public-shell live job with **FAILURE**. Artifact `shoir-ie-staging-live-acceptance` (ID `12846964756`, SHA-256 `4489cabfbaaea9a77e6e3e9df2fa1417b5170e2a0c1bd294653d021f3177f5ec`) reports the deployed app at `https://shoirieverified.streamlit.app/` passed desktop width 1440 but failed mobile width 390: tab-list `clientWidth=358`, `scrollWidth=384`; Explore tab scrolls 26px and label/content is clipped. Authentication/module checks were explicitly `NOT RUN` because no authorized test credentials were supplied to CI.
+- The same run's production CORS diagnostic artifact (ID `12847159408`, SHA-256 `d2cab608cfb8f0654cf1364db3694e713559385312851f6512c913aff8e2d1b9`) records actual, non-mutating OPTIONS probes at the production function endpoint. Approved origin, unapproved origin, and origin omitted each returned HTTP 200 with `Access-Control-Allow-Origin: *`; `Vary` was `Accept-Encoding`, not `Origin`. Overall **FAIL**. This is direct live proof of the production CORS blocker.
+- PR #215's candidate CSS includes both `[data-baseweb="tab-highlight"]` and `.react-aria-SelectionIndicator` hiding at mobile widths, preserving selected-tab styling. On exact head `8c72149cca683d0915bf1883df1b9c8bc7467fa3`, the platform test [40758603232](https://github.com/MSJ1708/shoir-ie/actions/runs/40758603232) passed with `939 passed, 3 skipped, 72 warnings`; engine regression [40758603238](https://github.com/MSJ1708/shoir-ie/actions/runs/40758603238) passed with `311 passed, 67 warnings`; security/quality [40758603371](https://github.com/MSJ1708/shoir-ie/actions/runs/40758603371) passed with `939 passed, 3 skipped, 71 warnings, 5 subtests passed`. These are candidate-code checks. The same head's hosted browser job still tested the *currently deployed old staging page* and failed mobile; the fix has not been deployed to staging, and the local all-in-one validation job was still running at the last read. Do not mark hosted mobile acceptance passed.
+- The two/three skipped pytest cases have not yet been identified; pytest output was run quiet without skip-reason output. The skip count is recorded, not presumed harmless. Add a fresh run with skip reasons (or inspect each skip source) before treating mandatory checks as complete.
+- The newer PR #211 production diagnostic now performs a browser-style preflight and checks allowed methods/headers, status and `Vary: Origin`. But PR #211 latest head `4f0b7fbeb9e761b37f68418929704b4f23b17ea6` checks are queued, not passed. The older diagnostic artifact remains the observed failure and is not invalidated by code updates.
+
+### Current candidate check snapshot
+
+- PR #220 current head `7b852037ac4d28f43365da81443463d8a287ded7`: exact-head jobs were queued on last read. Its latest case-normalized protected-admin guard change is unverified until fresh Deno/contract/security/regression checks finish. No independent reviewer and no production deployment.
+- PR #218 head `89b760611ba67028b5d9d2bc4286642fd641c6f9`: exact-head migration suite queued. The earlier 2-test PostgreSQL pass was on an older head; it is not evidence for the latest grant revocation change.
+- PR #211 head `4f0b7fbeb9e761b37f68418929704b4f23b17ea6`: all current head checks queued. Its packet update marks PR #220's earlier source ref as superseded and states that a deterministic deployment bundle SHA-256 has not been generated.
+- PR #216 head `67e43987ac99cba34564ff9ab2043550dd915820`: all six suite checks passed on this exact head; general test run [40756561498](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561498) reported `984 passed, 2 skipped, 71 warnings`. Two skipped cases still require explanation and independent review is absent.
+- PR #217 head `7c0ddde187c36c53e591c3742a5d770b1b0703f9`: its five CI suites passed on that candidate. PDF/PPTX artifact checks are prior-candidate evidence only; final files must be regenerated and inspected from the final integrated SHA.
+- PR #222 remains redundant as a standalone fix: it adds `POST, OPTIONS` allow-methods but retains wildcard ACAO. Do not merge it separately.
+
+### No-go decisions and remaining external dependencies
+
+1. **Production CORS — FAIL** until a reviewed candidate passes exact-head tests, obtains independent security review, is explicitly authorized, is deployed, and real production preflight probes pass.
+2. **Migration/recovery — BLOCKED** because the latest migration CI is pending, actual production ledger differs from staging, no production-shaped restore rehearsal is recorded, and usable backup/PITR recovery evidence is absent. Production DDL remains untouched.
+3. **Hosted authenticated acceptance — BLOCKED/NOT RUN** for the latest integrated candidate. Required disposable accounts and authenticated browser workflow are not yet supplied/configured. The prior public-shell live job fails mobile on deployed code.
+4. **Branch rulesets — UNVERIFIED**; current ruleset-read capability is unavailable through the connected tool. A repository owner/admin must provide a current export/screenshot.
+5. **Independent review — REQUIRED** for the security and database PRs; connected GitHub identity is repository owner, so the agent has not approved its own changes.
+6. **T096 — EXTERNAL CONFIG REQUIRED** despite secure generic REST code/mocked tests. An approved non-production endpoint, server-side secret, exact host allowlist and actual read-only HTTP test are missing. No SAP/Oracle protocol/tenant connection is proven.
+7. **T098 — EXTERNAL CONFIG / SCOPE DECISION REQUIRED.** Current handler is configuration readiness only; provider-backed OIDC callback/session flow, identity role mapping, provider-evidenced MFA and durable audit evidence are not proven. Supply a real IdP/audit sink and test in staging, or expressly exclude it from launch and remove unsupported claims before any go-live.
+8. **Legal/privacy/commercial — EXTERNAL REVIEW REQUIRED.** App text still identifies Shoir-IE as product name only and says the operator's full registered legal name, official business address and applicable registration details must be published. Qualified Saudi legal/privacy review and actual hosting/transfer/retention declarations are not signed off. Do not enable paid launch/rewards.
+9. **Authorization — NOT APPROVED.** `docs/release/PRODUCTION_RELEASE_AUTHORIZATION_REQUEST_2026-10-28.md` is preparation-only, has no deterministic build SHA-256, and must be refreshed after final exact-head review. Do not execute production function deploy or migration.
+10. **BETA — RETAIN.** The hosted screenshot currently shows the STAGING banner and the public product terms still explicitly describe beta. Global BETA removal is not authorized.
+
+No production deployment, production migration, production row mutation, review bypass, paid launch enablement, or BETA removal occurred during this refresh.
