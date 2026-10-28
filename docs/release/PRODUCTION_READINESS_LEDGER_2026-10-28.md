@@ -80,3 +80,54 @@ Safe sequence:
 ### Stop conditions
 
 Stop and remain HOLD if the function/schema hashes change unexpectedly; any migration would replay a historical rewriting script; recovery cannot be demonstrated; any protected-admin data changes; a required check is skipped or missing; a security/migration reviewer has not approved; T096/T098 claims exceed proven integration; legal facts are missing; or explicit production release authorization is absent.
+
+## 5. Recovery update — 2026-10-28, 19:42 UTC
+
+This section supersedes older candidate-head/check-status notes above where they differ. It does not change the release decision.
+
+### Exact candidate heads and fresh CI
+
+| Candidate | Current head | Fresh checks at the recorded head | Interpretation |
+|---|---|---|---|
+| [#216 main-based security/consolidation candidate](https://github.com/MSJ1708/shoir-ie/pull/216) | `67e43987ac99cba34564ff9ab2043550dd915820` | [Tests](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561498), [validation](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561606), [security/quality](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561610), [Edge Function](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561473), [engine](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561519), [platform](https://github.com/MSJ1708/shoir-ie/actions/runs/40756561593), and push validation [40756556601](https://github.com/MSJ1708/shoir-ie/actions/runs/40756556601) were queued when refreshed. | **NOT YET PASS.** Earlier head `96f58dab4545758cf2d4f8b53a216bdea1a39053` ran 984 tests: 982 passed, 2 failed. One failure revealed the engine method is decorated with an async wrapper; the regression test was corrected to execute it via `asyncio.run`. The other attempted to JSON-serialize a pandas DataFrame instead of the sanitized `profile_records`; the assertion was corrected to inspect those serializable records. Both fixes are in the newer head, which must be rerun. The missing SimPy dependency was added to `requirements.txt` before that run. |
+| [#215 staging integration/mobile candidate](https://github.com/MSJ1708/shoir-ie/pull/215) | `7e20633385cad96a59703ace23ddfedb0213c0fd` | [Validation](https://github.com/MSJ1708/shoir-ie/actions/runs/40756104792), [engine](https://github.com/MSJ1708/shoir-ie/actions/runs/40756104739), [platform](https://github.com/MSJ1708/shoir-ie/actions/runs/40756104791), and [security/quality](https://github.com/MSJ1708/shoir-ie/actions/runs/40756105091) were still in progress/queued at this refresh. The hosted staging job is no longer absent from the candidate workflow. | Hosted staging CORS/preflight **PASS**; the public browser smoke **FAIL** on the currently deployed staging app, as detailed below. Local candidate tests are not complete yet. |
+
+### Live staging failure — do not waive
+
+The current staging-targeted hosted run [40756104792](https://github.com/MSJ1708/shoir-ie/actions/runs/40756104792) uploaded artifact [`shoir-ie-staging-live-acceptance` #12846835741](https://github.com/MSJ1708/shoir-ie/actions/runs/40756104792). It directly probed `https://shoirieverified.streamlit.app/` and found:
+- Approved/rejected-origin CORS and preflight assertions passed against the deployed staging Edge Function.
+- Desktop public tabs and their expected fields passed.
+- At 390px mobile width, the deployed tab list measured `scrollWidth=384` vs `clientWidth=358`; browser scroll position was 26px and “Explore the Modules” rendered clipped to “Explore the M…”.
+- The report contains no uncaught JavaScript errors and no page-level horizontal overflow, but the tab-row clipping is a functional visual defect and the smoke correctly fails it.
+- Authenticated module checks were explicitly `NOT RUN` because no authorized disposable-account credentials were supplied to CI.
+
+PR #215 contains the candidate CSS to stack and wrap only the keyed public auth tabs, plus the stronger mobile geometry test. The hosted staging app does **not** yet run this PR’s source SHA, so the live failure cannot be called fixed until an independently reviewed candidate is deployed through the protected staging path and a fresh hosted screenshot/geometry run passes. The workflow job was initially malformed due to a bad indentation on commit `619a730bc1ba01ddb8c3af37dbf9b49083c053c6`; indentation was corrected in current head `7e20633385cad96a59703ace23ddfedb0213c0fd`. The temporary YAML error is not treated as a passing run.
+
+### Additional security implementation now present in #216 candidate (not deployed)
+
+The draft security candidate now includes these fail-closed changes, all still subject to fresh exact-head tests and independent review:
+
+- The legacy Industrial Connectivity Hub’s direct URL probe and query against a shared application SQLite database have been removed. The UI states that profiles are metadata and no network request is made there.
+- The legacy REST/SQL/MQTT/OPC-UA probes and sample-reader path return `EXTERNAL_TEST_DISABLED` instead of contacting user-entered URLs, arbitrary PostgreSQL/SQLite targets, MQTT brokers, or OPC-UA endpoints without the dedicated T096 safeguards.
+- The old connector schedule UI no longer creates/runs live sync jobs, and pre-existing cached sample data is cleared from the user session instead of being rendered after the unsafe reader is disabled.
+- `EnterpriseConnectorStub` no longer returns invented warehouse/demand values or logs an unperformed ERP write as successful; both operations fail closed with `NotImplementedError`.
+- T096 configuration inspection now distinguishes the generic HTTPS REST adapter from unimplemented vendor/protocol adapters. Configuration presence is not labelled `CONNECTED`; SAP/Oracle/WMS/MES/ERP, SQL/MQTT/OPC-UA are explicitly `PROVIDER_ADAPTER_NOT_IMPLEMENTED` until provider-specific code and acceptance evidence exist.
+- User-facing connector copy was changed to distinguish “profile/readiness” from live ERP connectivity. OIDC/MFA and durable audit still have no provider-backed T098 evidence.
+
+No production function or database was changed. The currently deployed production CORS failure remains independent of these candidate changes.
+
+### Saudi legal/privacy review reference pack
+
+Use official sources as inputs for qualified counsel, not as a substitute for legal approval:
+- [Saudi E-Commerce Law, official Bureau of Experts entry](https://laws.boe.gov.sa/BoeLaws/Laws/SearchDetails/?Id=360de590-0286-4fa5-a243-aa9100c31979&Query=+).
+- [Saudi E-Commerce Law text published by MISA](https://misa.gov.sa/app/uploads/2025/07/E-Commerce-Law.pdf).
+- [SDAIA Personal Data Protection Law](https://dgp.sdaia.gov.sa/wps/portal/pdp/knowledgecenter/details/PDPL/).
+- [SDAIA Regulation on Personal Data Transfer Outside the Kingdom](https://dgp.sdaia.gov.sa/wps/portal/pdp/knowledgecenter/details/RegulationonPersonalDataTransferOutsidetheKingdom/).
+- [SDAIA guidance for controllers and processors](https://dgp.sdaia.gov.sa/wps/portal/pdp/knowledgecenter/details/PDPLCP/).
+
+The paid-launch blocker is unchanged: company legal identity/contact facts are not yet verified in the customer-facing policy pack, hosting/subprocessor/data-location and cross-border transfer facts need to be documented, and a qualified Saudi legal/privacy review is not recorded. Do not infer legal clearance from these references or this code review.
+
+### Decision remains NO-GO
+
+Production CORS, production/schema compatibility, safe migration-ledger reconciliation, backup/PITR plus actual restore rehearsal, hosted authenticated acceptance, staging mobile candidate deployment/verification, complete 100-tool evidence, T096/T098 provider setup or launch-scope exclusion, independent reviews, staging ruleset completion, legal/privacy/commercial review, release-owner authorization, post-deployment smoke, and global BETA removal remain unresolved. Preserve all stop conditions above.
+
