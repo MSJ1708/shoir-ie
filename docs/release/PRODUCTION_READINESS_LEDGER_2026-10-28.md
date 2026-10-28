@@ -265,3 +265,11 @@ This entry supersedes earlier candidate status where stated. The release decisio
 10. **BETA — RETAIN.** The hosted screenshot currently shows the STAGING banner and the public product terms still explicitly describe beta. Global BETA removal is not authorized.
 
 No production deployment, production migration, production row mutation, review bypass, paid launch enablement, or BETA removal occurred during this refresh.
+
+## 10. Pull-request overlap decision — 2026-10-28, 20:20 UTC
+
+- Closed [PR #222](https://github.com/MSJ1708/shoir-ie/pull/222) as **superseded by #220**, without merging. The narrow PR only changed `Access-Control-Allow-Methods: POST, OPTIONS` while keeping `Access-Control-Allow-Origin: *`; the real production HTTP artifact proves that wildcard is still present for approved, unapproved and origin-free OPTIONS requests. PR #222 is explicitly marked “Superseded by #220” and its description records why this closure does not pass or authorize the broader fix.
+- PR #220 remains draft and is the sole intended production CORS/function candidate. Its current head is `7b852037ac4d28f43365da81443463d8a287ded7`; its latest relevant exact-head checks were queued. Further source changes require a new exact-head CI result and independent review.
+- PR #218 remains draft; latest migration grants revocation is not validated on a completed exact-head PostgreSQL replay yet.
+- PR #215's exact-head unit, engine-regression and security/quality jobs passed, but the hosted public-shell job on the currently deployed staging version failed mobile overflow. The local all-in-one validation job remained in progress at the last check; hosted re-test after deploying candidate code is still required.
+- Do not merge, deploy, migrate, or remove BETA as a consequence of closing the duplicate PR. Release stays **NO-GO / HOLD**.
