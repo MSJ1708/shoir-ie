@@ -226,7 +226,9 @@ Deno.test("public error mapping hides infrastructure errors and keeps known stat
   );
   assert(rejectedBody.status === 413, "Body-size error should retain 413.");
 });
-Deno.test("subscription approval guard protects reserved admin and any Enterprise Admin", () => {
+Deno.test(
+  "subscription approval guard protects reserved admin and any Enterprise Admin",
+  () => {
   assert(
     isProtectedAdministratorTarget({ username_lc: "sho" }, null, null),
     "reserved admin request must be protected even without an account row",
@@ -263,4 +265,5 @@ Deno.test("subscription approval guard protects reserved admin and any Enterpris
     ),
     "an ordinary user must not be classified as protected",
   );
-});
+  },
+);
