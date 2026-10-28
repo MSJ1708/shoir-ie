@@ -375,3 +375,14 @@ The staging Supabase security advisor reports one informational finding for `pub
 
 **Final disposition at this snapshot: NO-GO — TECHNICAL BLOCKER REMAINS.** Required human actions also remain: independent security/migration review; repository-owner enforcement settings; authorized staging operator's authenticated acceptance using disposable accounts; qualified Saudi legal/privacy review and verified commercial facts; and written release-owner approval. No production write, migration, deployment or billing operation occurred.
 
+### Follow-up deployed-source and grants verification — 28 October 2026
+
+A second read-only check of the actual deployed Edge Function source and database grants confirmed the following:
+
+- Production `shoir-persistence` remains active version 8, source hash `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`. Its deployed source still contains `Access-Control-Allow-Origin: *` and the login-time branch that can update the reserved administrator's tier and `updated_at`. The reserved account was not queried, logged into, or modified.
+- Staging `shoir-persistence` remains active version 10, source hash `5605d40e61feac6d010e7e1097565a7090bdf3325c862cc09de32af650b5a232`. It contains a fail-closed protected-admin invariant check, but its deployed source also still returns `Access-Control-Allow-Origin: *`. Therefore the current PR #216 CORS allowlist is **not deployed to either environment**.
+- Aggregate grant check for staging `public.shoir_referrals`: RLS is enabled, 0 grants to `PUBLIC`, `anon` or `authenticated`, and 7 service-role grant rows. Production has no such table, and no public referral grants were found. Preserve this server-only boundary; the RLS-without-policy advisor entry is informational in the context of this design and must not be “fixed” by granting browser access.
+- The actual current-source check strengthens the security NO-GO. The code in PR #216 may be tested as a source candidate, but deployed CORS/admin behavior remains vulnerable until a coordinated, reviewed, compatible release is approved and verified post-deployment. Do not deploy the PR's Edge Function by itself while production schema/migration parity is unresolved.
+
+No deployment, data mutation, account query or row-level selection was performed.
+
