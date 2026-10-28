@@ -1,10 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import {
-  corsHeadersForOrigin,
-  hasCanonicalMasterAdminInvariant,
-  isAllowedBrowserOrigin,
-} from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -12,6 +7,47 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const ITERATIONS = 200_000;
 const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs";
 const MAX_PAYMENT_PROOF_BYTES = 512 * 1024;
+
+const ALLOWED_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+]);
+
+/** Only the exact production browser origin is allowed. Origin-free server callers remain usable. */
+function isAllowedBrowserOrigin(origin: string | null): boolean {
+  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+}
+
+/** CORS is a browser policy only; API actions must still authenticate independently. */
+function corsHeadersForOrigin(origin: string | null): Headers {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  });
+  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+  return headers;
+}
+
+/** Read-only check; never repair a reserved administrator during login. */
+function hasCanonicalMasterAdminInvariant(
+  account: Record<string, unknown>,
+): boolean {
+  const expectedExpiry = Date.parse("2099-01-01T00:00:00Z");
+  const actualExpiry = typeof account.subscription_expires_at === "string"
+    ? Date.parse(account.subscription_expires_at)
+    : Number.NaN;
+  return account.username_lc === "sho" &&
+    account.role === "Enterprise Admin" &&
+    account.tier === "Enterprise Plus Tier ($399)" &&
+    account.active === true &&
+    Number.isFinite(actualExpiry) &&
+    actualExpiry === expectedExpiry;
+}
+
 
 async function ensurePaymentProofBucket() {
   const { data, error } = await supabase.storage.getBucket(
@@ -302,13 +338,7 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
   if (!isAllowedBrowserOrigin(origin)) {
-    return new Response(JSON.stringify({ error: "Origin not allowed." }), {
-      status: 403,
-      headers: {
-        "Content-Type": "application/json",
-        "Vary": "Origin",
-      },
-    });
+    return response({ error: "Origin not allowed." }, 403, origin);
   }
   const sendResponse = (data: unknown, status = 200) =>
     response(data, status, origin);
@@ -317,6 +347,9 @@ Deno.serve(async (req) => {
       status: 204,
       headers: corsHeadersForOrigin(origin),
     });
+  }
+  if (req.method !== "POST") {
+    return sendResponse({ error: "Method not allowed." }, 405);
   }
   try {
     const body = await req.json();
@@ -375,20 +408,23 @@ Deno.serve(async (req) => {
             "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
       }
-      // Never mutate the reserved administrator while logging in.
-      // Drift is a controlled operational incident; fail closed without revealing
-      // row details and correct it only through a reviewed administrative procedure.
-      const isProtectedMasterAdmin = row.username_lc === "sho";
+      // Fail closed on protected-administrator drift; never mutate it on login.
+      const isProtectedAdminMarker = row.username_lc === "sho" ||
+        row.role === "Enterprise Admin";
       if (
-        isProtectedMasterAdmin &&
+        isProtectedAdminMarker &&
         !hasCanonicalMasterAdminInvariant(row as Record<string, unknown>)
       ) {
+        console.error(
+          "Protected administrator configuration requires manual review.",
+        );
         return sendResponse({
           error:
-            "The protected administrator configuration requires manual review.",
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
       }
-      const isMasterAdmin = isProtectedMasterAdmin;
+      const isMasterAdmin = row.username_lc === "sho" &&
+        row.role === "Enterprise Admin";
       const effectiveTier = row.tier;
       if (!isMasterAdmin && isExpired(row.subscription_expires_at)) {
         const token = await createSession(
@@ -421,9 +457,7 @@ Deno.serve(async (req) => {
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
-      if (!token || !usernameLc) {
-        return sendResponse({ ok: true, revoked: false });
-      }
+      if (!token || !usernameLc) return sendResponse({ ok: true, revoked: false });
       const tokenHash = bytesToHex(
         await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
       );
@@ -523,10 +557,7 @@ Deno.serve(async (req) => {
       }
       const objectPath = storedPath.slice(prefix.length);
       if (!objectPath.startsWith("renewals/") || objectPath.includes("..")) {
-        return sendResponse(
-          { error: "Invalid private payment proof path." },
-          400,
-        );
+        return sendResponse({ error: "Invalid private payment proof path." }, 400);
       }
       const { data, error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET)
         .createSignedUrl(objectPath, 300);
