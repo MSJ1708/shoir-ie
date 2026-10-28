@@ -81,7 +81,7 @@ function tamperSignature(signedToken: string): string {
   );
   signatureBytes[0] = signatureBytes[0] ^ 1;
   const binary = Array.from(signatureBytes, (byte) => String.fromCharCode(byte)).join("");
-  const encoded = btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  const encoded = btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
   parts[2] = encoded;
   return parts.join(".");
 }
