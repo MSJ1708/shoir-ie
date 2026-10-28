@@ -985,20 +985,17 @@ def connector_health_frame(username: str, workspace: str = "default") -> pd.Data
 
 
 def check_rest_connector(url: str, token: str = "", timeout: float = 8.0) -> tuple[str, float, str]:
-    target = str(url or "").strip()
-    if not re.match(r"^https?://", target, flags=re.I):
-        return "Configuration Error", 0.0, "Endpoint must use http:// or https://."
-    started = datetime.now(timezone.utc)
-    try:
-        headers = {"Authorization": "Bearer " + token} if token else {}
-        response = requests.get(target, headers=headers, timeout=max(1.0, float(timeout)))
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-        status = "Healthy" if 200 <= response.status_code < 400 else "Attention"
-        return status, round(elapsed, 1), "HTTP " + str(response.status_code)
-    except requests.RequestException as exc:
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-        return "Offline", round(elapsed, 1), type(exc).__name__ + ": " + str(exc)[:220]
+    """Fail closed: the legacy profile checker must not make arbitrary HTTP requests.
 
+    Live HTTPS read verification is available only through the separately reviewed
+    T096 adapter, which reads server-side endpoint/token settings and enforces the
+    exact host allowlist, pinned DNS, TLS verification, no redirects and size bounds.
+    """
+    return (
+        "EXTERNAL_TEST_DISABLED",
+        0.0,
+        "No HTTP request was made. Use the secure T096 HTTPS REST verifier with administrator-configured endpoint, token and exact host allowlist.",
+    )
 
 def validate_connector_profile(system_type: str, protocol: str, endpoint: str) -> dict[str, Any]:
     system = str(system_type or "").strip().upper()
@@ -1135,83 +1132,31 @@ def connector_run_frame(username: str, workspace: str = "default", limit: int = 
 
 
 def _connector_sql_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float, str, int]:
-    started = datetime.now(timezone.utc)
-    target = str(endpoint or "").strip()
-    if target.lower().startswith("sqlite:///"):
-        db_path = target[10:]
-        try:
-            with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
-                row = conn.execute("SELECT 1").fetchone()
-            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-            return "Healthy", elapsed, "SQLite connection validated.", int(bool(row))
-        except sqlite3.Error as exc:
-            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-            return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
-    if target.lower().startswith(("postgresql://", "postgres://")):
-        try:
-            import psycopg2
-            conn = psycopg2.connect(target, connect_timeout=max(1, int(timeout)))
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-                    row = cur.fetchone()
-            finally:
-                conn.close()
-            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-            return "Healthy", elapsed, "PostgreSQL connection validated.", int(bool(row))
-        except Exception as exc:
-            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-            return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
-    elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-    return "Configuration Error", elapsed, "SQL adapter supports sqlite:/// and PostgreSQL DSNs.", 0
-
+    """Fail closed for the legacy arbitrary-path/DSN SQL probe."""
+    return (
+        "EXTERNAL_TEST_DISABLED",
+        0.0,
+        "No database connection was made. Legacy SQLite paths and PostgreSQL DSNs are not probed; external SQL requires a separately reviewed, tenant-scoped connector.",
+        0,
+    )
 
 def _connector_mqtt_test(endpoint: str, username: str = "", password: str = "", timeout: float = 8.0) -> tuple[str, float, str, int]:
-    started = datetime.now(timezone.utc)
-    target = str(endpoint or "").strip()
-    try:
-        import paho.mqtt.client as mqtt
-    except Exception:
-        return "Dependency Missing", 0.0, "Install paho-mqtt to enable live MQTT adapter tests.", 0
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(target if "://" in target else "mqtt://" + target)
-        host = parsed.hostname or ""
-        port = parsed.port or (8883 if parsed.scheme == "mqtts" else 1883)
-        client = mqtt.Client()
-        if username:
-            client.username_pw_set(username, password or None)
-        client.connect(host, port, keepalive=max(5, int(timeout)))
-        client.disconnect()
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-        return "Healthy", elapsed, f"MQTT broker {host}:{port} accepted a connection.", 1
-    except Exception as exc:
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-        return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
-
+    """Fail closed until an allowlisted, authenticated MQTT adapter is reviewed."""
+    return (
+        "EXTERNAL_TEST_DISABLED",
+        0.0,
+        "No MQTT connection was attempted. A broker-specific adapter and approved network/credential policy are required.",
+        0,
+    )
 
 def _connector_opcua_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float, str, int]:
-    started = datetime.now(timezone.utc)
-    try:
-        from opcua import Client
-    except Exception:
-        return "Dependency Missing", 0.0, "Install opcua to enable live OPC-UA adapter tests.", 0
-    client = None
-    try:
-        client = Client(str(endpoint), timeout=max(1.0, float(timeout)))
-        client.connect()
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-        return "Healthy", elapsed, "OPC-UA session handshake validated.", 1
-    except Exception as exc:
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-        return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
-    finally:
-        try:
-            if client is not None:
-                client.disconnect()
-        except Exception:
-            pass
-
+    """Fail closed until a hardened OPC-UA adapter and trust policy exist."""
+    return (
+        "EXTERNAL_TEST_DISABLED",
+        0.0,
+        "No OPC-UA connection was attempted. A reviewed endpoint allowlist, certificate/trust policy and provider-backed tests are required.",
+        0,
+    )
 
 def test_connector_profile(
     username: str,
@@ -1330,74 +1275,33 @@ def fetch_connector_sample(
     limit: int = 1000,
     timeout: float = 10.0,
 ) -> dict[str, Any]:
-    """Read a bounded sample from supported REST/SQL connectors and persist it with lineage."""
+    """Record an explicit unsupported result without connecting to a user-supplied target.
+
+    The legacy sample reader accepted arbitrary HTTP endpoints and SQL DSNs without
+    the secure T096 network controls or a tenant-owned source boundary. It therefore
+    fails closed. The dedicated T096 route remains the generic secure HTTPS REST path.
+    """
     limit = max(1, min(10000, int(limit)))
     started = datetime.now(timezone.utc)
-    proto = str(protocol or "").strip().upper()
-    secret = resolve_connector_secret(secret_ref)
+    proto = str(protocol or "").strip().upper() or "UNKNOWN"
     frame = pd.DataFrame()
-    detail = ""
-    status = "Configuration Error"
-    if proto in {"REST", "ODATA", "HTTPS"}:
-        try:
-            response = requests.get(str(endpoint).strip(), headers={"Authorization":"Bearer "+secret} if secret else {}, timeout=max(1.0, float(timeout)))
-            response.raise_for_status()
-            payload = response.json()
-            if isinstance(payload, list):
-                frame = pd.json_normalize(payload).head(limit)
-            elif isinstance(payload, dict):
-                rows = payload.get("data") if isinstance(payload.get("data"), list) else payload.get("results")
-                if isinstance(rows, list):
-                    frame = pd.json_normalize(rows).head(limit)
-                else:
-                    frame = pd.DataFrame([payload]).head(limit)
-            else:
-                raise ValueError("Response body is not JSON object/array data.")
-            status = "Healthy"
-            detail = f"Fetched {len(frame):,} record(s) from the REST endpoint."
-        except Exception as exc:
-            detail = f"{type(exc).__name__}: {str(exc)[:300]}"
-            status = "Offline" if isinstance(exc, requests.RequestException) else "Read Error"
-    elif proto in {"SQL", "JDBC"}:
-        if not _safe_read_sql_query(query):
-            detail = "Only a single read-only SELECT/WITH query is allowed for connector samples."
-        else:
-            bounded_query = "SELECT * FROM (" + str(query).strip().rstrip(";") + f") AS shoir_sample LIMIT {limit}"
-            try:
-                target = str(endpoint).strip()
-                if target.lower().startswith("sqlite:///"):
-                    db_path = target[10:]
-                    with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
-                        frame = pd.read_sql_query(bounded_query, conn)
-                elif target.lower().startswith(("postgresql://", "postgres://")):
-                    import psycopg2
-                    conn = psycopg2.connect(target, connect_timeout=max(1, int(timeout)))
-                    try:
-                        frame = pd.read_sql_query(bounded_query, conn)
-                    finally:
-                        conn.close()
-                else:
-                    raise ValueError("SQL sample adapter supports sqlite:/// and PostgreSQL DSNs.")
-                status = "Healthy"
-                detail = f"Fetched {len(frame):,} record(s) from the SQL source."
-            except Exception as exc:
-                detail = f"{type(exc).__name__}: {str(exc)[:300]}"
-                status = "Read Error"
-    else:
-        detail = "Sample reads are currently supported for REST/ODATA/HTTPS and SQL/JDBC adapters."
+    status = "EXTERNAL_TEST_DISABLED"
+    detail = (
+        f"No {proto} sample read was attempted. Use the approved T096 HTTPS REST path "
+        "for secure, allowlisted, read-only integration; SQL/MQTT/OPC-UA require separately "
+        "reviewed adapters before connection tests or sample reads are enabled."
+    )
     finished = datetime.now(timezone.utc)
-    mapping = infer_canonical_schema(frame)
-    artifact_id = ""
-    if status == "Healthy" and not frame.empty:
-        artifact_id = persist_dataframe_artifact(username, "Industrial Connectivity Hub", "connector_sample_"+connector_id, frame, workspace, limit)
-        record_artifact(username, "connector_schema_mapping", connector_id, {"connector_id":connector_id, "mapping":mapping, "columns":[str(x) for x in frame.columns], "artifact_id":artifact_id}, workspace)
-    _record_connector_run(username, connector_id, "sample_read", status, (finished-started).total_seconds()*1000.0, detail, len(frame), started, finished, workspace)
+    _record_connector_run(
+        username, connector_id, "sample_read", status, 0.0, detail, 0,
+        started, finished, workspace,
+    )
     return {
         "status": status,
         "detail": detail,
-        "records": int(len(frame)),
-        "artifact_id": artifact_id,
-        "schema_mapping": mapping,
+        "records": 0,
+        "artifact_id": "",
+        "schema_mapping": {},
         "frame": frame,
     }
 
