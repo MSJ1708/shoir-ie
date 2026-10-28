@@ -40,3 +40,14 @@ export function hasCanonicalMasterAdminInvariant(
     Number.isFinite(actualExpiry) &&
     actualExpiry === expectedExpiry;
 }
+
+/** Check that exactly one active Enterprise Admin exists and is the canonical reserved administrator. */
+export function hasExactlyOneCanonicalMasterAdmin(
+  activeEnterpriseAdmins: unknown,
+): boolean {
+  return Array.isArray(activeEnterpriseAdmins) &&
+    activeEnterpriseAdmins.length === 1 &&
+    hasCanonicalMasterAdminInvariant(
+      activeEnterpriseAdmins[0] as Record<string, unknown>,
+    );
+}
