@@ -549,7 +549,7 @@ def render_connectivity_extension() -> None:
     st.markdown("### 🔌 Connector Health & Deployment Readiness")
     st.caption("Governed connector-profile and readiness surface. Vendor/protocol labels are not proof of a live connection. The reviewed generic T096 adapter is HTTPS REST read-only with server-side secrets and an exact host allowlist; vendor-specific SAP/Oracle/WMS and external SQL/MQTT/OPC-UA adapters require separate implementation and provider-backed validation.")
 
-    with st.expander("🧭 Live Connection Wizard", expanded=False):
+    with st.expander("🔧 Connector Profile & Readiness", expanded=False):
         left, right = st.columns(2)
         with left:
             system_type = st.selectbox("System", ["SAP","ORACLE","WMS","MES","ERP","REST","SQL","MQTT","OPC-UA"], key="conn_wizard_system")
@@ -565,13 +565,13 @@ def render_connectivity_extension() -> None:
 
         profile = validate_connector_profile(system_type, protocol, endpoint)
         if profile["valid"]:
-            st.success("Adapter ready · " + str(profile.get("adapter", protocol)))
+            st.info("Profile syntax valid · connection not tested or verified · " + str(profile.get("adapter", protocol)))
         else:
             st.warning("Configuration needs attention: " + " ".join(profile["errors"]))
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("🧪 Test connection", type="primary", use_container_width=True, key="conn_wizard_test"):
+            if st.button("🔍 Check connection test policy (no network)", type="primary", use_container_width=True, key="conn_wizard_test"):
                 if not endpoint.strip():
                     st.warning("Enter an endpoint before testing.")
                 else:
@@ -584,21 +584,21 @@ def render_connectivity_extension() -> None:
             if st.button("⏱️ Save synchronization schedule", use_container_width=True, key="conn_wizard_schedule"):
                 last = st.session_state.get("connector_last_test") or {}
                 connector_id = str(last.get("connector_id") or "")
-                if not connector_id:
-                    st.warning("Test the connection first so a connector ID exists.")
+                if not connector_id or str(last.get("status", "")) != "Healthy":
+                    st.warning("No sync schedule saved. A secure approved live connection is not verified in this legacy profile surface; use T096 for the configured HTTPS REST read test.")
                 else:
                     sid = schedule_connector_sync(username, connector_id, int(interval), workspace, bool(enabled))
                     st.success(f"Synchronization schedule saved · {sid}")
 
     last = st.session_state.get("connector_last_test")
     if isinstance(last, dict):
-        st.markdown("**Last connector test:** " + str(last.get("status", "Unknown")) + " · " + f"{float(last.get('latency_ms', 0.0)):.1f} ms · " + str(last.get("detail", "")))
+        st.markdown("**Legacy connector result (no network):** " + str(last.get("status", "Unknown")) + " · " + f"{float(last.get('latency_ms', 0.0)):.1f} ms · " + str(last.get("detail", "")))
 
     schedules = connector_schedule_frame(username, workspace)
     if not schedules.empty:
         st.markdown("#### ⏱️ Synchronization schedules")
         st.dataframe(schedules, use_container_width=True, hide_index=True)
-        if st.button("▶️ Run due synchronization checks", use_container_width=True, key="conn_run_due"):
+        if st.button("▶️ Review due connector statuses (no network)", use_container_width=True, key="conn_run_due"):
             try:
                 result = run_due_connector_syncs(username, workspace, max_attempts=3, require_approval=True)
                 st.session_state["connector_due_run_result"] = result
