@@ -96,6 +96,38 @@ def visible_logout_button(frame):
     return button
 
 
+def _safe_javascript_diagnostic(value: object, limit: int = 700) -> str:
+    """Keep enough browser diagnostics to find a runtime fault without storing secrets."""
+    text = str(value or "")
+    text = re.sub(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
+    text = re.sub(
+        r"\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b",
+        "[REDACTED_JWT]",
+        text,
+    )
+    text = re.sub(
+        r"(?i)\\b(password|passwd|token|secret|api[_-]?key|authorization|cookie)\\b\\s*[:=]\\s*[^\\s,;]+",
+        r"\\1=[REDACTED]",
+        text,
+    )
+    # Preserve a script origin/path for debugging but never persist query-string values.
+    text = re.sub(r"(https?://[^\\s?#]+)\\?[^\\s#]+", r"\\1?[REDACTED_QUERY]", text)
+    return text[:limit]
+
+
+def _safe_javascript_error(error: object) -> dict[str, str]:
+    """Serialize a Playwright pageerror with redaction, bounded size, and source frames."""
+    name = _safe_javascript_diagnostic(getattr(error, "name", type(error).__name__), 100)
+    message = _safe_javascript_diagnostic(getattr(error, "message", ""), 700)
+    raw_stack = str(getattr(error, "stack", "") or "")
+    safe_frames = [
+        _safe_javascript_diagnostic(line.strip(), 320)
+        for line in raw_stack.splitlines()[1:5]
+        if line.strip()
+    ]
+    return {"name": name or "Error", "message": message, "stack_frames": "\\n".join(safe_frames)}
+
+
 def take_evidence_screenshot(page, path: Path) -> None:
     """Capture viewport evidence without letting a long page fail functional tests."""
     try:
@@ -128,8 +160,20 @@ def main() -> int:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
         page = context.new_page()
-        page_errors: list[str] = []
-        page.on("pageerror", lambda error: page_errors.append(type(error).__name__))
+        page_errors: list[dict[str, str]] = []
+
+        def record_page_error(error: object) -> None:
+            try:
+                page_errors.append(_safe_javascript_error(error))
+            except Exception:
+                # Keep the gate fail-closed while avoiding unsafe diagnostic output.
+                page_errors.append({
+                    "name": "Error",
+                    "message": "Uncaught JavaScript error; safe details unavailable.",
+                    "stack_frames": "",
+                })
+
+        page.on("pageerror", record_page_error)
         step = "load public application"
         try:
             response = page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
@@ -315,8 +359,15 @@ def main() -> int:
                     pass
             check("browser_walkthrough", False, detail)
         finally:
-            check("no_uncaught_javascript_errors", not page_errors,
-                  "No uncaught JavaScript errors." if not page_errors else f"{len(page_errors)} uncaught JavaScript error(s).")
+            if not page_errors:
+                javascript_detail = "No uncaught JavaScript errors."
+            else:
+                first = page_errors[0]
+                javascript_detail = (
+                    f"{len(page_errors)} uncaught JavaScript error(s); first safe diagnostic: "
+                    f"{first.get('name', 'Error')}: {first.get('message') or 'no message'}"
+                )
+            check("no_uncaught_javascript_errors", not page_errors, javascript_detail)
             try:
                 browser.close()
             except Exception:
@@ -327,6 +378,7 @@ def main() -> int:
         "target": URL,
         "account_class": "dedicated non-admin e2e account",
         "overall": "PASS" if all(c["status"] == "PASS" for c in cases) else "FAIL",
+        "javascript_errors": page_errors,
         "cases": cases,
     }, indent=2), encoding="utf-8")
     return 0 if all(c["status"] == "PASS" for c in cases) else 1
