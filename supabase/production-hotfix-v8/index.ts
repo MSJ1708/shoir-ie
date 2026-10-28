@@ -244,6 +244,11 @@ async function adminSession(username: string, token: string) {
   if (row.username_lc !== "sho" || row.role !== "Enterprise Admin") {
     throw new Error("Admin authorization failed.");
   }
+  // Re-check the global invariant when using an admin session, not only at login.
+  // A session created before configuration drift must fail closed on privileged actions.
+  if (!await canonicalMasterAdminConfigurationIsValid()) {
+    throw new Error("Authentication protection is temporarily unavailable.");
+  }
   return row;
 }
 
