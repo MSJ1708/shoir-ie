@@ -1,7 +1,7 @@
 import {
+  hasCanonicalMasterAdminInvariant,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
-  hasCanonicalMasterAdminInvariant,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   PublicRequestError,
@@ -158,7 +158,6 @@ Deno.test("public error mapping does not expose internal infrastructure details"
     "Invalid proof should be a client error.",
   );
 });
-
 
 Deno.test("protected administrator invariant is read-only and fails closed on drift", () => {
   const canonical = Object.freeze({
