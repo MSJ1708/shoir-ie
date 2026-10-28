@@ -150,7 +150,7 @@ jobs:
           path: artifacts/live-deployment-smoke/
           if-no-files-found: warn
 
-staging-live-acceptance:
+  staging-live-acceptance:
     # Exercise the hosted staging shell/function on staging-targeted PRs and on
     # the dedicated release-evidence branch. Probes are non-mutating and do not
     # claim that the triggering source SHA is the deployed staging SHA.
