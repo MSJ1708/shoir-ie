@@ -384,7 +384,8 @@ Deno.serve(async (req) => {
         !hasCanonicalMasterAdminInvariant(row as Record<string, unknown>)
       ) {
         return sendResponse({
-          error: "The protected administrator configuration requires manual review.",
+          error:
+            "The protected administrator configuration requires manual review.",
         }, 503);
       }
       const isMasterAdmin = isProtectedMasterAdmin;
@@ -420,7 +421,9 @@ Deno.serve(async (req) => {
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
-      if (!token || !usernameLc) return sendResponse({ ok: true, revoked: false });
+      if (!token || !usernameLc) {
+        return sendResponse({ ok: true, revoked: false });
+      }
       const tokenHash = bytesToHex(
         await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
       );
@@ -520,7 +523,10 @@ Deno.serve(async (req) => {
       }
       const objectPath = storedPath.slice(prefix.length);
       if (!objectPath.startsWith("renewals/") || objectPath.includes("..")) {
-        return sendResponse({ error: "Invalid private payment proof path." }, 400);
+        return sendResponse(
+          { error: "Invalid private payment proof path." },
+          400,
+        );
       }
       const { data, error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET)
         .createSignedUrl(objectPath, 300);
