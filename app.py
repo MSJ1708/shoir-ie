@@ -1595,8 +1595,8 @@ if not st.session_state.get("current_user"):
         """
         <style>
         @media (max-width: 600px) {
-          div[data-testid="stTabs"] [role="tablist"],
-          div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+          .st-key-shoir_public_auth_tabs [role="tablist"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab-list"] {
             display: grid !important;
             grid-template-columns: minmax(0, 1fr) !important;
             align-items: stretch !important;
@@ -1608,8 +1608,8 @@ if not st.session_state.get("current_user"):
             white-space: normal !important;
             box-sizing: border-box !important;
           }
-          div[data-testid="stTabs"] [role="tab"],
-          div[data-testid="stTabs"] [data-baseweb="tab"] {
+          .st-key-shoir_public_auth_tabs [role="tab"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab"] {
             width: 100% !important;
             min-width: 0 !important;
             max-width: 100% !important;
@@ -1621,8 +1621,8 @@ if not st.session_state.get("current_user"):
             text-align: center !important;
             box-sizing: border-box !important;
           }
-          div[data-testid="stTabs"] [role="tab"] [data-testid="stMarkdownContainer"],
-          div[data-testid="stTabs"] [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
+          .st-key-shoir_public_auth_tabs [role="tab"] [data-testid="stMarkdownContainer"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
             white-space: normal !important;
             overflow-wrap: anywhere !important;
             min-width: 0 !important;
@@ -1631,11 +1631,11 @@ if not st.session_state.get("current_user"):
           /* Streamlit's absolute tab-highlight can span the whole grid row on mobile.
              Hide only that decorative underline at narrow widths; preserve an explicit
              selected-tab surface and start border so keyboard/visual selection remains clear. */
-          div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab-highlight"] {
             display: none !important;
           }
-          div[data-testid="stTabs"] [role="tab"][aria-selected="true"],
-          div[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+          .st-key-shoir_public_auth_tabs [role="tab"][aria-selected="true"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab"][aria-selected="true"] {
             background-color: rgba(37, 99, 235, 0.08) !important;
             border-inline-start: 3px solid #2563eb !important;
           }
@@ -1645,7 +1645,7 @@ if not st.session_state.get("current_user"):
         unsafe_allow_html=True,
     )
 
-    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
+    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"], key="shoir_public_auth_tabs")
 
     # ------------------------------------------
     # TAB 1: SIGN IN
