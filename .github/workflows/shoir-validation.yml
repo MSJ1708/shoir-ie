@@ -121,13 +121,15 @@ jobs:
     # that the hosted app has deployed the triggering Git SHA. Manual runs on
     # main allow an explicit post-deployment check without account credentials.
     if: >-
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
-      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+      (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'audit/') || github.base_ref == 'staging-e2e-20261019')) ||
+      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main' || github.ref_name == 'staging-e2e-20261019')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref_name == 'main' || github.ref_name == 'staging-e2e-20261019'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SHoir_LIVE_URL: https://shoir-ie-app.streamlit.app/
+      SHOIR_E2E_EDGE_URL: ${{ secrets.SHOIR_E2E_EDGE_URL }}
+      SHOIR_E2E_APP_URL: ${{ secrets.SHOIR_E2E_APP_URL }}
+      SHOIR_E2E_EXPECTED_STAGING_APP_HOST: ${{ vars.SHOIR_E2E_EXPECTED_STAGING_APP_HOST }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -138,9 +140,29 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install playwright
           python -m playwright install --with-deps chromium
-      - name: Test hosted entry-screen rendering at desktop and mobile widths
+      - name: Select and validate the hosted smoke target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && "${GITHUB_BASE_REF:-}" == "staging-e2e-20261019" ]] ||
+             [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME:-}" == "staging-e2e-20261019" ]] ||
+             [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${GITHUB_REF_NAME:-}" == "staging-e2e-20261019" ]]; then
+            python scripts/staging_e2e_guard.py
+            echo "SHOIR_LIVE_URL=${SHOIR_E2E_APP_URL%/}/" >> "$GITHUB_ENV"
+          else
+            echo "SHOIR_LIVE_URL=https://shoir-ie-app.streamlit.app/" >> "$GITHUB_ENV"
+          fi
+      - name: Probe live staging Edge Function CORS
+        if: >-
+          (github.event_name == 'pull_request' && github.base_ref == 'staging-e2e-20261019') ||
+          (github.event_name == 'push' && github.ref_name == 'staging-e2e-20261019') ||
+          (github.event_name == 'workflow_dispatch' && github.ref_name == 'staging-e2e-20261019')
         env:
-          SHOIR_LIVE_URL: https://shoir-ie-app.streamlit.app/
+          SHOIR_CORS_EDGE_URL: ${{ secrets.SHOIR_E2E_EDGE_URL }}
+          SHOIR_CORS_ALLOWED_ORIGIN: ${{ secrets.SHOIR_E2E_APP_URL }}
+          SHOIR_E2E_EXPECTED_STAGING_APP_HOST: ${{ vars.SHOIR_E2E_EXPECTED_STAGING_APP_HOST }}
+        run: python scripts/live_cors_probe.py
+      - name: Test hosted entry-screen rendering at desktop and mobile widths
         run: python scripts/live_deployment_smoke.py
       - name: Save live browser screenshots and result
         if: always()
