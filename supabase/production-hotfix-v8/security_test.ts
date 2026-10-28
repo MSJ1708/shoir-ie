@@ -5,8 +5,8 @@ import {
   isAllowedBrowserOrigin,
   MAX_REQUEST_BODY_BYTES,
   PublicRequestError,
-  readBoundedJsonObject,
   publicErrorFor,
+  readBoundedJsonObject,
 } from "./security.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -120,7 +120,10 @@ Deno.test("reserved administrator list requires exactly one canonical active adm
     "multiple active administrators must fail closed",
   );
   assert(
-    !hasExactlyOneCanonicalMasterAdmin([{ ...canonical, username_lc: "other" }]),
+    !hasExactlyOneCanonicalMasterAdmin([{
+      ...canonical,
+      username_lc: "other",
+    }]),
     "a different administrator identity must fail closed",
   );
   assert(
@@ -138,8 +141,14 @@ async function expectPublicRequestError(
     await action();
   } catch (error) {
     assert(error instanceof PublicRequestError, "Expected PublicRequestError.");
-    assert(error.status === expectedStatus, `Expected status ${expectedStatus}, got ${error.status}.`);
-    assert(error.message.includes(expectedText), `Expected message to include "${expectedText}".`);
+    assert(
+      error.status === expectedStatus,
+      `Expected status ${expectedStatus}, got ${error.status}.`,
+    );
+    assert(
+      error.message.includes(expectedText),
+      `Expected message to include "${expectedText}".`,
+    );
     return;
   }
   throw new Error("Expected the action to reject.");
@@ -188,7 +197,10 @@ Deno.test("bounded parser enforces actual streamed body byte limit", async () =>
     413,
     "size limit",
   );
-  assert(MAX_REQUEST_BODY_BYTES > 128, "Default request limit should allow the fixture.");
+  assert(
+    MAX_REQUEST_BODY_BYTES > 128,
+    "Default request limit should allow the fixture.",
+  );
 });
 
 Deno.test("public error mapping hides infrastructure errors and keeps known statuses", () => {
@@ -196,14 +208,20 @@ Deno.test("public error mapping hides infrastructure errors and keeps known stat
     new Error("postgres host=secret.internal password=do-not-leak"),
   );
   assert(internal.status === 500, "Unknown failures remain server errors.");
-  assert(!internal.message.includes("secret.internal"), "Internal host leaked.");
+  assert(
+    !internal.message.includes("secret.internal"),
+    "Internal host leaked.",
+  );
   assert(!internal.message.includes("do-not-leak"), "Internal secret leaked.");
   assert(
-    internal.message === "The persistence service could not complete this request. Retry later.",
+    internal.message ===
+      "The persistence service could not complete this request. Retry later.",
     "Unknown errors should use a stable public response.",
   );
   const unauthorized = publicErrorFor(new Error("Unauthorized session."));
   assert(unauthorized.status === 401, "Unauthorized session should be 401.");
-  const rejectedBody = publicErrorFor(new PublicRequestError("Request body exceeds the allowed size limit.", 413));
+  const rejectedBody = publicErrorFor(
+    new PublicRequestError("Request body exceeds the allowed size limit.", 413),
+  );
   assert(rejectedBody.status === 413, "Body-size error should retain 413.");
 });
