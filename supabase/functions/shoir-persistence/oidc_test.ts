@@ -73,6 +73,19 @@ async function makeToken(
     .sign(privateKey);
 }
 
+function tamperSignature(signedToken: string): string {
+  const parts = signedToken.split(".");
+  const signatureBytes = Uint8Array.from(
+    atob(parts[2].replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - parts[2].length % 4) % 4)),
+    (character) => character.charCodeAt(0),
+  );
+  signatureBytes[0] = signatureBytes[0] ^ 1;
+  const binary = Array.from(signatureBytes, (byte) => String.fromCharCode(byte)).join("");
+  const encoded = btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  parts[2] = encoded;
+  return parts.join(".");
+}
+
 Deno.test("OIDC configuration is disabled or incomplete by default", () => {
   const disabled = readOidcVerifierConfig(() => undefined);
   assert(!disabled.enabled && !disabled.ready, "OIDC must stay disabled without explicit configuration.");
@@ -124,6 +137,15 @@ Deno.test("OIDC ID token verifies signature, issuer, audience, and verified emai
   assert(identity.subject === "subject-synthetic-001", "Verified subject was not returned.");
   assert(identity.email === "approved-user@example.invalid", "Verified email was not normalized.");
   assert(identity.mfaVerified, "MFA claim should be recognized.");
+
+  await expectOidcError(
+    async () => await verifyOidcIdToken(
+      tamperSignature(idToken),
+      config,
+      localJwks as never,
+    ),
+    "signature_or_standard_claims_invalid",
+  );
 
   await expectOidcError(
     async () => await verifyOidcIdToken(
