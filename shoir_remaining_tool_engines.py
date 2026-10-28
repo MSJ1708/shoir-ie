@@ -566,11 +566,10 @@ def _require_connector_operator() -> None:
 
 
 def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Inspect configuration or explicitly test a server-configured read-only REST connector.
+    """Inspect connector configuration; only the secure generic REST adapter can be tested.
 
-    Configuration inspection is the default and never performs network access.
-    A live request requires action='verify_rest_read', a server-configured
-    allowlisted profile, and an authenticated entitled administrator.
+    Configuration inspection is always network-free. Other named vendors/transports
+    remain metadata-only until separately reviewed adapters exist.
     """
     action = str(payload.get("action") or "inspect").strip().lower()
     if action == "verify_rest_read":
@@ -612,7 +611,29 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
                 "WMS": {"https"}, "MES": {"https"}, "ERP": {"https"},
             }[protocol]
             endpoint_valid = parsed.scheme.lower() in allowed_schemes and bool(parsed.netloc or parsed.path)
-        ready = bool(endpoint_value and credential_value and endpoint_valid)
+
+        rest_env_match = re.fullmatch(r"(SHOIR_CONNECTOR_[A-Z0-9_]+)_ENDPOINT", endpoint_env)
+        rest_names_match = bool(
+            rest_env_match and credential_env == rest_env_match.group(1) + "_TOKEN"
+        )
+        if protocol != "REST":
+            status = "PROVIDER_ADAPTER_NOT_IMPLEMENTED"
+            warning = (
+                "Configuration metadata only. No provider-specific network adapter is implemented; "
+                "SAP/Oracle/WMS/MES/ERP, SQL, MQTT and OPC-UA are not live-connected by this tool."
+            )
+        elif endpoint_value and credential_value and endpoint_valid and rest_names_match:
+            status = "CONFIGURED_AWAITING_HOST_ALLOWLIST_AND_AUTHORIZED_TEST"
+            warning = (
+                "No outbound network call was attempted. Live T096 verification additionally requires "
+                "the matching *_ENABLED setting, an exact host allowlist, TLS/DNS checks and an authorized test."
+            )
+        else:
+            status = "NOT_CONNECTED_CONFIGURATION_INCOMPLETE"
+            warning = (
+                "No outbound network call was attempted. The generic T096 adapter requires an HTTPS endpoint "
+                "variable ending in _ENDPOINT and its paired _TOKEN secret variable."
+            )
         output.append({
             "name": name,
             "protocol": protocol,
@@ -621,10 +642,10 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
             "endpoint_syntax_valid": endpoint_valid if endpoint_value else False,
             "credential_env": credential_env,
             "credential_configured": bool(credential_value),
-            "status": "READY_FOR_AUTHORIZED_STAGING_TEST" if ready else "NOT_CONNECTED_CONFIGURATION_INCOMPLETE",
+            "status": status,
             "last_test_at": None,
             "last_sync_at": None,
-            "warning": "Secrets are never returned. No outbound network call was attempted; configuration presence is not connection proof.",
+            "warning": warning,
         })
     return {
         "tool_id": "T096",
@@ -632,9 +653,11 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
         "profiles": pd.DataFrame(output),
         "profile_records": output,
         "connected_count": 0,
-        "warning": "Connection state is intentionally not reported as CONNECTED. An authorized provider-specific staging test, permission-scope review and redacted health result are required before enabling a connector.",
+        "warning": (
+            "Connection state is intentionally not reported as CONNECTED. The only generic live path is the "
+            "authorized HTTPS REST verifier; provider-specific adapters require implementation and evidence."
+        ),
     }
-
 
 def validate_api_plugin_manifests(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate inert, versioned plugin manifests; never imports or executes plugin code."""
