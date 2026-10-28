@@ -14,3 +14,16 @@ def test_admin_session_rechecks_global_protected_admin_invariant():
     assert "canonicalMasterAdminConfigurationIsValid()" in admin_session
     assert "Authentication protection is temporarily unavailable." in admin_session
     assert "supabase.from(\"shoir_accounts\").update" not in admin_session
+
+def test_subscription_approval_cannot_overwrite_the_protected_administrator():
+    source = SOURCE.read_text(encoding="utf-8")
+    start = source.index('if (\n      action === "admin_approve_session"')
+    end = source.index('if (action === "admin_decline_session")', start)
+    approval = source[start:end]
+
+    assert "const protectedTarget =" in approval
+    assert 'request.username_lc === "sho"' in approval
+    assert 'existing?.role === "Enterprise Admin"' in approval
+    assert "if (protectedTarget)" in approval
+    assert "}, 403);" in approval
+    assert approval.index("if (protectedTarget)") < approval.index(".upsert(payload")
