@@ -285,12 +285,16 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             assert allowed is True, f"service_role lacks required sequence {privilege}"
         assert _fetchone(
             target,
-            "SELECT has_sequence_privilege('anon', 'public.shoir_referrals_id_seq', 'USAGE');",
-        )[0] is False
-        assert _fetchone(
-            target,
-            "SELECT has_sequence_privilege('authenticated', 'public.shoir_referrals_id_seq', 'USAGE');",
-        )[0] is False
+            "SELECT has_sequence_privilege('service_role', 'public.shoir_referrals_id_seq', 'UPDATE');",
+        )[0] is False, "service_role must not receive sequence UPDATE"
+        for role in ("anon", "authenticated"):
+            for privilege in ("USAGE", "SELECT", "UPDATE"):
+                allowed = _fetchone(
+                    target,
+                    "SELECT has_sequence_privilege(%s, 'public.shoir_referrals_id_seq', %s);",
+                    (role, privilege),
+                )[0]
+                assert allowed is False, f"{role} unexpectedly has sequence {privilege}"
 
         # A case-insensitive duplicate must be rejected by PostgreSQL itself,
         # not just by an application-level pre-check.
