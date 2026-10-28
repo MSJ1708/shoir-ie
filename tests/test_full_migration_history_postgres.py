@@ -251,6 +251,47 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             "whitespace-normalized populated codes."
         )
 
+        # The referral table is server-only: app/browser roles receive no direct
+        # table privileges, while service_role receives CRUD but not schema-level
+        # privileges such as TRUNCATE, REFERENCES or TRIGGER.
+        for role in ("anon", "authenticated"):
+            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                allowed = _fetchone(
+                    target,
+                    "SELECT has_table_privilege(%s, 'public.shoir_referrals', %s);",
+                    (role, privilege),
+                )[0]
+                assert allowed is False, f"{role} unexpectedly has {privilege} on shoir_referrals"
+        for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+            allowed = _fetchone(
+                target,
+                "SELECT has_table_privilege('service_role', 'public.shoir_referrals', %s);",
+                (privilege,),
+            )[0]
+            assert allowed is True, f"service_role lacks required {privilege} on shoir_referrals"
+        for privilege in ("TRUNCATE", "REFERENCES", "TRIGGER"):
+            allowed = _fetchone(
+                target,
+                "SELECT has_table_privilege('service_role', 'public.shoir_referrals', %s);",
+                (privilege,),
+            )[0]
+            assert allowed is False, f"service_role has unnecessary {privilege} on shoir_referrals"
+        for privilege in ("USAGE", "SELECT"):
+            allowed = _fetchone(
+                target,
+                "SELECT has_sequence_privilege('service_role', 'public.shoir_referrals_id_seq', %s);",
+                (privilege,),
+            )[0]
+            assert allowed is True, f"service_role lacks required sequence {privilege}"
+        assert _fetchone(
+            target,
+            "SELECT has_sequence_privilege('anon', 'public.shoir_referrals_id_seq', 'USAGE');",
+        )[0] is False
+        assert _fetchone(
+            target,
+            "SELECT has_sequence_privilege('authenticated', 'public.shoir_referrals_id_seq', 'USAGE');",
+        )[0] is False
+
         # A case-insensitive duplicate must be rejected by PostgreSQL itself,
         # not just by an application-level pre-check.
         with target.cursor() as cursor:
@@ -441,6 +482,28 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "SELECT has_table_privilege('authenticated', %s, 'SELECT');",
                     (f"public.{table}",),
                 )[0] is False, f"authenticated has a direct SELECT grant on {table}"
+
+            # Referral attribution rows are service-side only. Check every table
+            # privilege, not just SELECT, so inherited PUBLIC/default grants fail.
+            for role in ("anon", "authenticated"):
+                for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege(%s, 'public.shoir_referrals', %s);",
+                        (role, privilege),
+                    )[0] is False, f"{role} unexpectedly has {privilege} on shoir_referrals"
+            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_referrals', %s);",
+                    (privilege,),
+                )[0] is True, f"service_role lacks required {privilege} on shoir_referrals"
+            for privilege in ("TRUNCATE", "REFERENCES", "TRIGGER"):
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_referrals', %s);",
+                    (privilege,),
+                )[0] is False, f"service_role has unnecessary {privilege} on shoir_referrals"
 
             assert _fetchone(
                 target,
