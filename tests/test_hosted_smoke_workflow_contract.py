@@ -143,4 +143,10 @@ def test_staging_push_and_dispatch_probe_the_staging_host():
     assert "https://shoirieverified.streamlit.app/" in source
     assert "SHOIR_LIVE_URL:" in source
     assert "https://shoir-ie-app.streamlit.app/" in source
-
+def test_mobile_auth_tabs_hide_react_aria_indicator_without_hiding_selection():
+    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert '.st-key-shoir_public_auth_tabs .react-aria-SelectionIndicator' in app_source
+    assert '.st-key-shoir_public_auth_tabs [data-baseweb="tab-highlight"]' in app_source
+    assert 'display: none !important;' in app_source
+    assert '[aria-selected="true"]' in app_source
+    assert 'border-inline-start: 3px solid #2563eb' in app_source
