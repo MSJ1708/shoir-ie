@@ -50,6 +50,38 @@ FATAL_TEXT_MARKERS = (
 )
 
 
+def wake_if_hibernated(page) -> bool:
+    """Wake the hosted Streamlit app when Community Cloud shows its sleep prompt."""
+    prompt = re.compile(
+        r"yes,?\\s*get this app back up|this app has gone to sleep|wake.*app|wake up",
+        re.I,
+    )
+    for frame in list(page.frames):
+        candidates = (
+            frame.get_by_role("button", name=prompt),
+            frame.get_by_text(re.compile(r"yes,?\\s*get this app back up", re.I)),
+            frame.locator("button").filter(has_text=prompt),
+            frame.locator("a").filter(has_text=prompt),
+            frame.locator("input[type='button'], input[type='submit']"),
+        )
+        for locator in candidates:
+            try:
+                if not locator.count():
+                    continue
+                candidate = locator.first
+                if not candidate.is_visible(timeout=500):
+                    continue
+                if candidate.evaluate("(el) => el.tagName === 'INPUT'") and not prompt.search(
+                    str(candidate.get_attribute("value") or "")
+                ):
+                    continue
+                candidate.click(timeout=2_000)
+                return True
+            except Exception:
+                continue
+    return False
+
+
 def main() -> int:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     report: dict = {
@@ -108,6 +140,13 @@ def main() -> int:
                             URL, wait_until="domcontentloaded", timeout=90_000
                         )
                         item["http_status"] = response.status if response else None
+                        wake_requested = wake_if_hibernated(page)
+                        item["staging_wake_requested"] = wake_requested
+                        if wake_requested:
+                            # Community Cloud returns HTTP 200 with a sleep interstitial.
+                            # Click its explicit wake control, then give the app a longer
+                            # hydration window; the sleep page itself must never pass.
+                            page.wait_for_timeout(5_000)
                         # Streamlit can briefly render only its static header before the
                         # application body hydrates. Do not treat generic product/sidebar
                         # text as readiness: wait for a real sign-in/welcome surface, and
@@ -118,7 +157,7 @@ def main() -> int:
                         app_frame = None
                         stable_frame_key = None
                         stable_observations = 0
-                        readiness_deadline = time.monotonic() + 45
+                        readiness_deadline = time.monotonic() + (120 if wake_requested else 45)
                         while time.monotonic() < readiness_deadline:
                             current_records = []
                             current_bodies = []
