@@ -58,7 +58,7 @@ Aggregate-only queries were rerun against the live production and staging databa
 
 Function inventory after staging-only deployment:
 
-- Production `shoir-persistence`: version **8**, deployed source hash `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`.
+- Production `shoir-persistence`: version **9**, deployed source hash `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`. Current source includes `Access-Control-Allow-Methods: POST, OPTIONS` but still emits wildcard `Access-Control-Allow-Origin: *`; the CORS release blocker remains open.
 - Staging `shoir-persistence`: version **11**, deployed source hash `a0252769822fd7834c6af67fcf69259ec9bbefce7041ac3a5a36d8d6a9a90397`; source was deployed from security candidate commit `21a8d786485c11a415df1158d851bc43f9705c24`.
 
 The staging function was verified to no longer emit wildcard CORS and no longer auto-repair the reserved administrator during login. Production remains unchanged and still has the older handler. The live staging HTTP CORS/preflight probe now passes via GitHub Actions; hosted public-shell and authenticated tests are recorded separately and must complete successfully before they can count as release evidence.
