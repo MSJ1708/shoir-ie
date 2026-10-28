@@ -559,8 +559,8 @@ def render_connectivity_extension() -> None:
             protocol = st.selectbox("Protocol / adapter", protocols, index=protocols.index(default_protocol), key="conn_wizard_protocol")
             name = st.text_input("Connection name", value=f"{system_type} connection", key="conn_wizard_name")
         with right:
-            endpoint = st.text_input("Endpoint / DSN", placeholder="https://… | postgresql://… | sqlite:///… | mqtt://… | opc.tcp://…", key="conn_wizard_endpoint")
-            secret_ref = st.text_input("Secret reference (optional)", placeholder="env:SAP_API_TOKEN", type="password", key="conn_wizard_secret_ref", help="Reference only. The secret value is never persisted.")
+            endpoint = st.text_input("Endpoint / DSN profile metadata (not contacted)", placeholder="Profile metadata only; use the secure T096 environment configuration for live HTTPS REST", key="conn_wizard_endpoint")
+            secret_ref = st.text_input("Secret reference metadata (not used here)", placeholder="T096 uses an administrator-configured server-side secret reference", type="password", key="conn_wizard_secret_ref", help="This legacy profile surface does not use this reference for network access.")
             timeout = st.number_input("Timeout (seconds)", 1.0, 60.0, 8.0, 1.0, key="conn_wizard_timeout")
 
         profile = validate_connector_profile(system_type, protocol, endpoint)
@@ -579,16 +579,11 @@ def render_connectivity_extension() -> None:
                     st.session_state["connector_last_test"] = result
                     st.rerun()
         with c2:
-            interval = st.number_input("Sync interval (minutes)", 1, 10080, 60, 5, key="conn_wizard_interval")
-            enabled = st.checkbox("Enable schedule", value=True, key="conn_wizard_enabled")
-            if st.button("⏱️ Save synchronization schedule", use_container_width=True, key="conn_wizard_schedule"):
-                last = st.session_state.get("connector_last_test") or {}
-                connector_id = str(last.get("connector_id") or "")
-                if not connector_id or str(last.get("status", "")) != "Healthy":
-                    st.warning("No sync schedule saved. A secure approved live connection is not verified in this legacy profile surface; use T096 for the configured HTTPS REST read test.")
-                else:
-                    sid = schedule_connector_sync(username, connector_id, int(interval), workspace, bool(enabled))
-                    st.success(f"Synchronization schedule saved · {sid}")
+            st.info(
+                "Scheduled connector sync is disabled in this legacy profile surface. "
+                "No endpoint has been live-verified here; do not create schedules until a reviewed, "
+                "provider-backed adapter has passed its authorized acceptance tests."
+            )
 
     last = st.session_state.get("connector_last_test")
     if isinstance(last, dict):
@@ -596,21 +591,10 @@ def render_connectivity_extension() -> None:
 
     schedules = connector_schedule_frame(username, workspace)
     if not schedules.empty:
-        st.markdown("#### ⏱️ Synchronization schedules")
+        st.markdown("#### ⏱️ Saved synchronization schedules")
+        st.caption("Existing schedule records are preserved for review only. The legacy runner does not connect to endpoints.")
         st.dataframe(schedules, use_container_width=True, hide_index=True)
-        if st.button("▶️ Review due connector statuses (no network)", use_container_width=True, key="conn_run_due"):
-            try:
-                result = run_due_connector_syncs(username, workspace, max_attempts=3, require_approval=True)
-                st.session_state["connector_due_run_result"] = result
-                st.rerun()
-            except PermissionError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.error("Scheduled connector checks failed safely: " + str(exc))
-    due_result = st.session_state.get("connector_due_run_result")
-    if isinstance(due_result, pd.DataFrame) and not due_result.empty:
-        st.markdown("#### Latest scheduled synchronization result")
-        st.dataframe(due_result, use_container_width=True, hide_index=True)
+        st.warning("Due connector execution is disabled until an approved provider adapter is implemented and verified.")
 
     last_test = st.session_state.get("connector_last_test") or {}
     if last_test.get("connector_id") and str(last_test.get("status")) == "Healthy" and str(protocol).upper() in {"REST","ODATA","HTTPS","SQL","JDBC"}:
