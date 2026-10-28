@@ -383,7 +383,7 @@ def copilot_module_recommendation(prompt: str) -> str:
         (["platform health","diagnostics","runtime health","system health"],"Platform Health & Diagnostics","Enterprise"),
         (["forecast","seasonality","promotion","weather","macro"],"Advanced ML Demand Forecasting","Enterprise"),
         (["monte carlo","stochastic","uncertainty","lead time variance","disruption"],"Stochastic & Monte Carlo Risk Modeling","Enterprise"),
-        (["sap","oracle","erp","wms","api connector"],"ERP & WMS API Connectors","Enterprise"),
+        (["sap","oracle","erp","wms","api connector"],"Industrial Connector Profiles (provider setup required)","Enterprise"),
         (["multi echelon","meio"],"MEIO Matrix","Mid-Tier Pro"),
         (["carbon","esg","emissions"],"Carbon Accounting","Mid-Tier Pro"),
         (["scenario compare","scenario version","baseline vs"],"Scenario Versioning","Mid-Tier Pro"),
