@@ -2717,6 +2717,10 @@ if _shell_surface == "logout":
             st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
             st.stop()
     st.session_state["_shoir_clear_session_before_render"] = True
+    if st.session_state.get("oidc_authenticated"):
+        # Revoke the Shoir-IE session above before ending the Streamlit OIDC cookie.
+        st.logout()
+        st.stop()
     st.rerun()
 # Compatibility contract retained for existing smoke tests and legacy integrations.
 # IMPORTANT: this is state only; it is intentionally NOT reused as a Streamlit widget key,
@@ -3083,6 +3087,10 @@ if st.sidebar.button("Lock / Logout Workspace"):
             st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
             st.stop()
     st.session_state["_shoir_clear_session_before_render"] = True
+    if st.session_state.get("oidc_authenticated"):
+        # Server-side session revocation above precedes provider-cookie logout.
+        st.logout()
+        st.stop()
     st.rerun()
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
