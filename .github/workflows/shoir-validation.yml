@@ -25,15 +25,17 @@ jobs:
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python -m pytest -q tests
+        run: python -m pytest -q -rs tests
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Type-check persistence Edge Function
-        run: deno check supabase/functions/shoir-persistence/index.ts
+      - name: Type-check persistence Edge Function and OIDC verifier tests
+        run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/oidc_test.ts
       - name: Run persistence Edge Function security tests
         run: deno test supabase/functions/shoir-persistence/security_test.ts
+      - name: Run OIDC identity and MFA verification tests
+        run: deno test supabase/functions/shoir-persistence/oidc_test.ts
       - name: Install PDF rendering tools for visual export acceptance
         if: always()
         run: |
