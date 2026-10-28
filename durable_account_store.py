@@ -538,6 +538,14 @@ def edge_login(username: str, password: str) -> dict[str, Any]:
     return _edge_call("login", {"username": username, "password": password})
 
 
+def edge_oidc_login(id_token: str) -> dict[str, Any]:
+    """Exchange an ID token for a Shoir-IE session after independent Edge verification."""
+    token = str(id_token or "").strip()
+    if not token or len(token) > 16_384:
+        raise ValueError("The identity-provider token is missing or exceeds the allowed size.")
+    return _edge_call("oidc_login", {"id_token": token})
+
+
 def edge_logout(username: str, token: str) -> dict[str, Any]:
     """Revoke only the current server session for this account."""
     return _edge_call("logout", {"username": username, "token": token})
