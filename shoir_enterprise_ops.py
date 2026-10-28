@@ -521,8 +521,7 @@ def normalize_connector_health(df: pd.DataFrame) -> pd.DataFrame:
 def render_connectivity_extension() -> None:
     from shoir_enterprise_layer import (
         connector_health_frame, connector_run_frame, connector_schedule_frame,
-        test_connector_profile, schedule_connector_sync, run_due_connector_syncs,
-        validate_connector_profile, fetch_connector_sample,
+        test_connector_profile, validate_connector_profile,
     )
 
     username = st.session_state.get("current_user", "unknown")
@@ -547,9 +546,9 @@ def render_connectivity_extension() -> None:
     st.session_state["connectivity_health_df"] = health
 
     st.markdown("### 🔌 Connector Health & Deployment Readiness")
-    st.caption("One governed adapter surface for SAP · Oracle · WMS · MES · ERP · REST · SQL · MQTT · OPC-UA. Live tests are opt-in; this build validates executable transports only and never stores secret values.")
+    st.caption("Governed connector-profile and readiness surface. Vendor/protocol labels are not proof of a live connection. The reviewed generic T096 adapter is HTTPS REST read-only with server-side secrets and an exact host allowlist; vendor-specific SAP/Oracle/WMS and external SQL/MQTT/OPC-UA adapters require separate implementation and provider-backed validation.")
 
-    with st.expander("🧭 Live Connection Wizard", expanded=False):
+    with st.expander("🔧 Connector Profile & Readiness", expanded=False):
         left, right = st.columns(2)
         with left:
             system_type = st.selectbox("System", ["SAP","ORACLE","WMS","MES","ERP","REST","SQL","MQTT","OPC-UA"], key="conn_wizard_system")
@@ -559,19 +558,19 @@ def render_connectivity_extension() -> None:
             protocol = st.selectbox("Protocol / adapter", protocols, index=protocols.index(default_protocol), key="conn_wizard_protocol")
             name = st.text_input("Connection name", value=f"{system_type} connection", key="conn_wizard_name")
         with right:
-            endpoint = st.text_input("Endpoint / DSN", placeholder="https://… | postgresql://… | sqlite:///… | mqtt://… | opc.tcp://…", key="conn_wizard_endpoint")
-            secret_ref = st.text_input("Secret reference (optional)", placeholder="env:SAP_API_TOKEN", type="password", key="conn_wizard_secret_ref", help="Reference only. The secret value is never persisted.")
+            endpoint = st.text_input("Endpoint / DSN profile metadata (not contacted)", placeholder="Profile metadata only; use the secure T096 environment configuration for live HTTPS REST", key="conn_wizard_endpoint")
+            secret_ref = st.text_input("Secret reference metadata (not used here)", placeholder="T096 uses an administrator-configured server-side secret reference", type="password", key="conn_wizard_secret_ref", help="This legacy profile surface does not use this reference for network access.")
             timeout = st.number_input("Timeout (seconds)", 1.0, 60.0, 8.0, 1.0, key="conn_wizard_timeout")
 
         profile = validate_connector_profile(system_type, protocol, endpoint)
         if profile["valid"]:
-            st.success("Adapter ready · " + str(profile.get("adapter", protocol)))
+            st.info("Profile syntax valid · connection not tested or verified · " + str(profile.get("adapter", protocol)))
         else:
             st.warning("Configuration needs attention: " + " ".join(profile["errors"]))
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("🧪 Test connection", type="primary", use_container_width=True, key="conn_wizard_test"):
+            if st.button("🔍 Check connection test policy (no network)", type="primary", use_container_width=True, key="conn_wizard_test"):
                 if not endpoint.strip():
                     st.warning("Enter an endpoint before testing.")
                 else:
@@ -579,57 +578,33 @@ def render_connectivity_extension() -> None:
                     st.session_state["connector_last_test"] = result
                     st.rerun()
         with c2:
-            interval = st.number_input("Sync interval (minutes)", 1, 10080, 60, 5, key="conn_wizard_interval")
-            enabled = st.checkbox("Enable schedule", value=True, key="conn_wizard_enabled")
-            if st.button("⏱️ Save synchronization schedule", use_container_width=True, key="conn_wizard_schedule"):
-                last = st.session_state.get("connector_last_test") or {}
-                connector_id = str(last.get("connector_id") or "")
-                if not connector_id:
-                    st.warning("Test the connection first so a connector ID exists.")
-                else:
-                    sid = schedule_connector_sync(username, connector_id, int(interval), workspace, bool(enabled))
-                    st.success(f"Synchronization schedule saved · {sid}")
+            st.info(
+                "Scheduled connector sync is disabled in this legacy profile surface. "
+                "No endpoint has been live-verified here; do not create schedules until a reviewed, "
+                "provider-backed adapter has passed its authorized acceptance tests."
+            )
 
     last = st.session_state.get("connector_last_test")
     if isinstance(last, dict):
-        st.markdown("**Last connector test:** " + str(last.get("status", "Unknown")) + " · " + f"{float(last.get('latency_ms', 0.0)):.1f} ms · " + str(last.get("detail", "")))
+        st.markdown("**Legacy connector result (no network):** " + str(last.get("status", "Unknown")) + " · " + f"{float(last.get('latency_ms', 0.0)):.1f} ms · " + str(last.get("detail", "")))
 
     schedules = connector_schedule_frame(username, workspace)
     if not schedules.empty:
-        st.markdown("#### ⏱️ Synchronization schedules")
+        st.markdown("#### ⏱️ Saved synchronization schedules")
+        st.caption("Existing schedule records are preserved for review only. The legacy runner does not connect to endpoints.")
         st.dataframe(schedules, use_container_width=True, hide_index=True)
-        if st.button("▶️ Run due synchronization checks", use_container_width=True, key="conn_run_due"):
-            try:
-                result = run_due_connector_syncs(username, workspace, max_attempts=3, require_approval=True)
-                st.session_state["connector_due_run_result"] = result
-                st.rerun()
-            except PermissionError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.error("Scheduled connector checks failed safely: " + str(exc))
-    due_result = st.session_state.get("connector_due_run_result")
-    if isinstance(due_result, pd.DataFrame) and not due_result.empty:
-        st.markdown("#### Latest scheduled synchronization result")
-        st.dataframe(due_result, use_container_width=True, hide_index=True)
+        st.warning("Due connector execution is disabled until an approved provider adapter is implemented and verified.")
 
-    last_test = st.session_state.get("connector_last_test") or {}
-    if last_test.get("connector_id") and str(last_test.get("status")) == "Healthy" and str(protocol).upper() in {"REST","ODATA","HTTPS","SQL","JDBC"}:
-        with st.expander("📥 Pull bounded sample + map canonical fields", expanded=False):
-            sample_query = ""
-            if str(protocol).upper() in {"SQL","JDBC"}:
-                sample_query = st.text_area("Read-only SQL query", value="SELECT * FROM your_table", key="conn_sample_query")
-            sample_limit = st.number_input("Sample limit", 1, 10000, 1000, 100, key="conn_sample_limit")
-            if st.button("📥 Fetch sample", use_container_width=True, key="conn_sample_fetch"):
-                result = fetch_connector_sample(username, str(last_test["connector_id"]), protocol, endpoint, secret_ref, sample_query, workspace, int(sample_limit), float(timeout))
-                st.session_state["connector_sample_result"] = result
-            sample = st.session_state.get("connector_sample_result")
-            if isinstance(sample, dict):
-                st.caption(str(sample.get("detail", "")))
-                frame = sample.get("frame")
-                if isinstance(frame, pd.DataFrame) and not frame.empty:
-                    st.dataframe(frame.head(100), use_container_width=True, hide_index=True)
-                    st.json(sample.get("schema_mapping", {}))
-                    st.session_state["connector_sample_df"] = frame.copy(deep=True)
+    # Clear any legacy sample payload left in this browser session. The former
+    # unrestricted sample reader could persist arbitrary endpoint responses; never
+    # re-render those cached records after the legacy connector path is disabled.
+    st.session_state.pop("connector_sample_result", None)
+    st.session_state.pop("connector_sample_df", None)
+    st.info(
+        "Live connector sample import is disabled in this legacy surface. "
+        "Use only the secure T096 HTTPS REST verifier for an approved, allowlisted, read-only connection; "
+        "vendor-specific adapters require separate implementation and acceptance evidence."
+    )
     if health.empty:
         st.info("Register or test a connector above to begin health monitoring.")
     else:

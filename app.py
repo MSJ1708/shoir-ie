@@ -612,38 +612,32 @@ def init_db():
         except Exception:
             admin_password = os.environ.get("SHOIR_ADMIN_PASSWORD", "").strip()
 
-        if admin_password:
+        # The reserved administrator is seeded only when the local metadata row
+        # is absent. Existing credentials, role, tier, email and expiry are
+        # never silently repaired or rotated during application startup.
+        existing_admin = cursor.execute(
+            "SELECT password_hash FROM enterprise_users WHERE LOWER(username)='sho' LIMIT 1"
+        ).fetchone()
+        if existing_admin:
+            admin_pass_hash = existing_admin[0] or ""
+        elif admin_password:
             admin_pass_hash = hash_password(admin_password)
             cursor.execute("""
                 INSERT OR IGNORE INTO enterprise_users
                 (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",
-                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "SHR-ADMIN01", "2030-01-01T00:00:00"))
-            cursor.execute("""
-                UPDATE enterprise_users
-                SET password_hash=?, role=?, tier=?, email=?
-                WHERE LOWER(username)='sho'
-            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
+                  "mohsuhailji@gmail.com", "2099-01-01T00:00:00+00:00", "SHR-ADMIN01",
+                  "2099-01-01T00:00:00+00:00"))
         else:
-            # Preserve an existing admin credential; only seed metadata for a
-            # first-run account when one does not already exist.
-            existing_admin = cursor.execute(
-                "SELECT password_hash FROM enterprise_users WHERE LOWER(username)='sho' LIMIT 1"
-            ).fetchone()
-            if existing_admin and existing_admin[0]:
-                admin_pass_hash = existing_admin[0]
+            admin_pass_hash = ""
             cursor.execute("""
                 INSERT OR IGNORE INTO enterprise_users
                 (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, ("sho", "Enterprise Admin", "Enterprise Plus Tier ($399)",
-                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "SHR-ADMIN01", "2030-01-01T00:00:00"))
-            cursor.execute("""
-                UPDATE enterprise_users
-                SET role=?, tier=?, email=?
-                WHERE LOWER(username)='sho'
-            """, ("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
+                  "mohsuhailji@gmail.com", "2099-01-01T00:00:00+00:00", "SHR-ADMIN01",
+                  "2099-01-01T00:00:00+00:00"))
 
         # Rotate legacy discount-looking referral codes to neutral attribution
         # codes. This changes no payment/subscription records and promises no reward.
@@ -651,6 +645,7 @@ def init_db():
             UPDATE enterprise_users
                SET affiliate_code = 'SHR-' || upper(hex(randomblob(6)))
              WHERE affiliate_code LIKE 'AFF-%'
+               AND LOWER(username) <> 'sho'
         """)
 
         # Never recreate/delete accounts on app startup.
@@ -661,7 +656,7 @@ def init_db():
                 (username,password,role,tier,email,created_at,subscription_expires_at)
                 VALUES (?,?,?,?,?,?,?)
             """, ("sho", admin_pass_hash, "admin", "Enterprise Plus Tier ($399)",
-                  "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
+                  "shoirtheagent@gmail.com", "2020-01-01T00:00:00+00:00", "2099-01-01T00:00:00+00:00"))
 
         conn.commit()
 
@@ -1586,17 +1581,15 @@ if not st.session_state.get("current_user"):
         )
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
     st.warning("BETA — Shoir-IE is still in testing. Independently validate source data, formulas and outputs before operational decisions; do not rely on beta output alone for safety-critical work.")
-    # Streamlit's tab bar is horizontally scrollable by default. On narrow phones
-    # that can leave the first or last auth tab label partially clipped. Wrap only
-    # the public landing-page tabs on small screens; desktop layout stays unchanged.
+    # Streamlit tab CSS is scoped to the keyed public auth tabs so internal module tabs keep their layout.
     st.markdown(
         """
         <style>
         @media (max-width: 600px) {
           /* BaseWeb's current Streamlit tabs use data-baseweb attributes; retain
              ARIA selectors as a fallback and wrap actual tab labels, not just the strip. */
-          div[data-testid="stTabs"] [role="tablist"],
-          div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+          .st-key-shoir_public_auth_tabs [role="tablist"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab-list"] {
             display: grid !important;
             grid-template-columns: minmax(0, 1fr) !important;
             align-items: stretch !important;
@@ -1608,8 +1601,8 @@ if not st.session_state.get("current_user"):
             white-space: normal !important;
             box-sizing: border-box !important;
           }
-          div[data-testid="stTabs"] [role="tab"],
-          div[data-testid="stTabs"] [data-baseweb="tab"] {
+          .st-key-shoir_public_auth_tabs [role="tab"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab"] {
             width: 100% !important;
             min-width: 0 !important;
             max-width: 100% !important;
@@ -1621,19 +1614,30 @@ if not st.session_state.get("current_user"):
             text-align: center !important;
             box-sizing: border-box !important;
           }
-          div[data-testid="stTabs"] [role="tab"] [data-testid="stMarkdownContainer"],
-          div[data-testid="stTabs"] [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
+          .st-key-shoir_public_auth_tabs [role="tab"] [data-testid="stMarkdownContainer"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
             white-space: normal !important;
             overflow-wrap: anywhere !important;
             min-width: 0 !important;
             max-width: 100% !important;
+          }
+          /* The global tab highlight is positioned for a horizontal tab row. Hide
+             that underline on the stacked mobile layout and use an explicit selected
+             surface/border instead, so it never crosses the wrapped tab label. */
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab-highlight"] {
+            display: none !important;
+          }
+          .st-key-shoir_public_auth_tabs [role="tab"][aria-selected="true"],
+          .st-key-shoir_public_auth_tabs [data-baseweb="tab"][aria-selected="true"] {
+            background-color: rgba(37, 99, 235, 0.08) !important;
+            border-inline-start: 3px solid #2563eb !important;
           }
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
+    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"], key="shoir_public_auth_tabs")
 
     # ------------------------------------------
     # TAB 1: SIGN IN
@@ -1691,53 +1695,54 @@ if not st.session_state.get("current_user"):
                 st.session_state["subscription_expires_at"] = expiry
                 st.session_state["authenticated"] = True
 
-                # Populate the ephemeral local cache for modules that still
-                # read user metadata from SQLite. This cache is never the
-                # source of truth for authentication or workspace persistence.
-                try:
-                    conn_local = sqlite3.connect("enterprise_full_workspace.db")
-                    local_row = conn_local.execute(
-                        "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
-                        (username.lower(),),
-                    ).fetchone()
-                    if local_row:
+                # The session already contains authoritative server values.
+                # Keep the reserved administrator out of automatic SQLite cache
+                # synchronization so login cannot mutate its local account mirror.
+                if username.strip().casefold() != "sho":
+                    try:
+                        conn_local = sqlite3.connect("enterprise_full_workspace.db")
+                        local_row = conn_local.execute(
+                            "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
+                            (username.lower(),),
+                        ).fetchone()
+                        if local_row:
+                            conn_local.execute(
+                                """
+                                UPDATE users
+                                SET role=?, tier=?, email=?, subscription_expires_at=?
+                                WHERE id=?
+                                """,
+                                (role, tier, email, expiry, local_row[0]),
+                            )
+                        else:
+                            conn_local.execute(
+                                """
+                                INSERT INTO users
+                                (username,password,role,tier,email,created_at,subscription_expires_at)
+                                VALUES (?,?,?,?,?,?,?)
+                                """,
+                                (
+                                    username,
+                                    "REMOTE_MANAGED",
+                                    role,
+                                    tier,
+                                    email,
+                                    datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                    expiry,
+                                ),
+                            )
                         conn_local.execute(
-                            """
-                            UPDATE users
-                            SET role=?, tier=?, email=?, subscription_expires_at=?
-                            WHERE id=?
-                            """,
-                            (role, tier, email, expiry, local_row[0]),
+                            "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
+                            (username,),
                         )
-                    else:
                         conn_local.execute(
-                            """
-                            INSERT INTO users
-                            (username,password,role,tier,email,created_at,subscription_expires_at)
-                            VALUES (?,?,?,?,?,?,?)
-                            """,
-                            (
-                                username,
-                                "REMOTE_MANAGED",
-                                role,
-                                tier,
-                                email,
-                                datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                expiry,
-                            ),
+                            "UPDATE enterprise_users SET role=?,tier=?,email=?,ticket_expiry=? WHERE LOWER(username)=?",
+                            (role, tier, email, expiry, username.lower()),
                         )
-                    conn_local.execute(
-                        "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
-                        (username,),
-                    )
-                    conn_local.execute(
-                        "UPDATE enterprise_users SET role=?,tier=?,email=?,ticket_expiry=? WHERE LOWER(username)=?",
-                        (role,tier,email,expiry,username.lower()),
-                    )
-                    conn_local.commit()
-                    conn_local.close()
-                except Exception:
-                    pass
+                        conn_local.commit()
+                        conn_local.close()
+                    except Exception:
+                        pass
 
                 st.success(f"Welcome back, {username}!")
                 st.rerun()

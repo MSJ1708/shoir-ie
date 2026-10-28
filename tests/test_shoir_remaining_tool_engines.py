@@ -232,10 +232,28 @@ def test_integration_status_checks_env_presence_without_returning_secret(monkeyp
         }],
     })
     row = out["profile_records"][0]
-    assert row["status"] == "READY_FOR_AUTHORIZED_STAGING_TEST"
+    assert row["status"] == "CONFIGURED_AWAITING_HOST_ALLOWLIST_AND_AUTHORIZED_TEST"
     assert row["endpoint_configured"] and row["credential_configured"]
     assert "never-return-this-secret" not in json.dumps({"status": out["status"], "profile_records": out["profile_records"]})
 
+
+
+def test_t096_configuration_does_not_claim_native_vendor_adapters_are_ready(monkeypatch):
+    monkeypatch.setenv("SHOIR_CONNECTOR_SAP_ENDPOINT", "https://sap.example.test/api")
+    monkeypatch.setenv("SHOIR_CONNECTOR_SAP_TOKEN", "do-not-return-this-token")
+    out = integration_configuration_status({
+        "profiles": [{
+            "name": "SAP API metadata",
+            "protocol": "SAP",
+            "endpoint_env": "SHOIR_CONNECTOR_SAP_ENDPOINT",
+            "credential_env": "SHOIR_CONNECTOR_SAP_TOKEN",
+        }],
+    })
+    row = out["profile_records"][0]
+    assert row["status"] == "PROVIDER_ADAPTER_NOT_IMPLEMENTED"
+    assert out["connected_count"] == 0
+    assert row["endpoint_configured"] and row["credential_configured"]
+    assert "do-not-return-this-token" not in json.dumps(out["profile_records"])
 
 def test_integration_status_refuses_invalid_env_names():
     with pytest.raises(ValueError, match="must use a SHOIR_CONNECTOR"):

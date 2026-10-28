@@ -41,11 +41,28 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     app_source = (root / "app.py").read_text(encoding="utf-8")
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
 
-    assert '("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",' in app_source
-    assert '(admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
-    assert '("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
-    assert _source_contract_contains(edge_source, 'const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";')
-    assert _source_contract_contains(edge_source, 'const effectiveTier=isMasterAdmin?adminTier:row.tier;')
+    seed_start = app_source.index("        existing_admin = cursor.execute(")
+    seed_end = app_source.index("        # Rotate legacy discount-looking referral codes", seed_start)
+    admin_seed = app_source[seed_start:seed_end]
+    assert 'INSERT OR IGNORE INTO enterprise_users' in admin_seed
+    assert "UPDATE enterprise_users" not in admin_seed
+    assert "2099-01-01T00:00:00+00:00" in admin_seed
+    assert '"2099-01-01T00:00:00+00:00")' in app_source
+
+    login_start = app_source.index("                # The session already contains authoritative server values.")
+    login_end = app_source.index('                st.success(f"Welcome back, {username}!")', login_start)
+    login_cache = app_source[login_start:login_end]
+    assert 'if username.strip().casefold() != "sho":' in login_cache
+    guard_pos = login_cache.index('if username.strip().casefold() != "sho":')
+    update_pos = login_cache.index('UPDATE enterprise_users SET role=?,tier=?,email=?,ticket_expiry=?')
+    assert guard_pos < update_pos
+    assert "AND LOWER(username) <> 'sho'" in app_source
+    security_source = (root / "supabase/functions/shoir-persistence/security.ts").read_text(encoding="utf-8")
+    assert _source_contract_contains(edge_source, 'const isProtectedMasterAdmin=row.username_lc==="sho";')
+    assert _source_contract_contains(edge_source, '!hasCanonicalMasterAdminInvariant(row as Record<string,unknown>)')
+    assert _source_contract_contains(edge_source, 'const effectiveTier=row.tier;')
+    assert "hasCanonicalMasterAdminInvariant" in security_source
+    assert not _source_contract_contains(edge_source, '.update({tier:adminTier,updated_at:newDate().toISOString()})')
     assert _source_contract_contains(edge_source, 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")')
     assert _source_contract_contains(edge_source, 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")')
 
@@ -172,8 +189,8 @@ def test_login_throttle_contract_is_server_only_and_atomic():
 
     assert _source_contract_contains(edge_source, 'loginThrottleBuckets(usernameLc,req)')
     assert _source_contract_contains(edge_source, 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")')
-    assert _source_contract_contains(edge_source, 'response({error:"Too many sign-in attempts. Please wait and try again."},429)')
-    assert _source_contract_contains(edge_source, 'response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
+    assert _source_contract_contains(edge_source, 'sendResponse({error:"Too many sign-in attempts. Please wait and try again."},429)')
+    assert _source_contract_contains(edge_source, 'sendResponse({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
     assert 'SECURITY INVOKER' in migration
     assert 'pg_advisory_xact_lock' in migration
     assert 'ALTER TABLE public.shoir_login_throttle ENABLE ROW LEVEL SECURITY' in migration

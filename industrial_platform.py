@@ -60,7 +60,7 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Manufacturing","name":"Manufacturing Execution System","when":"Connect work orders, dispatch, actual production, downtime, quality, WIP and genealogy.","example":"Track a work order from dispatch through production confirmation and quality release."},
     {"tier":"Enterprise","category":"Simulation","name":"Industrial Simulation Lab","when":"Test DES, agent-based and system-dynamics scenarios before changing the real operation.","example":"Compare queue throughput under one versus two packing stations with confidence intervals."},
     {"tier":"Enterprise","category":"Facilities","name":"3D Factory Designer","when":"Model equipment, people, storage, flow, travel distance and facility geometry visually.","example":"Place machines in 3D, review travel paths and feed the same layout into simulation."},
-    {"tier":"Enterprise","category":"Connectivity","name":"Industrial Connectivity Hub","when":"Manage and test REST, SQL, MQTT and OPC-UA connector profiles.","example":"Test a plant endpoint, record sync health and keep credentials out of analytics logs."},
+    {"tier":"Enterprise","category":"Connectivity","name":"Industrial Connectivity Hub","when":"Manage connector profile metadata and readiness; profile labels do not imply live connectivity.","example":"Maintain endpoint and protocol metadata. The current generic live-read adapter is HTTPS REST only and requires server-side secrets plus an exact host allowlist; vendor-specific SAP/Oracle/WMS and external SQL/MQTT/OPC-UA connections are not claimed as implemented."},
     {"tier":"Enterprise","category":"Optimization","name":"Multi-Objective Optimization","when":"Trade off cost, service, carbon, risk, inventory, lead time and capacity together.","example":"Explore the Pareto frontier between logistics cost and carbon."},
     {"tier":"Enterprise","category":"Optimization","name":"Robust & Resilient Optimization","when":"Evaluate decisions against demand, lead-time, supplier, energy and capacity uncertainty.","example":"Compare nominal capacity with the probability of meeting demand across thousands of shocks."},
     {"tier":"Enterprise","category":"Governance","name":"Engineering Model Registry","when":"Version models, parameters, data hashes, assumptions, solvers and results for reproducibility.","example":"Reproduce a planning study six months later from its registered snapshot."},
@@ -1473,30 +1473,57 @@ def render_module(module: str, tier: str, username: str):
             st.dataframe(_factory3d_dist_result.head(50),use_container_width=True)
         render_export_bar(module,[("3D Layout",df),("Travel Matrix",st.session_state.get("factory3d_dist_result",pd.DataFrame()))],[("3D Factory",fig)],tier,username)
     elif module=="Industrial Connectivity Hub":
-        tabs=st.tabs(["REST / SAP / Oracle / WMS","SQL","MQTT / OPC-UA"])
+        st.info(
+            "Profile management only. The legacy direct URL test and shared-database SQL query are disabled because "
+            "they did not enforce the approved connector security and workspace-isolation boundaries. "
+            "Use the existing T096 HTTPS REST verification in the Industrial Engineering Workbench after an "
+            "administrator configures the server-side endpoint, Bearer-token secret, and exact host allowlist. "
+            "That generic adapter is REST-only; it is not a native SAP, Oracle, WMS, SQL, MQTT, or OPC-UA adapter."
+        )
+        tabs=st.tabs(["REST / ERP Profiles","SQL (not connected)","MQTT / OPC-UA (settings only)"])
         with tabs[0]:
-            conn_df=st.data_editor(st.session_state.setdefault("conn_df",pd.DataFrame({"Name":["SAP Demo","Oracle Demo","WMS Demo"],"System Type":["SAP","Oracle","WMS"],"Endpoint":["https://example.com","",""],"Status":["Not Tested","",""]})),num_rows="dynamic",use_container_width=True,key="conn_editor")
-            selected=st.selectbox("Connector",conn_df["Name"].tolist(),key="conn_selected"); token=st.text_input("Bearer token (session only)",type="password",key="conn_token")
-            if st.button("🔌 Test REST Connector",type="primary",use_container_width=True,key="conn_rest"):
-                import requests
-                row=conn_df[conn_df["Name"]==selected].iloc[0]; url=str(row["Endpoint"]).strip()
-                if not url: st.error("Enter an endpoint."); 
-                else:
-                    try:
-                        rr=requests.get(url,headers={"Authorization":"Bearer "+token} if token else {},timeout=10); st.success(f"HTTP {rr.status_code}"); log_security_event(username,"connector_test",f"{selected}|HTTP {rr.status_code}")
-                    except Exception as exc: st.error(f"Connection failed safely: {exc}")
+            conn_df=st.data_editor(
+                st.session_state.setdefault(
+                    "conn_df",
+                    pd.DataFrame({
+                        "Name":["ERP Profile (example)","Warehouse Profile (example)"],
+                        "System Type":["ERP","WMS"],
+                        "Endpoint":["",""],
+                        "Status":["Profile only — not connected","Profile only — not connected"],
+                    }),
+                ),
+                num_rows="dynamic",
+                use_container_width=True,
+                key="conn_editor",
+            )
+            selected=st.selectbox("Connector profile",conn_df["Name"].tolist(),key="conn_selected")
+            st.caption("This editor stores profile metadata only. It never sends the endpoint or credentials to a network target.")
+            if st.button("🔒 Review secure T096 verification requirements",use_container_width=True,key="conn_rest"):
+                st.warning(
+                    "No network request was made. To verify a live connection, use T096 in the Workbench with "
+                    "an approved non-production HTTPS endpoint, server-side secret, exact host allowlist, "
+                    "read-only permission, and recorded positive/negative test evidence."
+                )
         with tabs[1]:
-            query=st.text_area("Read-only SQL query","SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-            if st.button("🗄️ Execute Read-Only SQL",use_container_width=True,key="conn_sql"):
-                if not query.lstrip().lower().startswith("select"): st.error("Only SELECT queries are permitted.")
-                else:
-                    try:
-                        with sqlite3.connect("enterprise_full_workspace.db") as c: st.dataframe(pd.read_sql_query(query,c))
-                    except Exception as exc: st.error(f"SQL failed safely: {exc}")
+            st.warning(
+                "External SQL connection testing is not implemented in this module. Direct SELECT queries against "
+                "the shared application SQLite database are disabled because they do not enforce workspace-specific "
+                "data boundaries. No SQL query was executed."
+            )
         with tabs[2]:
-            st.info("MQTT and OPC-UA connectors are configuration-ready. Live sessions require the site broker/server and protocol libraries.")
-            mqtt_topic=st.text_input("MQTT topic","factory/telemetry/#"); opc_url=st.text_input("OPC-UA endpoint","opc.tcp://localhost:4840")
-            if st.button("🧪 Validate Connector Settings",use_container_width=True,key="conn_validate"): st.write({"MQTT":mqtt_topic,"OPC-UA":opc_url,"Status":"Configuration accepted; no live connection attempted."})
+            st.info(
+                "MQTT and OPC-UA settings are metadata only. Live sessions require separately implemented and "
+                "reviewed protocol adapters, an approved broker/server, network controls, and security tests."
+            )
+            mqtt_topic=st.text_input("MQTT topic","factory/telemetry/#",key="conn_mqtt_topic")
+            opc_url=st.text_input("OPC-UA endpoint","opc.tcp://localhost:4840",key="conn_opc_endpoint")
+            if st.button("🧪 Validate profile syntax only",use_container_width=True,key="conn_validate"):
+                st.write({
+                    "MQTT":mqtt_topic,
+                    "OPC-UA":opc_url,
+                    "Status":"PROFILE_SYNTAX_ONLY_NOT_CONNECTED",
+                    "network_request_made":False,
+                })
         render_export_bar(module,[("Connector Profiles",conn_df)],tier,username)
     elif module=="Multi-Objective Optimization":
         st.subheader("⚖️ Multi-Objective Optimization & Pareto Studio")

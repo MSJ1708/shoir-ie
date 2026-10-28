@@ -122,7 +122,7 @@ def test_connector_system_transport_boundaries_are_explicit():
     assert "not executable" in " ".join(sql_jdbc["errors"])
 
 
-def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
+def test_legacy_connector_probe_is_disabled_and_endpoint_redaction_is_preserved(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
     import sqlite3
@@ -131,7 +131,8 @@ def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
     monkeypatch.setattr(ent, "_remote", lambda: False)
     result = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", "sqlite:///" + str(db))
-    assert result["status"] == "Healthy"
+    assert result["status"] == "EXTERNAL_TEST_DISABLED"
+    assert "No database connection was made" in result["detail"]
     assert result["run_id"].startswith("CRUN-")
     secret_id = ent.record_connector_health("alice", "REST", "REST", "REST", "https://example.test/api?token=topsecret&x=1", "Healthy")
     health = ent.connector_health_frame("alice")
@@ -139,6 +140,39 @@ def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     assert "topsecret" not in saved
     assert "***" in saved
 
+
+
+
+def test_legacy_external_connector_probes_and_sample_reads_never_network(tmp_path, monkeypatch):
+    import pytest
+    import shoir_enterprise_layer as ent
+
+    monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
+    monkeypatch.setattr(ent, "_remote", lambda: False)
+
+    def forbidden_network(*args, **kwargs):
+        pytest.fail("legacy connector path attempted a network request")
+
+    monkeypatch.setattr(ent.requests, "get", forbidden_network)
+    probe = ent.test_connector_profile(
+        "alice", "Untrusted REST", "REST", "REST",
+        "http://127.0.0.1:8080/private", workspace="plant-a",
+    )
+    assert probe["status"] == "EXTERNAL_TEST_DISABLED"
+    assert "No HTTP request was made" in probe["detail"]
+
+    sample = ent.fetch_connector_sample(
+        "alice", probe["connector_id"], "REST",
+        "http://127.0.0.1:8080/private", workspace="plant-a",
+    )
+    assert sample["status"] == "EXTERNAL_TEST_DISABLED"
+    assert sample["records"] == 0
+    assert sample["frame"].empty
+    assert sample["artifact_id"] == ""
+
+    assert ent._connector_sql_test("postgresql://127.0.0.1/private")[0] == "EXTERNAL_TEST_DISABLED"
+    assert ent._connector_mqtt_test("mqtt://127.0.0.1:1883")[0] == "EXTERNAL_TEST_DISABLED"
+    assert ent._connector_opcua_test("opc.tcp://127.0.0.1:4840")[0] == "EXTERNAL_TEST_DISABLED"
 
 
 def test_canonical_store_roundtrip_and_workspace_isolation(tmp_path, monkeypatch):
@@ -197,7 +231,7 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
     results = ent.run_due_connector_syncs("alice", "plant-a", max_attempts=2, require_approval=False)
     assert len(results) == 1
     assert results.iloc[0]["Attempts"] >= 1
-    assert results.iloc[0]["Status"] == "Healthy"
+    assert results.iloc[0]["Status"] == "EXTERNAL_TEST_DISABLED"
 
 
 def test_security_gate_requires_explicit_approval(tmp_path, monkeypatch):
