@@ -2,6 +2,8 @@
 
 **State: PREPARATION ONLY — NOT APPROVED. Do not execute production changes from this document.**
 
+> **Candidate snapshot note — 2026-10-28 20:16 UTC:** PR #220 advanced after this packet was first drafted. Its current candidate head is `7b852037ac4d28f43365da81443463d8a287ded7` (draft, exact-head checks queued/not verified); current helper blob SHA-1 is `40b1d1de3e87b4ed3e3e86062824ae84cae825e6`. The original `79feaae...` source/head and `c079ce...` helper blob values below are historical preparation-time identifiers, not current release identifiers. This packet is **not approval-ready** until all relevant checks and independent review pass, then the deterministic deployment artifact is built from the exact approved SHA and its actual SHA-256 is recorded.
+
 Prepared on 2026-10-28. This packet separates the production persistence-function security hotfix from the legal/referral schema migration. They are two distinct changes and require independent scope, preconditions and explicit release-owner approval.
 
 ## A. Production persistence-function security hotfix
