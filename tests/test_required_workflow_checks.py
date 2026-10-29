@@ -49,3 +49,15 @@ def test_authenticated_gate_requires_inactive_denial_and_login_throttle_inputs()
     username_checks = gate.split("for name in SHOIR_E2E_ACTIVE_USERNAME", 1)[1].split("; do", 1)[0]
     assert "SHOIR_E2E_INACTIVE_USERNAME" in username_checks
     assert 'shoir-e2e-*' in gate
+
+
+def test_validation_workflow_emits_test_once_per_release_pr_head():
+    source = (ROOT / ".github" / "workflows" / "shoir-validation.yml").read_text(
+        encoding="utf-8"
+    )
+    events = source.split("jobs:", 1)[0]
+    push = events.split("  push:", 1)[1].split("  pull_request:", 1)[0]
+    pull_request = events.split("  pull_request:", 1)[1].split("  workflow_dispatch:", 1)[0]
+    assert 'branches: ["main", "staging-e2e-20261019"]' in push
+    assert 'branches: ["main", "staging-e2e-20261019"]' in pull_request
+    assert "pull_request:" in events
