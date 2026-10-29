@@ -20,7 +20,8 @@ def test_optional_streamlit_oidc_is_config_gated_and_keeps_existing_password_log
     assert "edge_oidc_login(_oidc_id_token, _oidc_display_hint)" in app
     assert 'if not _oidc_status.get("ready")' in app
     assert 'action === "login"' in EDGE.read_text(encoding="utf-8")
-    assert 'return _edge_call("oidc_login", {"id_token": token})' in store
+    assert 'return _edge_call("oidc_login", {"id_token": token, "email_hint": hint})' in store
+    assert 'hint = str(email_hint or "").strip().lower()[:320]' in store
     assert '"id" not in exposed_tokens' in helpers
     assert "st.login(\"enterprise\")" in app
 

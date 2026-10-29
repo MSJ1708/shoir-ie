@@ -318,7 +318,6 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
   return keys;
 }
 
-
 type OidcAuditOutcome = "success" | "denied" | "expired" | "error";
 
 async function writeOidcAuditEvent(event: {
@@ -400,7 +399,8 @@ Deno.serve(async (req) => {
         oidcConfig = readOidcVerifierConfig();
       } catch {
         return response({
-          error: "Enterprise identity authentication is not correctly configured.",
+          error:
+            "Enterprise identity authentication is not correctly configured.",
         }, 503);
       }
       if (!oidcConfig.enabled || !oidcConfig.ready) {
@@ -412,7 +412,8 @@ Deno.serve(async (req) => {
       if (!idToken || idToken.length > MAX_OIDC_ID_TOKEN_CHARS) {
         return response({ error: "Invalid identity-provider response." }, 400);
       }
-      const emailHint = String(body.email_hint || "oidc-login").trim().toLowerCase().slice(0, 320);
+      const emailHint = String(body.email_hint || "oidc-login").trim()
+        .toLowerCase().slice(0, 320);
       let throttleBuckets: Array<
         { key_hash: string; max_attempts: number; reset_on_success: boolean }
       >;
@@ -433,7 +434,8 @@ Deno.serve(async (req) => {
         }
       } catch {
         return response({
-          error: "Authentication protection is temporarily unavailable. Please retry shortly.",
+          error:
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
         }, 503);
       }
 
@@ -481,7 +483,8 @@ Deno.serve(async (req) => {
         }
 
         const username = String(account.username || "").trim();
-        const usernameLc = String(account.username_lc || username).trim().toLowerCase();
+        const usernameLc = String(account.username_lc || username).trim()
+          .toLowerCase();
         const role = String(account.role || "User");
         const tier = String(account.tier || "Starter Tier");
         const email = String(account.email || "");
@@ -517,7 +520,9 @@ Deno.serve(async (req) => {
             activeAdmins.length !== 1 ||
             activeAdmins[0].username_lc !== "sho" ||
             !hasCanonicalMasterAdminInvariant(activeAdmins[0]) ||
-            !hasCanonicalMasterAdminInvariant(account as Record<string, unknown>)
+            !hasCanonicalMasterAdminInvariant(
+              account as Record<string, unknown>,
+            )
           ) {
             const recorded = await recordOidcDenial(
               identity.issuer,
@@ -531,7 +536,8 @@ Deno.serve(async (req) => {
               }, 503);
             }
             return response({
-              error: "Protected administrator authentication requires manual review.",
+              error:
+                "Protected administrator authentication requires manual review.",
             }, 503);
           }
         }
@@ -548,7 +554,8 @@ Deno.serve(async (req) => {
           }
         } catch {
           return response({
-            error: "Authentication protection is temporarily unavailable. Please retry shortly.",
+            error:
+              "Authentication protection is temporarily unavailable. Please retry shortly.",
           }, 503);
         }
 

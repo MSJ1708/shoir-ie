@@ -1,7 +1,7 @@
 import {
+  hasCanonicalMasterAdminInvariant,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
-  hasCanonicalMasterAdminInvariant,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   PublicRequestError,

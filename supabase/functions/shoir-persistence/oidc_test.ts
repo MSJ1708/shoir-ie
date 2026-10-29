@@ -9,8 +9,8 @@ import {
   MAX_OIDC_ID_TOKEN_CHARS,
   OidcVerificationError,
   readOidcVerifierConfig,
-  verifyOidcIdToken,
   type OidcVerifierConfig,
+  verifyOidcIdToken,
 } from "./oidc.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -24,8 +24,14 @@ async function expectOidcError(
   try {
     await action();
   } catch (error) {
-    assert(error instanceof OidcVerificationError, "Expected OidcVerificationError.");
-    assert(error.code === expectedCode, `Expected ${expectedCode}, received ${error.code}.`);
+    assert(
+      error instanceof OidcVerificationError,
+      "Expected OidcVerificationError.",
+    );
+    assert(
+      error.code === expectedCode,
+      `Expected ${expectedCode}, received ${error.code}.`,
+    );
     return;
   }
   throw new Error("Expected OIDC validation to reject the input.");
@@ -85,7 +91,10 @@ function tamperSignature(signedToken: string): string {
   signatureBytes[0] = signatureBytes[0] ^ 1;
   const binary = Array.from(signatureBytes, (byte) => String.fromCharCode(byte))
     .join("");
-  const encoded = btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const encoded = btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(
+    /\//g,
+    "_",
+  );
   parts[2] = encoded;
   return parts.join(".");
 }

@@ -1,7 +1,7 @@
 import {
   createRemoteJWKSet,
-  jwtVerify,
   type JWTPayload,
+  jwtVerify,
 } from "npm:jose@6.2.13";
 
 export const MAX_OIDC_ID_TOKEN_CHARS = 16_384;
@@ -36,8 +36,14 @@ export class OidcVerificationError extends Error {
 }
 
 function parseCsv(value: string | undefined, fallback: string[]): string[] {
-  const values = (value || "").split(",").map((part) => part.trim()).filter(Boolean);
-  return [...new Set((values.length ? values : fallback).map((part) => part.toLowerCase()))];
+  const values = (value || "").split(",").map((part) => part.trim()).filter(
+    Boolean,
+  );
+  return [
+    ...new Set((values.length ? values : fallback).map((part) =>
+      part.toLowerCase()
+    )),
+  ];
 }
 
 function httpsPublicDnsUrl(raw: string | undefined, label: string): URL | null {
@@ -60,7 +66,9 @@ function httpsPublicDnsUrl(raw: string | undefined, label: string): URL | null {
     host.startsWith("[") ||
     /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)
   ) {
-    throw new Error(label + " must use a public HTTPS DNS host without credentials.");
+    throw new Error(
+      label + " must use a public HTTPS DNS host without credentials.",
+    );
   }
   return url;
 }
@@ -68,11 +76,13 @@ function httpsPublicDnsUrl(raw: string | undefined, label: string): URL | null {
 export function readOidcVerifierConfig(
   getEnv: (name: string) => string | undefined = (name) => Deno.env.get(name),
 ): OidcVerifierConfig {
-  const enabled = (getEnv("SHOIR_OIDC_ENABLED") || "").trim().toLowerCase() === "true";
+  const enabled =
+    (getEnv("SHOIR_OIDC_ENABLED") || "").trim().toLowerCase() === "true";
   const issuer = (getEnv("SHOIR_OIDC_ISSUER") || "").trim();
   const clientId = (getEnv("SHOIR_OIDC_CLIENT_ID") || "").trim();
   const jwksUrl = (getEnv("SHOIR_OIDC_JWKS_URL") || "").trim();
-  const requireMfa = (getEnv("SHOIR_OIDC_REQUIRE_MFA") || "").trim().toLowerCase() === "true";
+  const requireMfa =
+    (getEnv("SHOIR_OIDC_REQUIRE_MFA") || "").trim().toLowerCase() === "true";
   const allowedMfaAmr = parseCsv(getEnv("SHOIR_OIDC_MFA_AMR_VALUES"), ["mfa"]);
   const allowedMfaAcr = parseCsv(getEnv("SHOIR_OIDC_MFA_ACR_VALUES"), []);
 
