@@ -217,7 +217,6 @@ Deno.test("referral code assignment never mutates the reserved or any Enterprise
   );
 });
 
-
 Deno.test("CORS allowlists are isolated per deployment environment", () => {
   const productionOrigins = parseAllowedBrowserOrigins(undefined);
   const productionOrigin = "https://shoir-ie-app.streamlit.app";
