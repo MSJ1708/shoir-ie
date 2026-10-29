@@ -58,3 +58,10 @@ This ledger is the consolidated snapshot of evidence observed on 29 October 2026
 | T098 code tests | **PASS AT EXACT INSPECTED HEAD; PROVIDER ACCEPTANCE OPEN** | On `86cf0102f47c9a6e33269f7019a259158144453d`, Edge Function, Python test, security-quality and PostgreSQL transaction contract checks passed. | Do not claim SSO/MFA is active. Configure a real provider in staging and complete the documented provider/MFA/audit acceptance first. |
 | Registration migration rehearsal state | **SAFE CANDIDATE REHEARSAL PASS; PRODUCTION SEQUENCE UNPROVEN** | PR #218's candidate passed its disposable PostgreSQL migration replay and transaction-contract checks on its recorded head. The safe additive migration preserves existing `affiliate_code` and `updated_at`; the older production-visible migration would rewrite all five current production account rows. | The exact complete function/migration ordering has not been rehearsed against a production-shaped clone; backup/restore is still unverified. No migration is authorized. |
 
+
+
+## Recheck — full shared-handler CORS candidate
+
+PR [#226](https://github.com/MSJ1708/shoir-ie/pull/226) now covers both exact-origin CORS and protected-admin referral-code preservation in the full main-branch persistence handler. Its current head is `28856b8e0478a63ea6452de07e27edfe9462be8c`. The CORS configuration is now **per deployment**: an unset `SHOIR_ALLOWED_BROWSER_ORIGINS` defaults to the production app host only, while the verified staging host must be configured separately on a staging deployment. The shared source no longer hard-codes both hosts into every project. Unit, source-contract, security-quality, and full exact-head checks are still queued/in progress at recheck time, and live-deployment-smoke is skipped. There is no post-deployment live CORS proof.
+
+The deployed production function remains v9 with wildcard CORS and no `register_request` action. The candidate is not deployed. It does not resolve schema migration or provider/legal approval blockers. Production remains **NO-GO / HOLD**.
