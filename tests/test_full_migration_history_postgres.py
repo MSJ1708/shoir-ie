@@ -42,6 +42,7 @@ EXPECTED_VERSIONS = [
     "20261022110000",
     "20261023130000",
     "20261026110000",
+    "20261028190000",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -384,6 +385,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "shoir_platform_events",
                 "shoir_platform_artifacts",
                 "shoir_platform_jobs",
+                "shoir_security_audit_events",
             }
             rows = _fetchone(
                 target,
@@ -436,7 +438,8 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             )
 
             for table in ("shoir_accounts", "shoir_pending_credentials", "shoir_sessions",
-                          "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states", "shoir_login_throttle"):
+                          "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states",
+                          "shoir_login_throttle", "shoir_security_audit_events"):
                 assert _fetchone(
                     target,
                     """
@@ -457,6 +460,39 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "SELECT has_table_privilege('authenticated', %s, 'SELECT');",
                     (f"public.{table}",),
                 )[0] is False, f"authenticated has a direct SELECT grant on {table}"
+
+            # OIDC authentication audit is append-only for the Edge Function.
+            assert _fetchone(
+                target,
+                "SELECT relrowsecurity FROM pg_class WHERE oid='public.shoir_security_audit_events'::regclass;",
+            )[0] is True, "OIDC audit table must have RLS enabled"
+            for role in ("anon", "authenticated"):
+                for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege(%s, 'public.shoir_security_audit_events', %s);",
+                        (role, privilege),
+                    )[0] is False, f"{role} unexpectedly has {privilege} on OIDC audit events"
+            assert _fetchone(
+                target,
+                "SELECT has_table_privilege('service_role', 'public.shoir_security_audit_events', 'INSERT');",
+            )[0] is True, "service_role must be able to append OIDC audit events"
+            for privilege in ("SELECT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_security_audit_events', %s);",
+                    (privilege,),
+                )[0] is False, f"service_role has unnecessary {privilege} on OIDC audit events"
+            assert _fetchone(
+                target,
+                "SELECT has_sequence_privilege('service_role', 'public.shoir_security_audit_events_id_seq', 'USAGE');",
+            )[0] is True, "service_role must be able to allocate an audit ID"
+            for role in ("anon", "authenticated"):
+                assert _fetchone(
+                    target,
+                    "SELECT has_sequence_privilege(%s, 'public.shoir_security_audit_events_id_seq', 'USAGE');",
+                    (role,),
+                )[0] is False, f"{role} unexpectedly has OIDC audit sequence USAGE"
 
             assert _fetchone(
                 target,

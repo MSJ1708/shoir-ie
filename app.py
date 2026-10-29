@@ -75,6 +75,11 @@ except ImportError:
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
+from shoir_oidc_auth import (
+    get_verified_streamlit_id_token,
+    oidc_claims_display_name,
+    oidc_configuration_status,
+)
 # Load the persistence module first, then validate its complete public contract.
 # A stale Streamlit checkout or partially updated deployment can otherwise raise an
 # opaque ImportError here and prevent even the public sign-in page from rendering.
@@ -83,6 +88,7 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "sync_durable_accounts",
     "sync_remote_requests_to_local",
     "edge_login",
+    "edge_oidc_login",
     "edge_logout",
     "edge_admin_list_requests",
     "edge_admin_approve",
@@ -1696,6 +1702,170 @@ if not st.session_state.get("current_user"):
 
                 st.success(f"Welcome back, {username}!")
                 st.rerun()
+        st.markdown("---")
+        st.markdown("#### Organization sign-in (optional)")
+        try:
+            _oidc_status = oidc_configuration_status(st.secrets)
+        except Exception:
+            _oidc_status = {
+                "ready": False,
+                "configured": False,
+                "missing_shared": (),
+                "missing_provider": (),
+                "provider_name": "enterprise",
+            }
+
+        if not _oidc_status.get("ready"):
+            st.caption(
+                "Enterprise identity sign-in is not configured for this deployment. "
+                "The existing password sign-in remains available."
+            )
+            if _oidc_status.get("configured"):
+                _missing_oidc = tuple(_oidc_status.get("missing_shared", ())) + tuple(
+                    _oidc_status.get("missing_provider", ())
+                )
+                if _missing_oidc:
+                    st.info(
+                        "Identity-provider setup is incomplete. Missing configuration "
+                        "keys: " + ", ".join(str(key) for key in _missing_oidc)
+                    )
+        else:
+            try:
+                _oidc_logged_in = bool(st.user.is_logged_in)
+            except Exception:
+                _oidc_logged_in = False
+
+            if not _oidc_logged_in:
+                if st.button(
+                    "Continue with organization identity",
+                    key="btn_oidc_begin",
+                    use_container_width=True,
+                ):
+                    st.login("enterprise")
+            else:
+                _oidc_display_hint = oidc_claims_display_name(st.user)
+                if _oidc_display_hint:
+                    st.caption(
+                        "Identity provider sign-in completed for "
+                        + _oidc_display_hint
+                        + ". The Shoir-IE account and permissions still need verification."
+                    )
+                else:
+                    st.caption(
+                        "Identity provider sign-in completed. Verify the matching "
+                        "Shoir-IE account before opening the workspace."
+                    )
+                if st.button(
+                    "Verify identity and open Shoir-IE",
+                    key="btn_oidc_exchange",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    _oidc_id_token = get_verified_streamlit_id_token(st.user)
+                    if not _oidc_id_token:
+                        st.error(
+                            "The identity token is unavailable. Re-authenticate with "
+                            "the configured provider or use password sign-in."
+                        )
+                    else:
+                        try:
+                            _oidc_auth = edge_oidc_login(_oidc_id_token, _oidc_display_hint)
+                        except Exception:
+                            _oidc_auth = {}
+                            st.error(
+                                "Enterprise sign-in could not be verified by the "
+                                "Shoir-IE authentication service. No workspace session was created."
+                            )
+                        if _oidc_auth:
+                            _oidc_username = str(_oidc_auth.get("username") or "").strip()
+                            _oidc_role = str(_oidc_auth.get("role") or "User")
+                            _oidc_tier = str(_oidc_auth.get("tier") or "Starter Tier")
+                            _oidc_email = str(_oidc_auth.get("email") or "")
+                            _oidc_expiry = _oidc_auth.get("expires_at")
+                            _oidc_token = str(_oidc_auth.get("token") or "")
+                            if _oidc_auth.get("error") == "SUBSCRIPTION_EXPIRED":
+                                if _oidc_token and _oidc_username:
+                                    st.session_state["renewal_mode"] = True
+                                    st.session_state["renewal_session_token"] = _oidc_token
+                                    st.session_state["renewal_username"] = _oidc_username
+                                    st.session_state["renewal_tier"] = _oidc_tier
+                                    st.session_state["renewal_email"] = _oidc_email
+                                    st.session_state["renewal_expires_at"] = _oidc_expiry
+                                    st.session_state["oidc_authenticated"] = True
+                                    st.session_state["auth_method"] = "oidc"
+                                    st.rerun()
+                                else:
+                                    st.error(
+                                        "The subscription requires renewal, but a restricted "
+                                        "renewal session could not be created."
+                                    )
+                            elif _oidc_token and _oidc_username:
+                                st.session_state.pop("renewal_mode", None)
+                                st.session_state.pop("renewal_session_token", None)
+                                st.session_state.pop("renewal_request_submitted", None)
+                                st.session_state["remote_session_token"] = _oidc_token
+                                st.session_state["current_user"] = _oidc_username
+                                st.session_state["user_role"] = _oidc_role
+                                st.session_state["user_tier"] = _oidc_tier
+                                st.session_state["user_email"] = _oidc_email
+                                st.session_state["subscription_expires_at"] = _oidc_expiry
+                                st.session_state["authenticated"] = True
+                                st.session_state["oidc_authenticated"] = True
+                                st.session_state["auth_method"] = "oidc"
+                                st.session_state["mfa_verified"] = bool(
+                                    _oidc_auth.get("mfa_verified")
+                                )
+                                st.session_state["auth_mfa_verified"] = bool(
+                                    _oidc_auth.get("mfa_verified")
+                                )
+                                # Keep the existing SQLite cache in sync; it is not
+                                # authoritative for login or server-side authorization.
+                                try:
+                                    _oidc_local = sqlite3.connect("enterprise_full_workspace.db")
+                                    _oidc_row = _oidc_local.execute(
+                                        "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
+                                        (_oidc_username.lower(),),
+                                    ).fetchone()
+                                    if _oidc_row:
+                                        _oidc_local.execute(
+                                            "UPDATE users SET role=?, tier=?, email=?, subscription_expires_at=? WHERE id=?",
+                                            (_oidc_role, _oidc_tier, _oidc_email, _oidc_expiry, _oidc_row[0]),
+                                        )
+                                    else:
+                                        _oidc_local.execute(
+                                            "INSERT INTO users (username,password,role,tier,email,created_at,subscription_expires_at) VALUES (?,?,?,?,?,?,?)",
+                                            (
+                                                _oidc_username,
+                                                "REMOTE_MANAGED",
+                                                _oidc_role,
+                                                _oidc_tier,
+                                                _oidc_email,
+                                                datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                                _oidc_expiry,
+                                            ),
+                                        )
+                                    _oidc_local.execute(
+                                        "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
+                                        (_oidc_username,),
+                                    )
+                                    _oidc_local.execute(
+                                        "UPDATE enterprise_users SET role=?,tier=?,email=?,ticket_expiry=? WHERE LOWER(username)=?",
+                                        (_oidc_role, _oidc_tier, _oidc_email, _oidc_expiry, _oidc_username.lower()),
+                                    )
+                                    _oidc_local.commit()
+                                    _oidc_local.close()
+                                except Exception:
+                                    # Authentication is authoritative in the Edge Function.
+                                    # A local-cache problem must not grant extra permissions.
+                                    pass
+                                st.success("Enterprise identity verified. Welcome to Shoir-IE.")
+                                st.rerun()
+                            else:
+                                st.error(
+                                    "Identity verification did not create an application session. "
+                                    "Contact support or use password sign-in."
+                                )
+
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER
     # ------------------------------------------
@@ -2547,6 +2717,10 @@ if _shell_surface == "logout":
             st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
             st.stop()
     st.session_state["_shoir_clear_session_before_render"] = True
+    if st.session_state.get("oidc_authenticated"):
+        # Revoke the Shoir-IE session above before ending the Streamlit OIDC cookie.
+        st.logout()
+        st.stop()
     st.rerun()
 # Compatibility contract retained for existing smoke tests and legacy integrations.
 # IMPORTANT: this is state only; it is intentionally NOT reused as a Streamlit widget key,
@@ -2913,6 +3087,10 @@ if st.sidebar.button("Lock / Logout Workspace"):
             st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
             st.stop()
     st.session_state["_shoir_clear_session_before_render"] = True
+    if st.session_state.get("oidc_authenticated"):
+        # Server-side session revocation above precedes provider-cookie logout.
+        st.logout()
+        st.stop()
     st.rerun()
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st

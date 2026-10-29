@@ -6,6 +6,13 @@ import {
   publicErrorFor,
   readBoundedJsonObject,
 } from "./security.ts";
+import {
+  escapePostgrestLikeLiteral,
+  MAX_OIDC_ID_TOKEN_CHARS,
+  readOidcVerifierConfig,
+  sha256Hex,
+  verifyOidcIdToken,
+} from "./oidc.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -311,11 +318,328 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
   return keys;
 }
 
+type OidcAuditOutcome = "success" | "denied" | "expired" | "error";
+
+async function writeOidcAuditEvent(event: {
+  event_type: "oidc_login";
+  outcome: OidcAuditOutcome;
+  actor_username_lc?: string | null;
+  provider_issuer?: string | null;
+  subject_sha256?: string | null;
+  id_token_sha256?: string | null;
+  details?: Record<string, unknown>;
+}) {
+  const { error } = await supabase.from("shoir_security_audit_events").insert({
+    event_type: event.event_type,
+    outcome: event.outcome,
+    actor_username_lc: event.actor_username_lc ?? null,
+    provider_issuer: event.provider_issuer ?? null,
+    subject_sha256: event.subject_sha256 ?? null,
+    id_token_sha256: event.id_token_sha256 ?? null,
+    details: event.details ?? {},
+  });
+  return error;
+}
+
+async function revokeJustCreatedSession(token: string, usernameLc: string) {
+  const tokenHash = await sha256Hex(token);
+  const { error } = await supabase.from("shoir_sessions").delete()
+    .eq("token_hash", tokenHash)
+    .eq("username_lc", usernameLc);
+  if (error) throw new Error("Could not revoke the un-audited session.");
+}
+
+function isUniqueConstraintError(error: { code?: string } | null): boolean {
+  return error?.code === "23505";
+}
+
+async function findAccountByVerifiedOidcEmail(email: string) {
+  const pattern = escapePostgrestLikeLiteral(email);
+  const { data, error } = await supabase.from("shoir_accounts").select(
+    "username,username_lc,role,tier,email,active,subscription_expires_at",
+  ).ilike("email", pattern).limit(5);
+  if (error) throw new Error("The account directory is unavailable.");
+  const matches = (data || []).filter((row) =>
+    typeof row.email === "string" && row.email.trim().toLowerCase() === email
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function recordOidcDenial(
+  issuer: string,
+  reason: string,
+  subject: string | null = null,
+  usernameLc: string | null = null,
+) {
+  try {
+    const error = await writeOidcAuditEvent({
+      event_type: "oidc_login",
+      outcome: "denied",
+      provider_issuer: issuer,
+      subject_sha256: subject ? await sha256Hex(subject) : null,
+      actor_username_lc: usernameLc,
+      details: { reason },
+    });
+    if (error) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return response({ ok: true });
   try {
     const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
+
+    if (action === "oidc_login") {
+      let oidcConfig;
+      try {
+        oidcConfig = readOidcVerifierConfig();
+      } catch {
+        return response({
+          error:
+            "Enterprise identity authentication is not correctly configured.",
+        }, 503);
+      }
+      if (!oidcConfig.enabled || !oidcConfig.ready) {
+        return response({
+          error: "Enterprise identity authentication is not configured.",
+        }, 503);
+      }
+      const idToken = typeof body.id_token === "string" ? body.id_token : "";
+      if (!idToken || idToken.length > MAX_OIDC_ID_TOKEN_CHARS) {
+        return response({ error: "Invalid identity-provider response." }, 400);
+      }
+      const emailHint = String(body.email_hint || "oidc-login").trim()
+        .toLowerCase().slice(0, 320);
+      let throttleBuckets: Array<
+        { key_hash: string; max_attempts: number; reset_on_success: boolean }
+      >;
+      try {
+        throttleBuckets = await loginThrottleBuckets(emailHint, req);
+        for (const bucket of throttleBuckets) {
+          if (
+            await checkLoginThrottle(
+              bucket.key_hash,
+              bucket.max_attempts,
+              "attempt",
+            )
+          ) {
+            return response({
+              error: "Too many sign-in attempts. Please wait and try again.",
+            }, 429);
+          }
+        }
+      } catch {
+        return response({
+          error:
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
+        }, 503);
+      }
+
+      let identity;
+      try {
+        identity = await verifyOidcIdToken(idToken, oidcConfig);
+      } catch (error) {
+        const reason = typeof error === "object" && error !== null &&
+            "code" in error && typeof error.code === "string"
+          ? error.code
+          : "identity_token_rejected";
+        const recorded = await recordOidcDenial(
+          oidcConfig.issuer,
+          reason.slice(0, 64),
+        );
+        if (!recorded) {
+          return response({
+            error: "Authentication audit is temporarily unavailable.",
+          }, 503);
+        }
+        return response({
+          error: "Unable to sign in with the configured identity provider.",
+        }, 401);
+      }
+
+      try {
+        const account = await findAccountByVerifiedOidcEmail(identity.email);
+        if (!account || account.active === false) {
+          const recorded = await recordOidcDenial(
+            identity.issuer,
+            "account_not_found_or_inactive",
+            identity.subject,
+            account && typeof account.username_lc === "string"
+              ? account.username_lc
+              : null,
+          );
+          if (!recorded) {
+            return response({
+              error: "Authentication audit is temporarily unavailable.",
+            }, 503);
+          }
+          return response({
+            error: "Unable to sign in with the configured identity provider.",
+          }, 401);
+        }
+
+        const username = String(account.username || "").trim();
+        const usernameLc = String(account.username_lc || username).trim()
+          .toLowerCase();
+        const role = String(account.role || "User");
+        const tier = String(account.tier || "Starter Tier");
+        const email = String(account.email || "");
+        const expiry = account.subscription_expires_at;
+        if (!username || !usernameLc) {
+          const recorded = await recordOidcDenial(
+            identity.issuer,
+            "account_identity_incomplete",
+            identity.subject,
+          );
+          if (!recorded) {
+            return response({
+              error: "Authentication audit is temporarily unavailable.",
+            }, 503);
+          }
+          return response({
+            error: "Unable to sign in with the configured identity provider.",
+          }, 401);
+        }
+
+        if (
+          usernameLc === "sho" ||
+          role.trim().toLowerCase() === "enterprise admin"
+        ) {
+          const { data: activeAdmins, error: adminLookupError } = await supabase
+            .from("shoir_accounts")
+            .select("username_lc,role,tier,active,subscription_expires_at")
+            .ilike("role", "Enterprise Admin")
+            .eq("active", true);
+          if (
+            adminLookupError ||
+            !activeAdmins ||
+            activeAdmins.length !== 1 ||
+            activeAdmins[0].username_lc !== "sho" ||
+            !hasCanonicalMasterAdminInvariant(activeAdmins[0]) ||
+            !hasCanonicalMasterAdminInvariant(
+              account as Record<string, unknown>,
+            )
+          ) {
+            const recorded = await recordOidcDenial(
+              identity.issuer,
+              "protected_admin_invariant_failed",
+              identity.subject,
+              usernameLc,
+            );
+            if (!recorded) {
+              return response({
+                error: "Authentication audit is temporarily unavailable.",
+              }, 503);
+            }
+            return response({
+              error:
+                "Protected administrator authentication requires manual review.",
+            }, 503);
+          }
+        }
+
+        try {
+          for (const bucket of throttleBuckets) {
+            if (bucket.reset_on_success) {
+              await checkLoginThrottle(
+                bucket.key_hash,
+                bucket.max_attempts,
+                "clear",
+              );
+            }
+          }
+        } catch {
+          return response({
+            error:
+              "Authentication protection is temporarily unavailable. Please retry shortly.",
+          }, 503);
+        }
+
+        const expired = usernameLc !== "sho" && isExpired(expiry);
+        const sessionToken = await createSession(
+          usernameLc,
+          expired ? "renewal" : "workspace",
+          expired ? 60 * 60 * 1000 : 8 * 60 * 60 * 1000,
+        );
+        const tokenFingerprint = await sha256Hex(idToken);
+        const auditError = await writeOidcAuditEvent({
+          event_type: "oidc_login",
+          outcome: expired ? "expired" : "success",
+          actor_username_lc: usernameLc,
+          provider_issuer: identity.issuer,
+          subject_sha256: await sha256Hex(identity.subject),
+          id_token_sha256: tokenFingerprint,
+          details: {
+            auth_method: "oidc",
+            mfa_verified: identity.mfaVerified,
+            renewal_only: expired,
+          },
+        });
+        if (auditError) {
+          try {
+            await revokeJustCreatedSession(sessionToken, usernameLc);
+          } catch {
+            // The session token is not returned to the caller if revocation fails.
+          }
+          if (isUniqueConstraintError(auditError)) {
+            const recorded = await recordOidcDenial(
+              identity.issuer,
+              "identity_token_replay",
+              identity.subject,
+              usernameLc,
+            );
+            return response({
+              error: recorded
+                ? "Unable to sign in with the configured identity provider."
+                : "Authentication audit is temporarily unavailable.",
+            }, recorded ? 401 : 503);
+          }
+          return response({
+            error: "Authentication audit is temporarily unavailable.",
+          }, 503);
+        }
+
+        if (expired) {
+          return response({
+            error: "SUBSCRIPTION_EXPIRED",
+            token: sessionToken,
+            username,
+            tier,
+            email,
+            expires_at: expiry,
+            renewal_only: true,
+            auth_method: "oidc",
+            mfa_verified: identity.mfaVerified,
+          }, 403);
+        }
+        return response({
+          ok: true,
+          token: sessionToken,
+          username,
+          role,
+          tier,
+          email,
+          expires_at: expiry,
+          auth_method: "oidc",
+          mfa_verified: identity.mfaVerified,
+        });
+      } catch {
+        const recorded = await recordOidcDenial(
+          oidcConfig.issuer,
+          "identity_flow_unavailable",
+          identity.subject,
+        );
+        return response({
+          error: recorded
+            ? "Authentication service is temporarily unavailable."
+            : "Authentication audit is temporarily unavailable.",
+        }, 503);
+      }
+    }
 
     if (action === "login") {
       const username = String(body.username || "").trim(),

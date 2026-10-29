@@ -538,6 +538,17 @@ def edge_login(username: str, password: str) -> dict[str, Any]:
     return _edge_call("login", {"username": username, "password": password})
 
 
+def edge_oidc_login(id_token: str, email_hint: str = "") -> dict[str, Any]:
+    """Exchange an ID token for a Shoir-IE session after independent Edge verification."""
+    token = str(id_token or "").strip()
+    if len(token) < 32 or len(token) > 16_384:
+        raise ValueError("The identity-provider token is missing or outside the allowed size.")
+    # Email is an untrusted rate-limit hint only; the Edge Function never uses it
+    # for authorization and obtains the authoritative email from the verified JWT.
+    hint = str(email_hint or "").strip().lower()[:320]
+    return _edge_call("oidc_login", {"id_token": token, "email_hint": hint})
+
+
 def edge_logout(username: str, token: str) -> dict[str, Any]:
     """Revoke only the current server session for this account."""
     return _edge_call("logout", {"username": username, "token": token})
