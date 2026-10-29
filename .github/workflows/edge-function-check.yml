@@ -2,15 +2,19 @@ name: Shoir-IE Edge Function verification
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "staging-e2e-20261019", "feature/**", "feat/**", "fix/**", "hotfix/**", "integration/**"]
     paths:
       - "supabase/functions/**"
+      - "supabase/production-hotfix-v8/**"
+      - "supabase/migrations/**"
       - ".github/workflows/edge-function-check.yml"
+      - "tests/test_full_migration_history_postgres.py"
+      - "tests/test_migration_source_inventory.py"
   pull_request:
-    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
-    paths:
-      - "supabase/functions/**"
-      - ".github/workflows/edge-function-check.yml"
+    # This check is required on main; do not path-skip it on migration/export/docs
+    # PRs that still need the same release gate. It also supplies the staging
+    # function check so the staging candidate can be validated before deployment.
+    branches: ["main", "staging-e2e-20261019", "feat/shoir-100-tools-integration-20261025"]
 
 permissions:
   contents: read
