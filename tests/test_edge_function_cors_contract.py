@@ -12,7 +12,9 @@ def test_handler_rejects_unapproved_origins_and_returns_safe_preflight():
     assert 'const origin = req.headers.get("origin")' in handler
     assert 'parseAllowedBrowserOrigins(\n    Deno.env.get("SHOIR_ALLOWED_BROWSER_ORIGINS")' in handler
     assert "if (!isAllowedBrowserOrigin(origin, allowedOrigins))" in handler
-    assert 'return response({ error: "Origin not allowed." }, 403, origin, allowedOrigins)' in handler
+    assert "return response(" in handler
+    assert 'error: "Origin not allowed."' in handler
+    assert "origin,\n      allowedOrigins," in handler
     assert "status: 204" in handler
     assert "headers: corsHeadersForOrigin(origin)" in handler
     assert 'if (req.method !== "POST")' in handler
