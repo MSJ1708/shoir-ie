@@ -226,7 +226,7 @@ export function parseAllowedBrowserOrigins(
   if (raw === undefined) return new Set(DEFAULT_BROWSER_ORIGINS);
   const entries = raw.split(",").map((value) => value.trim());
   if (
-    entries.length === 0 || entries.length > 10 ||
+    entries.length !== 1 ||
     entries.some((value) => value.length === 0)
   ) return new Set();
 
