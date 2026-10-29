@@ -12,10 +12,15 @@ A project configuration must contain exactly one canonical HTTPS origin, without
 
 ## Per-project configuration
 
-| Project | Value |
+The Edge Function also binds the configured origin to the project reference read from its own `SUPABASE_URL`:
+
+| Project | Required configuration and enforced behavior |
 |---|---|
-| Production `gcsamrdaeraxieaagsta` | Leave `SHOIR_ALLOWED_BROWSER_ORIGINS` unset (production-only default), or set exactly `https://shoir-ie-app.streamlit.app`. |
-| Staging `hfhrosthswcybccepmak` | Set exactly `https://shoirieverified.streamlit.app` before deploying this shared source to staging. The current deployed staging v11 is unchanged by this source PR. |
+| Production `gcsamrdaeraxieaagsta` | If unset, defaults to exactly `https://shoir-ie-app.streamlit.app`. If set, it must equal that exact origin; staging or any other value fails closed. |
+| Staging `hfhrosthswcybccepmak` | Must be set to exactly `https://shoirieverified.streamlit.app` before deploying this shared source to staging. An unset value fails closed. The current deployed staging v11 is unchanged by this source PR. |
+| Any other project reference | Must explicitly set one verified origin; unknown/unset project configuration fails closed. |
+
+Even if someone sets the staging host in the production project's environment, the project-bound policy returns an empty allowlist. The parser accepts exactly one origin, so no combined production/staging list is valid.
 
 The staging origin above is grounded in the current archived GitHub-runner browser acceptance artifact. The historical host `shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app` is deliberately not allowed because its use was not established by that acceptance evidence. Re-verify the active staging host before changing its allowlist.
 
