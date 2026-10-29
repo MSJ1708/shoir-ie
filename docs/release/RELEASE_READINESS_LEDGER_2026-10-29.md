@@ -1,0 +1,108 @@
+# Shoir-IE Release Readiness Ledger — 29 October 2026
+
+**Release decision: NO-GO. Keep BETA visible. Paid general availability and production changes are not authorized.**
+
+This ledger is the consolidated snapshot of evidence observed on 29 October 2026. Statuses are specific to the commits, deployed versions, and test runs linked here. Passing source tests, synthetic exports, or a staging acceptance run do not substitute for production deployment and post-deployment evidence.
+
+## Baseline
+
+| Item | Observed state | Evidence / note |
+|---|---|---|
+| GitHub main | `2ef44057f84162389d39998e922b505dcfe4d3e9` | Read from the live branch ref |
+| GitHub staging `staging-e2e-20261019` | `0558c23d59a3f0b79558a8d3407869d0238aceaf` | Read from the live branch ref |
+| Production Supabase | `gcsamrdaeraxieaagsta`, ACTIVE_HEALTHY, PG17, eu-central-1 | Read-only project metadata |
+| Staging Supabase | `hfhrosthswcybccepmak`, ACTIVE_HEALTHY, PG17, eu-central-1 | Read-only project metadata |
+| Production `shoir-persistence` | v9; source SHA-256 `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740` | Deployed version was reread; no deployment made |
+| Staging `shoir-persistence` | v11; source SHA-256 `a0252769822fd7834c6af67fcf69259ec9bbefce7041ac3a5a36d8d6a9a90397` | Differs from production; do not copy staging bundle into production |
+
+## Mandatory gate ledger
+
+| Gate | Status | Evidence | Exact remaining action |
+|---|---|---|---|
+| Production CORS security | **FAIL** | [Production CORS diagnostic workflow run](https://github.com/MSJ1708/shoir-ie/actions/runs/40766243324); its diagnostic artifact reports HTTP 200 and wildcard `Access-Control-Allow-Origin: *` for approved, unapproved and no-Origin preflight probes. | Independently review [PR #220](https://github.com/MSJ1708/shoir-ie/pull/220), confirm exact deployed source hash and authorization; only after release-owner approval deploy the schema-compatible artifact and repeat live approved/unapproved/OPTIONS/non-mutating probes. |
+| Production request bounds / safe errors | **IMPLEMENTED; NOT DEPLOYED** | [PR #220](https://github.com/MSJ1708/shoir-ie/pull/220) contains streamed 12 MiB JSON-object parsing and safe public error mapping; old exact-head test, edge, engine and security-quality checks passed on `2ab663663fe910f395b881869bc006183ed7bdfb`. Its hosted smoke was skipped. | Obtain current exact-head checks after any edit, independent review, then authorized deploy and real post-deployment negative/positive tests. |
+| Protected administrator | **PASS — read-only invariant check; deploy gate still open** | Aggregate-only SQL against each project found exactly one active Enterprise Admin and one matching row for `sho`, tier `Enterprise Plus Tier ($399)`, expiry `2099-01-01T00:00:00Z`. No account rows were mutated and no admin login was used as a test. | Preserve values; validate candidate fails closed on invariant drift with disposable accounts; post-deployment tests require release authorization. |
+| Production schema compatibility | **FAIL / HOLD** | Read-only schema comparison: production lacks all six of `terms_accepted`, `terms_version`, `privacy_policy_version`, `refund_policy_version`, `cookie_policy_version`, `accepted_at`; `public.shoir_referrals` is absent. Staging has those fields/table. | Use the v9-compatible function candidate; do not deploy staging v11 code to production. Review the safe legal/referral migration candidate and reconcile existing migration history before any DB change. |
+| Migration safety / referral data preservation | **FAIL / HOLD** | Production has 5 account rows and all 5 have blank/null `affiliate_code`; the older `20261021130000_shoir_beta_legal_referrals.sql` rewrites `affiliate_code` and `updated_at` for blank/legacy codes. Staging has already applied that older migration. | [PR #218](https://github.com/MSJ1708/shoir-ie/pull/218) provides additive replacements plus a recovery plan and disposable PostgreSQL rehearsal. Finish independent database/security review, verify ledger mapping and isolated before/after preservation, then obtain written authorization before any production migration. Do not use normal `supabase db push` meanwhile. |
+| Backup / PITR / isolated restore rehearsal | **NOT VERIFIED** | No authoritative backup/PITR point or executed isolated restore result was available in this inspection. | An authorized operator must record backup/PITR reference, restore point timestamp, isolated restore results, recovery owner, abort criteria, and forward-recovery steps. Do not infer a backup exists from project health. |
+| Hosted authenticated staging acceptance | **PARTIAL PASS / RE-RUN REQUIRED** | [Staging acceptance/gate run](https://github.com/MSJ1708/shoir-ie/actions/runs/40766243324) reported 96/96 module routes and 7/7 shell/Excel/logout checks, but login-throttle and inactive-account denial were skipped. Other prior candidates have skipped live-deployment-smoke jobs. | Run the authenticated gate on the final merged staging candidate with disposable accounts covering login-throttle and inactive-account denial; confirm session persistence, role/tier denial and two-user workspace isolation. |
+| Required GitHub checks / review integrity | **IN PROGRESS** | Main ruleset [Protect main — release gates](https://github.com/MSJ1708/shoir-ie/rules/26065188) is active and requires `test`, `edge-function`, `engine-regression`, `security-quality` plus one approving review. Traditional branch-protection API read is forbidden to the integration. [PR #224](https://github.com/MSJ1708/shoir-ie/pull/224) removes path-skipped Edge Function checks and disambiguates duplicate `test` job contexts. Its exact-head `edge-function` check passed; other checks were in progress when this ledger was created. | Finish all exact-head checks, review the workflow changes, obtain independent approval, merge only after required contexts show once each and pass. Authorized repository admin should additionally confirm saved settings in GitHub UI because traditional branch-protection API access was not available. |
+| Export completeness and artifact validity | **PASS — synthetic artifact-level evidence; merge review open** | [PR #217](https://github.com/MSJ1708/shoir-ie/pull/217) exact head `7c0ddde187c36c53e591c3742a5d770b1b0703f9`: tests, engine-regression and security-quality passed; hosted smoke skipped. Artifact `shoir-ie-report-export-validation` was downloaded and inspected. Its manifest confirms PDF: 3 pages, 67/67 rows; PPTX: 10 table slides, 67/67 rows. All rendered PDF pages and PPTX slides were visually checked for visible row sequence and clipping. | Get independent review and merge after branch rules/checks pass; re-run export validation on the resulting main head. This proves synthetic export completeness only, not every customer export path. |
+| T096 Integration Management Center | **EXTERNAL CONFIGURATION REQUIRED** | Canonical 100-tool matrix: T096 is not verified. Generic read-only REST adapter is implemented, but no approved endpoint/credential or live service test is evidenced. [PR #195](https://github.com/MSJ1708/shoir-ie/pull/195) states generic REST only, not native SAP/Oracle/MES. | Configure an approved non-production HTTPS endpoint and server-side credential through authorized secret configuration; run authorized health/read, redaction, TLS/allowlist, denial, persistence and isolation tests. Keep status unverified until evidence exists. |
+| T098 Enterprise Identity and Audit Center | **EXTERNAL CONFIGURATION REQUIRED** | [PR #223](https://github.com/MSJ1708/shoir-ie/pull/223) adds optional provider-verified OIDC/audit candidate. On latest inspected head `86cf0102f47c9a6e33269f7019a259158144453d`, Python test, Edge Function, security-quality and PostgreSQL transaction-contract checks passed; hosted smoke was skipped. No real identity provider, credentials, callback registration, provider MFA proof, or hosted login acceptance is evidenced. | Keep PR draft. Select/configure IdP using secret manager, register callback, test valid/invalid/expired/replayed/inactive/ambiguous/MFA-required cases and audit-failure fail-closed in staging; obtain independent security review. |
+| Legal / privacy / commercial readiness for Saudi paid launch | **EXTERNAL APPROVAL REQUIRED** | Repository contains legal/policy drafts and templates; this inspection did not establish Saudi counsel approval, legal identity confirmation, PDPL/privacy review, approved public terms/refund/cookie language, or commercial/revenue authorization. | Complete review with qualified Saudi counsel and accountable business owner; validate data inventory/processor agreements/retention/deletion and accurate tier claims; record dated approval artifacts. Do not treat repository drafts as approval. |
+| Production release authorization | **NOT AUTHORIZED** | No written release-owner approval naming exact source hashes, target, change window, migration actions, backup/restore evidence and rollback owner was provided. | Obtain explicit approval only after every technical and external gate above has current passing evidence. |
+| Post-deployment verification | **NOT RUN** | No production deployment was performed; existing live CORS result still fails. | After an authorized deployment only, verify running source hash/version, approved/unapproved CORS, disposable-account login/logout, rate limits, authorization, persistence, exports and database schema/ledger. Record raw redacted results. |
+| BETA removal | **NOT AUTHORIZED** | No complete GO evidence or release-owner decision exists. | Keep BETA visible. Remove it only following an explicit dated GO decision and successful post-deployment verification. |
+
+## Current candidate inventory
+
+- [PR #220](https://github.com/MSJ1708/shoir-ie/pull/220) — production-v9-compatible CORS/request-bound/admin hotfix, draft; hosted smoke skipped; no independent review.
+- [PR #218](https://github.com/MSJ1708/shoir-ie/pull/218) — safe legal/referral migration and recovery path, draft; disposable PostgreSQL rehearsal passed on recorded candidate; no production migration.
+- [PR #217](https://github.com/MSJ1708/shoir-ie/pull/217) — complete PDF/PPTX exports, current synthetic artifact evidence reviewed; independent review/merge remain.
+- [PR #223](https://github.com/MSJ1708/shoir-ie/pull/223) — T098 OIDC/audit candidate, draft; source tests passed but provider and hosted acceptance remain external.
+- [PR #224](https://github.com/MSJ1708/shoir-ie/pull/224) — required-check trigger/job-name repair, draft; exact-head full CI was not complete at ledger capture.
+
+## Decision
+
+**NO-GO.** Continue safe source and isolated-test work. No production function deployment, database migration, production account mutation, payment/billing action, BETA removal, or claim of Saudi legal approval is authorized by this ledger.
+
+
+## Additional compatibility findings — 29 October recheck
+
+| Gate | Status | Evidence | Remaining action |
+|---|---|---|---|
+| Production registration/API compatibility | **FAIL — handler mismatch** | Fresh Supabase Management API retrieval of live production v9 source hash `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740` found no `register_request` action and no references to the six legal-acceptance fields or `shoir_referrals`. Main-branch `durable_account_store.py` explicitly sends `register_request`, and main `app.py` collects the current legal acceptance versions. No state-changing POST was used to reproduce this. | Do not treat PR #220 alone as a complete release: it is a CORS/admin/request-bounds hotfix based on v9 and intentionally omits registration/schema migration. Build and review one coherent deployment sequence with the safe schema path, current consent-aware registration action, and exact compatible function bundle; prove it in staging/isolated rehearsal before seeking approval. |
+| Protected-admin referral summary mutation | **SOURCE DEFECT FOUND; FIX PR OPEN** | Current main `referral_summary_session` assigns an `SHR-*` code and updates `updated_at` when an account code is blank or begins `AFF-*`. Production currently has five blank/null codes. The live v9 handler does not expose that action, but the newer main/staging handler would need protection before it is deployed with referral schema. | [PR #226](https://github.com/MSJ1708/shoir-ie/pull/226) adds a pure protected-target guard and Deno regression tests. Keep draft until exact-head CI and independent review pass. |
+| Required CI contexts on candidate #224 | **AUTOMATED CHECKS PASS; REVIEW/MERGE OPEN** | On exact head `27159aaeea45d5a2b3a7fed89241ba79c5da3c97`, edge-function, engine-regression, platform-tests, test, security-quality and shoir-ie-tests completed successfully. | Obtain independent review, then merge only under the active ruleset. This fixes trigger/job-name ambiguity but does not close hosted acceptance or production deployment gates. |
+| T098 code tests | **PASS AT EXACT INSPECTED HEAD; PROVIDER ACCEPTANCE OPEN** | On `86cf0102f47c9a6e33269f7019a259158144453d`, Edge Function, Python test, security-quality and PostgreSQL transaction contract checks passed. | Do not claim SSO/MFA is active. Configure a real provider in staging and complete the documented provider/MFA/audit acceptance first. |
+| Registration migration rehearsal state | **SAFE CANDIDATE REHEARSAL PASS; PRODUCTION SEQUENCE UNPROVEN** | PR #218's candidate passed its disposable PostgreSQL migration replay and transaction-contract checks on its recorded head. The safe additive migration preserves existing `affiliate_code` and `updated_at`; the older production-visible migration would rewrite all five current production account rows. | The exact complete function/migration ordering has not been rehearsed against a production-shaped clone; backup/restore is still unverified. No migration is authorized. |
+
+
+
+## Recheck — full shared-handler CORS candidate
+
+PR [#226](https://github.com/MSJ1708/shoir-ie/pull/226) now covers both exact-origin CORS and protected-admin referral-code preservation in the full main-branch persistence handler. Its current head is `28856b8e0478a63ea6452de07e27edfe9462be8c`. The CORS configuration is now **per deployment**: an unset `SHOIR_ALLOWED_BROWSER_ORIGINS` defaults to the production app host only, while the verified staging host must be configured separately on a staging deployment. The shared source no longer hard-codes both hosts into every project. Unit, source-contract, security-quality, and full exact-head checks are still queued/in progress at recheck time, and live-deployment-smoke is skipped. There is no post-deployment live CORS proof.
+
+The deployed production function remains v9 with wildcard CORS and no `register_request` action. The candidate is not deployed. It does not resolve schema migration or provider/legal approval blockers. Production remains **NO-GO / HOLD**.
+
+
+## Exact-head CI recheck — 29 October 2026
+
+This section supersedes any earlier statement in this document that a candidate's checks were “in progress” or “passed” for a different commit. It reports the latest open PR heads read during this recheck.
+
+| PR | Exact inspected head | Latest CI state | Release meaning |
+|---|---|---|---|
+| [#226 CORS + protected-admin guard](https://github.com/MSJ1708/shoir-ie/pull/226) | `dbc6cf8d7e2e1f632169e9c953416849b9e6f674` | `test`, `edge-function`, `security-quality`, `engine-regression` and other test jobs are **QUEUED**. Hosted live deployment smoke is **SKIPPED**. | Not accepted yet. Current source requires exactly one configured, verified HTTPS origin per deployment; a combined production/staging list fails closed. The live production endpoint is still on v9 with wildcard CORS. |
+| [#224 required check + acceptance repair](https://github.com/MSJ1708/shoir-ie/pull/224) | `a1a4cb25c2cd6936845689bca7af6b9096e5c470` | All exact-head jobs polled here are **QUEUED**. | The earlier head `473a64f4d315f127b10d38090b789eec9800890d` did pass edge-function, test, engine-regression, security-quality, platform-tests and shoir-ie-tests. That result does not validate the new workflow/script changes. No current hosted authenticated run is complete. |
+| [#218 safe legal/referral migration](https://github.com/MSJ1708/shoir-ie/pull/218) | `17ded0dff27fa26737d2f7820978809d017c7b2a` | Disposable PostgreSQL replay **PASS**; PostgreSQL transaction contract **PASS**; some source tests **PASS**; security-quality is **IN PROGRESS** and additional test/engine jobs are **QUEUED**. | Partial candidate evidence only. No production-shaped full-sequence rehearsal, verified restore, or production migration is complete or authorized. |
+| [#225 release ledger / authorization packet](https://github.com/MSJ1708/shoir-ie/pull/225) | `2bf70273c0e7fac283b8c157a8817b9c3225544d` | Engine regression **PASS**; some test jobs **PASS**, other test/security jobs **IN PROGRESS**. | Documentation candidate CI is not yet fully green on this head. |
+| [#220 production-v9-compatible hotfix](https://github.com/MSJ1708/shoir-ie/pull/220) | `2ab663663fe910f395b881869bc006183ed7bdfb` | The recorded source/test/engine/security checks passed; live smoke **SKIPPED**. | This candidate still lacks the missing current registration action/schema and is not a full release bundle. Do not deploy as the complete release. |
+
+### Current hard blockers unchanged
+
+1. Production function v9 emits wildcard CORS; the latest connected GitHub-runner diagnostic remains a failure. No post-deployment probe exists because no deployment was authorized or performed.
+2. Production v9 lacks the current `register_request` action and legal/referral schema dependencies. A CORS-only v9 fix does not restore registration.
+3. Production schema is missing six legal-acceptance columns and `public.shoir_referrals`. The safe schema candidate has only isolated database-replay evidence.
+4. Production backup/PITR reference and an executed isolated restore are unverified.
+5. The protected main ruleset requires independent approval; no approving review or release-owner authorization has been recorded.
+6. T096 service endpoint and T098 identity provider/MFA remain external configuration and acceptance tasks.
+7. Saudi legal/privacy/commercial approvals remain external. BETA removal is not authorized.
+
+**Decision remains NO-GO / HOLD.** No production deployment, migration, account mutation, payment/billing change, or BETA removal was performed.
+
+
+## Latest ledger-PR head — 29 October 2026
+
+The documentation-only update to PR #225 has advanced its branch to `c0908c057506317251ccbe1b31b16ed783d4e337`. Its latest checks were queued at this recheck; earlier test and engine-regression results on `2bf70273c0e7fac283b8c157a8817b9c3225544d` do not prove the newer head fully green. The latest code candidate heads remain #226 `dbc6cf8d7e2e1f632169e9c953416849b9e6f674`, #224 `a1a4cb25c2cd6936845689bca7af6b9096e5c470`, and #218 `17ded0dff27fa26737d2f7820978809d017c7b2a`; #226 and #224 checks are queued, and #218's isolated migration replay and transaction contract pass while remaining checks are incomplete.
+
+No production function deployment, migration, account mutation, backup/restore rehearsal, review approval, or production authorization has occurred. **NO-GO / HOLD remains unchanged.**
+
+
+## Final recheck of current code-candidate heads — 29 October 2026
+
+- **PR #226** now points to `9fd31cf87b7b1c7bc6c08c5ce95bd7abb7b6a1eb`. It includes a single-origin parser bound to `SUPABASE_URL` project ref: production only accepts its production origin; staging only accepts the verified staging origin with explicit configuration; other project refs fail closed by default. Test, Edge Function, security-quality and engine-regression checks are **QUEUED** on this head; live-deployment-smoke is **SKIPPED**.
+- **PR #224** remains at `a1a4cb25c2cd6936845689bca7af6b9096e5c470`; platform-tests, shoir-ie-tests, edge-function, engine-regression, test and security-quality are **QUEUED**. The changes now require unique disposable identities, mandatory login-throttle and inactive-account checks, and remove duplicate/path-skipped required contexts. No current hosted authenticated acceptance result exists.
+- **PR #218** remains at `17ded0dff27fa26737d2f7820978809d017c7b2a`; disposable PostgreSQL replay, PostgreSQL transaction-contract, security-quality, engine-regression and several tests have passed, while another test is still **IN PROGRESS**. This is isolated candidate evidence only; no production-shaped restore/migration or approval exists.
+
+No production function or migration has changed. The current deployed prod-v9 wildcard-CORS defect remains live, and current prod-v9 registration remains incompatible with the app's `register_request` action. The release remains **NO-GO / HOLD**.
