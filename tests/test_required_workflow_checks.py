@@ -25,7 +25,7 @@ def test_required_test_context_is_unique_across_workflows():
     matching = []
     for path in workflows:
         source = path.read_text(encoding="utf-8")
-        if "\\n  test:" in source or source.startswith("jobs:\\n  test:"):
+        if "\n  test:" in source or source.startswith("jobs:\n  test:"):
             matching.append(path.name)
     assert matching == ["shoir-validation.yml"], (
         "The protected ruleset requires the check context 'test'; it must be emitted "
