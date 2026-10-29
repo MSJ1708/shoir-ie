@@ -33,6 +33,7 @@ def test_response_helper_never_emits_wildcard_and_applies_origin_vary():
     assert '"https://shoir-ie-app.streamlit.app"' in security
     assert '"https://shoirieverified.streamlit.app"' in security
     assert "!VERIFIED_BROWSER_ORIGINS.has(entry)" in security
+    assert "entries.length !== 1" in security
 
 
 def test_staging_and_production_allowlists_are_not_combined_in_shared_source():
