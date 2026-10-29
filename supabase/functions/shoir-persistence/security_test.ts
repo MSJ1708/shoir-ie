@@ -284,6 +284,7 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
     "",
     "https://good.example,",
     "https://unverified-domain.example",
+    "https://shoir-ie-app.streamlit.app,https://shoirieverified.streamlit.app",
   ]) {
     assert(
       parseAllowedBrowserOrigins(malformed).size === 0,
