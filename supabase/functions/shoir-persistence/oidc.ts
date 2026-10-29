@@ -40,9 +40,9 @@ function parseCsv(value: string | undefined, fallback: string[]): string[] {
     Boolean,
   );
   return [
-    ...new Set((values.length ? values : fallback).map((part) =>
-      part.toLowerCase()
-    )),
+    ...new Set(
+      (values.length ? values : fallback).map((part) => part.toLowerCase()),
+    ),
   ];
 }
 

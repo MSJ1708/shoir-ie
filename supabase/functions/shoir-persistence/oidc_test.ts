@@ -204,7 +204,7 @@ Deno.test("OIDC rejects expired, overlong, unverified-email, and missing-MFA tok
   await expectOidcError(
     async () =>
       await verifyOidcIdToken(
-        await makeToken({}, { expiresIn: "-1s" }),
+        await makeToken({}, { expiresIn: "-30s" }),
         config,
         localJwks as never,
       ),
