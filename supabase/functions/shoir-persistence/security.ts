@@ -206,3 +206,29 @@ export function shouldAutoAssignReferralCode(
     : "";
   return !code || code.startsWith("AFF-");
 }
+
+
+const ALLOWED_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+  "https://shoirieverified.streamlit.app",
+]);
+
+/** Missing Origin is allowed for server-to-server calls; each action still authenticates. */
+export function isAllowedBrowserOrigin(origin: string | null): boolean {
+  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+}
+
+/** Emit origin-specific CORS headers; never return wildcard or fabricate an approved origin. */
+export function corsHeadersForOrigin(origin: string | null): Headers {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  });
+  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+  return headers;
+}
