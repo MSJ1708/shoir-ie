@@ -61,3 +61,18 @@ def test_validation_workflow_emits_test_once_per_release_pr_head():
     assert 'branches: ["main", "staging-e2e-20261019"]' in push
     assert 'branches: ["main", "staging-e2e-20261019"]' in pull_request
     assert "pull_request:" in events
+
+
+def test_authenticated_backend_gate_does_not_skip_inactive_or_throttle_checks():
+    script = (ROOT / "scripts" / "authenticated_release_gate.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'require_env("SHOIR_E2E_INACTIVE_USERNAME")' in script
+    assert 'require_env("SHOIR_E2E_INACTIVE_PASSWORD")' in script
+    assert 'require_env("SHOIR_E2E_VERIFY_LOGIN_THROTTLE")' in script
+    assert "login_throttle_blocks_excess_attempts" in script
+    assert "inactive_account_denied" in script
+    assert '"Skipped: set the GitHub Actions variable SHOIR_E2E_VERIFY_LOGIN_THROTTLE' not in script
+    assert '"Skipped: configure a dedicated inactive test account' not in script
+    assert 'inactive_user.casefold()' in script
+    assert '("inactive", inactive_user, inactive_token)' in script
