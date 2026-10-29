@@ -215,6 +215,10 @@ const VERIFIED_BROWSER_ORIGINS = new Set<string>([
 const DEFAULT_BROWSER_ORIGINS = new Set<string>([
   "https://shoir-ie-app.streamlit.app",
 ]);
+const PROJECT_ORIGIN_POLICY = new Map<string, string>([
+  ["gcsamrdaeraxieaagsta", "https://shoir-ie-app.streamlit.app"],
+  ["hfhrosthswcybccepmak", "https://shoirieverified.streamlit.app"],
+]);
 
 /**
  * Parse a project-specific allowlist. An unset variable defaults to production
@@ -222,8 +226,27 @@ const DEFAULT_BROWSER_ORIGINS = new Set<string>([
  */
 export function parseAllowedBrowserOrigins(
   raw: string | undefined,
+  supabaseUrl?: string,
 ): Set<string> {
-  if (raw === undefined) return new Set(DEFAULT_BROWSER_ORIGINS);
+  if (supabaseUrl !== undefined) {
+    let projectRef = "";
+    try {
+      projectRef = new URL(supabaseUrl).hostname.split(".")[0].toLowerCase();
+    } catch {
+      return new Set();
+    }
+    const requiredOrigin = PROJECT_ORIGIN_POLICY.get(projectRef);
+    if (requiredOrigin) {
+      if (raw === undefined && projectRef === "gcsamrdaeraxieaagsta") {
+        return new Set([requiredOrigin]);
+      }
+      if (raw !== requiredOrigin) return new Set();
+      return new Set([requiredOrigin]);
+    }
+    if (raw === undefined) return new Set();
+  } else if (raw === undefined) {
+    return new Set(DEFAULT_BROWSER_ORIGINS);
+  }
   const entries = raw.split(",").map((value) => value.trim());
   if (
     entries.length !== 1 ||
