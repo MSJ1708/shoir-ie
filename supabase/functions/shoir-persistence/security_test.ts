@@ -1,4 +1,6 @@
 import {
+  corsHeadersForOrigin,
+  isAllowedBrowserOrigin,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizeWorkspaceStateJson,
@@ -211,5 +213,57 @@ Deno.test("referral code assignment never mutates the reserved or any Enterprise
       affiliate_code: "SHR-ABCDE12345",
     }),
     "An ordinary account with a current code must keep it.",
+  );
+});
+
+
+Deno.test("CORS allowlist returns exact origin headers for only the approved app hosts", () => {
+  const approvedOrigins = [
+    "https://shoir-ie-app.streamlit.app",
+    "https://shoirieverified.streamlit.app",
+  ];
+  for (const origin of approvedOrigins) {
+    assert(
+      isAllowedBrowserOrigin(origin),
+      `Expected approved origin to be allowed: ${origin}`,
+    );
+    const headers = corsHeadersForOrigin(origin);
+    assert(
+      headers.get("Access-Control-Allow-Origin") === origin,
+      "Approved origin must be echoed exactly, never wildcarded.",
+    );
+    assert(
+      headers.get("Access-Control-Allow-Methods") === "POST, OPTIONS",
+      "CORS methods must be limited to POST and OPTIONS.",
+    );
+    assert(
+      headers.get("Vary") === "Origin",
+      "Origin-specific responses must declare Vary: Origin.",
+    );
+  }
+
+  for (const origin of [
+    "https://unapproved-origin.example",
+    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+    "http://localhost:8501",
+    "null",
+  ]) {
+    assert(
+      !isAllowedBrowserOrigin(origin),
+      `Expected origin to be denied: ${origin}`,
+    );
+    assert(
+      !corsHeadersForOrigin(origin).has("Access-Control-Allow-Origin"),
+      "Unapproved origins must never receive Access-Control-Allow-Origin.",
+    );
+  }
+
+  assert(
+    isAllowedBrowserOrigin(null),
+    "Origin-free server-to-server calls must remain possible.",
+  );
+  assert(
+    !corsHeadersForOrigin(null).has("Access-Control-Allow-Origin"),
+    "Origin-free responses must not fabricate a browser origin.",
   );
 });
