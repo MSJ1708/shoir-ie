@@ -11,6 +11,7 @@ def test_handler_rejects_unapproved_origins_and_returns_safe_preflight():
     handler = index.split("Deno.serve(async (req) => {", 1)[1]
     assert 'const origin = req.headers.get("origin")' in handler
     assert 'parseAllowedBrowserOrigins(\n    Deno.env.get("SHOIR_ALLOWED_BROWSER_ORIGINS")' in handler
+    assert "SUPABASE_URL," in handler
     assert "if (!isAllowedBrowserOrigin(origin, allowedOrigins))" in handler
     assert "return response(" in handler
     assert 'error: "Origin not allowed."' in handler
@@ -34,6 +35,9 @@ def test_response_helper_never_emits_wildcard_and_applies_origin_vary():
     assert '"https://shoirieverified.streamlit.app"' in security
     assert "!VERIFIED_BROWSER_ORIGINS.has(entry)" in security
     assert "entries.length !== 1" in security
+    assert "PROJECT_ORIGIN_POLICY" in security
+    assert '"gcsamrdaeraxieaagsta"' in security
+    assert '"hfhrosthswcybccepmak"' in security
 
 
 def test_staging_and_production_allowlists_are_not_combined_in_shared_source():
