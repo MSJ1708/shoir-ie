@@ -4,6 +4,7 @@ import {
   corsHeadersForOrigin,
   isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
+  parseAllowedBrowserOrigins,
   publicErrorFor,
   readBoundedJsonObject,
   shouldAutoAssignReferralCode,
@@ -127,10 +128,11 @@ function response(
   data: unknown,
   status = 200,
   origin: string | null = null,
+  allowedOrigins: ReadonlySet<string> = parseAllowedBrowserOrigins(undefined),
 ) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: corsHeadersForOrigin(origin),
+    headers: corsHeadersForOrigin(origin, allowedOrigins),
   });
 }
 function hexToBytes(hex: string) {
@@ -314,15 +316,18 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
 
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
-  if (!isAllowedBrowserOrigin(origin)) {
-    return response({ error: "Origin not allowed." }, 403, origin);
+  const allowedOrigins = parseAllowedBrowserOrigins(
+    Deno.env.get("SHOIR_ALLOWED_BROWSER_ORIGINS"),
+  );
+  if (!isAllowedBrowserOrigin(origin, allowedOrigins)) {
+    return response({ error: "Origin not allowed." }, 403, origin, allowedOrigins);
   }
   const sendResponse = (data: unknown, status = 200) =>
-    response(data, status, origin);
+    response(data, status, origin, allowedOrigins);
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: corsHeadersForOrigin(origin),
+      headers: corsHeadersForOrigin(origin, allowedOrigins),
     });
   }
   if (req.method !== "POST") {
