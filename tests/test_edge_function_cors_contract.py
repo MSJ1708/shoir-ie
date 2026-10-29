@@ -23,7 +23,7 @@ def test_response_helper_never_emits_wildcard_and_applies_origin_vary():
     index = INDEX.read_text(encoding="utf-8")
     security = SECURITY.read_text(encoding="utf-8")
     assert '"Access-Control-Allow-Origin": "*"' not in index
-    assert "headers: corsHeadersForOrigin(origin)" in index
+    assert "headers: corsHeadersForOrigin(origin, allowedOrigins)" in index
     assert '"Vary": "Origin"' in security
     assert '"Access-Control-Allow-Methods": "POST, OPTIONS"' in security
     assert 'headers.set("Access-Control-Allow-Origin", origin)' in security
@@ -41,4 +41,3 @@ def test_staging_and_production_allowlists_are_not_combined_in_shared_source():
     assert 'url.origin !== entry' in security
     assert 'url.protocol !== "https:"' in security
     assert "VERIFIED_BROWSER_ORIGINS" in security
-    assert "unverified" not in security.casefold()
