@@ -17,7 +17,7 @@ def test_handler_rejects_unapproved_origins_and_returns_safe_preflight():
     assert 'error: "Origin not allowed."' in handler
     assert "origin,\n      allowedOrigins," in handler
     assert "status: 204" in handler
-    assert "headers: corsHeadersForOrigin(origin)" in handler
+    assert "headers: corsHeadersForOrigin(origin, allowedOrigins)" in handler
     assert 'if (req.method !== "POST")' in handler
     assert 'return sendResponse({ error: "Method not allowed." }, 405)' in handler
 
