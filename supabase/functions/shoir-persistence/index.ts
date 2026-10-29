@@ -320,7 +320,12 @@ Deno.serve(async (req) => {
     Deno.env.get("SHOIR_ALLOWED_BROWSER_ORIGINS"),
   );
   if (!isAllowedBrowserOrigin(origin, allowedOrigins)) {
-    return response({ error: "Origin not allowed." }, 403, origin, allowedOrigins);
+    return response(
+      { error: "Origin not allowed." },
+      403,
+      origin,
+      allowedOrigins,
+    );
   }
   const sendResponse = (data: unknown, status = 200) =>
     response(data, status, origin, allowedOrigins);
