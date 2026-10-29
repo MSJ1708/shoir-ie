@@ -207,7 +207,6 @@ export function shouldAutoAssignReferralCode(
   return !code || code.startsWith("AFF-");
 }
 
-
 /** Only these reviewed application hosts may be selected by project configuration. */
 const VERIFIED_BROWSER_ORIGINS = new Set<string>([
   "https://shoir-ie-app.streamlit.app",
