@@ -77,3 +77,10 @@ Expected impact includes rejecting unapproved browser origins, bounded payload f
 - Named recovery owner and tested procedure: **Not yet approved**
 - Final CI / independent security review: **Pending**
 - Decision: **HOLD — DO NOT DEPLOY**
+
+
+## Recheck — shared-handler origin configuration (29 October 2026)
+
+PR #226 now builds the shared current-main handler with a project-specific origin allowlist. With `SHOIR_ALLOWED_BROWSER_ORIGINS` unset, it defaults to the production origin only. A future authorized staging deployment of that shared source must set the variable to exactly `https://shoirieverified.streamlit.app` first. The currently deployed staging v11 function has not been changed. Production must not include the staging host in its allowlist.
+
+This candidate is still source-only and its latest exact-head workflows are queued/in progress; its live smoke is skipped. The candidate is not the final bundle because the deployed production v9 function lacks the current registration action and legal/referral schema. **Authorization fields remain unsigned, and the release decision remains HOLD — DO NOT DEPLOY.**
