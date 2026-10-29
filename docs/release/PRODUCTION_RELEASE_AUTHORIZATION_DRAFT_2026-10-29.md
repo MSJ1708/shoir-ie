@@ -94,3 +94,8 @@ Latest inspected PR heads: #226 `dbc6cf8d7e2e1f632169e9c953416849b9e6f674` and #
 ## Latest ledger documentation status
 
 The ledger PR advanced to commit `c0908c057506317251ccbe1b31b16ed783d4e337`; checks for that documentation-only head were queued at the latest recheck. The underlying authorization prerequisites have not changed. No approval signature or production change window is recorded. **HOLD — DO NOT DEPLOY.**
+
+
+## Final code-head check — 29 October 2026
+
+Latest CORS candidate #226 head: `9fd31cf87b7b1c7bc6c08c5ce95bd7abb7b6a1eb`; required test, Edge Function, security-quality and engine-regression checks were queued. Latest required-check/authenticated-gate candidate #224 head: `a1a4cb25c2cd6936845689bca7af6b9096e5c470`; its test and gate checks were queued. The full handler is now project-bound for CORS but remains undeployed. The current authorization request still lacks final artifact hashes, verified backup/restore evidence, independent review, and written owner approval. **HOLD — DO NOT DEPLOY.**

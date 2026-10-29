@@ -97,3 +97,12 @@ This section supersedes any earlier statement in this document that a candidate'
 The documentation-only update to PR #225 has advanced its branch to `c0908c057506317251ccbe1b31b16ed783d4e337`. Its latest checks were queued at this recheck; earlier test and engine-regression results on `2bf70273c0e7fac283b8c157a8817b9c3225544d` do not prove the newer head fully green. The latest code candidate heads remain #226 `dbc6cf8d7e2e1f632169e9c953416849b9e6f674`, #224 `a1a4cb25c2cd6936845689bca7af6b9096e5c470`, and #218 `17ded0dff27fa26737d2f7820978809d017c7b2a`; #226 and #224 checks are queued, and #218's isolated migration replay and transaction contract pass while remaining checks are incomplete.
 
 No production function deployment, migration, account mutation, backup/restore rehearsal, review approval, or production authorization has occurred. **NO-GO / HOLD remains unchanged.**
+
+
+## Final recheck of current code-candidate heads — 29 October 2026
+
+- **PR #226** now points to `9fd31cf87b7b1c7bc6c08c5ce95bd7abb7b6a1eb`. It includes a single-origin parser bound to `SUPABASE_URL` project ref: production only accepts its production origin; staging only accepts the verified staging origin with explicit configuration; other project refs fail closed by default. Test, Edge Function, security-quality and engine-regression checks are **QUEUED** on this head; live-deployment-smoke is **SKIPPED**.
+- **PR #224** remains at `a1a4cb25c2cd6936845689bca7af6b9096e5c470`; platform-tests, shoir-ie-tests, edge-function, engine-regression, test and security-quality are **QUEUED**. The changes now require unique disposable identities, mandatory login-throttle and inactive-account checks, and remove duplicate/path-skipped required contexts. No current hosted authenticated acceptance result exists.
+- **PR #218** remains at `17ded0dff27fa26737d2f7820978809d017c7b2a`; disposable PostgreSQL replay, PostgreSQL transaction-contract, security-quality, engine-regression and several tests have passed, while another test is still **IN PROGRESS**. This is isolated candidate evidence only; no production-shaped restore/migration or approval exists.
+
+No production function or migration has changed. The current deployed prod-v9 wildcard-CORS defect remains live, and current prod-v9 registration remains incompatible with the app's `register_request` action. The release remains **NO-GO / HOLD**.
