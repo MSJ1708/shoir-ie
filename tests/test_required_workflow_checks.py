@@ -49,6 +49,11 @@ def test_authenticated_gate_requires_inactive_denial_and_login_throttle_inputs()
     username_checks = gate.split("for name in SHOIR_E2E_ACTIVE_USERNAME", 1)[1].split("; do", 1)[0]
     assert "SHOIR_E2E_INACTIVE_USERNAME" in username_checks
     assert 'shoir-e2e-*' in gate
+    assert "identities=(SHOIR_E2E_ACTIVE_USERNAME" in gate
+    assert "SHOIR_E2E_MODULE_USERNAME" in gate
+    assert "SHOIR_E2E_RESEARCH_MODULE_USERNAME" in gate
+    assert "sort -fu" in gate
+    assert "All authenticated release-gate identities must be distinct." in gate
 
 
 def test_validation_workflow_emits_test_once_per_release_pr_head():
