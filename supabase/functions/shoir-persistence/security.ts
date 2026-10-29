@@ -188,3 +188,22 @@ export function publicErrorFor(
       "The persistence service could not complete this request. Retry later.",
   };
 }
+
+
+/** Return whether a referral summary is allowed to assign/replace a legacy code. */
+export function shouldAutoAssignReferralCode(
+  account: Record<string, unknown>,
+): boolean {
+  const username = [account.username_lc, account.username].some((value) =>
+    typeof value === "string" && value.trim().toLowerCase() === "sho"
+  );
+  const role = typeof account.role === "string"
+    ? account.role.trim().toLowerCase()
+    : "";
+  if (username || role === "enterprise admin") return false;
+
+  const code = typeof account.affiliate_code === "string"
+    ? account.affiliate_code.trim().toUpperCase()
+    : "";
+  return !code || code.startsWith("AFF-");
+}

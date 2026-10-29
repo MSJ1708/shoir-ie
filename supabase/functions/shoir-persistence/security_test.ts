@@ -5,6 +5,7 @@ import {
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
+  shouldAutoAssignReferralCode,
 } from "./security.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -155,5 +156,60 @@ Deno.test("public error mapping does not expose internal infrastructure details"
   assert(
     invalidProof.status === 400,
     "Invalid proof should be a client error.",
+  );
+});
+
+Deno.test("referral code assignment never mutates the reserved or any Enterprise Admin account", () => {
+  const protectedRows = [
+    {
+      username_lc: "sho",
+      role: "Enterprise Admin",
+      affiliate_code: null,
+    },
+    {
+      username_lc: "sho",
+      role: "Enterprise Admin",
+      affiliate_code: "AFF-LEGACY-15",
+    },
+    {
+      username_lc: "other-admin",
+      role: " enterprise admin ",
+      affiliate_code: "",
+    },
+    {
+      username: " SHO ",
+      role: "User",
+      affiliate_code: "",
+    },
+  ];
+  for (const account of protectedRows) {
+    assert(
+      !shouldAutoAssignReferralCode(account),
+      "Protected administrators must never receive an automatic code rewrite.",
+    );
+  }
+  assert(
+    shouldAutoAssignReferralCode({
+      username_lc: "ordinary-user",
+      role: "User",
+      affiliate_code: "",
+    }),
+    "An ordinary account with no code may receive one.",
+  );
+  assert(
+    shouldAutoAssignReferralCode({
+      username_lc: "ordinary-user",
+      role: "User",
+      affiliate_code: "AFF-LEGACY-15",
+    }),
+    "An ordinary account may replace a retired legacy code on explicit summary action.",
+  );
+  assert(
+    !shouldAutoAssignReferralCode({
+      username_lc: "ordinary-user",
+      role: "User",
+      affiliate_code: "SHR-ABCDE12345",
+    }),
+    "An ordinary account with a current code must keep it.",
   );
 });

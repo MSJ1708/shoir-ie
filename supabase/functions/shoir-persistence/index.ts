@@ -4,6 +4,7 @@ import {
   normalizeWorkspaceStateJson,
   publicErrorFor,
   readBoundedJsonObject,
+  shouldAutoAssignReferralCode,
 } from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -415,7 +416,19 @@ Deno.serve(async (req) => {
       const username = String(body.username || "").trim();
       const row = await getSession(String(body.token || ""), username);
       let referralCode = String(row.affiliate_code || "").trim().toUpperCase();
-      if (!referralCode || referralCode.startsWith("AFF-")) {
+      const protectedAdministrator =
+        String(row.username_lc || row.username || "").trim().toLowerCase() ===
+          "sho" ||
+        String(row.role || "").trim().toLowerCase() === "enterprise admin";
+      if (
+        protectedAdministrator &&
+        (!referralCode || referralCode.startsWith("AFF-"))
+      ) {
+        // Keep the reserved administrator's existing row and updated_at untouched.
+        // A missing or retired legacy code is reported as unavailable instead.
+        referralCode = "";
+      }
+      if (shouldAutoAssignReferralCode(row as Record<string, unknown>)) {
         let assigned = false;
         for (let attempt = 0; attempt < 6 && !assigned; attempt++) {
           const candidate = "SHR-" +
