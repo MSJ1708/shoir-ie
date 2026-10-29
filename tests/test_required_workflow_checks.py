@@ -31,3 +31,21 @@ def test_required_test_context_is_unique_across_workflows():
         "The protected ruleset requires the check context 'test'; it must be emitted "
         f"by exactly one workflow, found {matching}."
     )
+
+
+def test_authenticated_gate_requires_inactive_denial_and_login_throttle_inputs():
+    gate = (ROOT / ".github" / "workflows" / "authenticated-release-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    required = gate.split("required=(", 1)[1].split(")", 1)[0]
+    for name in (
+        "SHOIR_E2E_ACTIVE_EXPECTED_TIER",
+        "SHOIR_E2E_INACTIVE_USERNAME",
+        "SHOIR_E2E_INACTIVE_PASSWORD",
+        "SHOIR_E2E_VERIFY_LOGIN_THROTTLE",
+    ):
+        assert name in required, f"{name} must be a mandatory release-gate input"
+    assert 'SHOIR_E2E_VERIFY_LOGIN_THROTTLE,,}" != "true"' in gate
+    username_checks = gate.split("for name in SHOIR_E2E_ACTIVE_USERNAME", 1)[1].split("; do", 1)[0]
+    assert "SHOIR_E2E_INACTIVE_USERNAME" in username_checks
+    assert 'shoir-e2e-*' in gate
