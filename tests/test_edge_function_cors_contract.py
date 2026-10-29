@@ -29,12 +29,16 @@ def test_response_helper_never_emits_wildcard_and_applies_origin_vary():
     assert 'headers.set("Access-Control-Allow-Origin", origin)' in security
     assert "raw === undefined" in security
     assert '"https://shoir-ie-app.streamlit.app"' in security
-    assert '"https://shoirieverified.streamlit.app"' not in security
+    assert '"https://shoirieverified.streamlit.app"' in security
+    assert "!VERIFIED_BROWSER_ORIGINS.has(entry)" in security
 
 
 def test_staging_and_production_allowlists_are_not_combined_in_shared_source():
     security = SECURITY.read_text(encoding="utf-8")
-    assert "SHOIR_ALLOWED_BROWSER_ORIGINS" in INDEX.read_text(encoding="utf-8")
-    assert "parseAllowedBrowserOrigins(undefined)" in INDEX.read_text(encoding="utf-8")
+    index = INDEX.read_text(encoding="utf-8")
+    assert "SHOIR_ALLOWED_BROWSER_ORIGINS" in index
+    assert "parseAllowedBrowserOrigins(undefined)" in index
     assert 'url.origin !== entry' in security
     assert 'url.protocol !== "https:"' in security
+    assert "VERIFIED_BROWSER_ORIGINS" in security
+    assert "unverified" not in security.casefold()
