@@ -218,9 +218,12 @@ Deno.test("referral code assignment never mutates the reserved or any Enterprise
 });
 
 Deno.test("CORS allowlists are isolated per deployment environment", () => {
-  const productionOrigins = parseAllowedBrowserOrigins(undefined);
   const productionOrigin = "https://shoir-ie-app.streamlit.app";
   const stagingOrigin = "https://shoirieverified.streamlit.app";
+  const productionUrl = "https://gcsamrdaeraxieaagsta.supabase.co";
+  const stagingUrl = "https://hfhrosthswcybccepmak.supabase.co";
+  const productionOrigins = parseAllowedBrowserOrigins(undefined, productionUrl);
+  const stagingOrigins = parseAllowedBrowserOrigins(stagingOrigin, stagingUrl);
 
   assert(
     isAllowedBrowserOrigin(productionOrigin, productionOrigins),
@@ -236,7 +239,6 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
     "Production origin must be echoed exactly.",
   );
 
-  const stagingOrigins = parseAllowedBrowserOrigins(stagingOrigin);
   assert(
     isAllowedBrowserOrigin(stagingOrigin, stagingOrigins),
     "Configured staging origin must be allowed in staging.",
@@ -249,6 +251,23 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
     corsHeadersForOrigin(stagingOrigin, stagingOrigins)
       .get("Access-Control-Allow-Origin") === stagingOrigin,
     "Staging origin must be echoed exactly only when configured.",
+  );
+
+  assert(
+    parseAllowedBrowserOrigins(stagingOrigin, productionUrl).size === 0,
+    "Production project reference must reject the staging origin even if configured.",
+  );
+  assert(
+    parseAllowedBrowserOrigins(productionOrigin, stagingUrl).size === 0,
+    "Staging project reference must reject the production origin even if configured.",
+  );
+  assert(
+    parseAllowedBrowserOrigins(undefined, stagingUrl).size === 0,
+    "Staging must fail closed until its project-specific origin is explicitly configured.",
+  );
+  assert(
+    parseAllowedBrowserOrigins(undefined, "https://unknown-project.supabase.co").size === 0,
+    "Unknown project references must fail closed unless an explicit verified origin is configured.",
   );
 
   for (const origin of [
