@@ -92,13 +92,28 @@ def main() -> int:
         starter_password = require_env("SHOIR_E2E_STARTER_PASSWORD")
         expired_user = validate_test_username(require_env("SHOIR_E2E_EXPIRED_USERNAME"), "expired account")
         expired_password = require_env("SHOIR_E2E_EXPIRED_PASSWORD")
-        active_expected_tier = os.environ.get("SHOIR_E2E_ACTIVE_EXPECTED_TIER", "Enterprise Plus Tier ($399)").strip()
+        inactive_user = validate_test_username(require_env("SHOIR_E2E_INACTIVE_USERNAME"), "inactive account")
+        inactive_password = require_env("SHOIR_E2E_INACTIVE_PASSWORD")
+        active_expected_tier = require_env("SHOIR_E2E_ACTIVE_EXPECTED_TIER").strip()
+        verify_login_throttle = require_env("SHOIR_E2E_VERIFY_LOGIN_THROTTLE").strip().casefold()
+        if verify_login_throttle not in {"1", "true", "yes", "on"}:
+            raise ValueError("SHOIR_E2E_VERIFY_LOGIN_THROTTLE must be true; the live limiter probe cannot be skipped.")
     except ValueError as exc:
         print(f"[FAIL] Preflight: {exc}", file=sys.stderr)
         return 2
 
-    if len({active_user.casefold(), second_user.casefold(), starter_user.casefold(), expired_user.casefold()}) != 4:
-        print("[FAIL] Preflight: active, second, starter and expired test accounts must be distinct.", file=sys.stderr)
+    test_identities = {
+        active_user.casefold(),
+        second_user.casefold(),
+        starter_user.casefold(),
+        expired_user.casefold(),
+        inactive_user.casefold(),
+    }
+    if len(test_identities) != 5:
+        print(
+            "[FAIL] Preflight: active, second, starter, expired and inactive test accounts must be distinct.",
+            file=sys.stderr,
+        )
         return 2
 
     api = EdgeAPI(edge_url, key)
@@ -106,6 +121,7 @@ def main() -> int:
     second_token = ""
     starter_token = ""
     expired_token = ""
+    inactive_token = ""
     reload_token = ""
     original_workspace: str | None = None
     workspace_was_loaded = False
@@ -253,53 +269,41 @@ def main() -> int:
                    st_renew == 400 and "reference" in str(renew_data.get("error") or "").casefold(),
                    "Missing transaction reference is rejected before a renewal record is created.")
 
-        if os.environ.get("SHOIR_E2E_VERIFY_LOGIN_THROTTLE", "").strip().casefold() in {"1", "true", "yes", "on"}:
-            # Use a synthetic non-account identity so the test cannot lock a real
-            # user's bucket. This uses 9 attempts from the runner IP bucket and
-            # should only be enabled for an intentional release-gate run.
-            throttle_user = PREFIX + "throttle-" + secrets.token_hex(8)
-            observed = []
-            for attempt_number in range(9):
-                code, payload = safe_call(
-                    api, "login_throttle_probe", "synthetic", "login",
-                    {"username": throttle_user, "password": "invalid-" + secrets.token_hex(16)},
-                )
-                observed.append(code)
-                if code is None:
-                    break
-            record(
-                "login_throttle_blocks_excess_attempts",
-                "synthetic",
-                observed == [401] * 8 + [429],
-                "Eight synthetic attempts were rejected generically and the ninth was rate-limited."
-                if observed == [401] * 8 + [429]
-                else "Rate-limit responses differed from the expected 8x401 then 429 sequence.",
+        # This probe is mandatory for a release-gate run. Use a random non-account
+        # identity so it cannot lock a real test user; the ninth attempt must be limited.
+        throttle_user = PREFIX + "throttle-" + secrets.token_hex(8)
+        observed = []
+        for _attempt_number in range(9):
+            code, _payload = safe_call(
+                api, "login_throttle_probe", "synthetic", "login",
+                {"username": throttle_user, "password": "invalid-" + secrets.token_hex(16)},
             )
-        else:
-            record(
-                "login_throttle_blocks_excess_attempts",
-                "synthetic",
-                None,
-                "Skipped: set the GitHub Actions variable SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true for an intentional live limiter probe.",
-            )
+            observed.append(code)
+            if code is None:
+                break
+        record(
+            "login_throttle_blocks_excess_attempts",
+            "synthetic",
+            observed == [401] * 8 + [429],
+            "Eight synthetic attempts were rejected generically and the ninth was rate-limited."
+            if observed == [401] * 8 + [429]
+            else "Rate-limit responses differed from the expected 8x401 then 429 sequence.",
+        )
 
-        inactive_user = os.environ.get("SHOIR_E2E_INACTIVE_USERNAME", "").strip()
-        inactive_password = os.environ.get("SHOIR_E2E_INACTIVE_PASSWORD", "")
-        if inactive_user or inactive_password:
-            if not inactive_user or not inactive_password:
-                record("inactive_account_denied", "inactive", False, "Both inactive-account test credentials must be configured together.")
-            else:
-                try:
-                    inactive_user = validate_test_username(inactive_user, "inactive account")
-                    status, data = safe_call(api, "inactive_account_denied", "inactive", "login",
-                                             {"username": inactive_user, "password": inactive_password})
-                    record("inactive_account_denied", "inactive",
-                           status == 401 and not data.get("token"),
-                           "Inactive account credentials do not create a server session.")
-                except ValueError as exc:
-                    record("inactive_account_denied", "inactive", False, str(exc))
-        else:
-            record("inactive_account_denied", "inactive", None, "Skipped: configure a dedicated inactive test account to verify the server guard.")
+        # The inactive account is required by preflight and must never receive a session.
+        inactive_status, inactive_data = safe_call(
+            api, "inactive_account_denied", "inactive", "login",
+            {"username": inactive_user, "password": inactive_password},
+        )
+        inactive_token = str(inactive_data.get("token") or "")
+        record(
+            "inactive_account_denied",
+            "inactive",
+            inactive_status == 401 and not inactive_token,
+            "Inactive account credentials do not create a server session."
+            if inactive_status == 401 and not inactive_token
+            else "Inactive account login was not denied without issuing a session.",
+        )
 
     finally:
         # Restore the original dedicated test workspace before revoking the
@@ -329,6 +333,7 @@ def main() -> int:
             ("second", second_user, second_token),
             ("starter", starter_user, starter_token),
             ("expired", expired_user, expired_token),
+            ("inactive", inactive_user, inactive_token),
         ):
             if token:
                 try:
