@@ -8,7 +8,7 @@ The shared `shoir-persistence` handler reads `SHOIR_ALLOWED_BROWSER_ORIGINS` for
 
 `https://shoir-ie-app.streamlit.app`
 
-A configured list must contain canonical HTTPS origins only, comma-separated without paths, query strings, fragments or credentials. The source accepts only the two currently verified hosts above; any other host fails closed. If the variable is set but contains an empty or invalid entry, the parser fails closed: browser origins are not accepted. An absent Origin remains available for server-to-server requests and receives no `Access-Control-Allow-Origin` header; the API action still authenticates and authorizes the caller.
+A project configuration must contain exactly one canonical HTTPS origin, without a path, query string, fragment or credentials. The source accepts only the two currently verified hosts above; any other host fails closed. A combined production-and-staging list is rejected. If the variable is set but empty or invalid, the parser fails closed: browser origins are not accepted. An absent Origin remains available for server-to-server requests and receives no `Access-Control-Allow-Origin` header; the API action still authenticates and authorizes the caller.
 
 ## Per-project configuration
 
