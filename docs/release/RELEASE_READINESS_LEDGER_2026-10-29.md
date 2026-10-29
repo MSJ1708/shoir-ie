@@ -65,3 +65,28 @@ This ledger is the consolidated snapshot of evidence observed on 29 October 2026
 PR [#226](https://github.com/MSJ1708/shoir-ie/pull/226) now covers both exact-origin CORS and protected-admin referral-code preservation in the full main-branch persistence handler. Its current head is `28856b8e0478a63ea6452de07e27edfe9462be8c`. The CORS configuration is now **per deployment**: an unset `SHOIR_ALLOWED_BROWSER_ORIGINS` defaults to the production app host only, while the verified staging host must be configured separately on a staging deployment. The shared source no longer hard-codes both hosts into every project. Unit, source-contract, security-quality, and full exact-head checks are still queued/in progress at recheck time, and live-deployment-smoke is skipped. There is no post-deployment live CORS proof.
 
 The deployed production function remains v9 with wildcard CORS and no `register_request` action. The candidate is not deployed. It does not resolve schema migration or provider/legal approval blockers. Production remains **NO-GO / HOLD**.
+
+
+## Exact-head CI recheck — 29 October 2026
+
+This section supersedes any earlier statement in this document that a candidate's checks were “in progress” or “passed” for a different commit. It reports the latest open PR heads read during this recheck.
+
+| PR | Exact inspected head | Latest CI state | Release meaning |
+|---|---|---|---|
+| [#226 CORS + protected-admin guard](https://github.com/MSJ1708/shoir-ie/pull/226) | `dbc6cf8d7e2e1f632169e9c953416849b9e6f674` | `test`, `edge-function`, `security-quality`, `engine-regression` and other test jobs are **QUEUED**. Hosted live deployment smoke is **SKIPPED**. | Not accepted yet. Current source requires exactly one configured, verified HTTPS origin per deployment; a combined production/staging list fails closed. The live production endpoint is still on v9 with wildcard CORS. |
+| [#224 required check + acceptance repair](https://github.com/MSJ1708/shoir-ie/pull/224) | `a1a4cb25c2cd6936845689bca7af6b9096e5c470` | All exact-head jobs polled here are **QUEUED**. | The earlier head `473a64f4d315f127b10d38090b789eec9800890d` did pass edge-function, test, engine-regression, security-quality, platform-tests and shoir-ie-tests. That result does not validate the new workflow/script changes. No current hosted authenticated run is complete. |
+| [#218 safe legal/referral migration](https://github.com/MSJ1708/shoir-ie/pull/218) | `17ded0dff27fa26737d2f7820978809d017c7b2a` | Disposable PostgreSQL replay **PASS**; PostgreSQL transaction contract **PASS**; some source tests **PASS**; security-quality is **IN PROGRESS** and additional test/engine jobs are **QUEUED**. | Partial candidate evidence only. No production-shaped full-sequence rehearsal, verified restore, or production migration is complete or authorized. |
+| [#225 release ledger / authorization packet](https://github.com/MSJ1708/shoir-ie/pull/225) | `2bf70273c0e7fac283b8c157a8817b9c3225544d` | Engine regression **PASS**; some test jobs **PASS**, other test/security jobs **IN PROGRESS**. | Documentation candidate CI is not yet fully green on this head. |
+| [#220 production-v9-compatible hotfix](https://github.com/MSJ1708/shoir-ie/pull/220) | `2ab663663fe910f395b881869bc006183ed7bdfb` | The recorded source/test/engine/security checks passed; live smoke **SKIPPED**. | This candidate still lacks the missing current registration action/schema and is not a full release bundle. Do not deploy as the complete release. |
+
+### Current hard blockers unchanged
+
+1. Production function v9 emits wildcard CORS; the latest connected GitHub-runner diagnostic remains a failure. No post-deployment probe exists because no deployment was authorized or performed.
+2. Production v9 lacks the current `register_request` action and legal/referral schema dependencies. A CORS-only v9 fix does not restore registration.
+3. Production schema is missing six legal-acceptance columns and `public.shoir_referrals`. The safe schema candidate has only isolated database-replay evidence.
+4. Production backup/PITR reference and an executed isolated restore are unverified.
+5. The protected main ruleset requires independent approval; no approving review or release-owner authorization has been recorded.
+6. T096 service endpoint and T098 identity provider/MFA remain external configuration and acceptance tasks.
+7. Saudi legal/privacy/commercial approvals remain external. BETA removal is not authorized.
+
+**Decision remains NO-GO / HOLD.** No production deployment, migration, account mutation, payment/billing change, or BETA removal was performed.

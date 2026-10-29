@@ -84,3 +84,8 @@ Expected impact includes rejecting unapproved browser origins, bounded payload f
 PR #226 now builds the shared current-main handler with a project-specific origin allowlist. With `SHOIR_ALLOWED_BROWSER_ORIGINS` unset, it defaults to the production origin only. A future authorized staging deployment of that shared source must set the variable to exactly `https://shoirieverified.streamlit.app` first. The currently deployed staging v11 function has not been changed. Production must not include the staging host in its allowlist.
 
 This candidate is still source-only and its latest exact-head workflows are queued/in progress; its live smoke is skipped. The candidate is not the final bundle because the deployed production v9 function lacks the current registration action and legal/referral schema. **Authorization fields remain unsigned, and the release decision remains HOLD — DO NOT DEPLOY.**
+
+
+## Exact-head status recheck — 29 October 2026
+
+Latest inspected PR heads: #226 `dbc6cf8d7e2e1f632169e9c953416849b9e6f674` and #224 `a1a4cb25c2cd6936845689bca7af6b9096e5c470` still had CI queued at recheck. PR #218 `17ded0dff27fa26737d2f7820978809d017c7b2a` had its disposable PostgreSQL replay and transaction-contract tests passed, with security-quality in progress and additional jobs queued. These are source/rehearsal statuses, not production acceptance. PR #220 remains a partial v9 security candidate and does not contain the current registration action or schema. The authorization prerequisites remain incomplete; this request remains **unsigned / NOT READY / HOLD — DO NOT DEPLOY**.
