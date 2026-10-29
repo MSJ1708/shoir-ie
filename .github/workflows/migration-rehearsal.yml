@@ -1,0 +1,63 @@
+name: Shoir-IE isolated migration rehearsal
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "tests/test_full_migration_history_postgres.py"
+      - ".github/workflows/migration-rehearsal.yml"
+  push:
+    branches:
+      - fix/main-safe-legal-referrals-20261027
+    paths:
+      - "supabase/migrations/**"
+      - "tests/test_full_migration_history_postgres.py"
+      - ".github/workflows/migration-rehearsal.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-postgres-replay:
+    name: Replay migrations in disposable local PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shoir_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shoir_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SHOIR_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/shoir_test
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout exact PR source
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install only the local migration test dependencies
+        run: python -m pip install --disable-pip-version-check pytest psycopg2-binary
+      - name: Verify PostgreSQL endpoint is local and isolated
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          parsed = urlparse(os.environ["SHOIR_TEST_POSTGRES_URL"])
+          assert parsed.hostname in {"localhost", "127.0.0.1", "::1"}, parsed.hostname
+          assert parsed.path.lstrip("/") == "shoir_test", parsed.path
+          print("Target verified: local disposable shoir_test database; no Supabase endpoint configured.")
+          PY
+      - name: Replay safe preservation migration and full source history
+        run: python -m pytest -vv -rs tests/test_full_migration_history_postgres.py

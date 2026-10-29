@@ -22,6 +22,8 @@ EXPECTED_VERSIONS = [
     "20261021130000",
     "20261022110000",
     "20261023130000",
+    "20261026110000",
+    "20261027120000",
 ]
 
 
@@ -68,3 +70,32 @@ def test_refund_policy_v2_guard_migration_requires_current_refund_version():
     source = (MIGRATIONS / "20261023130000_refresh_refund_policy_acceptance_version.sql").read_text(encoding="utf-8")
     assert "refund_policy_version IS DISTINCT FROM '2026-10-23-v2'" in source
     assert "BEFORE UPDATE OF status" in source
+
+
+def test_safe_referral_migration_is_additive_and_server_only():
+    source = (
+        MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
+    ).read_text(encoding="utf-8").casefold()
+    executable_sql = "\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    assert "create table if not exists public.shoir_referrals" in executable_sql
+    assert "update public.shoir_accounts" not in executable_sql
+    assert "set affiliate_code" not in executable_sql
+    assert "set updated_at" not in executable_sql
+    assert "idx_shoir_accounts_affiliate_code_trimmed_unique" in executable_sql
+    assert "enable row level security" in executable_sql
+    assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in executable_sql
+    assert "grant select, insert, update, delete on table public.shoir_referrals to service_role" in executable_sql
+
+
+def test_current_beta_acceptance_guard_matches_live_application_versions():
+    source = (
+        MIGRATIONS / "20261027120000_enforce_current_beta_legal_acceptance.sql"
+    ).read_text(encoding="utf-8")
+    assert "2026-10-21-beta-v1" in source
+    assert "2026-10-21-v1" in source
+    assert "2026-10-23-v2" in source
+    assert "NEW.accepted_at IS NULL" in source
+    assert "BEFORE UPDATE OF status ON public.shoir_subscription_requests" in source
+    assert "REVOKE ALL ON FUNCTION public.shoir_require_legal_acceptance_before_approval()" in source
