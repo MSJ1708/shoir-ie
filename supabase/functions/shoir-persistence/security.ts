@@ -208,18 +208,59 @@ export function shouldAutoAssignReferralCode(
 }
 
 
-const ALLOWED_BROWSER_ORIGINS = new Set<string>([
+const DEFAULT_BROWSER_ORIGINS = new Set<string>([
   "https://shoir-ie-app.streamlit.app",
-  "https://shoirieverified.streamlit.app",
 ]);
 
-/** Missing Origin is allowed for server-to-server calls; each action still authenticates. */
-export function isAllowedBrowserOrigin(origin: string | null): boolean {
-  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+/**
+ * Parse a project-specific allowlist. An unset variable defaults to production
+ * only; a configured but invalid/empty value fails closed with no browser origins.
+ */
+export function parseAllowedBrowserOrigins(
+  raw: string | undefined,
+): Set<string> {
+  if (raw === undefined) return new Set(DEFAULT_BROWSER_ORIGINS);
+  const entries = raw.split(",").map((value) => value.trim());
+  if (
+    entries.length === 0 || entries.length > 10 ||
+    entries.some((value) => value.length === 0)
+  ) return new Set();
+
+  const origins = new Set<string>();
+  for (const entry of entries) {
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      return new Set();
+    }
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.origin !== entry ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) return new Set();
+    origins.add(entry);
+  }
+  return origins;
 }
 
-/** Emit origin-specific CORS headers; never return wildcard or fabricate an approved origin. */
-export function corsHeadersForOrigin(origin: string | null): Headers {
+/** Origin-free server calls are possible, but they do not get a fabricated ACAO header. */
+export function isAllowedBrowserOrigin(
+  origin: string | null,
+  allowedOrigins: ReadonlySet<string> = DEFAULT_BROWSER_ORIGINS,
+): boolean {
+  return origin === null || allowedOrigins.has(origin);
+}
+
+/** Emit origin-specific headers; never return wildcard or fabricate an approved origin. */
+export function corsHeadersForOrigin(
+  origin: string | null,
+  allowedOrigins: ReadonlySet<string> = DEFAULT_BROWSER_ORIGINS,
+): Headers {
   const headers = new Headers({
     "Content-Type": "application/json",
     "Access-Control-Allow-Headers":
@@ -227,7 +268,7 @@ export function corsHeadersForOrigin(origin: string | null): Headers {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   });
-  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+  if (origin !== null && allowedOrigins.has(origin)) {
     headers.set("Access-Control-Allow-Origin", origin);
   }
   return headers;
