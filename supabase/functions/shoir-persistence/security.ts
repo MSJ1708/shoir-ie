@@ -189,7 +189,6 @@ export function publicErrorFor(
   };
 }
 
-
 /** Return whether a referral summary is allowed to assign/replace a legacy code. */
 export function shouldAutoAssignReferralCode(
   account: Record<string, unknown>,
