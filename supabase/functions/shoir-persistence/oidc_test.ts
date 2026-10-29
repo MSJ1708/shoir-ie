@@ -8,9 +8,9 @@ import {
   identityFromVerifiedClaims,
   MAX_OIDC_ID_TOKEN_CHARS,
   OidcVerificationError,
+  type OidcVerifierConfig,
   readOidcVerifierConfig,
   verifyOidcIdToken,
-  type OidcVerifierConfig,
 } from "./oidc.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
