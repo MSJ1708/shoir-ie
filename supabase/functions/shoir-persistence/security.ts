@@ -208,6 +208,10 @@ export function shouldAutoAssignReferralCode(
 }
 
 
+const VERIFIED_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+  "https://shoirieverified.streamlit.app",
+]);
 const DEFAULT_BROWSER_ORIGINS = new Set<string>([
   "https://shoir-ie-app.streamlit.app",
 ]);
@@ -239,6 +243,7 @@ export function parseAllowedBrowserOrigins(
       url.username !== "" ||
       url.password !== "" ||
       url.origin !== entry ||
+      !VERIFIED_BROWSER_ORIGINS.has(entry) ||
       url.pathname !== "/" ||
       url.search !== "" ||
       url.hash !== ""
