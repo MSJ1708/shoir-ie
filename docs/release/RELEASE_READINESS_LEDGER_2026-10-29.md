@@ -90,3 +90,10 @@ This section supersedes any earlier statement in this document that a candidate'
 7. Saudi legal/privacy/commercial approvals remain external. BETA removal is not authorized.
 
 **Decision remains NO-GO / HOLD.** No production deployment, migration, account mutation, payment/billing change, or BETA removal was performed.
+
+
+## Latest ledger-PR head — 29 October 2026
+
+The documentation-only update to PR #225 has advanced its branch to `c0908c057506317251ccbe1b31b16ed783d4e337`. Its latest checks were queued at this recheck; earlier test and engine-regression results on `2bf70273c0e7fac283b8c157a8817b9c3225544d` do not prove the newer head fully green. The latest code candidate heads remain #226 `dbc6cf8d7e2e1f632169e9c953416849b9e6f674`, #224 `a1a4cb25c2cd6936845689bca7af6b9096e5c470`, and #218 `17ded0dff27fa26737d2f7820978809d017c7b2a`; #226 and #224 checks are queued, and #218's isolated migration replay and transaction contract pass while remaining checks are incomplete.
+
+No production function deployment, migration, account mutation, backup/restore rehearsal, review approval, or production authorization has occurred. **NO-GO / HOLD remains unchanged.**

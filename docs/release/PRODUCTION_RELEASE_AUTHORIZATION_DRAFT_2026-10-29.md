@@ -89,3 +89,8 @@ This candidate is still source-only and its latest exact-head workflows are queu
 ## Exact-head status recheck — 29 October 2026
 
 Latest inspected PR heads: #226 `dbc6cf8d7e2e1f632169e9c953416849b9e6f674` and #224 `a1a4cb25c2cd6936845689bca7af6b9096e5c470` still had CI queued at recheck. PR #218 `17ded0dff27fa26737d2f7820978809d017c7b2a` had its disposable PostgreSQL replay and transaction-contract tests passed, with security-quality in progress and additional jobs queued. These are source/rehearsal statuses, not production acceptance. PR #220 remains a partial v9 security candidate and does not contain the current registration action or schema. The authorization prerequisites remain incomplete; this request remains **unsigned / NOT READY / HOLD — DO NOT DEPLOY**.
+
+
+## Latest ledger documentation status
+
+The ledger PR advanced to commit `c0908c057506317251ccbe1b31b16ed783d4e337`; checks for that documentation-only head were queued at the latest recheck. The underlying authorization prerequisites have not changed. No approval signature or production change window is recorded. **HOLD — DO NOT DEPLOY.**
