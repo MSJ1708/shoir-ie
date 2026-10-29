@@ -318,6 +318,7 @@ Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
   const allowedOrigins = parseAllowedBrowserOrigins(
     Deno.env.get("SHOIR_ALLOWED_BROWSER_ORIGINS"),
+    SUPABASE_URL,
   );
   if (!isAllowedBrowserOrigin(origin, allowedOrigins)) {
     return response(
