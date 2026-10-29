@@ -68,3 +68,28 @@ The staging function was verified to no longer emit wildcard CORS and no longer 
 The present mismatch is real: deploying the staging v11 handler to production before schema rollout is not approved. Production has neither the legal-acceptance columns nor the referral table used by this handler. Normal migration execution is also unsafe until the unrecorded legacy migration path is reconciled because the historical `20261021130000_shoir_beta_legal_referrals.sql` includes data-rewriting updates.
 
 Do not execute production DDL on the basis of this recheck alone. Required next steps remain: exact migration manifest and schema diff; isolated production-shaped rehearsal; account-identifier/code/timestamp preservation proof; backup/PITR and restore/forward-recovery verification; independent database/security review; and explicit release-owner approval. The query results are time-bound and must be repeated immediately before any approved production migration.
+
+
+## Explicit migration-ledger reconciliation runbook (prepared only; NOT executed)
+
+**This runbook is for an approved change window only. It does not authorize production use.** The current production catalog has none of the six legal fields and no referrals table, while production's migration ledger ends at `20261019140600`. The safe replacement migrations are later in order than the three unsafe historical files. The exact sequence below must first pass on an isolated restore of a production-shaped copy.
+
+### Required isolated rehearsal sequence
+
+1. Restore a fresh isolated copy from an approved pre-change recovery point. Record project/database identity and ensure the runner cannot target either hosted project.
+2. Capture aggregate counts and a protected digest of the existing `username_lc`, `affiliate_code` and `updated_at` set. Never export row content into public artifacts.
+3. Compare the isolated target's migration list with the tracked repository migrations and the expected production ledger. Stop if any difference is unexplained.
+4. Confirm that the historical SQL files would rewrite blank referral codes and timestamps if executed. Treat these timestamps as superseded for this rollout and **do not execute their historical SQL**:
+   - `20261021130000_shoir_beta_legal_referrals.sql`
+   - `20261022110000_enforce_beta_legal_acceptance.sql`
+   - `20261023130000_refresh_refund_policy_acceptance_version.sql`
+5. In the isolated copy only, use the supported Supabase migration-history repair operation to record these three reviewed historical timestamps as reconciled, without executing their old SQL. This changes migration metadata only; it neither creates the missing columns/table nor validates the schema. Do this only after the compatibility manifest explicitly maps the three skipped historical timestamps to the safe replacement migrations below. If the mapping is not independently approved, stop.
+6. Recheck the migration list and run a migration dry-run. The output must show **only** `20261026110000_safe_beta_legal_referrals.sql` and `20261027120000_enforce_current_beta_legal_acceptance.sql` as pending. If any historical file is scheduled, a safe file is absent, or any extra migration is listed, abort before applying SQL.
+7. Only in the isolated copy, apply the rehearsed migration set and verify schema, triggers, grants/RLS, current policy versions, transaction behavior, and exact preservation of every synthetic `affiliate_code` and `updated_at` value. Test abort/forward-recovery and restore again from the original checkpoint.
+8. Record actual CLI output, schema hashes, row-preservation proof, restore identity/timing, and reviewer sign-off. Repeat read-only production preflight immediately before any separately authorized production change.
+
+### Repair-operation recovery guard
+
+The history repair is a separate metadata mutation and is not atomic with the subsequent schema push. If the repair succeeds but the dry-run fails before DDL executes, restore the original history entries in the isolated rehearsal using the reviewed reverse-repair operation, then investigate. If any DDL has executed or the post-repair schema is ambiguous, do not automatically reverse ledger rows; stop and use the rehearsed recovery procedure.
+
+**Production remains HOLD.** The runbook has not been run against production or any hosted database. Production execution requires an exact function/schema candidate, a verified backup/PITR restore rehearsal, independent database/security review, and written release-owner authorization. The staging migration history and schema differ; do not run this production-specific repair procedure against staging.
