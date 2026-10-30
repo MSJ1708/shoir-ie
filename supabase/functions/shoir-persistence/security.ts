@@ -188,3 +188,129 @@ export function publicErrorFor(
       "The persistence service could not complete this request. Retry later.",
   };
 }
+
+/** Return whether a referral summary is allowed to assign/replace a legacy code. */
+export function shouldAutoAssignReferralCode(
+  account: Record<string, unknown>,
+): boolean {
+  const username = [account.username_lc, account.username].some((value) =>
+    typeof value === "string" && value.trim().toLowerCase() === "sho"
+  );
+  const role = typeof account.role === "string"
+    ? account.role.trim().toLowerCase()
+    : "";
+  if (username || role === "enterprise admin") return false;
+
+  const code = typeof account.affiliate_code === "string"
+    ? account.affiliate_code.trim().toUpperCase()
+    : "";
+  return !code || code.startsWith("AFF-");
+}
+
+/** Per-project allowlists may select only these reviewed hosts. */
+const VERIFIED_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+  "https://shoirieverified.streamlit.app",
+]);
+const DEFAULT_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+]);
+const PROJECT_ORIGIN_POLICY = new Map<string, string>([
+  ["gcsamrdaeraxieaagsta", "https://shoir-ie-app.streamlit.app"],
+  ["hfhrosthswcybccepmak", "https://shoirieverified.streamlit.app"],
+]);
+
+/**
+ * Parse a project-specific allowlist. An unset variable defaults to production
+ * only; a configured but invalid/empty value fails closed with no browser origins.
+ */
+export function parseAllowedBrowserOrigins(
+  raw: string | undefined,
+  supabaseUrl?: string,
+): Set<string> {
+  if (supabaseUrl !== undefined) {
+    let projectRef = "";
+    let projectUrl: URL;
+    try {
+      projectUrl = new URL(supabaseUrl);
+    } catch {
+      return new Set();
+    }
+    if (
+      projectUrl.protocol !== "https:" ||
+      projectUrl.username !== "" ||
+      projectUrl.password !== "" ||
+      projectUrl.port !== "" ||
+      projectUrl.pathname !== "/" ||
+      projectUrl.search !== "" ||
+      projectUrl.hash !== "" ||
+      !/^[a-z0-9]{20}$/.test(projectUrl.hostname.split(".")[0]) ||
+      projectUrl.hostname !==
+        `${projectUrl.hostname.split(".")[0]}.supabase.co`
+    ) return new Set();
+    projectRef = projectUrl.hostname.split(".")[0].toLowerCase();
+    const requiredOrigin = PROJECT_ORIGIN_POLICY.get(projectRef);
+    // Unknown projects are never authorized, even when given a reviewed host.
+    if (!requiredOrigin) return new Set();
+    if (raw === undefined && projectRef === "gcsamrdaeraxieaagsta") {
+      return new Set([requiredOrigin]);
+    }
+    if (raw !== requiredOrigin) return new Set();
+    return new Set([requiredOrigin]);
+  }
+  if (raw === undefined) return new Set(DEFAULT_BROWSER_ORIGINS);
+
+  const entries = raw.split(",").map((value) => value.trim());
+  if (
+    entries.length !== 1 ||
+    entries.some((value) => value.length === 0)
+  ) return new Set();
+
+  const origins = new Set<string>();
+  for (const entry of entries) {
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      return new Set();
+    }
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.origin !== entry ||
+      !VERIFIED_BROWSER_ORIGINS.has(entry) ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) return new Set();
+    origins.add(entry);
+  }
+  return origins;
+}
+
+/** Origin-free server calls are possible, but they do not get a fabricated ACAO header. */
+export function isAllowedBrowserOrigin(
+  origin: string | null,
+  allowedOrigins: ReadonlySet<string> = DEFAULT_BROWSER_ORIGINS,
+): boolean {
+  return origin === null || allowedOrigins.has(origin);
+}
+
+/** Emit origin-specific headers; never return wildcard or fabricate an approved origin. */
+export function corsHeadersForOrigin(
+  origin: string | null,
+  allowedOrigins: ReadonlySet<string> = DEFAULT_BROWSER_ORIGINS,
+): Headers {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  });
+  if (origin !== null && allowedOrigins.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+  return headers;
+}
