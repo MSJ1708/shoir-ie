@@ -1,8 +1,12 @@
 name: Shoir-IE validation
 
 on:
+  # Feature branches are validated by pull_request once; push runs only for
+  # protected release branches so the required `test` context is not duplicated.
   push:
+    branches: ["main", "staging-e2e-20261019"]
   pull_request:
+    branches: ["main", "staging-e2e-20261019"]
   workflow_dispatch:
 
 jobs:

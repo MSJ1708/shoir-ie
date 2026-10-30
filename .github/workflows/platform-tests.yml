@@ -7,7 +7,7 @@ on:
     branches: ["main", "feat/shoir-100-tools-integration-20261025"]
 
 jobs:
-  test:
+  platform-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

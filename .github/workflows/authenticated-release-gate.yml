@@ -47,23 +47,36 @@ jobs:
           python -m pip install -r requirements.txt
           python -m playwright install --with-deps chromium
       - name: Verify dedicated test-account configuration
+        id: staging_preflight
         shell: bash
         run: |
           set -euo pipefail
-          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_APP_URL SHOIR_E2E_EXPECTED_STAGING_APP_HOST SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_MODULE_PASSWORD SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_PASSWORD)
+          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_APP_URL SHOIR_E2E_EXPECTED_STAGING_APP_HOST SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_ACTIVE_EXPECTED_TIER SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_MODULE_PASSWORD SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_PASSWORD SHOIR_E2E_INACTIVE_USERNAME SHOIR_E2E_INACTIVE_PASSWORD SHOIR_E2E_VERIFY_LOGIN_THROTTLE)
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required Actions secret/variable: $name"
               exit 2
             fi
           done
-          for name in SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_USERNAME; do
+          if [[ "${SHOIR_E2E_VERIFY_LOGIN_THROTTLE,,}" != "true" ]]; then
+            echo "::error::SHOIR_E2E_VERIFY_LOGIN_THROTTLE must be set to true; login-throttle acceptance is mandatory."
+            exit 2
+          fi
+          identities=(SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_INACTIVE_USERNAME)
+          normalized=()
+          for name in "${identities[@]}"; do
             value="${!name}"
             if [[ "${value,,}" != shoir-e2e-* ]]; then
               echo "::error::$name must use a dedicated shoir-e2e-* test account; production/customer/admin identities are refused."
               exit 2
             fi
+            normalized+=("${value,,}")
           done
+          unique_count=$(printf '%s\n' "${normalized[@]}" | sort -fu | wc -l)
+          if [[ "$unique_count" -ne "${#normalized[@]}" ]]; then
+            echo "::error::All authenticated release-gate identities must be distinct."
+            exit 2
+          fi
           python scripts/staging_e2e_guard.py
       - name: Verify authenticated 96-module rendering matrix
         run: python scripts/authenticated_module_matrix.py
