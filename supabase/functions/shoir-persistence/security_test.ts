@@ -222,7 +222,10 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
   const stagingOrigin = "https://shoirieverified.streamlit.app";
   const productionUrl = "https://gcsamrdaeraxieaagsta.supabase.co";
   const stagingUrl = "https://hfhrosthswcybccepmak.supabase.co";
-  const productionOrigins = parseAllowedBrowserOrigins(undefined, productionUrl);
+  const productionOrigins = parseAllowedBrowserOrigins(
+    undefined,
+    productionUrl,
+  );
   const stagingOrigins = parseAllowedBrowserOrigins(stagingOrigin, stagingUrl);
 
   assert(
@@ -266,16 +269,27 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
     "Staging must fail closed until its project-specific origin is explicitly configured.",
   );
   assert(
-    parseAllowedBrowserOrigins(undefined, "https://unknown-project.supabase.co").size === 0,
+    parseAllowedBrowserOrigins(undefined, "https://unknown-project.supabase.co")
+      .size === 0,
     "Unknown project references must fail closed unless an explicit verified origin is configured.",
   );
 
-  for (const origin of [
-    "https://unapproved-origin.example",
-    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
-    "http://localhost:8501",
-    "null",
-  ]) {
+  assert(
+    parseAllowedBrowserOrigins(
+      productionOrigin,
+      "https://unknown-project.supabase.co",
+    ).size === 0,
+    "Unknown project references must fail closed even with a valid explicit origin.",
+  );
+
+  for (
+    const origin of [
+      "https://unapproved-origin.example",
+      "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+      "http://localhost:8501",
+      "null",
+    ]
+  ) {
     assert(
       !isAllowedBrowserOrigin(origin, productionOrigins),
       `Expected origin to be denied by production: ${origin}`,
@@ -296,15 +310,17 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
     );
   }
 
-  for (const malformed of [
-    "http://shoir-ie-app.streamlit.app",
-    "https://shoir-ie-app.streamlit.app/path",
-    "https://user:password@example.com",
-    "",
-    "https://good.example,",
-    "https://unverified-domain.example",
-    "https://shoir-ie-app.streamlit.app,https://shoirieverified.streamlit.app",
-  ]) {
+  for (
+    const malformed of [
+      "http://shoir-ie-app.streamlit.app",
+      "https://shoir-ie-app.streamlit.app/path",
+      "https://user:password@example.com",
+      "",
+      "https://good.example,",
+      "https://unverified-domain.example",
+      "https://shoir-ie-app.streamlit.app,https://shoirieverified.streamlit.app",
+    ]
+  ) {
     assert(
       parseAllowedBrowserOrigins(malformed).size === 0,
       "Invalid configured origins must fail closed.",
