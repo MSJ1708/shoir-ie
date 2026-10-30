@@ -230,11 +230,25 @@ export function parseAllowedBrowserOrigins(
 ): Set<string> {
   if (supabaseUrl !== undefined) {
     let projectRef = "";
+    let projectUrl: URL;
     try {
-      projectRef = new URL(supabaseUrl).hostname.split(".")[0].toLowerCase();
+      projectUrl = new URL(supabaseUrl);
     } catch {
       return new Set();
     }
+    if (
+      projectUrl.protocol !== "https:" ||
+      projectUrl.username !== "" ||
+      projectUrl.password !== "" ||
+      projectUrl.port !== "" ||
+      projectUrl.pathname !== "/" ||
+      projectUrl.search !== "" ||
+      projectUrl.hash !== "" ||
+      !/^[a-z0-9]{20}$/.test(projectUrl.hostname.split(".")[0]) ||
+      projectUrl.hostname !==
+        `${projectUrl.hostname.split(".")[0]}.supabase.co`
+    ) return new Set();
+    projectRef = projectUrl.hostname.split(".")[0].toLowerCase();
     const requiredOrigin = PROJECT_ORIGIN_POLICY.get(projectRef);
     // Unknown projects are never authorized, even when given a reviewed host.
     if (!requiredOrigin) return new Set();
