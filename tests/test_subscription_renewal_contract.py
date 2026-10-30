@@ -272,7 +272,8 @@ def test_registration_preflight_does_not_disclose_durable_account_existence():
         "# TAB 3: EXPLORE THE MODULES", 1
     )[0]
 
-    assert "return response({ exists: false });" in edge_block
+    assert "return sendResponse({ exists: false });" in edge_block
+    assert "from(" not in edge_block, "Public preflight must not query account records"
     assert "getAccount(" not in edge_block
     assert "shoir_subscription_requests" not in edge_block
     assert "(not _durable_accounts_ready and local_account_exists(reg_name))" in registration_block
