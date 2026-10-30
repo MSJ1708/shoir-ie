@@ -236,17 +236,16 @@ export function parseAllowedBrowserOrigins(
       return new Set();
     }
     const requiredOrigin = PROJECT_ORIGIN_POLICY.get(projectRef);
-    if (requiredOrigin) {
-      if (raw === undefined && projectRef === "gcsamrdaeraxieaagsta") {
-        return new Set([requiredOrigin]);
-      }
-      if (raw !== requiredOrigin) return new Set();
+    // Unknown projects are never authorized, even when given a reviewed host.
+    if (!requiredOrigin) return new Set();
+    if (raw === undefined && projectRef === "gcsamrdaeraxieaagsta") {
       return new Set([requiredOrigin]);
     }
-    if (raw === undefined) return new Set();
-  } else if (raw === undefined) {
-    return new Set(DEFAULT_BROWSER_ORIGINS);
+    if (raw !== requiredOrigin) return new Set();
+    return new Set([requiredOrigin]);
   }
+  if (raw === undefined) return new Set(DEFAULT_BROWSER_ORIGINS);
+
   const entries = raw.split(",").map((value) => value.trim());
   if (
     entries.length !== 1 ||
