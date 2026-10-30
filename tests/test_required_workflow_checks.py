@@ -1,71 +1,193 @@
-"""Guard required CI context triggers used by the protected main/staging rulesets."""
+"""Guard required CI contexts using parsed GitHub Actions workflow structure."""
 from pathlib import Path
+import re
+import shlex
+
+import pytest
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "edge-function-check.yml"
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys instead of hiding them."""
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"Duplicate YAML mapping key: {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
+def _load_workflow(path: Path):
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
+    if not isinstance(document, dict):
+        raise ValueError(f"{path} must contain a YAML mapping")
+    return document
+
+
+def _workflow_events(document):
+    # PyYAML's YAML 1.1 resolver treats the unquoted GitHub Actions key "on"
+    # as boolean True. Support both representations without string slicing.
+    events = document.get("on", document.get(True, {}))
+    if not isinstance(events, dict):
+        raise ValueError("Workflow triggers must be a mapping")
+    return events
+
+
+def _workflow_jobs(document):
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        raise ValueError("Workflow must define a jobs mapping")
+    return jobs
+
+
+def _job_context(job_id, job):
+    return str(job.get("name") or job_id)
+
+
+def _find_unique_job_context(jobs, context):
+    matches = [
+        (job_id, job)
+        for job_id, job in jobs.items()
+        if isinstance(job, dict) and _job_context(job_id, job) == context
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Expected exactly one job context {context!r}; found {len(matches)}"
+        )
+    return matches[0]
+
+
+def test_required_job_lookup_rejects_missing_renamed_and_duplicate_contexts():
+    with pytest.raises(ValueError, match="found 0"):
+        _find_unique_job_context({}, "edge-function")
+    with pytest.raises(ValueError, match="found 0"):
+        _find_unique_job_context({"edge-function-renamed": {}}, "edge-function")
+    with pytest.raises(ValueError, match="found 2"):
+        _find_unique_job_context(
+            {"edge-function": {}, "another-job": {"name": "edge-function"}},
+            "edge-function",
+        )
 
 
 def test_edge_function_required_check_is_not_path_skipped_for_main_or_staging_prs():
-    source = WORKFLOW.read_text(encoding="utf-8")
-    pull_request = source.split("  pull_request:", 1)[1].split("\npermissions:", 1)[0]
-    assert '"main"' in pull_request
-    assert '"staging-e2e-20261019"' in pull_request
-    assert "paths:" not in pull_request
+    workflow = _load_workflow(ROOT / ".github" / "workflows" / "edge-function-check.yml")
+    events = _workflow_events(workflow)
+    pull_request = events.get("pull_request")
+    assert isinstance(pull_request, dict)
+    branches = set(pull_request.get("branches", []))
+    assert {"main", "staging-e2e-20261019"}.issubset(branches)
+    assert "paths" not in pull_request
+
+    jobs = _workflow_jobs(workflow)
+    _, edge_job = _find_unique_job_context(jobs, "edge-function")
+    assert edge_job.get("runs-on"), "The required Edge Function job must have a runner"
 
 
 def test_edge_function_workflow_covers_database_migration_rehearsal_paths():
-    source = WORKFLOW.read_text(encoding="utf-8")
-    assert '"supabase/migrations/**"' in source
-    assert '"tests/test_migration_source_inventory.py"' in source
-    assert '"tests/test_full_migration_history_postgres.py"' in source
+    workflow = _load_workflow(ROOT / ".github" / "workflows" / "edge-function-check.yml")
+    events = _workflow_events(workflow)
+    push = events.get("push")
+    assert isinstance(push, dict)
+    paths = set(push.get("paths", []))
+    assert {
+        "supabase/functions/**",
+        "supabase/production-hotfix-v8/**",
+        "supabase/migrations/**",
+        "tests/test_migration_source_inventory.py",
+        "tests/test_full_migration_history_postgres.py",
+    }.issubset(paths)
 
 
 def test_required_test_context_is_unique_across_workflows():
-    workflows = (ROOT / ".github" / "workflows").glob("*.yml")
-    matching = []
-    for path in workflows:
-        source = path.read_text(encoding="utf-8")
-        if "\n  test:" in source or source.startswith("jobs:\n  test:"):
-            matching.append(path.name)
-    assert matching == ["shoir-validation.yml"], (
+    matches = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow = _load_workflow(path)
+        jobs = _workflow_jobs(workflow)
+        for job_id, job in jobs.items():
+            if isinstance(job, dict) and _job_context(job_id, job) == "test":
+                matches.append(path.name)
+    assert matches == ["shoir-validation.yml"], (
         "The protected ruleset requires the check context 'test'; it must be emitted "
-        f"by exactly one workflow, found {matching}."
+        f"by exactly one workflow, found {matches}."
     )
 
 
 def test_authenticated_gate_requires_inactive_denial_and_login_throttle_inputs():
-    gate = (ROOT / ".github" / "workflows" / "authenticated-release-gate.yml").read_text(
-        encoding="utf-8"
+    workflow = _load_workflow(
+        ROOT / ".github" / "workflows" / "authenticated-release-gate.yml"
     )
-    required = gate.split("required=(", 1)[1].split(")", 1)[0]
-    for name in (
+    jobs = _workflow_jobs(workflow)
+    _, job = _find_unique_job_context(jobs, "authenticated-release-gate")
+    environment = job.get("env", {})
+    required_names = {
         "SHOIR_E2E_ACTIVE_EXPECTED_TIER",
         "SHOIR_E2E_INACTIVE_USERNAME",
         "SHOIR_E2E_INACTIVE_PASSWORD",
         "SHOIR_E2E_VERIFY_LOGIN_THROTTLE",
-    ):
-        assert name in required, f"{name} must be a mandatory release-gate input"
-    assert 'SHOIR_E2E_VERIFY_LOGIN_THROTTLE,,}" != "true"' in gate
-    username_checks = gate.split("for name in SHOIR_E2E_ACTIVE_USERNAME", 1)[1].split("; do", 1)[0]
-    assert "SHOIR_E2E_INACTIVE_USERNAME" in username_checks
-    assert 'shoir-e2e-*' in gate
-    assert "identities=(SHOIR_E2E_ACTIVE_USERNAME" in gate
-    assert "SHOIR_E2E_MODULE_USERNAME" in gate
-    assert "SHOIR_E2E_RESEARCH_MODULE_USERNAME" in gate
-    assert "sort -fu" in gate
-    assert "All authenticated release-gate identities must be distinct." in gate
+    }
+    assert required_names.issubset(environment)
+
+    steps = job.get("steps", [])
+    preflight = next(
+        (step for step in steps if isinstance(step, dict) and step.get("id") == "staging_preflight"),
+        None,
+    )
+    assert preflight is not None, "Authenticated gate must retain the dedicated-account preflight"
+    run = preflight.get("run", "")
+    assert isinstance(run, str)
+
+    required_match = re.search(r"(?m)^\s*required=\(([^)]*)\)", run)
+    assert required_match, "Preflight must declare mandatory environment inputs"
+    required = set(shlex.split(required_match.group(1)))
+    assert required_names.issubset(required)
+
+    identities_match = re.search(r"(?m)^\s*identities=\(([^)]*)\)", run)
+    assert identities_match, "Preflight must enumerate disposable test identities"
+    identities = shlex.split(identities_match.group(1))
+    expected_identities = {
+        "SHOIR_E2E_ACTIVE_USERNAME",
+        "SHOIR_E2E_SECOND_USERNAME",
+        "SHOIR_E2E_STARTER_USERNAME",
+        "SHOIR_E2E_EXPIRED_USERNAME",
+        "SHOIR_E2E_MODULE_USERNAME",
+        "SHOIR_E2E_RESEARCH_MODULE_USERNAME",
+        "SHOIR_E2E_INACTIVE_USERNAME",
+    }
+    assert set(identities) == expected_identities
+    assert len(identities) == len(set(identities)), "Test identities must be distinct"
+    assert 'for name in "${identities[@]}"' in run
+    assert "shoir-e2e-*" in run
+    assert "sort -fu" in run
+    assert "All authenticated release-gate identities must be distinct." in run
+    assert 'if [[ "${SHOIR_E2E_VERIFY_LOGIN_THROTTLE,,}" != "true" ]]' in run
 
 
 def test_validation_workflow_emits_test_once_per_release_pr_head():
-    source = (ROOT / ".github" / "workflows" / "shoir-validation.yml").read_text(
-        encoding="utf-8"
-    )
-    events = source.split("jobs:", 1)[0]
-    push = events.split("  push:", 1)[1].split("  pull_request:", 1)[0]
-    pull_request = events.split("  pull_request:", 1)[1].split("  workflow_dispatch:", 1)[0]
-    assert 'branches: ["main", "staging-e2e-20261019"]' in push
-    assert 'branches: ["main", "staging-e2e-20261019"]' in pull_request
-    assert "pull_request:" in events
+    workflow = _load_workflow(ROOT / ".github" / "workflows" / "shoir-validation.yml")
+    events = _workflow_events(workflow)
+    for event_name in ("push", "pull_request"):
+        event = events.get(event_name)
+        assert isinstance(event, dict)
+        assert {"main", "staging-e2e-20261019"}.issubset(
+            set(event.get("branches", []))
+        )
+        assert "paths" not in event
+
+    jobs = _workflow_jobs(workflow)
+    _find_unique_job_context(jobs, "test")
 
 
 def test_authenticated_backend_gate_does_not_skip_inactive_or_throttle_checks():
@@ -79,5 +201,5 @@ def test_authenticated_backend_gate_does_not_skip_inactive_or_throttle_checks():
     assert "inactive_account_denied" in script
     assert '"Skipped: set the GitHub Actions variable SHOIR_E2E_VERIFY_LOGIN_THROTTLE' not in script
     assert '"Skipped: configure a dedicated inactive test account' not in script
-    assert 'inactive_user.casefold()' in script
+    assert "inactive_user.casefold()" in script
     assert '("inactive", inactive_user, inactive_token)' in script
