@@ -555,7 +555,7 @@ Deno.serve(async (req) => {
           }, 400);
         }
         if (String(referrer.username_lc).toLowerCase() === usernameLc) {
-          return sendResponse({ error: "Self-referrals are not allowed." }, 400);
+          return sendResponse(\n            { error: "Self-referrals are not allowed." },\n            400,\n          );
         }
         referrerUsernameLc = String(referrer.username_lc).toLowerCase();
         const { data: priorReferral, error: priorReferralError } =
@@ -606,7 +606,7 @@ Deno.serve(async (req) => {
         return sendResponse({ error: "Enter a valid email address." }, 400);
       }
       if (!allowedTiers.has(tier)) {
-        return sendResponse({ error: "Select a valid subscription tier." }, 400);
+        return sendResponse(\n          { error: "Select a valid subscription tier." },\n          400,\n        );
       }
       if (paymentMethod !== "STC Pay (QR)") {
         return sendResponse(
@@ -785,7 +785,7 @@ Deno.serve(async (req) => {
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
-      if (!token || !usernameLc) return sendResponse({ ok: true, revoked: false });
+      if (!token || !usernameLc) {\n        return sendResponse({ ok: true, revoked: false });\n      }
       const tokenHash = bytesToHex(
         await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
       );
@@ -887,7 +887,7 @@ Deno.serve(async (req) => {
       }
       const objectPath = storedPath.slice(prefix.length);
       if (!objectPath.startsWith("renewals/") || objectPath.includes("..")) {
-        return sendResponse({ error: "Invalid private payment proof path." }, 400);
+        return sendResponse(\n          { error: "Invalid private payment proof path." },\n          400,\n        );
       }
       const { data, error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET)
         .createSignedUrl(objectPath, 300);
