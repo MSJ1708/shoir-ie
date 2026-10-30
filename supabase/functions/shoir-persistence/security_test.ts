@@ -283,6 +283,22 @@ Deno.test("CORS allowlists are isolated per deployment environment", () => {
   );
 
   for (
+    const invalidProjectUrl of [
+      "http://gcsamrdaeraxieaagsta.supabase.co",
+      "https://gcsamrdaeraxieaagsta.supabase.co/path",
+      "https://gcsamrdaeraxieaagsta.supabase.co:8443",
+      "https://gcsamrdaeraxieaagsta.example.com",
+      "https://user@gcsamrdaeraxieaagsta.supabase.co",
+    ]
+  ) {
+    assert(
+      parseAllowedBrowserOrigins(productionOrigin, invalidProjectUrl).size ===
+        0,
+      `Malformed or noncanonical Supabase URL must fail closed: ${invalidProjectUrl}`,
+    );
+  }
+
+  for (
     const origin of [
       "https://unapproved-origin.example",
       "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
