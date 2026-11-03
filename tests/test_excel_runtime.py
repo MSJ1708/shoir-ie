@@ -28,6 +28,66 @@ def test_process_fast_loads_workbook_without_building_exports():
     assert result["signature"]
 
 
+def test_multi_sheet_export_is_a_valid_separate_workbook_with_raw_archives():
+    import hashlib
+    import json
+    import zipfile
+
+    from openpyxl import load_workbook
+    from shoir_excel_runtime import prepare_exports
+
+    source_buffer = io.BytesIO()
+    with pd.ExcelWriter(source_buffer, engine="xlsxwriter") as writer:
+        pd.DataFrame(
+            [["Production export", None], ["Line", "Output"], ["A", 100], ["B", 120]]
+        ).to_excel(writer, index=False, header=False, sheet_name="Production")
+        pd.DataFrame(
+            [["Downtime report", None], ["Line", "Minutes"], ["A", 15], ["B", 8]]
+        ).to_excel(writer, index=False, header=False, sheet_name="Downtime")
+
+    original_bytes = source_buffer.getvalue()
+    original_hash = hashlib.sha256(original_bytes).hexdigest()
+    result = process_fast(original_bytes, "plant-data.xlsx")
+
+    assert list(result["cleaned_sheets"]) == ["Production", "Downtime"]
+    assert result["cleaned_sheets"]["Production"]["Output"].tolist() == [100, 120]
+    assert result["cleaned_sheets"]["Downtime"]["Minutes"].tolist() == [15, 8]
+    assert result["xlsx"] is None
+    assert result["bundle"] is None
+
+    prepare_exports(result)
+
+    # Export creates a separate artifact; the uploaded source bytes are immutable.
+    assert hashlib.sha256(original_bytes).hexdigest() == original_hash
+    assert isinstance(result["xlsx"], bytes) and result["xlsx"]
+    assert isinstance(result["bundle"], bytes) and result["bundle"]
+
+    workbook = load_workbook(io.BytesIO(result["xlsx"]), data_only=False, read_only=False)
+    assert "START HERE" in workbook.sheetnames
+    assert "EXECUTIVE DASHBOARD" in workbook.sheetnames
+    assert "SOURCE METADATA" in workbook.sheetnames
+    assert "CLEAN - Production" in workbook.sheetnames
+    assert "CLEAN - Downtime" in workbook.sheetnames
+    assert workbook["RAW - Production"].sheet_state == "hidden"
+    assert workbook["RAW - Downtime"].sheet_state == "hidden"
+    assert workbook["CLEAN - Production"]["A7"].value == "A"
+    assert workbook["CLEAN - Production"]["B7"].value == 100
+    workbook.close()
+
+    with zipfile.ZipFile(io.BytesIO(result["xlsx"])) as xlsx_archive:
+        assert xlsx_archive.testzip() is None
+    with zipfile.ZipFile(io.BytesIO(result["bundle"])) as evidence_archive:
+        assert evidence_archive.testzip() is None
+        names = set(evidence_archive.namelist())
+        assert "shoir_ie_industrial_excel_workbook.xlsx" in names
+        assert "manifest.json" in names
+        assert "raw_csv/Production.csv" in names
+        assert "clean_csv/Production.csv" in names
+        manifest = json.loads(evidence_archive.read("manifest.json"))
+        assert manifest["source_sheets"] == ["Production", "Downtime"]
+        assert manifest["cleaned_sheets"] == ["Production", "Downtime"]
+
+
 def test_process_fast_rejects_unsupported_large_upload_before_parsing():
     raw = b"x" * (75 * 1024 * 1024 + 1)
     try:
