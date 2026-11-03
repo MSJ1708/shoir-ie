@@ -11,7 +11,7 @@ This is the Microsoft Office JavaScript (Office.js) task-pane client for Shoir-I
 5. Run read-only inspection without changing workbook cells, or explicitly approve creation of a separate results worksheet.
 6. In Excel desktop, prepare a separate copy of the current workbook containing the results worksheet, then select the download link that appears.
 
-The first selected row is treated as the header row for planning. This assumption appears in the plan.
+The first selected row is treated as the header row for planning. This assumption appears in the plan. If formulas are present, the plan warns that formulas are copied with Excel's relative-reference behavior and may depend on cells outside the selected range; users must review those formula results on the results worksheet.
 
 The current local operation allow-list is intentionally small:
 
