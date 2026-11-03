@@ -1341,7 +1341,7 @@ def _safe_csv_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
             return value
         # Excel and similar spreadsheet applications may interpret leading
         # formula markers after whitespace/control characters as formulas.
-        probe = value.lstrip(" \\t\\r\\n\\x00\\x0b\\x0c")
+        probe = value.lstrip(" \t\r\n\x00\x0b\x0c")
         if probe.startswith(("=", "+", "-", "@")):
             return "'" + value
         return value
