@@ -54,6 +54,22 @@ Office.onReady((info) => {
     status.textContent = message;
   }
 
+  // Keep the task-pane preview small. Full cell values stay local and are only
+  // copied when the user explicitly requests the JSON selection export.
+  function selectionSummary(payload) {
+    const selection = payload && payload.selection ? payload.selection : {};
+    return {
+      workbookTitle: String(payload && payload.workbookTitle || ""),
+      worksheet: String(payload && payload.sheetName || ""),
+      address: String(selection.address || ""),
+      rows: Number(selection.rows || 0),
+      columns: Number(selection.columns || 0),
+      formulaCells: Number(selection.formulaCellCount || 0),
+      transferMode: "LOCAL_ONLY",
+      note: "Cell values and formulas are not expanded in this preview. Use “Copy selection as JSON” only when you explicitly need the full selected range."
+    };
+  }
+
   function setPlan(plan) {
     latestPlan = plan;
     if (plan) {
@@ -145,10 +161,11 @@ Office.onReady((info) => {
   }
 
   async function inspect() {
+    setPlan(null);
     try {
       showStatus("Reading the selected range locally…");
       latestPayload = await selectedRangePayload();
-      preview.textContent = JSON.stringify(latestPayload, null, 2);
+      preview.textContent = JSON.stringify(selectionSummary(latestPayload), null, 2);
       showStatus(
         "Inspection complete. " +
         latestPayload.selection.rows + " row(s) × " +
@@ -165,12 +182,13 @@ Office.onReady((info) => {
   }
 
   async function buildPlan() {
+    setPlan(null);
     try {
       showStatus("Inspecting the selected range and preparing a deterministic plan…");
       latestPayload = await selectedRangePayload();
       const plan = window.ShoirExcelPlanner.buildPlan(instruction.value, latestPayload);
       setPlan(plan);
-      preview.textContent = JSON.stringify(latestPayload, null, 2);
+      preview.textContent = JSON.stringify(selectionSummary(latestPayload), null, 2);
       showStatus(
         plan.requiresWriteApproval
           ? "Plan ready. Review the operations and approve creation of a separate results worksheet."
@@ -576,12 +594,19 @@ Office.onReady((info) => {
 
   copyButton.addEventListener("click", async () => {
     try {
-      const payload = latestPayload || await inspect();
+      const payload = await inspect();
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
       showStatus("Selection copied to the clipboard. Nothing was transmitted to a server.");
     } catch (error) {
       showStatus("Could not copy the selection: " +
         (error && error.message ? error.message : "Clipboard access unavailable"));
+    }
+  });
+
+  instruction.addEventListener("input", () => {
+    if (latestPlan) {
+      setPlan(null);
+      showStatus("The instruction changed. Build and review a new plan before execution.");
     }
   });
 
