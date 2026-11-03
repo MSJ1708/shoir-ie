@@ -30,7 +30,7 @@
 
   function fingerprint(payload) {
     const selection = requireSelection(payload);
-    return JSON.stringify({
+    const serialized = JSON.stringify({
       workbookTitle: String(payload.workbookTitle || ""),
       sheetName: String(payload.sheetName || ""),
       worksheets: Array.isArray(payload.worksheets) ? payload.worksheets : [],
@@ -41,6 +41,19 @@
       formulas: selection.formulas,
       numberFormats: selection.numberFormats || []
     });
+
+    // Compact, deterministic client-side change detector. This is not a
+    // cryptographic digest, authentication token, or authorization control.
+    let hashA = 0x811c9dc5;
+    let hashB = 0x9e3779b9;
+    for (let index = 0; index < serialized.length; index += 1) {
+      const code = serialized.charCodeAt(index);
+      hashA = Math.imul(hashA ^ code, 0x01000193);
+      hashB = Math.imul(hashB ^ (code + index), 0x85ebca6b);
+    }
+    return "LOCAL-" +
+      (hashA >>> 0).toString(16).padStart(8, "0") +
+      (hashB >>> 0).toString(16).padStart(8, "0");
   }
 
   function numericColumnIndexes(selection) {
