@@ -676,13 +676,29 @@ def excel_intelligence_plan_fingerprint(plan: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def build_excel_intelligence_plan(prompt: str, sheet_name: str, df: pd.DataFrame) -> dict[str, Any]:
-    """Build a review-first workflow using Shoir-IE's existing Copilot planner."""
+def build_excel_intelligence_plan(
+    prompt: str,
+    sheet_name: str,
+    df: pd.DataFrame,
+    username: str | None = None,
+) -> dict[str, Any]:
+    """Build a review-first plan bound to the signed-in actor and workspace."""
     instruction = str(prompt or "").strip()
     if not instruction:
         raise ValueError("Enter an instruction before building a Copilot plan.")
     if not isinstance(df, pd.DataFrame) or df.empty:
         raise ValueError("Select a non-empty cleaned worksheet before planning an analysis.")
+
+    owner = str(username or st.session_state.get("current_user") or "").strip()
+    session_actor = str(st.session_state.get("current_user") or "").strip()
+    if (
+        st.session_state.get("authenticated") is not True
+        or owner.casefold() in {"", "guest", "guest visitor", "anonymous"}
+        or session_actor.casefold() != owner.casefold()
+    ):
+        raise PermissionError("An active authenticated Shoir-IE session is required to create a Copilot plan.")
+
+    workspace = str(st.session_state.get("workspace_id") or "default")
     from shoir_copilot_orchestrator import build_workflow_plan
 
     plan = build_workflow_plan(instruction, "Excel Intelligence", df.copy(deep=True))
@@ -691,6 +707,8 @@ def build_excel_intelligence_plan(prompt: str, sheet_name: str, df: pd.DataFrame
         # planned execution. Rebuilding even an identical request creates a
         # new plan and therefore requires a new approval.
         "plan_id": uuid.uuid4().hex,
+        "owner_username": owner.casefold(),
+        "workspace_id": workspace,
         "request_fingerprint": excel_intelligence_request_fingerprint(instruction, sheet_name, df),
         "plan_fingerprint": excel_intelligence_plan_fingerprint(plan),
         "prompt": instruction,
@@ -733,6 +751,12 @@ def execute_excel_intelligence_plan(
     if not supplied or supplied != expected:
         raise ValueError("The plan is stale. Rebuild it after changing the instruction, worksheet or data.")
 
+    workspace = str(st.session_state.get("workspace_id") or "default")
+    plan_owner = str(plan_envelope.get("owner_username") or "").strip()
+    plan_workspace = str(plan_envelope.get("workspace_id") or "")
+    if plan_owner.casefold() != actor.casefold() or plan_workspace != workspace:
+        raise PermissionError("This Copilot plan belongs to another user or workspace.")
+
     plan = plan_envelope.get("plan")
     if not isinstance(plan, Mapping) or plan.get("requires_approval") is not True:
         raise ValueError("A valid approval-required Copilot plan is required.")
@@ -754,7 +778,6 @@ def execute_excel_intelligence_plan(
     if not re.fullmatch(r"[a-f0-9]{32}", plan_id):
         raise ValueError("This plan has no valid one-use identifier. Build and review a new plan.")
 
-    workspace = str(st.session_state.get("workspace_id") or "default")
     registry_key = "excel_intelligence_copilot_execution_registry"
     registry = st.session_state.get(registry_key)
     if not isinstance(registry, dict):
@@ -1142,7 +1165,9 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 key="excel_intelligence_copilot_build_plan",
             ):
                 try:
-                    envelope = build_excel_intelligence_plan(copilot_prompt, selected, cleaned[selected])
+                    envelope = build_excel_intelligence_plan(
+                        copilot_prompt, selected, cleaned[selected], username=username
+                    )
                     approval_key = "excel_intelligence_copilot_approved_" + str(envelope["plan_id"])[:12]
                     # A rebuilt plan always needs a new, explicit approval even
                     # when the instruction and workbook contents are identical.
