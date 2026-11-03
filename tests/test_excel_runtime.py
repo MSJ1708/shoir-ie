@@ -18,6 +18,21 @@ def test_ooxml_preflight_rejects_traversal_and_resource_exhaustion(monkeypatch):
     with pytest.raises(ValueError, match="unsafe package path"):
         runtime._validate_ooxml_package(traversal.getvalue(), "unsafe.xlsx")
 
+    windows_path = io.BytesIO()
+    with zipfile.ZipFile(windows_path, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("C:/outside.xml", b"not allowed")
+    with pytest.raises(ValueError, match="unsafe package path"):
+        runtime._validate_ooxml_package(windows_path.getvalue(), "windows-path.xlsx")
+
+    symlink = io.BytesIO()
+    link_info = zipfile.ZipInfo("xl/linked.xml")
+    link_info.create_system = 3
+    link_info.external_attr = (0o120777 << 16)
+    with zipfile.ZipFile(symlink, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr(link_info, "../outside.xml")
+    with pytest.raises(ValueError, match="Symbolic links"):
+        runtime._validate_ooxml_package(symlink.getvalue(), "symlink.xlsx")
+
     compressed = io.BytesIO()
     with zipfile.ZipFile(compressed, "w", compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr("xl/workbook.xml", b"A" * 4096)
