@@ -248,18 +248,9 @@ Office.onReady((info) => {
         // assigned to and remains unchanged by all following operations.
         resultSheet = worksheets.add(resultSheetName);
         outputRange = resultSheet.getRangeByIndexes(0, 0, range.rowCount, range.columnCount);
-        outputRange.values = range.values;
-        outputRange.numberFormat = range.numberFormat;
-
-        const formulas = range.formulas || [];
-        for (let rowIndex = 0; rowIndex < formulas.length; rowIndex += 1) {
-          for (let columnIndex = 0; columnIndex < formulas[rowIndex].length; columnIndex += 1) {
-            const formula = formulas[rowIndex][columnIndex];
-            if (typeof formula === "string" && formula.startsWith("=")) {
-              outputRange.getCell(rowIndex, columnIndex).formulas = [[formula]];
-            }
-          }
-        }
+        // Office.js copyFrom applies Excel's normal relative-reference adjustment
+        // while preserving cell values, formulas and formatting on the new sheet.
+        outputRange.copyFrom(range, Excel.RangeCopyType.all);
       }
 
       const completed = [];
