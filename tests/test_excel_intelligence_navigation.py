@@ -88,6 +88,10 @@ def test_workbench_and_renderer_are_explicitly_wired_to_the_existing_safe_engine
     assert "MAX_RENDER_PREVIEW_ROWS = 2_000" in runtime
     assert "def _safe_excel_display_frame(" in runtime
     assert "pd.array(" in runtime
+    assert "MAX_RENDER_JSON_CHARS = 250_000" in runtime
+    assert "def _render_excel_json(" in runtime
+    assert "MAX_RENDER_CHART_POINTS = 20_000" in runtime
+    assert "def _render_excel_plotly_figure(" in runtime
     assert "def scan_source_formulas(" in runtime
     assert "Inspect source formulas" in runtime
     assert "MAX_FORMULA_SCAN_CELLS" in runtime
