@@ -165,6 +165,10 @@ Office.onReady((info) => {
     const result = await Excel.run(async (context) => {
       const range = context.workbook.getSelectedRange();
       const worksheet = range.worksheet;
+      const workbookProperties = context.workbook.properties;
+      const worksheets = context.workbook.worksheets;
+      workbookProperties.load("title");
+      worksheets.load("items/name");
       range.load(["address", "rowIndex", "columnIndex", "rowCount", "columnCount"]);
       worksheet.load("name");
       await context.sync();
@@ -178,8 +182,8 @@ Office.onReady((info) => {
       await context.sync();
 
       const currentPayload = {
-        workbookTitle: latestPayload ? latestPayload.workbookTitle : "",
-        worksheets: latestPayload ? latestPayload.worksheets : [],
+        workbookTitle: workbookProperties.title || "",
+        worksheets: worksheets.items.map(sheet => sheet.name),
         sheetName: worksheet.name || "",
         selection: {
           address: range.address,
