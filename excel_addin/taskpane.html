@@ -14,6 +14,8 @@
     button{width:100%;box-sizing:border-box;padding:10px 12px;margin-top:8px;border-radius:9px;border:1px solid #cbd5e1;background:#fff;font-weight:700;cursor:pointer}
     button.primary{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
     button:disabled{opacity:.5;cursor:not-allowed}
+    .download-link{display:block;margin-top:8px;padding:11px;border:1px solid #0f766e;border-radius:9px;color:#0f766e;text-align:center;font-size:13px;font-weight:700;text-decoration:none}
+    .download-link:hover{text-decoration:underline}
     #status{margin-top:13px;padding:11px;background:#f1f5f9;border-radius:9px;font-size:12px;line-height:1.5}
     .notice{padding:10px;border-left:3px solid #0f766e;background:#f0fdfa;border-radius:5px;font-size:12px;line-height:1.5;margin:10px 0}
     .warning{padding:10px;border-left:3px solid #b45309;background:#fffbeb;border-radius:5px;font-size:12px;line-height:1.5;margin:10px 0}
@@ -51,7 +53,8 @@
     <span>I reviewed the operations and approve modifying the active workbook. I have saved a backup or deliberately chose this workbook for editing.</span>
   </label>
   <button id="runPlan" class="primary" disabled>Run read-only inspection</button>
-  <button id="downloadWorkbook" disabled>Download results workbook copy (Excel desktop)</button>
+  <button id="downloadWorkbook" disabled>Prepare workbook copy download (Excel desktop)</button>
+  <a id="downloadReadyLink" class="download-link" hidden>Download prepared workbook copy</a>
   <p class="notice">Workbook-file download is available only when the current Excel host supports compressed OOXML export. Excel for the web does not expose this Office.js export API; the results worksheet remains available in the open workbook.</p>
 
   <div id="status" role="status" aria-live="polite">Ready. No workbook data has been transmitted or modified.</div>
