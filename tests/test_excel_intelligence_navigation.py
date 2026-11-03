@@ -181,8 +181,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert 'range.load(["values", "formulas", "numberFormat"])' in taskpane
     assert "ShoirExcelPlanner.buildPlan" in taskpane
     assert "requiresWriteApproval" in taskpane
-    assert "USER_APPROVED_LOCAL_EDIT" in taskpane
-    assert "worksheet.charts.add" in taskpane
+    assert "USER_APPROVED_RESULTS_SHEET" in taskpane
+    assert "resultSheet.charts.add" in taskpane
     assert "AVERAGE" in taskpane and "SUM" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
