@@ -51,6 +51,8 @@
     <span>I reviewed the operations and approve modifying the active workbook. I have saved a backup or deliberately chose this workbook for editing.</span>
   </label>
   <button id="runPlan" class="primary" disabled>Run read-only inspection</button>
+  <button id="downloadWorkbook" disabled>Download results workbook copy (Excel desktop)</button>
+  <p class="notice">Workbook-file download is available only when the current Excel host supports compressed OOXML export. Excel for the web does not expose this Office.js export API; the results worksheet remains available in the open workbook.</p>
 
   <div id="status" role="status" aria-live="polite">Ready. No workbook data has been transmitted or modified.</div>
   <h2>Inspection / execution evidence</h2>
