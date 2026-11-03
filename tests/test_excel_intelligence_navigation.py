@@ -100,4 +100,6 @@ def test_office_addin_does_not_post_workbook_data_without_authenticated_api():
     assert "10,000 cells" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
+    manifest = (ROOT / "excel_addin" / "manifest.xml").read_text(encoding="utf-8")
+    assert "<Permissions>ReadDocument</Permissions>" in manifest
     assert "does not transmit workbook contents to a server" in readme
