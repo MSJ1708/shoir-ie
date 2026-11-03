@@ -45,13 +45,65 @@ def bounded_excel_preview(frame: pd.DataFrame, max_rows: int = MAX_RENDER_PREVIE
     return frame.iloc[:rows, :columns]
 
 
+def _excel_display_scalar(value: Any, max_text_length: int = 2000) -> Any:
+    """Convert non-scalar/mixed object cells to Arrow-safe display-only text."""
+    if value is None:
+        return pd.NA
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, (bool, np.bool_)) and bool(missing):
+            return pd.NA
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, bytes):
+        rendered = value.decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        rendered = value
+    elif isinstance(value, (bool, int, float, np.integer, np.floating, np.bool_)):
+        rendered = str(value)
+    else:
+        try:
+            rendered = json.dumps(value, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            rendered = str(value)
+
+    rendered = str(rendered)
+    if len(rendered) > max_text_length:
+        rendered = rendered[: max_text_length - 1] + "…"
+    return rendered
+
+
+def _safe_excel_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Build a display-only frame with unique string headers and safe object cells."""
+    display = frame.copy(deep=True).reset_index(drop=True)
+    names: list[str] = []
+    seen: dict[str, int] = {}
+    for original in display.columns:
+        base = str(original)
+        seen[base] = seen.get(base, 0) + 1
+        names.append(base if seen[base] == 1 else f"{base} ({seen[base]})")
+    display.columns = names
+
+    # Streamlit's Arrow serializer can reject mixed Python objects, nested cells
+    # and custom values. Convert only object-typed cells in this display copy;
+    # analytical/source DataFrames remain untouched.
+    for position in range(display.shape[1]):
+        if pd.api.types.is_object_dtype(display.iloc[:, position].dtype):
+            display.iloc[:, position] = pd.array(
+                [_excel_display_scalar(value) for value in display.iloc[:, position].tolist()],
+                dtype="string",
+            )
+    return display
+
+
 def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
-    """Render a bounded table and degrade to text if Streamlit's table renderer fails."""
+    """Render a bounded Arrow-safe table and degrade to text if rendering fails."""
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         st.info(f"{label} is empty or not available yet.")
         return
 
-    preview = bounded_excel_preview(frame)
+    preview = _safe_excel_display_frame(bounded_excel_preview(frame))
     try:
         st.dataframe(preview, use_container_width=True, hide_index=True)
     except Exception as exc:
@@ -768,7 +820,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
 
     with tabs[0]:
         st.markdown("### Workbook loaded")
-        st.dataframe(
+        _render_excel_dataframe(
             pd.DataFrame(
                 [
                     {
@@ -781,13 +833,12 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                     for name, frame in cleaned.items()
                 ]
             ),
-            use_container_width=True,
-            hide_index=True,
+            "Workbook overview",
         )
         st.markdown("### Before vs after")
-        st.dataframe(pd.DataFrame(result.get("before_after", [])), use_container_width=True, hide_index=True)
+        _render_excel_dataframe(pd.DataFrame(result.get("before_after", [])), "Before and after")
         st.markdown("### Source provenance")
-        st.dataframe(pd.DataFrame(_source_metadata(result)), use_container_width=True, hide_index=True)
+        _render_excel_dataframe(pd.DataFrame(_source_metadata(result)), "Source provenance")
         st.info(
             "The upload path is intentionally lazy: the application becomes usable as soon as the data is cleaned. "
             "Workbook packaging is separate so a large export cannot prevent the core workspace from loading."
