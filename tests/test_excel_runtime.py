@@ -672,7 +672,8 @@ def test_excel_json_renderer_falls_back_when_interactive_json_display_fails(monk
 
     runtime._render_excel_json({"source": "synthetic", "rows": 12}, "Evidence manifest")
 
-    assert warnings and "interactive JSON tree" in warnings[0]
+    assert warnings and "displayed interactively" in warnings[0]
+    assert "simulated JSON tree rendering issue" not in warnings[0]
     assert code_blocks and '"rows": 12' in code_blocks[0]
 
 
