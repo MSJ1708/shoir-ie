@@ -90,7 +90,7 @@ def _safe_excel_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     # analytical/source DataFrames remain untouched.
     for position in range(display.shape[1]):
         if pd.api.types.is_object_dtype(display.iloc[:, position].dtype):
-            display.iloc[:, position] = pd.array(
+            display[names[position]] = pd.array(
                 [_excel_display_scalar(value) for value in display.iloc[:, position].tolist()],
                 dtype="string",
             )
