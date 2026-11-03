@@ -101,3 +101,14 @@ test("local plan fingerprint is compact and does not retain source cell content"
   assert.match(plan.dataFingerprint, /^LOCAL-[0-9a-f]{16}$/);
   assert.equal(plan.dataFingerprint.includes("Confidential-Order-42"), false);
 });
+
+test("does not classify a text-returning formula as a numeric measure", () => {
+  const source = payload(
+    [["Line", "Status"], ["A", "Ready"]],
+    [[null, null], [null, '=IF(A2="A","Ready","Other")']]
+  );
+  const profile = planner.inspectSelection(source);
+  assert.deepEqual(profile.numericColumns, []);
+  const plan = planner.buildPlan("Calculate total status", source);
+  assert.equal(plan.operations.some(operation => operation.type === "add_summary_formulas"), false);
+});
