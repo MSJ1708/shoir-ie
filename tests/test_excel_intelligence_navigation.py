@@ -186,6 +186,7 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "USER_APPROVED_RESULTS_SHEET" in taskpane
     assert "copyFrom(range, Excel.RangeCopyType.all)" in taskpane
     assert "sourceWorksheetPreserved: true" in taskpane
+    assert "formulaCells: profile.formulaCells" in taskpane
     assert "resultSheet.charts.add" in taskpane
     assert "AVERAGE" in taskpane and "SUM" in taskpane
     assert "formulaLikeTextSkipped" in taskpane
