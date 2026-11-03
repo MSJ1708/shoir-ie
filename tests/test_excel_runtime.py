@@ -97,6 +97,38 @@ def test_ooxml_fidelity_scan_flags_formula_chart_named_range_and_validation_risk
     assert "original upload remains unchanged" in report["Fidelity warning"]
 
 
+def test_ooxml_fidelity_scan_detects_tables_filters_merges_and_hidden_bands():
+    from shoir_excel_foundation import fast_workbook_fidelity_report
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        pd.DataFrame(
+            {"Line": ["A", "B"], "Output": [10, 12], "Cost": [5.0, 6.0]}
+        ).to_excel(writer, index=False, sheet_name="Data")
+        worksheet = writer.sheets["Data"]
+        worksheet.add_table(
+            0, 0, 2, 2,
+            {"name": "ProductionTable", "columns": [
+                {"header": "Line"}, {"header": "Output"}, {"header": "Cost"}
+            ]},
+        )
+        worksheet.autofilter(0, 0, 2, 2)
+        worksheet.merge_range("E1:F1", "Merged title")
+        worksheet.set_row(1, None, None, {"hidden": True})
+        worksheet.set_column("C:C", None, None, {"hidden": True})
+
+    report = fast_workbook_fidelity_report(buf.getvalue(), "fidelity-matrix.xlsx")
+
+    assert report["Tables present"] is True
+    assert report["Auto filters present"] is True
+    assert report["Merged cells present"] is True
+    assert report["Hidden rows present"] is True
+    assert report["Hidden columns present"] is True
+    assert report["Requires acknowledgement"] is True
+    for feature in ("Source Excel tables", "filters", "Merged cells", "Hidden rows", "Hidden columns"):
+        assert any(feature in item for item in report["Unsupported features"])
+
+
 def test_source_formula_scan_is_bounded_and_exports_formulas_as_inert_evidence(monkeypatch):
     import pytest
     from openpyxl import load_workbook
