@@ -6,6 +6,7 @@ import {
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
+  sessionEntitlementFields,
 } from "./security.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -121,6 +122,59 @@ Deno.test("workspace JSON rejects malformed, non-object, and oversized state bef
     MAX_WORKSPACE_STATE_BYTES > 8,
     "Default workspace limit should exceed the small test limit.",
   );
+});
+
+Deno.test("session entitlement returns only safe live account fields", () => {
+  const result = sessionEntitlementFields({
+    username: "synthetic-enterprise-user",
+    tier: "Enterprise Tier",
+    active: true,
+    subscription_expires_at: "2099-01-01T00:00:00Z",
+    password_hash: "must-not-leak",
+    email: "private@example.invalid",
+    affiliate_code: "private-code",
+  });
+
+  assert(result.username === "synthetic-enterprise-user", "Username missing.");
+  assert(result.tier === "Enterprise Tier", "Tier missing.");
+  assert(result.active === true, "Active state missing.");
+  assert(
+    result.expires_at === "2099-01-01T00:00:00Z",
+    "Subscription expiry missing.",
+  );
+  assert(
+    !("password_hash" in result) && !("email" in result) &&
+      !("affiliate_code" in result),
+    "Private account fields must never be returned.",
+  );
+});
+
+Deno.test("session entitlement fails closed on incomplete, inactive or expired account data", () => {
+  const canonical = {
+    username: "synthetic-enterprise-user",
+    tier: "Enterprise Tier",
+    active: true,
+    subscription_expires_at: "2099-01-01T00:00:00Z",
+  };
+  const invalid = [
+    { ...canonical, username: "" },
+    { ...canonical, tier: "" },
+    { ...canonical, active: false },
+    { ...canonical, subscription_expires_at: "" },
+    { ...canonical, subscription_expires_at: "not-a-date" },
+    { ...canonical, subscription_expires_at: "2000-01-01T00:00:00Z" },
+  ];
+
+  for (const account of invalid) {
+    try {
+      sessionEntitlementFields(account);
+    } catch (error) {
+      assert(error instanceof PublicRequestError, "Expected a public request error.");
+      assert(error.status === 403, "Invalid entitlements must be denied.");
+      continue;
+    }
+    throw new Error("Invalid account entitlement should not be accepted.");
+  }
 });
 
 Deno.test("public error mapping does not expose internal infrastructure details", () => {
