@@ -369,6 +369,6 @@ def test_excel_display_frame_sanitizes_mixed_objects_and_duplicate_headers_witho
     assert display.iloc[0, 0] == "1"
     assert display.iloc[1, 0] == "two"
     assert display.iloc[1, 1] == '{"nested": [1, 2]}'
-    assert display.iloc[2, 0] is pd.NA
+    assert pd.isna(display.iloc[2, 0])
     assert display.iloc[2, 1] == "binary"
     pd.testing.assert_frame_equal(source, original)
