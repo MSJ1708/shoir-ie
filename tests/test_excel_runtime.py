@@ -28,6 +28,53 @@ def test_process_fast_loads_workbook_without_building_exports():
     assert result["signature"]
 
 
+def test_ooxml_fidelity_scan_flags_formula_chart_named_range_and_validation_risks():
+    from shoir_excel_foundation import fast_workbook_fidelity_report
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        pd.DataFrame({"Quantity": [2], "Unit Price": [5.0]}).to_excel(
+            writer, index=False, sheet_name="Data"
+        )
+        worksheet = writer.sheets["Data"]
+        worksheet.write_formula("C2", "=A2*B2")
+        worksheet.data_validation("A2:A20", {"validate": "integer", "criteria": ">", "value": 0})
+        chart = writer.book.add_chart({"type": "column"})
+        chart.add_series({"values": "=Data!$B$2:$B$2"})
+        worksheet.insert_chart("E2", chart)
+        writer.book.define_name("QuantityInput", "=Data!$A$2")
+
+    report = fast_workbook_fidelity_report(buf.getvalue(), "source-with-features.xlsx")
+
+    assert report["Formula cells"] == 1
+    assert report["Charts present"] is True
+    assert report["Named ranges present"] is True
+    assert report["Data validations present"] is True
+    assert report["Requires acknowledgement"] is True
+    assert any("Source formulas" in item for item in report["Unsupported features"])
+    assert "original source remains unchanged" in report["Fidelity warning"]
+
+
+def test_prepare_exports_requires_acknowledgement_for_unsupported_source_features():
+    import pytest
+
+    from shoir_excel_runtime import prepare_exports
+
+    result = {
+        "cleaned_sheets": {"Data": pd.DataFrame({"Value": [1, 2]})},
+        "fidelity_report": {
+            "Requires acknowledgement": True,
+            "Unsupported features": ["Source formulas"],
+        },
+    }
+    with pytest.raises(PermissionError, match="acknowledge"):
+        prepare_exports(result)
+
+    # Explicit acknowledgement permits creation of a separate data-focused copy.
+    prepare_exports(result, acknowledged_fidelity_risk=True)
+    assert isinstance(result["xlsx"], bytes) and result["xlsx"]
+
+
 def test_multi_sheet_export_is_a_valid_separate_workbook_with_raw_archives():
     import hashlib
     import json
