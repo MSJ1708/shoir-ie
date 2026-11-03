@@ -55,7 +55,7 @@
   <button id="runPlan" class="primary" disabled>Run read-only inspection</button>
   <button id="downloadWorkbook" disabled>Prepare workbook copy download (Excel desktop)</button>
   <a id="downloadReadyLink" class="download-link" hidden>Download prepared workbook copy</a>
-  <p class="notice">Workbook-file download is available only when the current Excel host supports compressed OOXML export. Excel for the web does not expose this Office.js export API; the results worksheet remains available in the open workbook.</p>
+  <p class="notice">Workbook-file download is shown only when the current Excel host reports support for compressed OOXML export. Host behaviour must still be validated in the target Excel desktop and web clients; the results worksheet remains available in the open workbook if file export is unavailable.</p>
 
   <div id="status" role="status" aria-live="polite">Ready. No workbook data has been transmitted or modified.</div>
   <h2>Inspection / execution evidence</h2>
