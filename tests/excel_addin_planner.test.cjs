@@ -82,3 +82,15 @@ test("unsupported destructive tasks are warned about and never become executable
   assert.equal(plan.operations.length, 1);
   assert.ok(plan.warnings.some(warning => warning.includes("does not support")));
 });
+
+test("text trimming flags values that would become executable formula-like input", () => {
+  const source = payload([
+    ["Reference", "Comment"],
+    ["A-01", "  =HYPERLINK(\"https://invalid.example\",\"open\")"],
+    ["A-02", "  ordinary text  "]
+  ]);
+  const profile = planner.inspectSelection(source);
+  assert.equal(profile.unsafeTrimCells, 1);
+  const plan = planner.buildPlan("Trim extra spaces", source);
+  assert.ok(plan.warnings.some(warning => warning.includes("prevent formula injection")));
+});
