@@ -238,7 +238,6 @@ def process_fast(raw: bytes, filename: str) -> dict[str, Any]:
     return {
         "signature": signature,
         "filename": str(filename),
-        "raw": raw,
         "fidelity_report": fast_workbook_fidelity_report(raw, filename),
         "formula_inventory": [],
         "formula_counts_by_sheet": {},
@@ -279,15 +278,18 @@ def process_fast(raw: bytes, filename: str) -> dict[str, Any]:
     }
 
 
-def scan_source_formulas(result: dict[str, Any]) -> dict[str, Any]:
+def scan_source_formulas(result: dict[str, Any], raw_bytes: bytes | bytearray) -> dict[str, Any]:
     """Collect bounded source formulas as inert evidence; never execute them."""
-    if not isinstance(result, dict) or not isinstance(result.get("raw"), (bytes, bytearray)):
-        raise ValueError("A processed workbook with its original uploaded bytes is required.")
+    if not isinstance(result, dict) or not isinstance(raw_bytes, (bytes, bytearray)):
+        raise ValueError("A processed workbook and its current uploaded bytes are required.")
     filename = str(result.get("filename") or "")
     if not filename.casefold().endswith((".xlsx", ".xlsm")):
         raise ValueError("Source formula inspection is available for XLSX and XLSM workbooks.")
 
-    raw = bytes(result["raw"])
+    raw = bytes(raw_bytes)
+    expected_signature = str(result.get("signature") or "")
+    if not expected_signature or hashlib.sha256(raw).hexdigest() != expected_signature:
+        raise ValueError("The uploaded workbook changed. Re-import it before scanning source formulas.")
     _validate_ooxml_package(raw, filename)
 
     try:
