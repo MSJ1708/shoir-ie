@@ -10,6 +10,11 @@
   <Description DefaultValue="Inspect a bounded Excel selection locally with Shoir-IE."/>
   <IconUrl DefaultValue="https://YOUR-SHOIR-IE-HOST/excel_addin/icon-32.png"/>
   <SupportUrl DefaultValue="https://github.com/MSJ1708/shoir-ie"/>
+  <Requirements>
+    <Sets DefaultMinVersion="1.7">
+      <Set Name="ExcelApi"/>
+    </Sets>
+  </Requirements>
   <Hosts><Host Name="Workbook"/></Hosts>
   <DefaultSettings>
     <SourceLocation DefaultValue="https://YOUR-SHOIR-IE-HOST/excel_addin/taskpane.html"/>
