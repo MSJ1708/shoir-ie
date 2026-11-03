@@ -103,7 +103,12 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
         st.info(f"{label} is empty or not available yet.")
         return
 
-    preview = _safe_excel_display_frame(bounded_excel_preview(frame))
+    bounded = bounded_excel_preview(frame)
+    has_object_cells = any(
+        pd.api.types.is_object_dtype(bounded.dtypes.iloc[position])
+        for position in range(bounded.shape[1])
+    )
+    preview = _safe_excel_display_frame(bounded)
     try:
         st.dataframe(preview, use_container_width=True, hide_index=True)
     except Exception as exc:
@@ -115,6 +120,12 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
             st.text(preview.iloc[:50, :20].to_string(index=False, max_rows=50, max_cols=20))
         except Exception:
             st.error(f"{label} could not be rendered. The underlying data remains available for export.")
+
+    if has_object_cells:
+        st.caption(
+            "Mixed/nested values are shown as text and text longer than 2,000 characters is shortened "
+            "in this display only. The underlying data and exports are unchanged."
+        )
 
     if len(frame) > len(preview) or len(frame.columns) > len(preview.columns):
         st.caption(
