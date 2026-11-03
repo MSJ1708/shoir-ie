@@ -12,9 +12,11 @@ semantics and governance rules remain centralized.
 from __future__ import annotations
 
 import hashlib
+import json
 import io
 import math
 import re
+import zipfile
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -289,7 +291,98 @@ def _activate_shared_dataset(df: pd.DataFrame, filename: str, sheet: str, signat
     st.session_state["shoir_active_workbook_sheet"] = str(sheet)
 
 
-def render_excel_intelligence_safe(tier: str, username: str) -> None:
+def excel_intelligence_request_fingerprint(prompt: str, sheet_name: str, df: pd.DataFrame) -> str:
+    """Bind a proposed Copilot plan to the exact prompt, sheet and selected data."""
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Excel Intelligence requires a pandas DataFrame.")
+    payload = {
+        "prompt": str(prompt or "").strip(),
+        "sheet": str(sheet_name or ""),
+        "data": df.to_json(orient="split", date_format="iso", default_handler=str),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_excel_intelligence_plan(prompt: str, sheet_name: str, df: pd.DataFrame) -> dict[str, Any]:
+    """Build a review-first workflow using Shoir-IE's existing Copilot planner."""
+    instruction = str(prompt or "").strip()
+    if not instruction:
+        raise ValueError("Enter an instruction before building a Copilot plan.")
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        raise ValueError("Select a non-empty cleaned worksheet before planning an analysis.")
+    from shoir_copilot_orchestrator import build_workflow_plan
+
+    plan = build_workflow_plan(instruction, "Excel Intelligence", df.copy(deep=True))
+    return {
+        "request_fingerprint": excel_intelligence_request_fingerprint(instruction, sheet_name, df),
+        "prompt": instruction,
+        "sheet_name": str(sheet_name),
+        "plan": plan,
+        "planner": "Shoir-IE deterministic Copilot orchestrator",
+        "external_model_used": False,
+    }
+
+
+def execute_excel_intelligence_plan(
+    prompt: str,
+    sheet_name: str,
+    df: pd.DataFrame,
+    plan_envelope: Mapping[str, Any],
+    username: str,
+    tier: str,
+    approved: bool,
+) -> dict[str, Any]:
+    """Execute only a current, approved Copilot plan against a copy of the data."""
+    if approved is not True:
+        raise PermissionError("Explicit approval is required before Copilot execution.")
+
+    actor = str(username or "").strip()
+    session_actor = str(st.session_state.get("current_user") or "").strip()
+    if (
+        st.session_state.get("authenticated") is not True
+        or actor.casefold() in {"", "guest", "guest visitor", "anonymous"}
+        or session_actor.casefold() != actor.casefold()
+    ):
+        raise PermissionError("An active authenticated Shoir-IE session is required.")
+
+    from shoir_excel_entitlements import excel_intelligence_allowed
+
+    if not excel_intelligence_allowed(tier):
+        raise PermissionError("The current subscription does not include Excel Intelligence Copilot.")
+
+    expected = excel_intelligence_request_fingerprint(prompt, sheet_name, df)
+    supplied = str(plan_envelope.get("request_fingerprint") or "")
+    if not supplied or supplied != expected:
+        raise ValueError("The plan is stale. Rebuild it after changing the instruction, worksheet or data.")
+
+    plan = plan_envelope.get("plan")
+    if not isinstance(plan, Mapping) or plan.get("requires_approval") is not True:
+        raise ValueError("A valid approval-required Copilot plan is required.")
+
+    # The orchestrator receives an isolated copy. The source/cleaned worksheet is
+    # never modified by this analysis route.
+    source_snapshot = df.copy(deep=True)
+    from shoir_copilot_orchestrator import run_orchestration
+
+    run = run_orchestration(
+        str(prompt).strip(),
+        "Excel Intelligence",
+        df.copy(deep=True),
+        context={"actor": actor, "username": actor, "workspace": str(st.session_state.get("workspace_id") or "default")},
+    )
+    if not df.equals(source_snapshot):
+        raise RuntimeError("Copilot unexpectedly modified the source dataframe; execution was stopped.")
+    if not isinstance(run, dict) or not isinstance(run.get("export"), (bytes, bytearray)):
+        raise RuntimeError("Copilot did not produce a valid evidence export; no success state was recorded.")
+    run["source_sheet"] = str(sheet_name)
+    run["source_data_fingerprint"] = expected
+    run["planner"] = "Shoir-IE deterministic Copilot orchestrator"
+    run["external_model_used"] = False
+    return run
+
+
+def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: bool = False) -> None:
     from shoir_tier_capabilities import tier_allows
 
     if not tier_allows(tier, "Starter"):
@@ -380,7 +473,11 @@ def render_excel_intelligence_safe(tier: str, username: str) -> None:
     m4.metric("Review items", f"{len(result.get('review_register', [])):,}")
     m5.metric("High priority", high_reviews)
 
-    tabs = st.tabs(["Overview", "Clean Data", "Quality Center", "Field Intelligence", "Export"])
+    tab_names = ["Overview", "Clean Data", "Quality Center", "Field Intelligence"]
+    if enable_copilot:
+        tab_names.append("Copilot")
+    tab_names.append("Export")
+    tabs = st.tabs(tab_names)
 
     with tabs[0]:
         st.markdown("### Workbook loaded")
@@ -433,7 +530,134 @@ def render_excel_intelligence_safe(tier: str, username: str) -> None:
         field_frame = pd.DataFrame(result.get("field_intelligence", []))
         st.dataframe(field_frame, use_container_width=True, hide_index=True)
 
-    with tabs[4]:
+    if enable_copilot:
+        with tabs[4]:
+            st.markdown("### Excel Copilot")
+            st.caption(
+                "Describe an analysis in your own words. Shoir-IE inspects the selected cleaned sheet, "
+                "proposes a reviewable plan, and runs supported deterministic analysis only after approval."
+            )
+            st.info(
+                "This route uses Shoir-IE's deterministic Copilot orchestrator. It does not call an external "
+                "LLM, send workbook contents to an external AI provider, overwrite the source workbook, or "
+                "silently execute workbook edits. Unsupported requests are reported as limitations rather "
+                "than treated as completed operations."
+            )
+            copilot_prompt = st.text_area(
+                "What would you like Shoir-IE to analyse?",
+                key="excel_intelligence_copilot_prompt",
+                height=110,
+                placeholder="Example: analyse throughput and cost, identify trends, compare scenarios and prepare an evidence workbook.",
+            )
+            if st.button(
+                "Build execution plan",
+                type="primary",
+                use_container_width=True,
+                key="excel_intelligence_copilot_build_plan",
+            ):
+                try:
+                    envelope = build_excel_intelligence_plan(copilot_prompt, selected, cleaned[selected])
+                    st.session_state["excel_intelligence_copilot_plan"] = envelope
+                    st.session_state.pop("excel_intelligence_copilot_run", None)
+                    st.session_state.pop("excel_intelligence_copilot_run_fingerprint", None)
+                    st.success("A reviewable plan has been prepared. No analysis has run yet.")
+                except Exception as exc:
+                    st.error(f"Could not prepare the Copilot plan: {type(exc).__name__}: {exc}")
+
+            envelope = st.session_state.get("excel_intelligence_copilot_plan")
+            current_fingerprint = (
+                excel_intelligence_request_fingerprint(copilot_prompt, selected, cleaned[selected])
+                if str(copilot_prompt or "").strip()
+                else ""
+            )
+            if isinstance(envelope, dict):
+                if current_fingerprint != str(envelope.get("request_fingerprint") or ""):
+                    st.warning("This plan is stale because the instruction, worksheet or data changed. Build a new plan before execution.")
+                else:
+                    plan = envelope.get("plan") or {}
+                    st.markdown("#### Proposed plan")
+                    st.caption(
+                        f"Planner: {envelope.get('planner')} · Sheet: {envelope.get('sheet_name')} · "
+                        f"Approval required: {'Yes' if plan.get('requires_approval') else 'No'}"
+                    )
+                    if plan.get("intent"):
+                        st.write(f"**Detected intent:** {plan['intent'].get('label', 'Engineering analysis')}")
+                        st.caption(str(plan["intent"].get("reason") or ""))
+                    if plan.get("method"):
+                        st.write(f"**Selected method:** {plan['method'].get('method', 'Not specified')}")
+                    st.dataframe(pd.DataFrame(plan.get("steps") or []), use_container_width=True, hide_index=True)
+                    st.caption("Execution is read-only against a copy of the selected cleaned sheet. The source workbook remains unchanged.")
+                    approval_key = "excel_intelligence_copilot_approved_" + current_fingerprint[:12]
+                    approved = st.checkbox(
+                        "I have reviewed this plan and approve running the analysis.",
+                        key=approval_key,
+                    )
+                    if st.button(
+                        "Approve and run analysis",
+                        type="primary",
+                        disabled=not approved,
+                        use_container_width=True,
+                        key="excel_intelligence_copilot_execute",
+                    ):
+                        try:
+                            run = execute_excel_intelligence_plan(
+                                copilot_prompt,
+                                selected,
+                                cleaned[selected],
+                                envelope,
+                                username,
+                                tier,
+                                approved=approved,
+                            )
+                            st.session_state["excel_intelligence_copilot_run"] = run
+                            st.session_state["excel_intelligence_copilot_run_fingerprint"] = current_fingerprint
+                            st.success("The approved analysis completed and an evidence bundle was generated.")
+                        except Exception as exc:
+                            st.error(f"Copilot execution did not complete: {type(exc).__name__}: {exc}")
+
+            run = st.session_state.get("excel_intelligence_copilot_run")
+            run_fingerprint = st.session_state.get("excel_intelligence_copilot_run_fingerprint")
+            if isinstance(run, dict) and run_fingerprint == current_fingerprint and current_fingerprint:
+                st.markdown("#### Analysis result")
+                inspection = run.get("inspection") or {}
+                metrics = run.get("analysis_meta") or {}
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Rows inspected", f"{int(inspection.get('rows', 0)):,}")
+                m2.metric("Missing cells", f"{int(inspection.get('missing_cells', 0)):,}")
+                m3.metric("Analysis type", str(metrics.get("type") or "—").replace("_", " ").title())
+                result_df = run.get("result")
+                if isinstance(result_df, pd.DataFrame):
+                    st.dataframe(result_df.head(2000), use_container_width=True, hide_index=True)
+                figure = run.get("figure")
+                if figure is not None:
+                    st.plotly_chart(figure, use_container_width=True)
+                st.markdown("**Explanation**")
+                st.write(str(run.get("explanation") or "No explanation was generated."))
+                with st.expander("Evidence manifest and analysis assumptions"):
+                    st.json(run.get("evidence_manifest") or {})
+                    st.json(metrics)
+                try:
+                    with zipfile.ZipFile(io.BytesIO(bytes(run["export"])), "r") as archive:
+                        workbook_bytes = archive.read("copilot_analysis.xlsx")
+                    st.download_button(
+                        "Download Copilot analysis workbook",
+                        workbook_bytes,
+                        file_name=f"shoir_ie_excel_copilot_{str(run.get('run_id') or 'run').lower()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="excel_intelligence_copilot_download_xlsx",
+                    )
+                    st.download_button(
+                        "Download complete Copilot evidence package",
+                        bytes(run["export"]),
+                        file_name=f"shoir_ie_excel_copilot_{str(run.get('run_id') or 'run').lower()}.zip",
+                        mime="application/zip",
+                        key="excel_intelligence_copilot_download_bundle",
+                    )
+                except Exception as exc:
+                    st.error(f"The Copilot evidence package could not be reopened safely: {type(exc).__name__}: {exc}")
+
+    export_tab_index = 5 if enable_copilot else 4
+    with tabs[export_tab_index]:
         st.markdown("### Download center")
         if result.get("xlsx") is None:
             st.info(
