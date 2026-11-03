@@ -51,7 +51,7 @@ The repository CI validates manifest XML, JavaScript syntax and deterministic pl
 - Establish a dedicated, short-lived Shoir-IE add-in authentication flow.
 - Implement and deploy an authenticated workbook API only after security review.
 - Validate compressed workbook-copy downloads on supported Excel desktop hosts and verify that the original source worksheet is preserved.
-- Document the Excel for the web export limitation and provide a separate supported web export strategy before claiming parity.
+- Complete host-specific export validation and document any Excel desktop/web limitations before claiming cross-client parity.
 - Expand the controlled operation registry and add acceptance tests for every added operation.
 - Complete end-to-end testing with dedicated synthetic accounts only.
 
