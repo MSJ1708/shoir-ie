@@ -296,8 +296,8 @@ Office.onReady((info) => {
 
         if (operation.type === "trim_text") {
           let changed = 0;
-          const values = outputRange.values || [];
-          const formulas = outputRange.formulas || [];
+          const values = currentPayload.selection.values || [];
+          const formulas = currentPayload.selection.formulas || [];
           for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
             for (let columnIndex = 0; columnIndex < values[rowIndex].length; columnIndex += 1) {
               const value = values[rowIndex][columnIndex];
