@@ -97,6 +97,52 @@ def test_ooxml_fidelity_scan_flags_formula_chart_named_range_and_validation_risk
     assert "original upload remains unchanged" in report["Fidelity warning"]
 
 
+def test_source_formula_scan_is_bounded_and_exports_formulas_as_inert_evidence(monkeypatch):
+    import pytest
+    from openpyxl import load_workbook
+
+    import shoir_excel_runtime as runtime
+
+    source_buffer = io.BytesIO()
+    with pd.ExcelWriter(source_buffer, engine="xlsxwriter") as writer:
+        pd.DataFrame(
+            {"Item": ["A"], "Quantity": [2], "Unit Price": [5], "Total": [None]}
+        ).to_excel(writer, index=False, sheet_name="Data")
+        writer.sheets["Data"].write_formula("D2", "=B2*C2")
+
+    raw = source_buffer.getvalue()
+    result = process_fast(raw, "formula-source.xlsx")
+    assert result["formula_scan_status"] == "NOT_SCANNED"
+    assert result["formula_inventory"] == []
+
+    scan = runtime.scan_source_formulas(result, raw)
+    assert scan["status"] == "COMPLETE"
+    assert scan["formula_count"] == 1
+    assert result["formula_inventory"][0]["Sheet"] == "Data"
+    assert result["formula_inventory"][0]["Cell"] == "D2"
+    assert result["formula_inventory"][0]["Formula"] == "=B2*C2"
+
+    with pytest.raises(ValueError, match="changed"):
+        runtime.scan_source_formulas(result, raw + b"tampered")
+
+    # The bounded scanner refuses very large worksheet dimensions rather than
+    # iterating through unbounded cell ranges.
+    monkeypatch.setattr(runtime, "MAX_FORMULA_SCAN_CELLS", 1)
+    with pytest.raises(ValueError, match="formula-inspection limit"):
+        runtime.scan_source_formulas(result, raw)
+
+    monkeypatch.setattr(runtime, "MAX_FORMULA_SCAN_CELLS", 2_000_000)
+    scan = runtime.scan_source_formulas(result, raw)
+    runtime.prepare_exports(result, acknowledged_fidelity_risk=True)
+
+    workbook = load_workbook(io.BytesIO(result["xlsx"]), data_only=False, read_only=False)
+    assert "FORMULA INVENTORY" in workbook.sheetnames
+    cell = workbook["FORMULA INVENTORY"]["C4"]
+    assert cell.value == "=B2*C2"
+    assert cell.data_type != "f", "Source formula evidence must be inert text, not an executable formula."
+    workbook.close()
+
+
 def test_prepare_exports_requires_acknowledgement_for_unsupported_source_features():
     import pytest
 
