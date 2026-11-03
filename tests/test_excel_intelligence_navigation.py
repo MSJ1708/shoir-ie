@@ -151,7 +151,12 @@ def test_professional_user_sees_excel_intelligence_locked_in_workbench_data():
     app.run(timeout=90)
 
     assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
-    assert any("requires Enterprise" in str(item.value) for item in app.warning)
+    assert app.session_state["workbench_module_selector"] == "Data · Excel Intelligence"
+    enterprise_row = module_availability("Professional").loc[
+        lambda rows: rows["Module"] == MODULE_NAME
+    ].iloc[0]
+    assert enterprise_row["Required Tier"] == "Enterprise"
+    assert bool(enterprise_row["Available"]) is False
     assert not any("Shoir-IE Excel Intelligence" in str(item.value) for item in app.markdown)
 
 
