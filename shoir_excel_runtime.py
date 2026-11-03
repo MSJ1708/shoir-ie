@@ -29,6 +29,8 @@ MAX_OOXML_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_OOXML_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_OOXML_MEMBER_COUNT = 10_000
 MAX_OOXML_COMPRESSION_RATIO = 500
+MAX_FORMULA_SCAN_CELLS = 2_000_000
+MAX_FORMULA_INVENTORY_ROWS = 10_000
 
 
 def _validate_ooxml_package(raw: bytes, filename: str) -> None:
@@ -236,7 +238,11 @@ def process_fast(raw: bytes, filename: str) -> dict[str, Any]:
     return {
         "signature": signature,
         "filename": str(filename),
+        "raw": raw,
         "fidelity_report": fast_workbook_fidelity_report(raw, filename),
+        "formula_inventory": [],
+        "formula_counts_by_sheet": {},
+        "formula_scan_status": "NOT_SCANNED",
         "raw_sheets": raw_sheets,
         "cleaned_sheets": cleaned,
         "profiles": profiles,
@@ -273,6 +279,90 @@ def process_fast(raw: bytes, filename: str) -> dict[str, Any]:
     }
 
 
+def scan_source_formulas(result: dict[str, Any]) -> dict[str, Any]:
+    """Collect bounded source formulas as inert evidence; never execute them."""
+    if not isinstance(result, dict) or not isinstance(result.get("raw"), (bytes, bytearray)):
+        raise ValueError("A processed workbook with its original uploaded bytes is required.")
+    filename = str(result.get("filename") or "")
+    if not filename.casefold().endswith((".xlsx", ".xlsm")):
+        raise ValueError("Source formula inspection is available for XLSX and XLSM workbooks.")
+
+    raw = bytes(result["raw"])
+    _validate_ooxml_package(raw, filename)
+
+    try:
+        import openpyxl
+
+        book = openpyxl.load_workbook(
+            io.BytesIO(raw),
+            read_only=True,
+            data_only=False,
+            keep_vba=False,
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"Source formulas could not be inspected safely: {type(exc).__name__}."
+        ) from exc
+
+    inventory: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    scanned_cells = 0
+    try:
+        for worksheet in book.worksheets:
+            rows = int(getattr(worksheet, "max_row", 0) or 0)
+            columns = int(getattr(worksheet, "max_column", 0) or 0)
+            worksheet_cells = rows * columns
+            if scanned_cells + worksheet_cells > MAX_FORMULA_SCAN_CELLS:
+                raise ValueError(
+                    "The workbook's used ranges exceed the formula-inspection limit of "
+                    f"{MAX_FORMULA_SCAN_CELLS:,} cells. The workbook remains available for "
+                    "cleaning and analysis; only formula-text inspection was skipped."
+                )
+            scanned_cells += worksheet_cells
+            formula_count = 0
+            for row in worksheet.iter_rows():
+                for cell in row:
+                    value = cell.value
+                    if isinstance(value, str) and value.startswith("="):
+                        formula_count += 1
+                        if len(inventory) < MAX_FORMULA_INVENTORY_ROWS:
+                            inventory.append(
+                                {
+                                    "Sheet": str(worksheet.title),
+                                    "Cell": str(cell.coordinate),
+                                    "Formula": value,
+                                    "Type": "Original source formula",
+                                    "Note": (
+                                        "Archived as inert text for traceability. "
+                                        "It is not executed or copied into the CLEAN data sheet."
+                                    ),
+                                }
+                            )
+            counts[str(worksheet.title)] = formula_count
+    finally:
+        try:
+            book.close()
+        except Exception:
+            pass
+
+    total_formulas = sum(counts.values())
+    result["formula_inventory"] = inventory
+    result["formula_counts_by_sheet"] = counts
+    result["formula_count"] = total_formulas
+    result["formula_scan_status"] = (
+        "SAMPLED" if total_formulas > MAX_FORMULA_INVENTORY_ROWS else "COMPLETE"
+    )
+    result["formula_scan_cells"] = scanned_cells
+    result["source_metadata"] = _source_metadata(result)
+    return {
+        "status": result["formula_scan_status"],
+        "formula_count": total_formulas,
+        "inventory_rows": len(inventory),
+        "scanned_cells": scanned_cells,
+        "counts_by_sheet": dict(counts),
+    }
+
+
 def _source_metadata(result: Mapping[str, Any]) -> list[dict[str, Any]]:
     signature = str(result.get("signature") or "")
     rows = []
@@ -291,7 +381,7 @@ def _source_metadata(result: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "Detected header row": int(headers.get(sheet, 0)) + 1,
                 "Detected table blocks": 1,
                 "Merged ranges": 0,
-                "Source formulas": "Not rescanned in fast export",
+                "Source formulas": (result.get("formula_counts_by_sheet") or {}).get(str(sheet), "Not scanned"),
             }
         )
     return rows
@@ -338,7 +428,8 @@ def prepare_exports(
     review_register = result.get("review_register") or []
     before_after = result.get("before_after") or []
     cross_sheet_map = result.get("cross_sheet_map") or []
-    source_metadata = _source_metadata(result)
+    source_metadata = result.get("source_metadata") or _source_metadata(result)
+    formula_inventory = list(result.get("formula_inventory") or [])
 
     title = f"Shoir-IE — {result.get('filename', 'Industrial Workbook')}"
     result["xlsx"] = p["build_workbook"](
@@ -351,7 +442,7 @@ def prepare_exports(
         field_intelligence=field_intelligence,
         review_register=review_register,
         before_after=before_after,
-        formula_inventory=[],
+        formula_inventory=formula_inventory,
         cross_sheet_map=cross_sheet_map,
     )
     result["bundle"] = p["build_bundle"](
