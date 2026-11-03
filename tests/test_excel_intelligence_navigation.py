@@ -84,6 +84,18 @@ def test_workbench_and_renderer_are_explicitly_wired_to_the_existing_safe_engine
     assert "render_excel_intelligence_safe(tier, username)" in platform
 
 
+def test_premium_excel_runtime_rechecks_entitlement_and_preserves_starter_route():
+    runtime = (ROOT / "shoir_excel_runtime.py").read_text(encoding="utf-8")
+    renderer = runtime.split(
+        "def render_excel_intelligence_safe(", 1
+    )[1].split("def process_upload_for_data_hub(", 1)[0]
+    assert "if enable_copilot:" in renderer
+    assert "excel_intelligence_allowed(tier)" in renderer
+    assert 'session_actor.casefold() != actor.casefold()' in renderer
+    assert 'if not tier_allows(tier, "Starter")' in renderer
+    assert "Preserve the separate Starter Excel Data Cleaning & Import module." in renderer
+
+
 def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
     platform = (ROOT / "industrial_platform.py").read_text(encoding="utf-8")
     route = platform.split('if module=="Excel Intelligence":', 1)[1].split(
