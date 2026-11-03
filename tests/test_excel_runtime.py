@@ -106,10 +106,14 @@ def test_ooxml_fidelity_scan_detects_tables_filters_merges_and_hidden_bands():
             {"Line": ["A", "B"], "Output": [10, 12], "Cost": [5.0, 6.0]}
         ).to_excel(writer, index=False, sheet_name="Data")
         worksheet = writer.sheets["Data"]
-        worksheet.add_table(
-            0, 0, 2, 2,
+        table_sheet = writer.book.add_worksheet("TableSource")
+        table_sheet.write_row(0, 0, ["ID", "Measure"])
+        table_sheet.write_row(1, 0, ["A", 10])
+        table_sheet.write_row(2, 0, ["B", 12])
+        table_sheet.add_table(
+            0, 0, 2, 1,
             {"name": "ProductionTable", "columns": [
-                {"header": "Line"}, {"header": "Output"}, {"header": "Cost"}
+                {"header": "ID"}, {"header": "Measure"}
             ]},
         )
         worksheet.autofilter(0, 0, 2, 2)
