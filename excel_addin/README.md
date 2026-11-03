@@ -14,7 +14,7 @@ This directory contains a real Microsoft Office JavaScript (Office.js) task-pane
 
 The earlier configurable-host POST bridge has been removed. The repository does not currently provide a deployed, authenticated `POST /api/workbook/import` service or an established add-in identity/token validation flow. Sending workbook data to an arbitrary host without those controls would be unsafe.
 
-The task pane therefore remains **LOCAL_ONLY** until all of the following are implemented and tested:
+The task pane currently **does not POST workbook contents to a server**. It therefore remains **LOCAL_ONLY** until all of the following are implemented and tested:
 
 1. A deployed HTTPS Shoir-IE workbook API.
 2. Authentication that validates a real Shoir-IE user/session for every request.
