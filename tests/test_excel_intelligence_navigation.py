@@ -182,6 +182,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "ShoirExcelPlanner.buildPlan" in taskpane
     assert "requiresWriteApproval" in taskpane
     assert "USER_APPROVED_RESULTS_SHEET" in taskpane
+    assert "copyFrom(range, Excel.RangeCopyType.all)" in taskpane
+    assert "sourceWorksheetPreserved: true" in taskpane
     assert "resultSheet.charts.add" in taskpane
     assert "AVERAGE" in taskpane and "SUM" in taskpane
     assert "fetch(" not in taskpane
