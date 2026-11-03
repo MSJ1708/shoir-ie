@@ -5,7 +5,8 @@ This directory contains a real Microsoft Office JavaScript (Office.js) task-pane
 ## Current behavior
 
 - Opens as an Excel task pane when the manifest is hosted and sideloaded in a supported Excel environment.
-- Reads the worksheet names and currently selected range through Office.js.
+- Reads the workbook title, worksheet names and currently selected range through Office.js.
+- Reads selected values, formula strings, formula-cell count and number formats.
 - Limits a single selected range to 10,000 cells.
 - Displays a local JSON preview and can copy that preview to the clipboard.
 - Does not transmit workbook contents to a server.
