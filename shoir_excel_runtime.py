@@ -803,19 +803,21 @@ def execute_excel_intelligence_plan(
     ):
         raise PermissionError("An active authenticated Shoir-IE session is required.")
 
-    live_account = _require_live_excel_entitlement(actor, tier)
-    live_tier = str(live_account["tier"])
+    # Reject cross-user/workspace plan replay before making a live entitlement
+    # request for the caller. A plan can never be used to probe another account.
+    workspace = str(st.session_state.get("workspace_id") or "default")
+    plan_owner = str(plan_envelope.get("owner_username") or "").strip()
+    plan_workspace = str(plan_envelope.get("workspace_id") or "")
+    if plan_owner.casefold() != actor.casefold() or plan_workspace != workspace:
+        raise PermissionError("This Copilot plan belongs to another user or workspace.")
 
     expected = excel_intelligence_request_fingerprint(prompt, sheet_name, df)
     supplied = str(plan_envelope.get("request_fingerprint") or "")
     if not supplied or supplied != expected:
         raise ValueError("The plan is stale. Rebuild it after changing the instruction, worksheet or data.")
 
-    workspace = str(st.session_state.get("workspace_id") or "default")
-    plan_owner = str(plan_envelope.get("owner_username") or "").strip()
-    plan_workspace = str(plan_envelope.get("workspace_id") or "")
-    if plan_owner.casefold() != actor.casefold() or plan_workspace != workspace:
-        raise PermissionError("This Copilot plan belongs to another user or workspace.")
+    live_account = _require_live_excel_entitlement(actor, tier)
+    live_tier = str(live_account["tier"])
 
     plan = plan_envelope.get("plan")
     if not isinstance(plan, Mapping) or plan.get("requires_approval") is not True:
