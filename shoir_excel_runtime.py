@@ -379,6 +379,18 @@ def excel_intelligence_request_fingerprint(prompt: str, sheet_name: str, df: pd.
     return hashlib.sha256(encoded).hexdigest()
 
 
+def excel_intelligence_plan_fingerprint(plan: Mapping[str, Any]) -> str:
+    """Hash the exact deterministic plan displayed for human approval."""
+    encoded = json.dumps(
+        dict(plan),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def build_excel_intelligence_plan(prompt: str, sheet_name: str, df: pd.DataFrame) -> dict[str, Any]:
     """Build a review-first workflow using Shoir-IE's existing Copilot planner."""
     instruction = str(prompt or "").strip()
@@ -391,6 +403,7 @@ def build_excel_intelligence_plan(prompt: str, sheet_name: str, df: pd.DataFrame
     plan = build_workflow_plan(instruction, "Excel Intelligence", df.copy(deep=True))
     return {
         "request_fingerprint": excel_intelligence_request_fingerprint(instruction, sheet_name, df),
+        "plan_fingerprint": excel_intelligence_plan_fingerprint(plan),
         "prompt": instruction,
         "sheet_name": str(sheet_name),
         "plan": plan,
@@ -434,6 +447,19 @@ def execute_excel_intelligence_plan(
     plan = plan_envelope.get("plan")
     if not isinstance(plan, Mapping) or plan.get("requires_approval") is not True:
         raise ValueError("A valid approval-required Copilot plan is required.")
+
+    # Verify that the exact plan reviewed in the UI is still the plan being run.
+    # Rebuild it server-side from the current request/data rather than trusting
+    # plan fields supplied by mutable client/session state.
+    from shoir_copilot_orchestrator import build_workflow_plan
+    canonical_plan = build_workflow_plan(prompt, "Excel Intelligence", df.copy(deep=True))
+    canonical_plan_fingerprint = excel_intelligence_plan_fingerprint(canonical_plan)
+    supplied_plan_fingerprint = str(plan_envelope.get("plan_fingerprint") or "")
+    if (
+        supplied_plan_fingerprint != canonical_plan_fingerprint
+        or excel_intelligence_plan_fingerprint(plan) != canonical_plan_fingerprint
+    ):
+        raise ValueError("The approved plan changed or is stale. Rebuild and review the current plan before execution.")
 
     # The orchestrator receives an isolated copy. The source/cleaned worksheet is
     # never modified by this analysis route.
