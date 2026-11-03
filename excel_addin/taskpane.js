@@ -2,7 +2,8 @@
 //
 // The add-in plans and executes a small, explicit allow-list of local Excel
 // operations. Workbook contents are never uploaded to Shoir-IE or another AI
-// service by this task pane. Workbook edits require separate user approval.
+// service by this task pane. Any write creates a separate results worksheet
+// and requires explicit user approval; the selected source worksheet is not edited.
 
 Office.onReady((info) => {
   const inspectButton = document.getElementById("inspectSelection");
@@ -41,12 +42,12 @@ Office.onReady((info) => {
 
   function setPlan(plan) {
     latestPlan = plan;
-    planView.textContent = JSON.stringify(plan, null, 2);
+    planView.textContent = plan ? JSON.stringify(plan, null, 2) : "No task plan has been prepared.";
     const hasWriteActions = Boolean(plan && plan.requiresWriteApproval);
     approvalLabel.hidden = !hasWriteActions;
     approval.checked = false;
     runButton.disabled = !plan || !Array.isArray(plan.operations) || plan.operations.length === 0;
-    runButton.textContent = hasWriteActions ? "Approve and run local edits" : "Run read-only inspection";
+    runButton.textContent = hasWriteActions ? "Approve and create results worksheet" : "Run read-only inspection";
   }
 
   async function selectedRangePayload() {
@@ -124,12 +125,12 @@ Office.onReady((info) => {
     try {
       showStatus("Inspecting the selected range and preparing a deterministic plan…");
       latestPayload = await selectedRangePayload();
-      latestPlan = window.ShoirExcelPlanner.buildPlan(instruction.value, latestPayload);
-      setPlan(latestPlan);
+      const plan = window.ShoirExcelPlanner.buildPlan(instruction.value, latestPayload);
+      setPlan(plan);
       preview.textContent = JSON.stringify(latestPayload, null, 2);
       showStatus(
-        latestPlan.requiresWriteApproval
-          ? "Plan ready. Review each operation; edits have not been made."
+        plan.requiresWriteApproval
+          ? "Plan ready. Review the operations and approve creation of a separate results worksheet."
           : "Read-only plan ready. No workbook changes are proposed."
       );
     } catch (error) {
@@ -150,15 +151,26 @@ Office.onReady((info) => {
     return result;
   }
 
+  function uniqueResultsSheetName(existingNames) {
+    const used = new Set(existingNames.map(name => String(name).toLocaleLowerCase()));
+    const base = "Shoir-IE Results";
+    if (!used.has(base.toLocaleLowerCase())) return base;
+    for (let suffix = 2; suffix < 10000; suffix += 1) {
+      const candidate = base + " (" + suffix + ")";
+      if (!used.has(candidate.toLocaleLowerCase())) return candidate;
+    }
+    throw new Error("A unique Shoir-IE Results worksheet name could not be allocated.");
+  }
+
   async function executePlan() {
     if (!latestPlan) throw new Error("Build and review a task plan first.");
     if (latestPlan.requiresWriteApproval && !approval.checked) {
-      throw new Error("Explicit workbook-edit approval is required.");
+      throw new Error("Explicit approval is required before creating or editing a results worksheet.");
     }
 
     showStatus(
       latestPlan.requiresWriteApproval
-        ? "Rechecking the selected data and preflighting approved local edits…"
+        ? "Rechecking the selected data and preparing a separate results worksheet…"
         : "Running read-only inspection…"
     );
 
@@ -208,47 +220,45 @@ Office.onReady((info) => {
       }
 
       const operations = currentPlan.operations.filter(operation => operation.requiresWriteApproval);
-      const preflight = [];
-      const maxRows = 1048576;
-
-      // Preflight every destination before queuing any write operation.
+      const allowedTypes = new Set([
+        "copy_selection_to_results",
+        "trim_text",
+        "add_summary_formulas",
+        "create_column_chart"
+      ]);
       for (const operation of operations) {
-        if (operation.type === "add_summary_formulas") {
-          const targetRowIndex = range.rowIndex + range.rowCount;
-          if (targetRowIndex >= maxRows) {
-            throw new Error("There is no row below the selected range for summary formulas.");
-          }
-          const target = worksheet.getRangeByIndexes(
-            targetRowIndex, range.columnIndex, 1, range.columnCount
-          );
-          target.load(["values", "formulas"]);
-          preflight.push({ operation, target });
-        } else if (operation.type === "create_column_chart") {
-          const chartTopRow = range.rowIndex + range.rowCount + 1;
-          if (chartTopRow + 15 >= maxRows || range.columnIndex + 7 >= 16384) {
-            throw new Error("There is not enough worksheet space to position the requested chart.");
-          }
-          preflight.push({ operation });
-        } else if (operation.type === "trim_text") {
-          preflight.push({ operation });
-        } else {
+        if (!allowedTypes.has(operation.type)) {
           throw new Error("The plan contains an operation that is not in the local execution allow-list.");
         }
       }
 
-      if (preflight.some(item => item.target)) await context.sync();
+      if (range.rowIndex + range.rowCount > 1048576 ||
+          range.columnIndex + range.columnCount > 16384) {
+        throw new Error("The selected range is outside Excel worksheet bounds.");
+      }
 
-      for (const item of preflight) {
-        if (!item.target) continue;
-        const occupied = item.target.values.some((row, rowIndex) =>
-          row.some((value, columnIndex) => {
-            const formula = item.target.formulas[rowIndex] && item.target.formulas[rowIndex][columnIndex];
-            return (value !== null && value !== undefined && value !== "") ||
-              (typeof formula === "string" && formula.startsWith("="));
-          })
-        );
-        if (occupied) {
-          throw new Error("The row directly below the selected range is not empty. No workbook edits were applied.");
+      const resultSheetName = operations.length
+        ? uniqueResultsSheetName(worksheets.items.map(sheet => sheet.name))
+        : null;
+      let resultSheet = null;
+      let outputRange = null;
+
+      if (operations.length) {
+        // Copy the selected region to a fresh sheet. The source worksheet is never
+        // assigned to and remains unchanged by all following operations.
+        resultSheet = worksheets.add(resultSheetName);
+        outputRange = resultSheet.getRangeByIndexes(0, 0, range.rowCount, range.columnCount);
+        outputRange.values = range.values;
+        outputRange.numberFormat = range.numberFormat;
+
+        const formulas = range.formulas || [];
+        for (let rowIndex = 0; rowIndex < formulas.length; rowIndex += 1) {
+          for (let columnIndex = 0; columnIndex < formulas[rowIndex].length; columnIndex += 1) {
+            const formula = formulas[rowIndex][columnIndex];
+            if (typeof formula === "string" && formula.startsWith("=")) {
+              outputRange.getCell(rowIndex, columnIndex).formulas = [[formula]];
+            }
+          }
         }
       }
 
@@ -269,10 +279,25 @@ Office.onReady((info) => {
           continue;
         }
 
+        if (operation.type === "copy_selection_to_results") {
+          completed.push({
+            operation: operation.title,
+            status: "Completed",
+            destinationWorksheet: resultSheetName,
+            sourceWorksheet: currentPayload.sheetName,
+            sourceRange: currentPayload.selection.address
+          });
+          continue;
+        }
+
+        if (!outputRange || !resultSheet) {
+          throw new Error("A results worksheet is required for the requested local edit.");
+        }
+
         if (operation.type === "trim_text") {
           let changed = 0;
-          const values = range.values || [];
-          const formulas = range.formulas || [];
+          const values = outputRange.values || [];
+          const formulas = outputRange.formulas || [];
           for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
             for (let columnIndex = 0; columnIndex < values[rowIndex].length; columnIndex += 1) {
               const value = values[rowIndex][columnIndex];
@@ -280,7 +305,7 @@ Office.onReady((info) => {
               if (typeof value === "string" &&
                   !(typeof formula === "string" && formula.startsWith("=")) &&
                   value !== value.trim()) {
-                range.getCell(rowIndex, columnIndex).values = [[value.trim()]];
+                outputRange.getCell(rowIndex, columnIndex).values = [[value.trim()]];
                 changed += 1;
               }
             }
@@ -288,28 +313,29 @@ Office.onReady((info) => {
           completed.push({
             operation: operation.title,
             status: "Completed",
+            destinationWorksheet: resultSheetName,
             cellsChanged: changed
           });
           continue;
         }
 
         if (operation.type === "add_summary_formulas") {
-          const targetRowIndex = range.rowIndex + range.rowCount;
-          const target = worksheet.getRangeByIndexes(
-            targetRowIndex, range.columnIndex, 1, range.columnCount
+          const formulaRowIndex = range.rowCount;
+          const target = resultSheet.getRangeByIndexes(
+            formulaRowIndex, 0, 1, range.columnCount
           );
           const formulaRow = new Array(range.columnCount).fill("");
           formulaRow[0] = operation.aggregate === "average" ? "AVERAGE" : "TOTAL";
           target.values = [formulaRow];
 
-          const firstDataRow = range.rowIndex + 2;
-          const lastDataRow = range.rowIndex + range.rowCount;
+          const firstDataRow = 2;
+          const lastDataRow = range.rowCount;
           const formulasAdded = [];
           for (const columnIndex of operation.columnIndexes) {
             if (!Number.isInteger(columnIndex) || columnIndex <= 0 || columnIndex >= range.columnCount) {
               throw new Error("The formula plan contains an invalid column reference.");
             }
-            const column = columnName(range.columnIndex + columnIndex);
+            const column = columnName(columnIndex);
             const functionName = operation.aggregate === "average" ? "AVERAGE" : "SUM";
             const formula = "=" + functionName + "(" + column + firstDataRow + ":" +
               column + lastDataRow + ")";
@@ -319,30 +345,32 @@ Office.onReady((info) => {
           completed.push({
             operation: operation.title,
             status: "Completed",
-            destination: "Row " + (targetRowIndex + 1),
+            destinationWorksheet: resultSheetName,
+            destinationRow: formulaRowIndex + 1,
             formulas: formulasAdded
           });
           continue;
         }
 
         if (operation.type === "create_column_chart") {
-          const chart = worksheet.charts.add(
+          const chart = resultSheet.charts.add(
             Excel.ChartType.columnClustered,
-            range,
+            outputRange,
             Excel.ChartSeriesBy.auto
           );
-          chart.title.text = "Shoir-IE Excel Intelligence — " + worksheet.name;
+          chart.title.text = "Shoir-IE Excel Intelligence — " + resultSheetName;
           chart.title.visible = true;
-          const chartTopRow = range.rowIndex + range.rowCount + 1;
+          const chartTopRow = range.rowCount + 2;
           chart.setPosition(
-            columnName(range.columnIndex) + (chartTopRow + 1),
-            columnName(range.columnIndex + 7) + (chartTopRow + 15)
+            "A" + (chartTopRow + 1),
+            "H" + (chartTopRow + 15)
           );
           completed.push({
             operation: operation.title,
             status: "Completed",
+            destinationWorksheet: resultSheetName,
             chartType: "columnClustered",
-            position: columnName(range.columnIndex) + (chartTopRow + 1)
+            position: "A" + (chartTopRow + 1)
           });
           continue;
         }
@@ -353,25 +381,26 @@ Office.onReady((info) => {
       await context.sync();
       return {
         status: "Completed",
-        mode: operations.length ? "USER_APPROVED_LOCAL_EDIT" : "READ_ONLY",
+        mode: operations.length ? "USER_APPROVED_RESULTS_SHEET" : "READ_ONLY",
         completedAt: new Date().toISOString(),
         workbookTitle: currentPayload.workbookTitle,
-        sheetName: currentPayload.sheetName,
-        selectionAddress: currentPayload.selection.address,
+        sourceWorksheet: currentPayload.sheetName,
+        sourceRange: currentPayload.selection.address,
+        resultsWorksheet: resultSheetName,
+        sourceWorksheetPreserved: true,
         completedOperations: completed,
         transferMode: "LOCAL_ONLY"
       };
     });
 
     latestPayload = null;
-    latestPlan = null;
     setPlan(null);
-    planView.textContent = "The plan has been executed. Build a fresh plan before another task.";
     preview.textContent = JSON.stringify(result, null, 2);
     showStatus(
       result.mode === "READ_ONLY"
         ? "Read-only inspection completed. No workbook cells were changed and no data was transmitted."
-        : "Approved local operations completed. The active workbook was modified; save or discard the workbook in Excel."
+        : "Approved operations completed on the new worksheet “" + result.resultsWorksheet +
+          "”. The selected source worksheet remains unchanged. Save the workbook in Excel to keep the results."
     );
   }
 
