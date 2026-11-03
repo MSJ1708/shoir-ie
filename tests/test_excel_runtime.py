@@ -120,8 +120,8 @@ def test_ooxml_fidelity_scan_detects_tables_filters_merges_and_hidden_bands():
         worksheet.merge_range("E1:F1", "Merged title")
         styled_header = writer.book.add_format({"bold": True, "bg_color": "#163A5F"})
         worksheet.write("A1", "Line", styled_header)
-        worksheet.set_row(1, None, None, {"hidden": True})
-        worksheet.set_column("C:C", None, None, {"hidden": True})
+        worksheet.set_row(1, None, styled_header, {"hidden": True})
+        worksheet.set_column("C:C", None, styled_header, {"hidden": True})
 
     report = fast_workbook_fidelity_report(buf.getvalue(), "fidelity-matrix.xlsx")
 
