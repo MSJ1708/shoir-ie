@@ -49,6 +49,7 @@ MODULE_REQUIREMENTS = {
     "AI Copilot": "Starter",
     "ShadowShift — Micro-Loss & Recovery Intelligence": "Enterprise",
     "Excel Data Cleaning & Import": "Starter",
+    "Excel Intelligence": "Enterprise",
     "Industrial Workbook": "Starter",
     "Research AI": "Research Pack",
     "Statistical Hypothesis Testing": "Research Pack",
