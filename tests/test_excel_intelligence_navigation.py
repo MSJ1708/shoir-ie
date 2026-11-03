@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from industrial_platform_excellence import MODULE_MATRIX
+from industrial_platform_excellence import MODULE_MATRIX, module_availability
 from shoir_application_shell import _module_choices, _module_target_section, module_group
 from shoir_excel_entitlements import (
     excel_intelligence_allowed,
@@ -29,6 +29,15 @@ def test_excel_intelligence_is_listed_under_workbench_data():
         {MODULE_NAME: {"category": "Data Platform"}},
     )
     assert choices == [MODULE_NAME]
+
+    enterprise_rows = module_availability("Enterprise")
+    enterprise_row = enterprise_rows.loc[enterprise_rows["Module"] == MODULE_NAME].iloc[0]
+    assert enterprise_row["Category"] == "Data"
+    assert bool(enterprise_row["Available"]) is True
+
+    professional_rows = module_availability("Professional")
+    professional_row = professional_rows.loc[professional_rows["Module"] == MODULE_NAME].iloc[0]
+    assert bool(professional_row["Available"]) is False
 
 
 def test_excel_intelligence_uses_the_shared_data_navigation_group():
