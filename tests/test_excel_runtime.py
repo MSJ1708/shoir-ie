@@ -276,7 +276,9 @@ def test_process_fast_rejects_unsupported_large_upload_before_parsing():
         raise AssertionError("Large uploads must be rejected before workbook parsing.")
 
 def test_premium_excel_module_fails_closed_before_upload_without_live_entitlement(monkeypatch):
+    import streamlit as st
     import durable_account_store as account_store
+
     from shoir_excel_runtime import render_excel_intelligence_safe
 
     monkeypatch.setattr(
