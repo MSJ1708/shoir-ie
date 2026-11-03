@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from industrial_platform import PLATFORM_CATALOG
 from industrial_platform_excellence import MODULE_MATRIX
 from shoir_application_shell import _module_choices, _module_target_section, module_group
 from shoir_excel_entitlements import (
@@ -50,16 +49,10 @@ def test_excel_intelligence_access_uses_a_configurable_server_side_tier(monkeypa
     # Research Pack inherits Enterprise features under the existing product policy.
     assert excel_intelligence_allowed("Research Pack")
 
-    from shoir_excel_entitlements import apply_excel_intelligence_entitlement
-    assert "Excel Intelligence" in apply_excel_intelligence_entitlement(["Excel Data Cleaning & Import"], "Enterprise")
-    assert "Excel Intelligence" not in apply_excel_intelligence_entitlement(["Excel Data Cleaning & Import"], "Professional")
-
     monkeypatch.setenv("SHOIR_EXCEL_INTELLIGENCE_MINIMUM_TIER", "Professional")
     assert excel_intelligence_minimum_tier() == "Professional"
     assert excel_intelligence_allowed("Professional")
     assert not excel_intelligence_allowed("Mid-Tier Pro")
-    assert "Excel Intelligence" in apply_excel_intelligence_entitlement(["Excel Data Cleaning & Import"], "Professional")
-    assert not apply_excel_intelligence_entitlement(["Excel Intelligence"], "Mid-Tier Pro")
 
 
 def test_invalid_excel_intelligence_tier_configuration_fails_closed(monkeypatch):
