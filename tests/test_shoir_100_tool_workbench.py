@@ -784,6 +784,11 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     at.selectbox(key="shoir_100_tool_inspector").select("T039 · CAPA and 8D Manager")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    # Freeze the review date so the overdue-state assertion is independent of
+    # the CI runner's actual wall-clock date.
+    at.text_input(key="tool039_as_of_date").set_value("2026-11-03")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool039_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -792,4 +797,4 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["status"] == "CAPA_REGISTER_REVIEWED"
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-    assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+    assert result["records"].iloc[0]["Workflow state"] == "OVERDUE"
