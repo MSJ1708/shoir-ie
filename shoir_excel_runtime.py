@@ -547,6 +547,20 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             "The upload path is intentionally lazy: the application becomes usable as soon as the data is cleaned. "
             "Workbook packaging is separate so a large export cannot prevent the core workspace from loading."
         )
+        fidelity = result.get("fidelity_report") or {}
+        st.markdown("### Workbook feature preservation")
+        if fidelity.get("Requires acknowledgement") is True:
+            st.warning(str(fidelity.get("Fidelity warning") or "The source has features that may not survive a data-focused export."))
+            st.caption(
+                "Features requiring review: "
+                + "; ".join(str(x) for x in fidelity.get("Unsupported features", []))
+            )
+        else:
+            st.success(str(fidelity.get("Fidelity warning") or "No unsupported workbook features were detected."))
+        st.caption(
+            "The uploaded source remains unchanged. The generated Industrial Excel Intelligence workbook is a separate, "
+            "data-focused output and does not replace the original file."
+        )
 
     with tabs[1]:
         selected = st.selectbox("Clean sheet", sheet_names, index=sheet_names.index(selected), key="excel_studio_safe_sheet")
@@ -701,6 +715,19 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
     export_tab_index = 5 if enable_copilot else 4
     with tabs[export_tab_index]:
         st.markdown("### Download center")
+        fidelity = result.get("fidelity_report") or {}
+        requires_fidelity_ack = fidelity.get("Requires acknowledgement") is True
+        fidelity_acknowledged = False
+        if requires_fidelity_ack:
+            st.warning(
+                "Review the unsupported source features below before preparing the data-focused output. "
+                "The original upload will remain unchanged."
+            )
+            st.caption("; ".join(str(x) for x in fidelity.get("Unsupported features", [])))
+            fidelity_acknowledged = st.checkbox(
+                "I reviewed the source workbook fidelity warnings and understand the generated copy may not preserve those features.",
+                key="excel_fidelity_ack_" + str(result.get("signature") or "source")[:12],
+            )
         if result.get("xlsx") is None:
             st.info(
                 "No export has been built yet. This is intentional — building a full multi-sheet workbook can be "
@@ -709,12 +736,16 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             if st.button(
                 "⚙️ Prepare Industrial Excel Workbook",
                 type="primary",
+                disabled=requires_fidelity_ack and not fidelity_acknowledged,
                 use_container_width=True,
                 key="excel_studio_safe_prepare_export",
             ):
                 try:
                     with st.spinner("Assembling the downloadable workbook…"):
-                        prepare_exports(result)
+                        prepare_exports(
+                            result,
+                            acknowledged_fidelity_risk=fidelity_acknowledged,
+                        )
                     st.session_state["excel_studio_safe_result"] = result
                     st.success("Download package prepared.")
                 except Exception as exc:
