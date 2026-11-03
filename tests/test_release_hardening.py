@@ -124,11 +124,13 @@ def test_failed_replacement_upload_clears_stale_excel_download():
     assert "excel_studio_safe_signature" not in state
 
     message = _record_upload_failure(state, "bad-file", ValueError("unsupported format"))
-    assert message == "ValueError: unsupported format"
+    assert message.startswith("Workbook validation failed.")
+    assert "Reference: EXCEL-" in message
+    assert "unsupported format" not in message
     assert state["excel_studio_safe_result"] is None
     assert "excel_studio_safe_signature" not in state
     assert state["excel_studio_safe_error_signature"] == "bad-file"
-    assert "unsupported format" in state["excel_studio_safe_error"]
+    assert "unsupported format" not in state["excel_studio_safe_error"]
 
 
 def test_module_explorer_lists_all_subscription_tiers():
