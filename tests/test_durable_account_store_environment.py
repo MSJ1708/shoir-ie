@@ -75,3 +75,42 @@ def test_direct_database_url_settings_are_detected(monkeypatch):
     assert store._configured_direct_database_url() == ""
     monkeypatch.setenv("DATABASE_URL", "postgresql://production.example.invalid/db")
     assert store._configured_direct_database_url() == "postgresql://production.example.invalid/db"
+
+
+def test_edge_session_entitlement_uses_scoped_server_side_session_action(monkeypatch):
+    expected = {
+        "ok": True,
+        "username": "synthetic-enterprise-user",
+        "tier": "Enterprise Tier",
+        "active": True,
+        "expires_at": "2099-01-01T00:00:00Z",
+    }
+    calls = []
+
+    def fake_edge_call(action, payload):
+        calls.append((action, payload))
+        return dict(expected)
+
+    monkeypatch.setattr(store, "_edge_call", fake_edge_call)
+    result = store.edge_session_entitlement(
+        "synthetic-enterprise-user",
+        "synthetic-session-token",
+    )
+
+    assert result == expected
+    assert calls == [(
+        "session_entitlement",
+        {
+            "username": "synthetic-enterprise-user",
+            "token": "synthetic-session-token",
+        },
+    )]
+
+
+@pytest.mark.parametrize(
+    ("username", "token"),
+    [("", "synthetic-token"), ("synthetic-user", ""), (" ", " ")],
+)
+def test_edge_session_entitlement_rejects_missing_identity_or_token(username, token):
+    with pytest.raises(PermissionError, match="authenticated workspace session"):
+        store.edge_session_entitlement(username, token)
