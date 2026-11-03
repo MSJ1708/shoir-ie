@@ -169,6 +169,9 @@ def test_office_addin_does_not_post_workbook_data_without_authenticated_api():
     taskpane = (ROOT / "excel_addin" / "taskpane.js").read_text(encoding="utf-8")
     readme = (ROOT / "excel_addin" / "README.md").read_text(encoding="utf-8")
     assert "Excel.run" in taskpane
+    assert "workbookProperties.load(\"title\")" in taskpane
+    assert 'range.load(["values", "formulas", "numberFormat"])' in taskpane
+    assert "formulaCellCount" in taskpane
     assert "10,000 cells" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
