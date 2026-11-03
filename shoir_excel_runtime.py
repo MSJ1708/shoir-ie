@@ -152,9 +152,12 @@ def process_fast(raw: bytes, filename: str) -> dict[str, Any]:
         # workbook package during import.
         _ = raw_frame
 
+    from shoir_excel_foundation import fast_workbook_fidelity_report
+
     return {
         "signature": signature,
         "filename": str(filename),
+        "fidelity_report": fast_workbook_fidelity_report(raw, filename),
         "raw_sheets": raw_sheets,
         "cleaned_sheets": cleaned,
         "profiles": profiles,
@@ -233,9 +236,19 @@ def _record_upload_failure(session_state: Any, signature: str, error: Exception)
     return message
 
 
-def prepare_exports(result: dict[str, Any]) -> None:
+def prepare_exports(
+    result: dict[str, Any],
+    acknowledged_fidelity_risk: bool = False,
+) -> None:
     if not isinstance(result, dict) or not result.get("cleaned_sheets"):
         raise ValueError("There is no processed workbook available to export.")
+
+    fidelity = result.get("fidelity_report") or {}
+    if fidelity.get("Requires acknowledgement") is True and acknowledged_fidelity_risk is not True:
+        raise PermissionError(
+            "Review the source workbook fidelity warnings and explicitly acknowledge them before export. "
+            "The original upload remains unchanged."
+        )
 
     p = _load_primitives()
     cleaned = result["cleaned_sheets"]
