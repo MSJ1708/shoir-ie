@@ -54,9 +54,10 @@ def _validate_ooxml_package(raw: bytes, filename: str) -> None:
     total_uncompressed = 0
     seen_names: set[str] = set()
     for member in members:
-        normalized = str(member.filename or "").replace("\\\\", "/")
-        parts = normalized.split("/")
-        if normalized.startswith("/") or any(part in {"", ".", ".."} for part in parts[:-1]):
+        normalized = str(member.filename or "").replace(chr(92), "/")
+        clean_path = normalized.rstrip("/")
+        parts = clean_path.split("/")
+        if not clean_path or normalized.startswith("/") or any(part in {"", ".", ".."} for part in parts):
             raise ValueError("The workbook contains an unsafe package path.")
         if normalized in seen_names:
             raise ValueError("The workbook contains duplicate package member paths.")
