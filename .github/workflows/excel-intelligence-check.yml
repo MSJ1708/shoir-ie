@@ -82,7 +82,11 @@ jobs:
           ns = {"o": "http://schemas.microsoft.com/office/appforoffice/1.1"}
           permissions = root.find("o:Permissions", ns)
           source = root.find("o:DefaultSettings/o:SourceLocation", ns)
+          requirements = root.find("o:Requirements/o:Sets", ns)
           assert permissions is not None and permissions.text == "ReadDocument"
+          assert requirements is not None
+          assert requirements.attrib.get("DefaultMinVersion") == "1.7"
+          assert any(item.attrib.get("Name") == "ExcelApi" for item in requirements)
           assert source is not None
           assert "YOUR-SHOIR-IE-HOST" in source.attrib.get("DefaultValue", "")
           print("Manifest is valid XML and remains read-only/local-only until a staging host is deployed.")
