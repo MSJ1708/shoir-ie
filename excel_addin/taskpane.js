@@ -50,7 +50,7 @@ Office.onReady((info) => {
   downloadButton.disabled = true;
   downloadReadyLink.hidden = true;
   if (!canDownloadCompressedWorkbook) {
-    downloadButton.title = "Compressed workbook download is not supported by this Excel host. Open the workbook in Excel desktop to download a copy.";
+    downloadButton.title = "Compressed workbook download is not supported by this host. Open the workbook in another Excel host that reports CompressedFile support.";
   }
 
   function showStatus(message) {
