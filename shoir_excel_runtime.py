@@ -313,16 +313,23 @@ def scan_source_formulas(result: dict[str, Any], raw_bytes: bytes | bytearray) -
         for worksheet in book.worksheets:
             rows = int(getattr(worksheet, "max_row", 0) or 0)
             columns = int(getattr(worksheet, "max_column", 0) or 0)
-            worksheet_cells = rows * columns
-            if scanned_cells + worksheet_cells > MAX_FORMULA_SCAN_CELLS:
+            declared_cells = rows * columns
+            if scanned_cells + declared_cells > MAX_FORMULA_SCAN_CELLS:
                 raise ValueError(
                     "The workbook's used ranges exceed the formula-inspection limit of "
                     f"{MAX_FORMULA_SCAN_CELLS:,} cells. The workbook remains available for "
                     "cleaning and analysis; only formula-text inspection was skipped."
                 )
-            scanned_cells += worksheet_cells
+            actual_worksheet_cells = 0
             formula_count = 0
             for row in worksheet.iter_rows():
+                actual_worksheet_cells += len(row)
+                if scanned_cells + actual_worksheet_cells > MAX_FORMULA_SCAN_CELLS:
+                    raise ValueError(
+                        "The workbook exceeded the formula-inspection cell limit while reading. "
+                        "The workbook remains available for cleaning and analysis; only formula-text "
+                        "inspection was skipped."
+                    )
                 for cell in row:
                     value = cell.value
                     if isinstance(value, str) and value.startswith("="):
@@ -340,6 +347,7 @@ def scan_source_formulas(result: dict[str, Any], raw_bytes: bytes | bytearray) -
                                     ),
                                 }
                             )
+            scanned_cells += max(declared_cells, actual_worksheet_cells)
             counts[str(worksheet.title)] = formula_count
     finally:
         try:
