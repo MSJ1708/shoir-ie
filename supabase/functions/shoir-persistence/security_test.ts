@@ -169,7 +169,10 @@ Deno.test("session entitlement fails closed on incomplete, inactive or expired a
     try {
       sessionEntitlementFields(account);
     } catch (error) {
-      assert(error instanceof PublicRequestError, "Expected a public request error.");
+      assert(
+        error instanceof PublicRequestError,
+        "Expected a public request error.",
+      );
       assert(error.status === 403, "Invalid entitlements must be denied.");
       continue;
     }
