@@ -121,14 +121,29 @@ def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
     assert 'Sign in with an active Shoir-IE account' in route
 
 
-def test_enterprise_user_can_open_excel_intelligence_from_workbench_data():
+def test_enterprise_user_can_open_excel_intelligence_from_workbench_data(monkeypatch):
+    import durable_account_store as account_store
     from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+    monkeypatch.setattr(
+        account_store,
+        "edge_session_entitlement",
+        lambda username, token: {
+            "ok": True,
+            "username": username,
+            "tier": "Enterprise Tier",
+            "active": True,
+            "expires_at": "2099-01-01T00:00:00Z",
+        },
+    )
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
     app = AppTest.from_file(page, default_timeout=90)
     app.session_state["current_user"] = "excel-intelligence-route-test"
     app.session_state["authenticated"] = True
     app.session_state["user_tier"] = "Enterprise"
+    app.session_state["remote_session_token"] = "synthetic-session-token"
     app.run(timeout=90)
     assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
 
