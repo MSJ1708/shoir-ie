@@ -46,6 +46,8 @@ The repository CI validates manifest XML, JavaScript syntax and deterministic pl
 
 ## Remaining Stage 1 work
 
+- **Excel for the web:** do not assume compressed OOXML export is available. The add-in checks the host's CompressedFile capability at runtime; support on the target Excel desktop and web clients must be tested before the add-in is described as supported.
+
 - Host the task-pane assets and replace manifest placeholders on staging.
 - Sideload and test on the supported Excel desktop and web clients.
 - Establish a dedicated, short-lived Shoir-IE add-in authentication flow.
