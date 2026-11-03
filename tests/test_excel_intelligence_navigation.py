@@ -180,6 +180,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "Excel.run" in taskpane
     assert 'range.load(["values", "formulas", "numberFormat"])' in taskpane
     assert "ShoirExcelPlanner.buildPlan" in taskpane
+    assert "visiblePlan" in taskpane
+    assert "dataFingerprint" not in taskpane.split("function setPlan(plan)", 1)[1].split("async function selectedRangePayload", 1)[0]
     assert "requiresWriteApproval" in taskpane
     assert "USER_APPROVED_RESULTS_SHEET" in taskpane
     assert "copyFrom(range, Excel.RangeCopyType.all)" in taskpane
