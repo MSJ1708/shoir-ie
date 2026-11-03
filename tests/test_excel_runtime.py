@@ -227,6 +227,14 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
             "shoir-e2e-excel-copilot", "Enterprise", approved=True,
         )
 
+    tampered = dict(plan)
+    tampered["plan"] = {**plan["plan"], "steps": [{"step": "unapproved operation"}]}
+    with pytest.raises(ValueError, match="plan changed"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, tampered,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+
     run = execute_excel_intelligence_plan(
         prompt, "Production", source, plan,
         "shoir-e2e-excel-copilot", "Enterprise", approved=True,
