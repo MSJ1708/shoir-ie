@@ -70,6 +70,7 @@ Office.onReady((info) => {
           missingCells: profile.missingCells,
           duplicateRows: profile.duplicateRows,
           formulaErrors: profile.formulaErrors,
+          formulaCells: profile.formulaCells,
           numericColumns: profile.numericColumns
         },
         operations: (plan.operations || []).map(operation => ({
