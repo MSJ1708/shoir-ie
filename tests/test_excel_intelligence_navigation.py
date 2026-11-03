@@ -171,18 +171,37 @@ def test_excel_intelligence_registers_a_visual_table_for_the_shared_visualizer()
     assert "excel_studio_visual_df" in _module_visual_keys(MODULE_NAME)
 
 
-def test_office_addin_does_not_post_workbook_data_without_authenticated_api():
+def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     taskpane = (ROOT / "excel_addin" / "taskpane.js").read_text(encoding="utf-8")
+    planner = (ROOT / "excel_addin" / "planner.js").read_text(encoding="utf-8")
+    html = (ROOT / "excel_addin" / "taskpane.html").read_text(encoding="utf-8")
     readme = (ROOT / "excel_addin" / "README.md").read_text(encoding="utf-8")
+
     assert "Excel.run" in taskpane
-    assert "workbookProperties.load(\"title\")" in taskpane
     assert 'range.load(["values", "formulas", "numberFormat"])' in taskpane
-    assert "formulaCellCount" in taskpane
-    assert "10,000 cells" in taskpane
+    assert "ShoirExcelPlanner.buildPlan" in taskpane
+    assert "requiresWriteApproval" in taskpane
+    assert "USER_APPROVED_LOCAL_EDIT" in taskpane
+    assert "worksheet.charts.add" in taskpane
+    assert "AVERAGE" in taskpane and "SUM" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
+
+    assert "MAX_CELLS = 10000" in planner
+    assert 'type: "trim_text"' in planner
+    assert 'type: "add_summary_formulas"' in planner
+    assert 'type: "create_column_chart"' in planner
+    assert "remove duplicates" in planner
+    assert "requiresWriteApproval" in planner
+
+    assert 'id="instruction"' in html
+    assert 'id="buildPlan"' in html
+    assert 'id="approveWorkbookEdits"' in html
+    assert "planner.js" in html
+
     manifest = (ROOT / "excel_addin" / "manifest.xml").read_text(encoding="utf-8")
-    assert "<Permissions>ReadDocument</Permissions>" in manifest
+    assert "<Permissions>ReadWriteDocument</Permissions>" in manifest
     assert '<Sets DefaultMinVersion="1.7">' in manifest
     assert '<Set Name="ExcelApi"/>' in manifest
-    assert "does not POST workbook contents to a server" in readme
+    assert "does not upload workbook contents" in readme
+    assert "Save a backup" in readme
