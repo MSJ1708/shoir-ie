@@ -137,7 +137,7 @@ def test_source_formula_scan_is_bounded_and_exports_formulas_as_inert_evidence(m
 
     workbook = load_workbook(io.BytesIO(result["xlsx"]), data_only=False, read_only=False)
     assert "FORMULA INVENTORY" in workbook.sheetnames
-    cell = workbook["FORMULA INVENTORY"]["C4"]
+    cell = workbook["FORMULA INVENTORY"]["C5"]
     assert cell.value == "=B2*C2"
     assert cell.data_type != "f", "Source formula evidence must be inert text, not an executable formula."
     workbook.close()
