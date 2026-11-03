@@ -32,7 +32,7 @@ This change does **not** establish that the full Excel Intelligence specificatio
 - The Office add-in can now create a results worksheet and apply the limited approved local operations listed above. It can prepare a separate compressed OOXML copy of the current workbook and expose a download link on hosts that support the Office CompressedFile requirement set (Excel desktop for Windows/Mac); it validates the complete slice length and caps exports at 100 MB. The host matrix has not been runtime-tested, so Excel desktop/web parity is not claimed. The local add-in still does not create PivotTables or provide a dedicated add-in-to-Shoir-IE authenticated workflow. The selected source worksheet remains unchanged by the current write path.
 - The in-app upload runtime cleans and profiles data but does not yet deliver every Stage 1 operation (formula generation, chart creation, and full preservation of all advanced workbook features).
 - No authenticated browser test has proved the exact menu selection under each supported account/tier.
-- No Office desktop/web compatibility acceptance has been run. In-app table previews are bounded to protect Streamlit rendering, normalize mixed/nested object cells and duplicate headers in a display-only copy, and fall back to text when the interactive table renderer raises an exception. Large review registers are bounded before DataFrame creation. Regression tests cover these paths but do not replace hosted browser/Excel acceptance.
+- No Office desktop/web compatibility acceptance has been run. In-app table previews are bounded to protect Streamlit rendering, normalize mixed/nested object cells and duplicate headers in a display-only copy, and fall back to text when the interactive table renderer raises an exception. Copilot evidence JSON previews are also capped and fall back to formatted text when the interactive JSON tree fails; complete evidence remains downloadable. Large review registers are bounded before DataFrame creation. Regression tests cover these paths but do not replace hosted browser/Excel acceptance.
 
 ## Required staging configuration before enabling server transfer
 
@@ -41,7 +41,7 @@ The API host, identity/token validation, allowed origins, maximum payload limits
 ## Acceptance status
 
 - Workbench Data registration and route: **IMPLEMENTED_NEEDS_VALIDATION**
-- Safe bounded/Arrow-compatible Streamlit Excel table rendering with failure fallback: **IMPLEMENTED_NEEDS_VALIDATION**
+- Safe bounded/Arrow-compatible Streamlit Excel table rendering and bounded Copilot evidence JSON with failure fallbacks: **IMPLEMENTED_NEEDS_VALIDATION**
 - Server-side tier gate: **IMPLEMENTED_NEEDS_VALIDATION**
 - Local Office.js inspection, bounded 8 MB selection payload and metadata summary, and deterministic planner with stale-plan/double-submit protection: **IMPLEMENTED_NEEDS_VALIDATION**
 - Copy-first, approval-gated local operations (text trim, SUM/AVERAGE, column chart): **IMPLEMENTED_NEEDS_VALIDATION**
