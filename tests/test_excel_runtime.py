@@ -577,6 +577,26 @@ def test_excel_evidence_csv_neutralizes_formula_like_text_and_preserves_source_f
     pd.testing.assert_frame_equal(source, original)
 
 
+def test_upload_failure_hides_exception_details_and_logs_server_side(caplog):
+    from shoir_excel_runtime import _record_upload_failure
+
+    private_error = ValueError(
+        "private path=/srv/shoir/secrets.xlsx token=synthetic-secret-value"
+    )
+    state = {"excel_studio_safe_result": {"old": "data"}}
+
+    message = _record_upload_failure(state, "synthetic-workbook-signature", private_error)
+
+    assert "EXCEL-" in message
+    assert "private path" not in message
+    assert "/srv/shoir/secrets.xlsx" not in message
+    assert "synthetic-secret-value" not in message
+    assert state["excel_studio_safe_result"] is None
+    assert "synthetic-secret-value" not in state["excel_studio_safe_error"]
+    assert "synthetic-secret-value" in caplog.text
+    assert "workbook upload and inspection" in caplog.text
+
+
 def test_bounded_excel_preview_limits_render_size_without_mutating_source():
     from shoir_excel_runtime import bounded_excel_preview
 
