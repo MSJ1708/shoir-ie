@@ -383,11 +383,40 @@ def execute_excel_intelligence_plan(
 
 
 def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: bool = False) -> None:
-    from shoir_tier_capabilities import tier_allows
+    if enable_copilot:
+        # The premium route is independently protected here as well as in the
+        # platform dispatcher. Never rely on hiding a Workbench menu item.
+        from shoir_excel_entitlements import (
+            excel_intelligence_allowed,
+            excel_intelligence_entitlement_config,
+            excel_intelligence_minimum_tier,
+        )
 
-    if not tier_allows(tier, "Starter"):
-        st.warning("This workspace is not included in your current package.")
-        return
+        actor = str(username or "").strip()
+        session_actor = str(st.session_state.get("current_user") or "").strip()
+        if (
+            st.session_state.get("authenticated") is not True
+            or actor.casefold() in {"", "guest", "guest visitor", "anonymous"}
+            or session_actor.casefold() != actor.casefold()
+        ):
+            st.warning("Sign in with an active Shoir-IE account before using Excel Intelligence.")
+            return
+        entitlement = excel_intelligence_entitlement_config()
+        if not excel_intelligence_allowed(tier):
+            st.warning(
+                f"Excel Intelligence requires {excel_intelligence_minimum_tier()}. "
+                f"Your current tier is {tier}."
+            )
+            if not entitlement["valid"]:
+                st.error(str(entitlement["warning"]))
+            return
+    else:
+        # Preserve the separate Starter Excel Data Cleaning & Import module.
+        from shoir_tier_capabilities import tier_allows
+
+        if not tier_allows(tier, "Starter"):
+            st.warning("This workspace is not included in your current package.")
+            return
 
     st.markdown("## 📊 Excel Intelligence & Data Cleaning Studio")
     st.caption(
