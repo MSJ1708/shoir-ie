@@ -314,3 +314,40 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
         assert "copilot_analysis.xlsx" in archive.namelist()
         assert "inspection.json" in archive.namelist()
         assert "evidence_manifest.json" in archive.namelist()
+
+
+def test_bounded_excel_preview_limits_render_size_without_mutating_source():
+    from shoir_excel_runtime import bounded_excel_preview
+
+    source = pd.DataFrame(
+        {f"Column {column}": range(2505) for column in range(75)}
+    )
+    original_shape = source.shape
+    preview = bounded_excel_preview(source)
+
+    assert preview.shape == (2000, 50)
+    assert source.shape == original_shape
+    assert preview.iloc[0, 0] == 0
+    assert preview.iloc[-1, -1] == 1999
+
+
+def test_excel_table_renderer_falls_back_when_streamlit_dataframe_rendering_fails(monkeypatch):
+    import shoir_excel_runtime as runtime
+
+    warnings = []
+    text_previews = []
+    captions = []
+
+    def fail_dataframe(*args, **kwargs):
+        raise RuntimeError("simulated Streamlit frontend serialization issue")
+
+    monkeypatch.setattr(runtime.st, "dataframe", fail_dataframe)
+    monkeypatch.setattr(runtime.st, "warning", warnings.append)
+    monkeypatch.setattr(runtime.st, "text", text_previews.append)
+    monkeypatch.setattr(runtime.st, "caption", captions.append)
+
+    frame = pd.DataFrame({"Line": ["A", "B"], "Output": [10, 20]})
+    runtime._render_excel_dataframe(frame, "Quality review")
+
+    assert warnings and "text preview instead" in warnings[0]
+    assert text_previews and "A" in text_previews[0]
