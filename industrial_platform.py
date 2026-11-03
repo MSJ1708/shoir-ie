@@ -1230,15 +1230,15 @@ def render_module(module: str, tier: str, username: str):
         )
         st.info(
             "Available in this staging implementation: workbook import, multi-sheet inspection, "
-            "cleaned-table review, quality flags, field intelligence, source provenance and an "
-            "explicit separate-workbook export. The Microsoft Excel task-pane API/authentication "
-            "bridge and AI-generated task execution are not connected yet; workbook contents are "
-            "not sent to an external AI service by this route."
+            "cleaned-table review, quality flags, field intelligence, source provenance, approval-first "
+            "Copilot analysis on a copy of the selected cleaned sheet, and separate workbook/evidence exports. "
+            "The Microsoft Excel task-pane API/authentication bridge and external generative-model integration "
+            "are not connected; workbook contents are not sent to an external AI service by this route."
         )
         if not entitlement["valid"]:
             st.error(str(entitlement["warning"]))
         from shoir_excel_runtime import render_excel_intelligence_safe
-        render_excel_intelligence_safe(tier, username)
+        render_excel_intelligence_safe(tier, username, enable_copilot=True)
         return
 
     if module=="Excel Data Cleaning & Import":
