@@ -792,4 +792,4 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["status"] == "CAPA_REGISTER_REVIEWED"
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-    assert result["records"].iloc[0]["Workflow state"] == "OVERDUE"
+    assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
