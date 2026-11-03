@@ -992,7 +992,14 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 f"Your current tier is {tier}."
             )
             if not entitlement["valid"]:
-                st.error(str(entitlement["warning"]))
+                _LOGGER.warning(
+                    "Excel Intelligence entitlement configuration is invalid; fail-closed tier applied: %s",
+                    entitlement.get("warning"),
+                )
+                st.error(
+                    "Excel Intelligence access is restricted by server configuration. "
+                    "Please contact your Shoir-IE administrator."
+                )
             return
     else:
         # Preserve the separate Starter Excel Data Cleaning & Import module.
@@ -1430,9 +1437,10 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                     st.session_state["excel_studio_safe_result"] = result
                     st.success("Download package prepared.")
                 except Exception as exc:
+                    reference = _log_excel_error("workbook export preparation", exc)
                     st.error(
-                        f"The source workbook is loaded, but export preparation failed safely: "
-                        f"{type(exc).__name__}: {exc}"
+                        "The source workbook is loaded, but the export package could not be prepared. "
+                        f"Reference: EXCEL-{reference}."
                     )
         if result.get("xlsx") is not None:
             safe_name = re.sub(r"[^A-Za-z0-9]+", "_", str(result["filename"])).strip("_").lower()
