@@ -15,7 +15,8 @@
 - Added OOXML ZIP preflight checks before workbook parsing: 75 MB upload limit, 512 MB total expanded-package limit, 256 MB per-member limit, 10,000-member limit, 500:1 maximum compression ratio, encrypted-member rejection, duplicate-path rejection and archive path-traversal rejection.
 - Kept the existing Starter **Excel Data Cleaning & Import** module and its access policy intact.
 - Added server-side entitlement enforcement for the new premium module. Default minimum tier: **Enterprise**. The operator may configure `SHOIR_EXCEL_INTELLIGENCE_MINIMUM_TIER` to one of the six existing package names. Invalid values fail closed to **Enterprise Plus**.
-- Removed the prior Office add-in behavior that POSTed a selected range to any manually configured host without authentication. The Office.js task pane now performs local-only inspection of the workbook title, worksheet names, selected values, formula strings, formula-like cell count and number formats; it limits a selected range to 10,000 cells and supports clipboard export.
+- Replaced the read-only Office.js scaffold with a local-only, deterministic task planner and an explicit operation allow-list. It inspects a selection of up to 10,000 cells, fingerprints the selected workbook data, and proposes supported operations before execution. It does not send workbook contents to any server or external AI model.
+- Added copy-first Office.js execution: after explicit approval, the add-in creates a uniquely named `Shoir-IE Results` worksheet, copies the selected values/formulas/number formats, and applies supported edits only to that new worksheet. The selected source worksheet is not written to. Current write operations are trimming text constants, adding SUM/AVERAGE summary formulas, and creating a column chart; read-only inspection reports missing cells, duplicate data rows and formula-error values.
 - Added an approval-first Copilot tab. It binds the plan to the current instruction, worksheet and data fingerprint, and separately fingerprints the exact plan shown for approval. It re-builds and verifies that plan at execution; enforces authentication and the configurable tier again; runs the existing deterministic Copilot orchestrator against a copy; checks source preservation; and exports a separate analysis workbook plus evidence ZIP.
 - Kept Shoir-IE's fixed 96-module subscription inventory intact; Excel Intelligence is a separately governed Workbench Data capability with its own server-side entitlement policy. Added regression tests for navigation, routing, tier policy, Copilot approval/source preservation and the add-in's local-only data boundary.
 
@@ -28,7 +29,7 @@ This change does **not** establish that the full Excel Intelligence specificatio
 - No task-pane Shoir-IE sign-in or validated token exchange exists. The existing browser `remote_session_token` is a broad, long-lived workspace session and must not be copied into Excel. A future bridge must mint and validate a separate short-lived Excel-scoped token, bind it to the user and entitlement, and revoke/expire it independently.
 - The current persistence Edge Function response helper emits wildcard CORS. A workbook-data API must not be enabled for Excel under that policy; it needs an explicit allowlist for the actual Office task-pane origins, bounded request parsing, consent, and negative cross-user tests before any workbook transfer is activated.
 - The current Copilot uses the existing deterministic intent classifier and analysis engine. External generative-model/LLM task authoring is not configured and is not claimed.
-- The Office add-in does not write formulas, create PivotTables, or modify the source workbook. In-app Copilot analysis can generate a separate result workbook and evidence package; add-in workbook editing remains unimplemented.
+- The Office add-in can now create a results worksheet and apply the limited approved local operations listed above. It still does not generate a separate `.xlsx` output file, does not create PivotTables, and does not provide a dedicated add-in-to-Shoir-IE authenticated workflow. The selected source worksheet remains unchanged by the current write path.
 - The in-app upload runtime cleans and profiles data but does not yet deliver every Stage 1 operation (formula generation, chart creation, and full preservation of all advanced workbook features).
 - No authenticated browser test has proved the exact menu selection under each supported account/tier.
 - No Office desktop/web compatibility acceptance has been run.
@@ -41,7 +42,8 @@ The API host, identity/token validation, allowed origins, maximum payload limits
 
 - Workbench Data registration and route: **IMPLEMENTED_NEEDS_VALIDATION**
 - Server-side tier gate: **IMPLEMENTED_NEEDS_VALIDATION**
-- Local Office.js selected-range inspector: **IMPLEMENTED_NEEDS_VALIDATION**
+- Local Office.js inspection and deterministic planner: **IMPLEMENTED_NEEDS_VALIDATION**
+- Copy-first, approval-gated local operations (text trim, SUM/AVERAGE, column chart): **IMPLEMENTED_NEEDS_VALIDATION**
 - Full Stage 1 Excel Intelligence: **BLOCKED / NOT VERIFIED**
 - Stages 2–4: **NOT STARTED**
 
