@@ -741,9 +741,31 @@ def execute_excel_intelligence_plan(
     ):
         raise PermissionError("An active authenticated Shoir-IE session is required.")
 
+    # Re-read the server-populated session entitlement at execution time.
+    # Never let a caller-supplied tier parameter elevate a lower-tier session.
+    from shoir_tier_capabilities import normalize_tier
     from shoir_excel_entitlements import excel_intelligence_allowed
 
-    if not excel_intelligence_allowed(tier):
+    session_tier = str(st.session_state.get("user_tier") or "").strip()
+    if not session_tier:
+        raise PermissionError("The current subscription could not be verified. Sign in again before running Copilot.")
+    if normalize_tier(session_tier) != normalize_tier(str(tier or "")):
+        raise PermissionError("The subscription changed during this session. Sign in again to refresh your access.")
+
+    expiry_value = st.session_state.get("subscription_expires_at")
+    if not expiry_value:
+        raise PermissionError("The subscription expiry could not be verified. Sign in again before running Copilot.")
+    expiry_text = expiry_value.isoformat() if hasattr(expiry_value, "isoformat") else str(expiry_value)
+    try:
+        expiry = datetime.fromisoformat(expiry_text.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise PermissionError("The subscription expiry is invalid. Sign in again before running Copilot.") from exc
+    if expiry <= datetime.now(timezone.utc):
+        raise PermissionError("The subscription has expired. Sign in again to access renewal options.")
+
+    if not excel_intelligence_allowed(session_tier):
         raise PermissionError("The current subscription does not include Excel Intelligence Copilot.")
 
     expected = excel_intelligence_request_fingerprint(prompt, sheet_name, df)
