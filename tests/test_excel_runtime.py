@@ -275,6 +275,38 @@ def test_process_fast_rejects_unsupported_large_upload_before_parsing():
     else:
         raise AssertionError("Large uploads must be rejected before workbook parsing.")
 
+def test_premium_excel_module_fails_closed_before_upload_without_live_entitlement(monkeypatch):
+    import durable_account_store as account_store
+    from shoir_excel_runtime import render_excel_intelligence_safe
+
+    monkeypatch.setattr(
+        st,
+        "session_state",
+        {
+            "authenticated": True,
+            "current_user": "synthetic-enterprise-user",
+            "user_tier": "Enterprise Tier",
+        },
+    )
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: False)
+    warnings = []
+    monkeypatch.setattr(st, "warning", lambda message: warnings.append(str(message)))
+    monkeypatch.setattr(
+        st,
+        "file_uploader",
+        lambda *args, **kwargs: pytest.fail("Premium upload UI must not render without live entitlement."),
+    )
+
+    render_excel_intelligence_safe(
+        "Enterprise Tier",
+        "synthetic-enterprise-user",
+        enable_copilot=True,
+    )
+
+    assert len(warnings) == 1
+    assert "session and subscription could not be verified" in warnings[0]
+
+
 def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only(monkeypatch):
     import json
     import zipfile
