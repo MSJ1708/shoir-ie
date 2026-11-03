@@ -378,6 +378,11 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         "Preservation mode": "Data-focused governed export; original source remains unchanged",
         "Macro present": False,
         "Formula cells": 0,
+        "Tables present": False,
+        "Auto filters present": False,
+        "Merged cells present": False,
+        "Hidden rows present": False,
+        "Hidden columns present": False,
         "Charts present": False,
         "Pivot structures present": False,
         "Named ranges present": False,
@@ -431,6 +436,10 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
             formula_count = 0
             has_validations = False
             has_conditional_formatting = False
+            has_auto_filters = False
+            has_merged_cells = False
+            has_hidden_rows = False
+            has_hidden_columns = False
             worksheet_paths = sorted(
                 name for name in names
                 if name.startswith("xl/worksheets/") and name.endswith(".xml")
@@ -445,8 +454,21 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
                             has_validations = True
                         elif local_name == "conditionalFormatting":
                             has_conditional_formatting = True
+                        elif local_name == "autoFilter":
+                            has_auto_filters = True
+                        elif local_name == "mergeCell":
+                            has_merged_cells = True
+                        elif local_name == "row" and str(element.attrib.get("hidden", "")).casefold() in {"1", "true"}:
+                            has_hidden_rows = True
+                        elif local_name == "col" and str(element.attrib.get("hidden", "")).casefold() in {"1", "true"}:
+                            has_hidden_columns = True
                         element.clear()
             report["Formula cells"] = formula_count
+            report["Tables present"] = any(name.startswith("xl/tables/") for name in names)
+            report["Auto filters present"] = has_auto_filters
+            report["Merged cells present"] = has_merged_cells
+            report["Hidden rows present"] = has_hidden_rows
+            report["Hidden columns present"] = has_hidden_columns
             report["Data validations present"] = has_validations
             report["Conditional formatting present"] = has_conditional_formatting
     except (zipfile.BadZipFile, KeyError, ET.ParseError, OSError) as exc:
@@ -459,6 +481,16 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         unsupported.append("Macros / VBA")
     if report["Formula cells"]:
         unsupported.append(f"Source formulas ({report['Formula cells']:,} formula cell(s))")
+    if report["Tables present"]:
+        unsupported.append("Source Excel tables (table structure is rebuilt in the data-focused output)")
+    if report["Auto filters present"]:
+        unsupported.append("Source filters / AutoFilter settings")
+    if report["Merged cells present"]:
+        unsupported.append("Merged cells")
+    if report["Hidden rows present"]:
+        unsupported.append("Hidden rows")
+    if report["Hidden columns present"]:
+        unsupported.append("Hidden columns")
     if report["Charts present"]:
         unsupported.append("Embedded charts")
     if report["Pivot structures present"]:
