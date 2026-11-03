@@ -1332,6 +1332,32 @@ def _safe_write_frame(ws: Any, df: pd.DataFrame, start_row: int, start_col: int,
             _safe_xlsx_write(ws, i, start_col + j, value, fmt)
 
 
+def _safe_csv_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Neutralize formula-like untrusted text before creating spreadsheet-readable CSV evidence."""
+    safe = frame.copy(deep=True)
+
+    def neutralize(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        # Excel and similar spreadsheet applications may interpret leading
+        # formula markers after whitespace/control characters as formulas.
+        probe = value.lstrip(" \\t\\r\\n\\x00\\x0b\\x0c")
+        if probe.startswith(("=", "+", "-", "@")):
+            return "'" + value
+        return value
+
+    safe.columns = [neutralize(str(column)) for column in safe.columns]
+    for position in range(safe.shape[1]):
+        if pd.api.types.is_object_dtype(safe.iloc[:, position].dtype) or pd.api.types.is_string_dtype(safe.iloc[:, position].dtype):
+            safe.iloc[:, position] = safe.iloc[:, position].map(neutralize)
+    return safe
+
+
+def _safe_csv_text(frame: pd.DataFrame, **kwargs: Any) -> str:
+    """Serialize a defensive copy whose untrusted strings cannot become formulas."""
+    return _safe_csv_export_frame(frame).to_csv(index=False, **kwargs)
+
+
 def _safe_table_name(name: str, used: set[str]) -> str:
     base = re.sub(r"[^A-Za-z0-9_]", "_", str(name)).strip("_") or "Table"
     base = ("T_" + base)[:200]
@@ -1711,15 +1737,18 @@ def build_ultimate_bundle(
         zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
         zf.writestr("cleaning_audit.json", json.dumps(audits, indent=2, ensure_ascii=False))
         zf.writestr("quality_profiles.json", json.dumps(profiles, indent=2, ensure_ascii=False))
-        zf.writestr("field_intelligence.csv", pd.DataFrame(field_intelligence).to_csv(index=False))
-        zf.writestr("validation_review.csv", pd.DataFrame(review_register).to_csv(index=False))
-        zf.writestr("source_metadata.csv", pd.DataFrame(source_metadata).to_csv(index=False))
+        zf.writestr("field_intelligence.csv", _safe_csv_text(pd.DataFrame(field_intelligence)))
+        zf.writestr("validation_review.csv", _safe_csv_text(pd.DataFrame(review_register)))
+        zf.writestr("source_metadata.csv", _safe_csv_text(pd.DataFrame(source_metadata)))
         for name, frame in cleaned_sheets.items():
             safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name)).strip("_") or "sheet"
-            zf.writestr(f"clean_csv/{safe}.csv", frame.to_csv(index=False, date_format="%Y-%m-%dT%H:%M:%S"))
+            zf.writestr(
+                f"clean_csv/{safe}.csv",
+                _safe_csv_text(frame, date_format="%Y-%m-%dT%H:%M:%S"),
+            )
         for name, frame in raw_sheets.items():
             safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name)).strip("_") or "sheet"
-            zf.writestr(f"raw_csv/{safe}.csv", frame.to_csv(index=False))
+            zf.writestr(f"raw_csv/{safe}.csv", _safe_csv_text(frame))
         zf.writestr("README.txt", (
             f"{title}\n\n"
             "This package contains a presentation-ready XLSX plus machine-readable evidence files.\n"
