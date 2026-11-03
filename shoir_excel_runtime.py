@@ -130,13 +130,15 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
     try:
         st.dataframe(preview, use_container_width=True, hide_index=True)
     except Exception as exc:
+        _log_excel_error("dataframe rendering", exc)
         st.warning(
-            f"{label} could not be displayed as an interactive table "
+            f"{label} could not be displayed as an interactive table. "
             "Showing a small text preview instead."
         )
         try:
             st.text(preview.iloc[:50, :20].to_string(index=False, max_rows=50, max_cols=20))
-        except Exception:
+        except Exception as fallback_exc:
+            _log_excel_error("dataframe text fallback rendering", fallback_exc)
             st.error(f"{label} could not be rendered. The underlying data remains available for export.")
 
     if has_object_cells:
@@ -213,7 +215,8 @@ def _render_excel_json(value: Any, label: str) -> None:
         st.warning(f"{label} could not be displayed interactively. A text fallback is shown below.")
         try:
             st.code(serialized, language="json")
-        except Exception:
+        except Exception as fallback_exc:
+            _log_excel_error("JSON text fallback rendering", fallback_exc)
             st.error(f"{label} could not be rendered. The full evidence remains in the downloadable package.")
 
 
