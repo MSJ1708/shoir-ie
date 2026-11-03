@@ -18,6 +18,7 @@ Office.onReady((info) => {
   const status = document.getElementById("status");
   const preview = document.getElementById("preview");
   const planView = document.getElementById("planView");
+  const MAX_SELECTION_SERIALIZED_BYTES = 8 * 1024 * 1024;
 
   if (!info || info.host !== Office.HostType.Excel) {
     status.textContent = "Open this task pane inside Excel to inspect a workbook.";
@@ -140,23 +141,40 @@ Office.onReady((info) => {
         0
       );
 
+      const selection = {
+        address: range.address,
+        rowIndex: range.rowIndex,
+        columnIndex: range.columnIndex,
+        rows: range.rowCount,
+        columns: range.columnCount,
+        values: range.values,
+        formulas,
+        formulaCellCount,
+        numberFormats: range.numberFormat
+      };
+      // Cell count alone does not bound very long text values. Use a
+      // conservative UTF-16 estimate to protect planner and clipboard memory.
+      const serializedSelection = JSON.stringify({
+        values: selection.values,
+        formulas: selection.formulas,
+        numberFormats: selection.numberFormats
+      });
+      const approximateBytes = serializedSelection.length * 2;
+      if (!Number.isFinite(approximateBytes) ||
+          approximateBytes > MAX_SELECTION_SERIALIZED_BYTES) {
+        throw new Error(
+          "The selected data is too large for safe task-pane processing. " +
+          "Select fewer rows or columns (maximum estimated payload: 8 MB)."
+        );
+      }
+
       return {
         source: "Excel selection",
         capturedAt: new Date().toISOString(),
         workbookTitle: workbookProperties.title || "",
         worksheets: worksheets.items.map((sheet) => sheet.name),
         sheetName: worksheet.name || "",
-        selection: {
-          address: range.address,
-          rowIndex: range.rowIndex,
-          columnIndex: range.columnIndex,
-          rows: range.rowCount,
-          columns: range.columnCount,
-          values: range.values,
-          formulas,
-          formulaCellCount,
-          numberFormats: range.numberFormat
-        },
+        selection,
         transferMode: "LOCAL_ONLY"
       };
     });
@@ -586,7 +604,7 @@ Office.onReady((info) => {
           "”. The selected source worksheet remains unchanged." +
           (canDownloadCompressedWorkbook
             ? " You can download a separate copy of the current workbook."
-            : " To download a file copy, open this workbook in Excel desktop; this host does not support compressed workbook export.")
+            : " To download a file copy, open this workbook in an Excel host that supports compressed workbook export.")
     );
   }
 
@@ -623,6 +641,7 @@ Office.onReady((info) => {
     [inspectButton, copyButton, planButton].forEach(control => {
       control.disabled = true;
     });
+    instruction.disabled = true;
     try {
       await executePlan();
     } catch (error) {
@@ -633,6 +652,7 @@ Office.onReady((info) => {
       [inspectButton, copyButton, planButton].forEach(control => {
         control.disabled = false;
       });
+      instruction.disabled = false;
       if (latestPlan) runButton.disabled = false;
     }
   });
