@@ -296,13 +296,6 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
     )
     original = source.copy(deep=True)
     prompt = "Summarise throughput and operating cost"
-    plan = build_excel_intelligence_plan(prompt, "Production", source)
-
-    assert plan["plan"]["requires_approval"] is True
-    assert plan["external_model_used"] is False
-    assert len(plan["request_fingerprint"]) == 64
-    assert len(plan["plan_id"]) == 32
-    assert plan["plan_id"].isalnum()
 
     monkeypatch.delenv("SHOIR_EXCEL_INTELLIGENCE_MINIMUM_TIER", raising=False)
     monkeypatch.setattr(
@@ -314,6 +307,15 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
             "workspace_id": "test-workspace",
         },
     )
+
+    plan = build_excel_intelligence_plan(prompt, "Production", source)
+    assert plan["plan"]["requires_approval"] is True
+    assert plan["external_model_used"] is False
+    assert len(plan["request_fingerprint"]) == 64
+    assert len(plan["plan_id"]) == 32
+    assert plan["plan_id"].isalnum()
+    assert plan["owner_username"] == "shoir-e2e-excel-copilot"
+    assert plan["workspace_id"] == "test-workspace"
 
     with pytest.raises(PermissionError, match="Explicit approval"):
         execute_excel_intelligence_plan(
@@ -341,6 +343,24 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
             prompt, "Production", source, tampered,
             "shoir-e2e-excel-copilot", "Enterprise", approved=True,
         )
+
+    # A valid plan from another actor or workspace must not be reusable,
+    # even when that other actor is also authenticated and entitled.
+    st.session_state["current_user"] = "another-e2e-user"
+    with pytest.raises(PermissionError, match="another user or workspace"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "another-e2e-user", "Enterprise", approved=True,
+        )
+    st.session_state["current_user"] = "shoir-e2e-excel-copilot"
+
+    st.session_state["workspace_id"] = "another-workspace"
+    with pytest.raises(PermissionError, match="another user or workspace"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    st.session_state["workspace_id"] = "test-workspace"
 
     run = execute_excel_intelligence_plan(
         prompt, "Production", source, plan,
