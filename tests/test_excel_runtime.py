@@ -385,8 +385,8 @@ def test_excel_evidence_csv_neutralizes_formula_like_text_and_preserves_source_f
 
     source = pd.DataFrame({
         "=UntrustedHeader": [
-            "  =HYPERLINK(\\"https://invalid.example\\",\\"open\\")",
-            "\\t+1+1",
+            '  =HYPERLINK("https://invalid.example","open")',
+            "\t+1+1",
             "-1+2",
             "@SUM(A1:A2)",
             "ordinary text",
@@ -401,7 +401,7 @@ def test_excel_evidence_csv_neutralizes_formula_like_text_and_preserves_source_f
         cleaned_sheets={"Sheet1": source},
         raw_sheets={"Sheet1": source},
         field_intelligence=[{"Field": "=1+2"}],
-        review_register=[{"Finding": "\\t=CMD()"}],
+        review_register=[{"Finding": "\t=CMD()"}],
         source_metadata=[{"Source": "+HYPERLINK()"}],
     )
 
@@ -419,10 +419,8 @@ def test_excel_evidence_csv_neutralizes_formula_like_text_and_preserves_source_f
             rows = list(csv.reader(io.StringIO(archive.read(name).decode("utf-8"))))
             for row in rows:
                 for value in row:
-                    candidate = value.lstrip(" \\t\\r\\n\\x00\\x0b\\x0c")
+                    candidate = value.lstrip(" \t\r\n\x00\x0b\x0c")
                     assert not candidate.startswith(("=", "+", "-", "@"))
-                    if candidate.startswith(("=", "+", "-", "@")):
-                        raise AssertionError("Formula-like CSV text was not neutralized.")
 
     pd.testing.assert_frame_equal(source, original)
 
