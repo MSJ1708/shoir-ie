@@ -870,13 +870,30 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
 
     with tabs[2]:
         review_items = result.get("review_register") or []
-        review_frame = pd.DataFrame(review_items)
-        if review_frame.empty:
+        review_preview_items = (
+            review_items[:MAX_RENDER_PREVIEW_ROWS]
+            if isinstance(review_items, (list, tuple))
+            else []
+        )
+        review_frame = pd.DataFrame(review_preview_items)
+        if not review_items:
             st.success("No automated review exceptions detected.")
         else:
             _render_excel_dataframe(review_frame, "Quality review")
-            if "Severity" in review_frame.columns:
-                counts = review_frame["Severity"].value_counts().rename_axis("Severity").reset_index(name="Count")
+            if len(review_items) > MAX_RENDER_PREVIEW_ROWS:
+                st.caption(
+                    f"Showing the first {MAX_RENDER_PREVIEW_ROWS:,} of {len(review_items):,} review records."
+                )
+            severity_counts: dict[str, int] = {}
+            if isinstance(review_items, (list, tuple)):
+                for item in review_items:
+                    if isinstance(item, Mapping):
+                        severity = str(item.get("Severity") or "Unspecified")
+                        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            if severity_counts:
+                counts = pd.DataFrame(
+                    [{"Severity": key, "Count": value} for key, value in sorted(severity_counts.items())]
+                )
                 _render_excel_dataframe(counts, "Review severity counts")
             else:
                 st.caption("A severity breakdown is not available for these review records.")
