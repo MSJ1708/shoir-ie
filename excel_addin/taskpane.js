@@ -287,6 +287,7 @@ Office.onReady((info) => {
 
         if (operation.type === "trim_text") {
           let changed = 0;
+          let formulaLikeTextSkipped = 0;
           const values = currentPayload.selection.values || [];
           const formulas = currentPayload.selection.formulas || [];
           for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
@@ -296,7 +297,14 @@ Office.onReady((info) => {
               if (typeof value === "string" &&
                   !(typeof formula === "string" && formula.startsWith("=")) &&
                   value !== value.trim()) {
-                outputRange.getCell(rowIndex, columnIndex).values = [[value.trim()]];
+                const trimmed = value.trim();
+                // Office.js interprets values beginning with =, + or - as formulas.
+                // Do not turn previously inert text into executable spreadsheet logic.
+                if (/^[=+\-@]/.test(trimmed)) {
+                  formulaLikeTextSkipped += 1;
+                  continue;
+                }
+                outputRange.getCell(rowIndex, columnIndex).values = [[trimmed]];
                 changed += 1;
               }
             }
@@ -305,7 +313,8 @@ Office.onReady((info) => {
             operation: operation.title,
             status: "Completed",
             destinationWorksheet: resultSheetName,
-            cellsChanged: changed
+            cellsChanged: changed,
+            formulaLikeTextSkipped
           });
           continue;
         }
