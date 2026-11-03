@@ -11,6 +11,7 @@ import io
 import json
 import re
 import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -359,6 +360,133 @@ def fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         )
     else:
         report["Fidelity warning"] = "No non-tabular workbook feature requiring special preservation was detected."
+    return report
+
+
+def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
+    """Inspect OOXML preservation risks without loading workbook cells into memory.
+
+    The governed Excel Intelligence export is data-focused. This fast package
+    scan identifies source features that the generated copy does not guarantee
+    to preserve. It never modifies the uploaded source file.
+    """
+    lower = str(filename or "").casefold()
+    report: dict[str, Any] = {
+        "File": str(filename or ""),
+        "Source SHA256": hashlib.sha256(raw).hexdigest(),
+        "Source format": lower.rsplit(".", 1)[-1].upper() if "." in lower else "UNKNOWN",
+        "Preservation mode": "Data-focused governed export; original source remains unchanged",
+        "Macro present": False,
+        "Formula cells": 0,
+        "Charts present": False,
+        "Pivot structures present": False,
+        "Named ranges present": False,
+        "External links present": False,
+        "Images present": False,
+        "Data validations present": False,
+        "Conditional formatting present": False,
+        "Unsupported features": [],
+        "Requires acknowledgement": False,
+        "Fidelity warning": "",
+    }
+
+    if not raw:
+        raise ValueError("The uploaded source is empty.")
+
+    if lower.endswith((".csv", ".tsv", ".txt")):
+        report["Fidelity warning"] = "Delimited text has no workbook presentation features to preserve."
+        return report
+
+    if lower.endswith(".xls"):
+        report["Unsupported features"] = ["Legacy XLS package features were not inspected by the OOXML scanner."]
+        report["Requires acknowledgement"] = True
+        report["Fidelity warning"] = (
+            "Legacy XLS workbook fidelity is not fully inspected. The original file remains unchanged; "
+            "the generated workbook is a data-focused copy."
+        )
+        return report
+
+    if not lower.endswith((".xlsx", ".xlsm")):
+        raise ValueError("Fidelity inspection supports XLSX, XLSM and delimited text uploads.")
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), "r") as package:
+            names = set(package.namelist())
+            report["Macro present"] = "xl/vbaProject.bin" in names
+            report["Charts present"] = any(name.startswith("xl/charts/") for name in names)
+            report["Pivot structures present"] = any(
+                name.startswith(("xl/pivotTables/", "xl/pivotCache/")) for name in names
+            )
+            report["External links present"] = any(name.startswith("xl/externalLinks/") for name in names)
+            report["Images present"] = any(name.startswith("xl/media/") for name in names)
+
+            workbook_xml = package.read("xl/workbook.xml")
+            workbook_root = ET.fromstring(workbook_xml)
+            report["Named ranges present"] = any(
+                element.tag.rsplit("}", 1)[-1] == "definedNames"
+                and len(list(element)) > 0
+                for element in list(workbook_root)
+            )
+
+            formula_count = 0
+            has_validations = False
+            has_conditional_formatting = False
+            worksheet_paths = sorted(
+                name for name in names
+                if name.startswith("xl/worksheets/") and name.endswith(".xml")
+            )
+            for path in worksheet_paths:
+                with package.open(path, "r") as stream:
+                    for _event, element in ET.iterparse(stream, events=("end",)):
+                        local_name = element.tag.rsplit("}", 1)[-1]
+                        if local_name == "f":
+                            formula_count += 1
+                        elif local_name == "dataValidations":
+                            has_validations = True
+                        elif local_name == "conditionalFormatting":
+                            has_conditional_formatting = True
+                        element.clear()
+            report["Formula cells"] = formula_count
+            report["Data validations present"] = has_validations
+            report["Conditional formatting present"] = has_conditional_formatting
+    except (zipfile.BadZipFile, KeyError, ET.ParseError, OSError) as exc:
+        raise ValueError(
+            f"Workbook feature inspection could not safely read the XLSX package: {type(exc).__name__}."
+        ) from exc
+
+    unsupported = []
+    if report["Macro present"]:
+        unsupported.append("Macros / VBA")
+    if report["Formula cells"]:
+        unsupported.append(f"Source formulas ({report['Formula cells']:,} formula cell(s))")
+    if report["Charts present"]:
+        unsupported.append("Embedded charts")
+    if report["Pivot structures present"]:
+        unsupported.append("Pivot tables / pivot caches")
+    if report["Named ranges present"]:
+        unsupported.append("Named ranges")
+    if report["External links present"]:
+        unsupported.append("External workbook links")
+    if report["Images present"]:
+        unsupported.append("Embedded images")
+    if report["Data validations present"]:
+        unsupported.append("Data validation rules")
+    if report["Conditional formatting present"]:
+        unsupported.append("Conditional formatting")
+
+    report["Unsupported features"] = unsupported
+    report["Requires acknowledgement"] = bool(unsupported)
+    if unsupported:
+        report["Fidelity warning"] = (
+            "The source contains workbook features that the data-focused generated copy does not guarantee "
+            "to preserve: " + "; ".join(unsupported) +
+            ". Review this list before export. Your original upload remains unchanged."
+        )
+    else:
+        report["Fidelity warning"] = (
+            "No unsupported OOXML workbook features were detected. The export is still a new data-focused "
+            "copy, not an in-place replacement of the original."
+        )
     return report
 
 
