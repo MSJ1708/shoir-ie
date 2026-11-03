@@ -94,6 +94,54 @@ def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
     assert 'Sign in with an active Shoir-IE account' in route
 
 
+def test_enterprise_user_can_open_excel_intelligence_from_workbench_data():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    app = AppTest.from_file(page, default_timeout=90)
+    app.session_state["current_user"] = "excel-intelligence-route-test"
+    app.session_state["authenticated"] = True
+    app.session_state["user_tier"] = "Enterprise"
+    app.run(timeout=90)
+    assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
+
+    app.selectbox(key="workbench_category").select("Data")
+    app.run(timeout=90)
+    assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
+
+    module_selector = app.selectbox(key="workbench_module_selector")
+    assert "Data · Excel Intelligence" in module_selector.options
+    module_selector.select("Data · Excel Intelligence")
+    app.run(timeout=90)
+
+    assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
+    assert app.session_state["workbench_module_selector"] == "Data · Excel Intelligence"
+    assert any("No workbook" in str(item.value) or "Upload" in str(item.value) for item in app.info)
+
+
+def test_professional_user_sees_excel_intelligence_locked_in_workbench_data():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    app = AppTest.from_file(page, default_timeout=90)
+    app.session_state["current_user"] = "excel-intelligence-professional-test"
+    app.session_state["authenticated"] = True
+    app.session_state["user_tier"] = "Professional"
+    app.run(timeout=90)
+    assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
+
+    app.selectbox(key="workbench_category").select("Data")
+    app.run(timeout=90)
+    selector = app.selectbox(key="workbench_module_selector")
+    assert "Data · Excel Intelligence" in selector.options
+    selector.select("Data · Excel Intelligence")
+    app.run(timeout=90)
+
+    assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
+    assert any("requires Enterprise" in str(item.value) for item in app.warning)
+    assert not any("Shoir-IE Excel Intelligence" in str(item.value) for item in app.markdown)
+
+
 def test_excel_intelligence_registers_a_visual_table_for_the_shared_visualizer():
     from shoir_live_visuals import _module_visual_keys
     assert "excel_studio_visual_df" in _module_visual_keys(MODULE_NAME)
