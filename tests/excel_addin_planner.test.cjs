@@ -112,3 +112,13 @@ test("does not classify a text-returning formula as a numeric measure", () => {
   const plan = planner.buildPlan("Calculate total status", source);
   assert.equal(plan.operations.some(operation => operation.type === "add_summary_formulas"), false);
 });
+
+test("warns when copied formulas may depend on cells outside the selected range", () => {
+  const source = payload(
+    [["Line", "Calculated Output"], ["A", 10]],
+    [[null, null], [null, "=B2+C2"]]
+  );
+  const plan = planner.buildPlan("Create a chart for this selection", source);
+  assert.equal(plan.profile.formulaCells, 1);
+  assert.ok(plan.warnings.some(warning => warning.includes("references outside the selected range")));
+});
