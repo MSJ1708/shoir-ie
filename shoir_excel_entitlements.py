@@ -59,6 +59,14 @@ def excel_intelligence_minimum_tier() -> str:
     return str(excel_intelligence_entitlement_config()["minimum_tier"])
 
 
+def apply_excel_intelligence_entitlement(modules: list[str], user_tier: str | None) -> list[str]:
+    """Keep the application-shell feature list aligned with the server-side policy."""
+    result = [str(item) for item in modules if str(item) != "Excel Intelligence"]
+    if excel_intelligence_allowed(user_tier):
+        result.append("Excel Intelligence")
+    return result
+
+
 def excel_intelligence_allowed(user_tier: str | None) -> bool:
     """Enforce the configured minimum tier; failures deny access."""
     try:
