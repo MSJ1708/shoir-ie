@@ -2535,7 +2535,11 @@ if not _selected_module_allowed:
     st.stop()
 
 # Specialized upgraded surfaces
-if selected == "Engineering Validation Center":
+if selected == "Excel Intelligence":
+    # This dedicated Data route reuses the governed Excel runtime and its
+    # server-side premium entitlement check in industrial_platform.render_module.
+    render_module(selected, RAW_TIER, USER)
+elif selected == "Engineering Validation Center":
     st.subheader("🔎 Engineering Validation Center")
     st.caption("Validate schema, missingness, duplicates, types, units, ranges and cross-table references before running engineering logic.")
     source = st.session_state.get("workbench_df", pd.DataFrame({
