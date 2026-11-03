@@ -13,7 +13,7 @@
 - Kept the existing Starter **Excel Data Cleaning & Import** module and its access policy intact.
 - Added server-side entitlement enforcement for the new premium module. Default minimum tier: **Enterprise**. The operator may configure `SHOIR_EXCEL_INTELLIGENCE_MINIMUM_TIER` to one of the six existing package names. Invalid values fail closed to **Enterprise Plus**.
 - Removed the prior Office add-in behavior that POSTed a selected range to any manually configured host without authentication. The Office.js task pane now performs local-only sheet/selection inspection, limits a selected range to 10,000 cells, and supports clipboard export.
-- Added module-tier inventory metadata and regression tests for navigation, routing, tier policy, and the add-in's local-only data boundary.
+- Kept Shoir-IE's fixed 96-module subscription inventory intact; Excel Intelligence is a separately governed Workbench Data capability with its own server-side entitlement policy. Added regression tests for navigation, routing, tier policy, and the add-in's local-only data boundary.
 
 ## Not yet complete — Stage 1 remains open
 
