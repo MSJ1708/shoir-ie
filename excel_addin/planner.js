@@ -160,7 +160,7 @@
           aggregate,
           columnIndexes: targetIndexes.filter(index => index !== 0),
           title: aggregate === "average" ? "Add AVERAGE formulas" : "Add SUM formulas",
-          description: "Write formulas in the first blank row below the selected range; refuse to overwrite occupied cells.",
+          description: "Write formulas in the first blank row below the copied range on the new results worksheet.",
           requiresWriteApproval: true
         });
       }
@@ -172,7 +172,7 @@
           id: "create_column_chart",
           type: "create_column_chart",
           title: "Create a column chart",
-          description: "Create a chart from the selected range and position it below the selection.",
+          description: "Create a chart from the copied range on the new results worksheet.",
           requiresWriteApproval: true
         });
       } else {
@@ -187,10 +187,20 @@
       );
     }
 
+    if (operations.length > 1) {
+      operations.splice(1, 0, {
+        id: "copy_selection_to_results",
+        type: "copy_selection_to_results",
+        title: "Create a separate results worksheet",
+        description: "Copy the selected range to a new Shoir-IE Results worksheet. The source worksheet remains unchanged.",
+        requiresWriteApproval: true
+      });
+    }
+
     if (operations.length === 1) {
       warnings.push(
         "No supported write operation was detected. The plan can still run a read-only inspection. " +
-        "Supported local edits: trim text, add SUM/AVERAGE formulas, and create a column chart."
+        "Supported local edits: copy to a results worksheet, trim text, add SUM/AVERAGE formulas, and create a column chart."
       );
     }
 
