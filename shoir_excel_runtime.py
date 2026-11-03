@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import io
+import logging
 import math
 import re
 import zipfile
@@ -36,6 +37,20 @@ MAX_RENDER_PREVIEW_ROWS = 2_000
 MAX_RENDER_PREVIEW_COLUMNS = 50
 MAX_RENDER_JSON_CHARS = 250_000
 MAX_RENDER_CHART_POINTS = 20_000
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _log_excel_error(context: str, error: Exception) -> str:
+    """Log diagnostic details server-side and return a non-sensitive reference ID."""
+    reference = uuid.uuid4().hex[:12].upper()
+    _LOGGER.error(
+        "Excel Intelligence failure %s in %s",
+        reference,
+        context,
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return reference
 
 
 def bounded_excel_preview(frame: pd.DataFrame, max_rows: int = MAX_RENDER_PREVIEW_ROWS,
@@ -117,7 +132,7 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
     except Exception as exc:
         st.warning(
             f"{label} could not be displayed as an interactive table "
-            f"({type(exc).__name__}). Showing a small text preview instead."
+            "Showing a small text preview instead."
         )
         try:
             st.text(preview.iloc[:50, :20].to_string(index=False, max_rows=50, max_cols=20))
@@ -164,9 +179,9 @@ def _render_excel_plotly_figure(figure: Any, label: str = "Analysis chart") -> N
             return
         st.plotly_chart(figure, use_container_width=True)
     except Exception as exc:
+        _log_excel_error("chart rendering", exc)
         st.warning(
-            f"{label} could not be rendered ({type(exc).__name__}). "
-            "The underlying analysis table and evidence remain available."
+            f"{label} could not be rendered. The underlying analysis table and evidence remain available."
         )
 
 
@@ -175,7 +190,8 @@ def _render_excel_json(value: Any, label: str) -> None:
     try:
         serialized = json.dumps(value, ensure_ascii=False, default=str, indent=2)
     except Exception as exc:
-        st.warning(f"{label} could not be formatted as JSON ({type(exc).__name__}).")
+        _log_excel_error("JSON evidence formatting", exc)
+        st.warning(f"{label} could not be formatted. The complete evidence remains downloadable.")
         try:
             st.text(str(value)[:MAX_RENDER_JSON_CHARS])
         except Exception:
@@ -193,7 +209,8 @@ def _render_excel_json(value: Any, label: str) -> None:
     try:
         st.json(json.loads(serialized))
     except Exception as exc:
-        st.warning(f"{label} could not be displayed as an interactive JSON tree ({type(exc).__name__}).")
+        _log_excel_error("interactive JSON evidence rendering", exc)
+        st.warning(f"{label} could not be displayed interactively. A text fallback is shown below.")
         try:
             st.code(serialized, language="json")
         except Exception:
@@ -576,7 +593,8 @@ def _record_upload_failure(session_state: Any, signature: str, error: Exception)
     """Hide stale exports and cache a clear error for the currently selected file."""
     session_state["excel_studio_safe_result"] = None
     session_state.pop("excel_studio_safe_signature", None)
-    message = f"{type(error).__name__}: {error}"
+    reference = _log_excel_error("workbook upload and inspection", error)
+    message = f"Workbook validation failed. No source data was changed. Reference: EXCEL-{reference}."
     session_state["excel_studio_safe_error_signature"] = str(signature)
     session_state["excel_studio_safe_error"] = message
     return message
@@ -1034,8 +1052,10 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 message = _record_upload_failure(st.session_state, signature, exc)
                 st.error(f"Excel upload could not be loaded safely: {message}")
         elif cached_error_signature == signature and current_signature != signature:
-            cached_message = str(st.session_state.get("excel_studio_safe_error") or "This upload previously failed validation.")
-            st.error(f"Excel upload could not be loaded safely: {cached_message}")
+            st.error(
+                "This upload previously failed validation. No source data was changed. "
+                "Select a different file or try again."
+            )
 
     result = st.session_state.get("excel_studio_safe_result")
     if not isinstance(result, dict):
@@ -1124,7 +1144,10 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                         "formula cell(s). Formula text is not scanned until you request it."
                     )
                 else:
-                    st.warning(str(result.get("formula_scan_error") or "The previous formula scan could not complete."))
+                    st.warning(
+                        "The previous source formula inspection could not complete. "
+                        "No formula results are being shown."
+                    )
                 if upload is not None and st.button(
                     "Inspect source formulas",
                     use_container_width=True,
@@ -1140,10 +1163,16 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                             f"{scan_result['formula_count']:,} formula(s)."
                         )
                     except Exception as exc:
+                        reference = _log_excel_error("source formula inspection", exc)
                         result["formula_scan_status"] = "BLOCKED"
-                        result["formula_scan_error"] = f"{type(exc).__name__}: {exc}"
+                        result["formula_scan_error"] = (
+                            "Source formula inspection failed. No formula results were produced."
+                        )
                         st.session_state["excel_studio_safe_result"] = result
-                        st.error(f"Source formula inspection was not completed: {result['formula_scan_error']}")
+                        st.error(
+                            "Source formula inspection was not completed. "
+                            f"No formula results were produced. Reference: EXCEL-{reference}."
+                        )
             elif extension.endswith((".xlsx", ".xlsm")):
                 formula_count = int(result.get("formula_count", 0) or 0)
                 st.caption(
@@ -1248,7 +1277,11 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                     st.session_state.pop("excel_intelligence_copilot_run_fingerprint", None)
                     st.success("A reviewable plan has been prepared. No analysis has run yet.")
                 except Exception as exc:
-                    st.error(f"Could not prepare the Copilot plan: {type(exc).__name__}: {exc}")
+                    reference = _log_excel_error("Copilot plan preparation", exc)
+                    st.error(
+                        "Shoir-IE could not prepare this analysis plan. "
+                        f"No analysis was executed. Reference: EXCEL-{reference}."
+                    )
 
             envelope = st.session_state.get("excel_intelligence_copilot_plan")
             current_fingerprint = (
@@ -1305,7 +1338,12 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                             st.session_state["excel_intelligence_copilot_run_fingerprint"] = current_fingerprint
                             st.success("The approved analysis completed and an evidence bundle was generated.")
                         except Exception as exc:
-                            st.error(f"Copilot execution did not complete: {type(exc).__name__}: {exc}")
+                            reference = _log_excel_error("Copilot execution", exc)
+                            st.error(
+                                "The approved analysis could not be completed. "
+                                "No success was recorded. Reference: "
+                                f"EXCEL-{reference}."
+                            )
 
             run = st.session_state.get("excel_intelligence_copilot_run")
             run_fingerprint = st.session_state.get("excel_intelligence_copilot_run_fingerprint")
@@ -1349,7 +1387,11 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                         key="excel_intelligence_copilot_download_bundle",
                     )
                 except Exception as exc:
-                    st.error(f"The Copilot evidence package could not be reopened safely: {type(exc).__name__}: {exc}")
+                    reference = _log_excel_error("Copilot evidence verification", exc)
+                    st.error(
+                        "The Copilot evidence package could not be reopened safely. "
+                        f"Reference: EXCEL-{reference}."
+                    )
 
     export_tab_index = 5 if enable_copilot else 4
     with tabs[export_tab_index]:
