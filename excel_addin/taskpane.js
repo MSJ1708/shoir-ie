@@ -11,6 +11,7 @@ Office.onReady((info) => {
   const planButton = document.getElementById("buildPlan");
   const runButton = document.getElementById("runPlan");
   const downloadButton = document.getElementById("downloadWorkbook");
+  const downloadReadyLink = document.getElementById("downloadReadyLink");
   const approval = document.getElementById("approveWorkbookEdits");
   const approvalLabel = document.getElementById("approvalLabel");
   const instruction = document.getElementById("instruction");
@@ -20,7 +21,7 @@ Office.onReady((info) => {
 
   if (!info || info.host !== Office.HostType.Excel) {
     status.textContent = "Open this task pane inside Excel to inspect a workbook.";
-    [inspectButton, copyButton, planButton, runButton, downloadButton, approval].forEach(control => {
+    [inspectButton, copyButton, planButton, runButton, downloadButton, downloadReadyLink, approval].forEach(control => {
       control.disabled = true;
     });
     return;
@@ -28,7 +29,7 @@ Office.onReady((info) => {
 
   if (!window.ShoirExcelPlanner) {
     status.textContent = "The local task planner did not load. Reload the add-in and try again.";
-    [inspectButton, copyButton, planButton, runButton, approval].forEach(control => {
+    [inspectButton, copyButton, planButton, runButton, downloadButton, downloadReadyLink, approval].forEach(control => {
       control.disabled = true;
     });
     return;
@@ -41,8 +42,10 @@ Office.onReady((info) => {
     Office.context.requirements.isSetSupported("CompressedFile")
   );
   let resultsWorkbookReady = false;
+  let workbookObjectUrl = null;
 
   downloadButton.disabled = true;
+  downloadReadyLink.hidden = true;
   if (!canDownloadCompressedWorkbook) {
     downloadButton.title = "Compressed workbook download is not supported by this Excel host. Open the workbook in Excel desktop to download a copy.";
   }
@@ -249,6 +252,11 @@ Office.onReady((info) => {
       throw new Error("Run an approved task to create a results worksheet before downloading the workbook copy.");
     }
     const fileInfo = workbookDownloadName();
+    downloadReadyLink.hidden = true;
+    if (workbookObjectUrl) {
+      URL.revokeObjectURL(workbookObjectUrl);
+      workbookObjectUrl = null;
+    }
     showStatus("Preparing a local workbook copy for download…");
     const file = await officeFileAsync(
       Office.FileType.Compressed,
@@ -256,33 +264,35 @@ Office.onReady((info) => {
     );
     const maxDownloadBytes = 100 * 1024 * 1024;
     if (!Number.isFinite(Number(file.size)) || Number(file.size) < 1 ||
-        Number(file.size) > maxDownloadBytes) {
+        Number(file.size) > maxDownloadBytes || !Number.isSafeInteger(Number(file.sliceCount)) ||
+        Number(file.sliceCount) < 1) {
       await closeOfficeFileAsync(file);
-      throw new Error("The workbook export must be between 1 byte and 100 MB. The active workbook was not uploaded or changed by this download.");
+      throw new Error("The workbook export must be between 1 byte and 100 MB and contain valid file slices. No workbook data was uploaded.");
     }
 
     const chunks = [];
+    let receivedBytes = 0;
     try {
       for (let index = 0; index < file.sliceCount; index += 1) {
         showStatus("Reading local workbook copy: part " + (index + 1) + " of " + file.sliceCount + "…");
         const slice = await officeFileSliceAsync(file, index);
-        chunks.push(new Uint8Array(slice.data));
+        const bytes = new Uint8Array(slice.data);
+        chunks.push(bytes);
+        receivedBytes += bytes.byteLength;
+      }
+      if (receivedBytes !== Number(file.size)) {
+        throw new Error("The workbook copy is incomplete (" + receivedBytes + " of " + file.size + " bytes). No download link was prepared.");
       }
     } finally {
       await closeOfficeFileAsync(file);
     }
 
     const blob = new Blob(chunks, { type: fileInfo.mime });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = fileInfo.filename;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
-    showStatus("Workbook copy prepared locally: " + fileInfo.filename + ". No workbook data was transmitted to a server.");
+    workbookObjectUrl = URL.createObjectURL(blob);
+    downloadReadyLink.href = workbookObjectUrl;
+    downloadReadyLink.download = fileInfo.filename;
+    downloadReadyLink.hidden = false;
+    showStatus("Workbook copy is ready: " + fileInfo.filename + ". Select the download link above to save it. No workbook data was transmitted to a server.");
   }
 
   function columnName(zeroBasedIndex) {
@@ -542,6 +552,11 @@ Office.onReady((info) => {
     setPlan(null);
     resultsWorkbookReady = Boolean(result.resultsWorksheet);
     downloadButton.disabled = !canDownloadCompressedWorkbook || !resultsWorkbookReady;
+    downloadReadyLink.hidden = true;
+    if (workbookObjectUrl) {
+      URL.revokeObjectURL(workbookObjectUrl);
+      workbookObjectUrl = null;
+    }
     preview.textContent = JSON.stringify(result, null, 2);
     showStatus(
       result.mode === "READ_ONLY"
@@ -585,5 +600,9 @@ Office.onReady((info) => {
       showStatus("Workbook download failed: " +
         (error && error.message ? error.message : "Unknown Excel error"));
     });
+  });
+
+  window.addEventListener("pagehide", () => {
+    if (workbookObjectUrl) URL.revokeObjectURL(workbookObjectUrl);
   });
 });
