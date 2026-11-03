@@ -6,27 +6,58 @@
   <title>Shoir-IE Excel Intelligence</title>
   <style>
     :root{color-scheme:light}
-    body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#0f172a;background:#fff}
+    body{font-family:Arial,sans-serif;margin:0;padding:16px;color:#0f172a;background:#fff}
     h1{font-size:21px;margin:0 0 7px}
     p{color:#475569;font-size:13px;line-height:1.5}
-    button{width:100%;box-sizing:border-box;padding:10px 12px;margin-top:9px;border-radius:9px;border:1px solid #cbd5e1;background:#fff;font-weight:700;cursor:pointer}
+    label{display:block;font-size:12px;font-weight:700;margin:13px 0 5px}
+    textarea{width:100%;box-sizing:border-box;min-height:76px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font:13px Arial;resize:vertical}
+    button{width:100%;box-sizing:border-box;padding:10px 12px;margin-top:8px;border-radius:9px;border:1px solid #cbd5e1;background:#fff;font-weight:700;cursor:pointer}
     button.primary{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
-    #status{margin-top:14px;padding:11px;background:#f1f5f9;border-radius:9px;font-size:12px;line-height:1.5}
-    #preview{margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:330px;overflow:auto}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    #status{margin-top:13px;padding:11px;background:#f1f5f9;border-radius:9px;font-size:12px;line-height:1.5}
+    .notice{padding:10px;border-left:3px solid #0f766e;background:#f0fdfa;border-radius:5px;font-size:12px;line-height:1.5;margin:10px 0}
+    .warning{padding:10px;border-left:3px solid #b45309;background:#fffbeb;border-radius:5px;font-size:12px;line-height:1.5;margin:10px 0}
     .eyebrow{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#0f766e}
-    .notice{padding:10px;border-left:3px solid #0f766e;background:#f0fdfa;border-radius:5px;font-size:12px;line-height:1.5}
+    .approval{display:flex;align-items:flex-start;gap:8px;font-size:12px;font-weight:400;line-height:1.45}
+    .approval input{margin-top:2px}
+    pre{margin-top:8px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:240px;overflow:auto}
+    h2{font-size:14px;margin:17px 0 5px}
+    [hidden]{display:none!important}
   </style>
 </head>
 <body>
-  <div class="eyebrow">Shoir-IE · Data</div>
+  <div class="eyebrow">Shoir-IE · Workbench Data</div>
   <h1>Excel Intelligence</h1>
-  <p>Inspect the active Excel selection locally, review the worksheet list, and copy a bounded JSON snapshot for a deliberate import into Shoir-IE.</p>
-  <div class="notice">Local-only mode: this task pane does not send workbook contents to a server. Secure account authentication and the hosted workbook API must be configured before transfer or AI execution can be enabled.</div>
-  <button id="inspectSelection" class="primary">Inspect selected range</button>
-  <button id="copySelection">Copy selected range as JSON</button>
-  <div id="status" role="status" aria-live="polite">Ready. No workbook data has been transmitted.</div>
-  <pre id="preview" aria-label="Workbook inspection preview">Select a range in Excel and choose “Inspect selected range”.</pre>
+  <p>Describe an Excel task, inspect the selected range, review the proposed operations, and approve any local workbook edits.</p>
+
+  <div class="notice">
+    <strong>Local-only mode.</strong> Workbook values stay inside Excel. This add-in does not upload workbook data or call an external AI model. Its planner uses a fixed allow-list, not workbook instructions or generated code.
+  </div>
+  <div class="warning">
+    <strong>Workbook edits are opt-in.</strong> Read-only inspection does not change cells. Before approving an edit, save a backup or open a duplicate workbook. Approved operations modify the active workbook.
+  </div>
+
+  <label for="instruction">What should Excel Intelligence do?</label>
+  <textarea id="instruction" placeholder="Example: Trim extra spaces, calculate total cost, and create a chart."></textarea>
+  <button id="inspectSelection">Inspect selected range</button>
+  <button id="copySelection">Copy selection as JSON</button>
+  <button id="buildPlan" class="primary">Build execution plan</button>
+
+  <h2>Proposed plan</h2>
+  <pre id="planView" aria-label="Proposed task plan">No task plan has been prepared.</pre>
+
+  <label id="approvalLabel" class="approval" hidden>
+    <input type="checkbox" id="approveWorkbookEdits">
+    <span>I reviewed the operations and approve modifying the active workbook. I have saved a backup or deliberately chose this workbook for editing.</span>
+  </label>
+  <button id="runPlan" class="primary" disabled>Run read-only inspection</button>
+
+  <div id="status" role="status" aria-live="polite">Ready. No workbook data has been transmitted or modified.</div>
+  <h2>Inspection / execution evidence</h2>
+  <pre id="preview" aria-label="Workbook inspection and execution evidence">Select a range in Excel and choose “Inspect selected range”.</pre>
+
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="./planner.js"></script>
   <script src="./taskpane.js"></script>
 </body>
 </html>
