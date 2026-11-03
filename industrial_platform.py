@@ -37,11 +37,15 @@ from shoir_engine_studio import (
 )
 from shoir_investor_demo import render_investor_control_center
 from shoir_workspace_rbac import list_workspace_members, save_workspace_members, WORKSPACE_ROLES
+from shoir_excel_entitlements import excel_intelligence_allowed, excel_intelligence_entitlement_config, excel_intelligence_minimum_tier
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
      "when":"Turn raw Excel/CSV exports into structured, traceable and presentation-ready engineering workbooks.",
      "example":"Upload a messy multi-sheet workbook and receive CLEAN working sheets, a START HERE map, quality checks, data dictionary, cleaning audit and hidden RAW archives."},
+    {"tier":excel_intelligence_minimum_tier(),"category":"Data Platform","name":"Excel Intelligence",
+     "when":"Use the governed Workbench Data workspace for multi-sheet workbook inspection, cleaning, quality review, field intelligence, provenance and controlled export.",
+     "example":"Load a manufacturing workbook, inspect sheets and quality findings, review cleaned tables, then explicitly prepare a separate Industrial Excel Intelligence workbook. Office add-in execution and AI task automation remain configuration-gated."},
     {"tier":"Research Pack","category":"Research AI","name":"Research AI",
      "when":"Use a research-focused assistant for protocols, hypotheses, statistical planning, reproducibility and peer-review preparation.",
      "example":"Load a study and dataset, then ask Research AI to structure the analysis plan and identify evidence gaps without inventing results or citations."},
@@ -118,7 +122,7 @@ TIER_FEATURES = {
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
         "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
-        "Industrial Data Platform","ShadowShift — Micro-Loss & Recovery Intelligence","Advanced Planning & Scheduling","Quality Engineering & Reliability",
+        "Industrial Data Platform","Excel Intelligence","ShadowShift — Micro-Loss & Recovery Intelligence","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
         "AI Copilot","Monte Carlo Sim","Sensitivity Analysis","Digital Twin & Discrete-Event Simulation",
@@ -1198,9 +1202,43 @@ def render_module(module: str, tier: str, username: str):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
 
+    if module=="Excel Intelligence":
+        # Enforce the configurable premium entitlement at the renderer boundary,
+        # even when this function is called outside the Workbench selector.
+        entitlement = excel_intelligence_entitlement_config()
+        if not excel_intelligence_allowed(tier):
+            st.warning(
+                f"Excel Intelligence requires {excel_intelligence_minimum_tier()}. "
+                f"Your current tier is {tier}."
+            )
+            if not entitlement["valid"]:
+                st.error(str(entitlement["warning"]))
+            return
+        with sqlite3.connect("enterprise_full_workspace.db") as _excel_usage_conn:
+            _excel_usage_conn.execute(
+                "INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",
+                (username,module,_now()),
+            )
+            _excel_usage_conn.commit()
+        st.markdown("## 📊 Shoir-IE Excel Intelligence")
+        st.caption(
+            "A governed Data workspace using Shoir-IE's existing Excel processing engine."
+        )
+        st.info(
+            "Available in this staging implementation: workbook import, multi-sheet inspection, "
+            "cleaned-table review, quality flags, field intelligence, source provenance and an "
+            "explicit separate-workbook export. The Microsoft Excel task-pane API/authentication "
+            "bridge and AI-generated task execution are not connected yet; workbook contents are "
+            "not sent to an external AI service by this route."
+        )
+        if not entitlement["valid"]:
+            st.error(str(entitlement["warning"]))
+        from shoir_excel_runtime import render_excel_intelligence_safe
+        render_excel_intelligence_safe(tier, username)
+        return
+
     if module=="Excel Data Cleaning & Import":
-        # Use the safe/lazy renderer so upload itself never builds the full
-        # XLSX + ZIP evidence package and takes down the Streamlit process.
+        # Keep the original Starter data-cleaning module and its existing access.
         from shoir_excel_runtime import render_excel_intelligence_safe
         render_excel_intelligence_safe(tier, username)
         return
