@@ -2492,6 +2492,12 @@ elif "Pro" in tier_val or "Trial" in tier_val:
 else:
     allowed_modules = tier1_features
 
+# Keep the premium Excel Intelligence module list aligned with its server-side
+# configurable entitlement. This is a visibility decision only; execution is
+# independently gated inside industrial_platform.render_module.
+from shoir_excel_entitlements import apply_excel_intelligence_entitlement
+allowed_modules = apply_excel_intelligence_entitlement(allowed_modules, tier_val)
+
 # Cumulative tier lists inherit prior features. Keep one entry per module so
 # navigation and tier search never show repeated options.
 allowed_modules = unique_modules(allowed_modules)
