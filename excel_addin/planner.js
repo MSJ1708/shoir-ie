@@ -63,6 +63,7 @@
     let missingCells = 0;
     let formulaErrors = 0;
     let textCells = 0;
+    let unsafeTrimCells = 0;
 
     for (let row = 0; row < rowCount; row += 1) {
       for (let column = 0; column < columnCount; column += 1) {
@@ -71,7 +72,10 @@
         if (value === null || value === undefined || value === "") missingCells += 1;
         if (typeof value === "string" && ERROR_VALUES.has(value.toUpperCase())) formulaErrors += 1;
         if (typeof value === "string" && value.length > 0 &&
-            !(typeof formula === "string" && formula.startsWith("="))) textCells += 1;
+            !(typeof formula === "string" && formula.startsWith("="))) {
+          textCells += 1;
+          if (value !== value.trim() && /^[=+\-@]/.test(value.trim())) unsafeTrimCells += 1;
+        }
       }
     }
 
@@ -94,6 +98,7 @@
       duplicateRows,
       formulaErrors,
       textCells,
+      unsafeTrimCells,
       numericColumns: numericColumnIndexes(selection).map(index => ({
         index,
         header: header[index]
@@ -130,6 +135,12 @@
         });
       } else {
         warnings.push("No text constants were found to trim in the selected range.");
+      }
+      if (profile.unsafeTrimCells > 0) {
+        warnings.push(
+          profile.unsafeTrimCells + " text cell(s) would start with an Excel formula marker after trimming. " +
+          "Those values will be left unchanged to prevent formula injection."
+        );
       }
     }
 
