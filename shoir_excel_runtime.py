@@ -33,6 +33,7 @@ MAX_FORMULA_SCAN_CELLS = 2_000_000
 MAX_FORMULA_INVENTORY_ROWS = 10_000
 MAX_RENDER_PREVIEW_ROWS = 2_000
 MAX_RENDER_PREVIEW_COLUMNS = 50
+MAX_RENDER_JSON_CHARS = 250_000
 
 
 def bounded_excel_preview(frame: pd.DataFrame, max_rows: int = MAX_RENDER_PREVIEW_ROWS,
@@ -133,6 +134,36 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
             f"from {len(frame):,} row(s) and {len(frame.columns):,} column(s). "
             "The source data is not truncated by this display limit."
         )
+
+
+def _render_excel_json(value: Any, label: str) -> None:
+    """Render JSON-safe, bounded evidence with a readable fallback."""
+    try:
+        serialized = json.dumps(value, ensure_ascii=False, default=str, indent=2)
+    except Exception as exc:
+        st.warning(f"{label} could not be formatted as JSON ({type(exc).__name__}).")
+        try:
+            st.text(str(value)[:MAX_RENDER_JSON_CHARS])
+        except Exception:
+            st.error(f"{label} could not be rendered. The full evidence remains in the downloadable package.")
+        return
+
+    if len(serialized) > MAX_RENDER_JSON_CHARS:
+        st.code(serialized[:MAX_RENDER_JSON_CHARS], language="json")
+        st.caption(
+            f"{label} preview shortened to {MAX_RENDER_JSON_CHARS:,} characters. "
+            "The complete evidence remains in the downloadable package."
+        )
+        return
+
+    try:
+        st.json(json.loads(serialized))
+    except Exception as exc:
+        st.warning(f"{label} could not be displayed as an interactive JSON tree ({type(exc).__name__}).")
+        try:
+            st.code(serialized, language="json")
+        except Exception:
+            st.error(f"{label} could not be rendered. The full evidence remains in the downloadable package.")
 
 
 def _validate_ooxml_package(raw: bytes, filename: str) -> None:
@@ -1075,8 +1106,11 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 st.markdown("**Explanation**")
                 st.write(str(run.get("explanation") or "No explanation was generated."))
                 with st.expander("Evidence manifest and analysis assumptions"):
-                    st.json(run.get("evidence_manifest") or {})
-                    st.json(metrics)
+                    _render_excel_json(
+                        run.get("evidence_manifest") or {},
+                        "Evidence manifest",
+                    )
+                    _render_excel_json(metrics, "Analysis assumptions")
                 try:
                     with zipfile.ZipFile(io.BytesIO(bytes(run["export"])), "r") as archive:
                         workbook_bytes = archive.read("copilot_analysis.xlsx")
