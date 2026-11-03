@@ -719,6 +719,64 @@ def build_excel_intelligence_plan(
     }
 
 
+def _require_live_excel_entitlement(actor: str, tier: str) -> dict[str, Any]:
+    """Revalidate the caller's current account and subscription on the server."""
+    from durable_account_store import edge_backend_configured, edge_session_entitlement
+    from shoir_tier_capabilities import normalize_tier
+    from shoir_excel_entitlements import excel_intelligence_allowed
+
+    if not edge_backend_configured():
+        raise PermissionError("Live account verification is unavailable. Excel Intelligence is disabled.")
+    session_token = str(st.session_state.get("remote_session_token") or "").strip()
+    if not session_token:
+        raise PermissionError("The authenticated workspace session could not be verified. Sign in again.")
+
+    try:
+        live_account = edge_session_entitlement(actor, session_token)
+    except Exception as exc:
+        raise PermissionError("The authenticated workspace session could not be revalidated. Sign in again.") from exc
+
+    if not isinstance(live_account, dict) or live_account.get("error") == "SUBSCRIPTION_EXPIRED":
+        raise PermissionError("The subscription has expired or could not be verified. Sign in again.")
+    live_username = str(live_account.get("username") or "").strip()
+    live_tier = str(live_account.get("tier") or "").strip()
+    if live_account.get("ok") is not True or live_account.get("active") is not True:
+        raise PermissionError("The authenticated account is inactive or its current access could not be verified.")
+    if live_username.casefold() != str(actor or "").strip().casefold():
+        raise PermissionError("The live account session does not match the signed-in user.")
+    if not live_tier:
+        raise PermissionError("The current subscription tier could not be verified. Sign in again.")
+    session_tier = str(st.session_state.get("user_tier") or "").strip()
+    if (
+        not session_tier
+        or normalize_tier(session_tier) != normalize_tier(live_tier)
+        or normalize_tier(str(tier or "")) != normalize_tier(live_tier)
+    ):
+        raise PermissionError("The subscription changed during this session. Sign in again to refresh your access.")
+
+    expiry_value = live_account.get("expires_at")
+    if not expiry_value:
+        raise PermissionError("The live subscription expiry could not be verified. Excel Intelligence is disabled.")
+    expiry_text = expiry_value.isoformat() if hasattr(expiry_value, "isoformat") else str(expiry_value)
+    try:
+        expiry = datetime.fromisoformat(expiry_text.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise PermissionError("The live subscription expiry is invalid. Excel Intelligence is disabled.") from exc
+    if expiry <= datetime.now(timezone.utc):
+        raise PermissionError("The subscription has expired. Sign in again to access renewal options.")
+    if not excel_intelligence_allowed(live_tier):
+        raise PermissionError("The current subscription does not include Excel Intelligence.")
+
+    return {
+        "username": live_username,
+        "tier": live_tier,
+        "active": True,
+        "expires_at": expiry.isoformat(),
+    }
+
+
 def execute_excel_intelligence_plan(
     prompt: str,
     sheet_name: str,
@@ -741,58 +799,8 @@ def execute_excel_intelligence_plan(
     ):
         raise PermissionError("An active authenticated Shoir-IE session is required.")
 
-    # Revalidate the opaque workspace session against the live account row
-    # immediately before execution. The raw token remains server-side and is
-    # sent only from this Streamlit backend to the pinned staging/production
-    # persistence endpoint; it is never issued to the Office.js task pane.
-    from durable_account_store import edge_backend_configured, edge_session_entitlement
-    from shoir_tier_capabilities import normalize_tier
-    from shoir_excel_entitlements import excel_intelligence_allowed
-
-    if not edge_backend_configured():
-        raise PermissionError("Live account verification is unavailable. Copilot execution is disabled.")
-    session_token = str(st.session_state.get("remote_session_token") or "").strip()
-    if not session_token:
-        raise PermissionError("The authenticated workspace session could not be verified. Sign in again before running Copilot.")
-    try:
-        live_account = edge_session_entitlement(actor, session_token)
-    except Exception as exc:
-        raise PermissionError("The authenticated workspace session could not be revalidated. Sign in again before running Copilot.") from exc
-
-    if not isinstance(live_account, dict) or live_account.get("error") == "SUBSCRIPTION_EXPIRED":
-        raise PermissionError("The subscription has expired or could not be verified. Sign in again to refresh access.")
-    live_username = str(live_account.get("username") or "").strip()
-    live_tier = str(live_account.get("tier") or "").strip()
-    if live_account.get("ok") is not True or live_account.get("active") is not True:
-        raise PermissionError("The authenticated account is inactive or its current access could not be verified.")
-    if live_username.casefold() != actor.casefold():
-        raise PermissionError("The live account session does not match the signed-in user.")
-    if not live_tier:
-        raise PermissionError("The current subscription tier could not be verified. Sign in again before running Copilot.")
-
-    session_tier = str(st.session_state.get("user_tier") or "").strip()
-    if (
-        not session_tier
-        or normalize_tier(session_tier) != normalize_tier(live_tier)
-        or normalize_tier(str(tier or "")) != normalize_tier(live_tier)
-    ):
-        raise PermissionError("The subscription changed during this session. Sign in again to refresh your access.")
-
-    expiry_value = live_account.get("expires_at")
-    if not expiry_value:
-        raise PermissionError("The live subscription expiry could not be verified. Copilot execution is disabled.")
-    expiry_text = expiry_value.isoformat() if hasattr(expiry_value, "isoformat") else str(expiry_value)
-    try:
-        expiry = datetime.fromisoformat(expiry_text.replace("Z", "+00:00"))
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise PermissionError("The live subscription expiry is invalid. Copilot execution is disabled.") from exc
-    if expiry <= datetime.now(timezone.utc):
-        raise PermissionError("The subscription has expired. Sign in again to access renewal options.")
-
-    if not excel_intelligence_allowed(live_tier):
-        raise PermissionError("The current subscription does not include Excel Intelligence Copilot.")
+    live_account = _require_live_excel_entitlement(actor, tier)
+    live_tier = str(live_account["tier"])
 
     expected = excel_intelligence_request_fingerprint(prompt, sheet_name, df)
     supplied = str(plan_envelope.get("request_fingerprint") or "")
@@ -945,6 +953,15 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             st.warning("Sign in with an active Shoir-IE account before using Excel Intelligence.")
             return
         entitlement = excel_intelligence_entitlement_config()
+        try:
+            live_entitlement = _require_live_excel_entitlement(actor, tier)
+        except PermissionError:
+            st.warning(
+                "Your current Shoir-IE session and subscription could not be verified. "
+                "Sign in again before using Excel Intelligence."
+            )
+            return
+        tier = str(live_entitlement["tier"])
         if not excel_intelligence_allowed(tier):
             st.warning(
                 f"Excel Intelligence requires {excel_intelligence_minimum_tier()}. "
