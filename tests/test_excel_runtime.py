@@ -444,6 +444,17 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
         )
     monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
 
+    def invalid_backend_configuration():
+        raise RuntimeError("synthetic invalid staging configuration")
+
+    monkeypatch.setattr(account_store, "edge_backend_configured", invalid_backend_configuration)
+    with pytest.raises(PermissionError, match="unavailable"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+
     with pytest.raises(ValueError, match="stale"):
         execute_excel_intelligence_plan(
             prompt + " with a different instruction",
