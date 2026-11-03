@@ -34,7 +34,7 @@ The manifest requests ReadWriteDocument because approved operations create and w
 
 ## Data transfer boundary
 
-The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. Its planner is deterministic rule-based code, not an LLM.
+The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. Its planner is deterministic rule-based code, not an LLM. The compact local change fingerprint is used only to invalidate a stale plan; it is not a cryptographic digest, authentication token, or authorization control. The displayed plan does not duplicate the selected cell values.
 
 A deployed authenticated Shoir-IE workbook API and a separate short-lived add-in identity/token exchange do not currently exist. The browser remote_session_token must not be copied into the add-in. Do not enable workbook transfer until user authentication, server-side tier/workspace checks, explicit data-transfer consent, origin/request bounds, audit/retention policy and cross-tenant denial tests are implemented.
 
