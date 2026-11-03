@@ -31,6 +31,45 @@ MAX_OOXML_MEMBER_COUNT = 10_000
 MAX_OOXML_COMPRESSION_RATIO = 500
 MAX_FORMULA_SCAN_CELLS = 2_000_000
 MAX_FORMULA_INVENTORY_ROWS = 10_000
+MAX_RENDER_PREVIEW_ROWS = 2_000
+MAX_RENDER_PREVIEW_COLUMNS = 50
+
+
+def bounded_excel_preview(frame: pd.DataFrame, max_rows: int = MAX_RENDER_PREVIEW_ROWS,
+                          max_columns: int = MAX_RENDER_PREVIEW_COLUMNS) -> pd.DataFrame:
+    """Return a display-only slice so very wide/large workbooks cannot overwhelm Streamlit."""
+    if not isinstance(frame, pd.DataFrame):
+        return pd.DataFrame()
+    rows = max(1, min(int(max_rows), MAX_RENDER_PREVIEW_ROWS))
+    columns = max(1, min(int(max_columns), MAX_RENDER_PREVIEW_COLUMNS))
+    return frame.iloc[:rows, :columns]
+
+
+def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
+    """Render a bounded table and degrade to text if Streamlit's table renderer fails."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        st.info(f"{label} is empty or not available yet.")
+        return
+
+    preview = bounded_excel_preview(frame)
+    try:
+        st.dataframe(preview, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(
+            f"{label} could not be displayed as an interactive table "
+            f"({type(exc).__name__}). Showing a small text preview instead."
+        )
+        try:
+            st.text(preview.iloc[:50, :20].to_string(index=False, max_rows=50, max_cols=20))
+        except Exception:
+            st.error(f"{label} could not be rendered. The underlying data remains available for export.")
+
+    if len(frame) > len(preview) or len(frame.columns) > len(preview.columns):
+        st.caption(
+            f"Showing {len(preview):,} row(s) and {len(preview.columns):,} column(s) in this preview "
+            f"from {len(frame):,} row(s) and {len(frame.columns):,} column(s). "
+            "The source data is not truncated by this display limit."
+        )
 
 
 def _validate_ooxml_package(raw: bytes, filename: str) -> None:
@@ -806,11 +845,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 )
                 formulas = result.get("formula_inventory") or []
                 if formulas:
-                    st.dataframe(
-                        pd.DataFrame(formulas).head(2000),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+                    _render_excel_dataframe(pd.DataFrame(formulas), "Source formula inventory")
                 if formula_status == "SAMPLED":
                     st.warning(
                         f"Only the first {MAX_FORMULA_INVENTORY_ROWS:,} source formulas are included "
@@ -831,21 +866,25 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             f"{selected} · {len(df):,} rows × {len(df.columns):,} fields · "
             f"{profiles.get(selected, {}).get('Readiness', '—')}"
         )
-        st.dataframe(df.head(2000), use_container_width=True, hide_index=True)
+        _render_excel_dataframe(df, "Clean data")
 
     with tabs[2]:
-        review_frame = pd.DataFrame(result.get("review_register", []))
+        review_items = result.get("review_register") or []
+        review_frame = pd.DataFrame(review_items)
         if review_frame.empty:
             st.success("No automated review exceptions detected.")
         else:
-            st.dataframe(review_frame, use_container_width=True, hide_index=True)
-            counts = review_frame["Severity"].value_counts().rename_axis("Severity").reset_index(name="Count")
-            st.dataframe(counts, use_container_width=True, hide_index=True)
+            _render_excel_dataframe(review_frame, "Quality review")
+            if "Severity" in review_frame.columns:
+                counts = review_frame["Severity"].value_counts().rename_axis("Severity").reset_index(name="Count")
+                _render_excel_dataframe(counts, "Review severity counts")
+            else:
+                st.caption("A severity breakdown is not available for these review records.")
         st.caption("Potential outliers are flags for review; they are never silently deleted by the interactive upload path.")
 
     with tabs[3]:
         field_frame = pd.DataFrame(result.get("field_intelligence", []))
-        st.dataframe(field_frame, use_container_width=True, hide_index=True)
+        _render_excel_dataframe(field_frame, "Field intelligence")
 
     if enable_copilot:
         with tabs[4]:
@@ -902,7 +941,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                         st.caption(str(plan["intent"].get("reason") or ""))
                     if plan.get("method"):
                         st.write(f"**Selected method:** {plan['method'].get('method', 'Not specified')}")
-                    st.dataframe(pd.DataFrame(plan.get("steps") or []), use_container_width=True, hide_index=True)
+                    _render_excel_dataframe(pd.DataFrame(plan.get("steps") or []), "Copilot proposed steps")
                     st.caption("Execution is read-only against a copy of the selected cleaned sheet. The source workbook remains unchanged.")
                     approval_key = "excel_intelligence_copilot_approved_" + current_fingerprint[:12]
                     approved = st.checkbox(
@@ -944,10 +983,16 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 m3.metric("Analysis type", str(metrics.get("type") or "—").replace("_", " ").title())
                 result_df = run.get("result")
                 if isinstance(result_df, pd.DataFrame):
-                    st.dataframe(result_df.head(2000), use_container_width=True, hide_index=True)
+                    _render_excel_dataframe(result_df, "Copilot analysis results")
                 figure = run.get("figure")
                 if figure is not None:
-                    st.plotly_chart(figure, use_container_width=True)
+                    try:
+                        st.plotly_chart(figure, use_container_width=True)
+                    except Exception as exc:
+                        st.warning(
+                            "The analysis table is available, but its chart could not be rendered "
+                            f"({type(exc).__name__})."
+                        )
                 st.markdown("**Explanation**")
                 st.write(str(run.get("explanation") or "No explanation was generated."))
                 with st.expander("Evidence manifest and analysis assumptions"):
