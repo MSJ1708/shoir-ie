@@ -23,6 +23,8 @@ Office.onReady((info) => {
     return Excel.run(async (context) => {
       const worksheets = context.workbook.worksheets;
       worksheets.load("items/name");
+      const workbookProperties = context.workbook.properties;
+      workbookProperties.load("title");
 
       const range = context.workbook.getSelectedRange();
       range.load(["address", "rowCount", "columnCount"]);
@@ -33,18 +35,30 @@ Office.onReady((info) => {
         throw new Error("Select a range containing between 1 and 10,000 cells.");
       }
 
-      range.load("values");
+      range.load(["values", "formulas", "numberFormat"]);
       await context.sync();
+
+      const formulas = range.formulas || [];
+      const formulaCellCount = formulas.reduce(
+        (count, row) => count + row.filter(
+          (value) => typeof value === "string" && value.startsWith("=")
+        ).length,
+        0
+      );
 
       return {
         source: "Excel selection",
         capturedAt: new Date().toISOString(),
+        workbookTitle: workbookProperties.title || "",
         worksheets: worksheets.items.map((sheet) => sheet.name),
         selection: {
           address: range.address,
           rows: range.rowCount,
           columns: range.columnCount,
-          values: range.values
+          values: range.values,
+          formulas,
+          formulaCellCount,
+          numberFormats: range.numberFormat
         },
         transferMode: "LOCAL_ONLY"
       };
