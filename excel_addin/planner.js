@@ -75,6 +75,7 @@
     const columnCount = Number(selection.columns);
     let missingCells = 0;
     let formulaErrors = 0;
+    let formulaCells = 0;
     let textCells = 0;
     let unsafeTrimCells = 0;
 
@@ -82,6 +83,7 @@
       for (let column = 0; column < columnCount; column += 1) {
         const value = values[row][column];
         const formula = selection.formulas[row][column];
+        if (typeof formula === "string" && formula.startsWith("=")) formulaCells += 1;
         if (value === null || value === undefined || value === "") missingCells += 1;
         if (typeof value === "string" && ERROR_VALUES.has(value.toUpperCase())) formulaErrors += 1;
         if (typeof value === "string" && value.length > 0 &&
@@ -110,6 +112,7 @@
       missingCells,
       duplicateRows,
       formulaErrors,
+      formulaCells,
       textCells,
       unsafeTrimCells,
       numericColumns: numericColumnIndexes(selection).map(index => ({
@@ -136,6 +139,12 @@
     }];
     const warnings = [];
     const numericIndexes = profile.numericColumns.map(column => column.index);
+    if (profile.formulaCells > 0) {
+      warnings.push(
+        profile.formulaCells + " formula cell(s) were found. Excel will copy formulas with native relative-reference adjustment; " +
+        "references outside the selected range may not resolve to the same cells on the results worksheet. Review formula results before relying on them."
+      );
+    }
 
     if (/\b(trim|whitespace|extra spaces|clean text|standardi[sz]e whitespace)\b/.test(normalized)) {
       if (profile.textCells > 0) {
