@@ -216,19 +216,19 @@ Office.onReady((info) => {
   function workbookDownloadName() {
     const rawUrl = String(Office.context.document.url || "");
     const pathPart = rawUrl.split(/[?#]/)[0];
-    const extensionMatch = pathPart.match(/\\.(xlsx|xlsm)$/i);
+    const extensionMatch = pathPart.match(/\.(xlsx|xlsm)$/i);
     if (!extensionMatch) {
       throw new Error("Save the current workbook as .xlsx or .xlsm first so Excel Intelligence can preserve the correct file type.");
     }
     const extension = extensionMatch[1].toLowerCase();
-    let lastPart = pathPart.replace(/\\\\/g, "/").split("/").pop() || "Workbook";
+    let lastPart = pathPart.replace(/\\/g, "/").split("/").pop() || "Workbook";
     try {
       lastPart = decodeURIComponent(lastPart);
     } catch (_) {
       // Keep the raw final path component if it is not valid URI encoding.
     }
     const base = lastPart
-      .replace(/\\.(xlsx|xlsm)$/i, "")
+      .replace(/\.(xlsx|xlsm)$/i, "")
       .replace(/[^A-Za-z0-9_-]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, 60) || "Workbook";
