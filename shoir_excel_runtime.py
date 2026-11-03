@@ -759,6 +759,61 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             "The uploaded source remains unchanged. The generated Industrial Excel Intelligence workbook is a separate, "
             "data-focused output and does not replace the original file."
         )
+        if enable_copilot:
+            st.markdown("### Source formula inspection")
+            formula_status = str(result.get("formula_scan_status") or "NOT_SCANNED")
+            extension = str(result.get("filename") or "").casefold()
+            if extension.endswith((".xlsx", ".xlsm")) and formula_status in {"NOT_SCANNED", "BLOCKED"}:
+                if formula_status == "NOT_SCANNED":
+                    st.caption(
+                        f"Workbook package inspection detected {int(fidelity.get('Formula cells', 0) or 0):,} "
+                        "formula cell(s). Formula text is not scanned until you request it."
+                    )
+                else:
+                    st.warning(str(result.get("formula_scan_error") or "The previous formula scan could not complete."))
+                if upload is not None and st.button(
+                    "Inspect source formulas",
+                    use_container_width=True,
+                    key="excel_intelligence_scan_source_formulas",
+                ):
+                    try:
+                        with st.spinner("Scanning source formulas as inert evidence…"):
+                            scan_result = scan_source_formulas(result, upload.getvalue())
+                        result["formula_scan_error"] = ""
+                        st.session_state["excel_studio_safe_result"] = result
+                        st.success(
+                            f"Scanned {scan_result['scanned_cells']:,} cell(s) and found "
+                            f"{scan_result['formula_count']:,} formula(s)."
+                        )
+                    except Exception as exc:
+                        result["formula_scan_status"] = "BLOCKED"
+                        result["formula_scan_error"] = f"{type(exc).__name__}: {exc}"
+                        st.session_state["excel_studio_safe_result"] = result
+                        st.error(f"Source formula inspection was not completed: {result['formula_scan_error']}")
+            elif extension.endswith((".xlsx", ".xlsm")):
+                formula_count = int(result.get("formula_count", 0) or 0)
+                st.caption(
+                    f"Formula inspection status: {formula_status} · "
+                    f"{formula_count:,} formula(s) found."
+                )
+                formulas = result.get("formula_inventory") or []
+                if formulas:
+                    st.dataframe(
+                        pd.DataFrame(formulas).head(2000),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                if formula_status == "SAMPLED":
+                    st.warning(
+                        f"Only the first {MAX_FORMULA_INVENTORY_ROWS:,} source formulas are included "
+                        "in the evidence inventory. The total formula count is shown above."
+                    )
+                st.caption(
+                    "Formula strings are stored as inert text in the separate output workbook. "
+                    "They are not executed, rewritten or silently restored into cleaned data."
+                )
+            else:
+                st.caption("Source formula inventory is available only for XLSX and XLSM workbooks.")
 
     with tabs[1]:
         selected = st.selectbox("Clean sheet", sheet_names, index=sheet_names.index(selected), key="excel_studio_safe_sheet")
