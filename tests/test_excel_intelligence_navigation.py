@@ -94,6 +94,11 @@ def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
     assert 'Sign in with an active Shoir-IE account' in route
 
 
+def test_excel_intelligence_registers_a_visual_table_for_the_shared_visualizer():
+    from shoir_live_visuals import _module_visual_keys
+    assert "excel_studio_visual_df" in _module_visual_keys(MODULE_NAME)
+
+
 def test_office_addin_does_not_post_workbook_data_without_authenticated_api():
     taskpane = (ROOT / "excel_addin" / "taskpane.js").read_text(encoding="utf-8")
     readme = (ROOT / "excel_addin" / "README.md").read_text(encoding="utf-8")
