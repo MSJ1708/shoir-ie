@@ -378,6 +378,7 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         "Preservation mode": "Data-focused governed export; original source remains unchanged",
         "Macro present": False,
         "Formula cells": 0,
+        "Cell formatting present": False,
         "Tables present": False,
         "Auto filters present": False,
         "Merged cells present": False,
@@ -436,6 +437,7 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
             formula_count = 0
             has_validations = False
             has_conditional_formatting = False
+            has_cell_formatting = False
             has_auto_filters = False
             has_merged_cells = False
             has_hidden_rows = False
@@ -450,6 +452,12 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
                         local_name = element.tag.rsplit("}", 1)[-1]
                         if local_name == "f":
                             formula_count += 1
+                        elif local_name == "c" and int(element.attrib.get("s", "0") or 0) > 0:
+                            has_cell_formatting = True
+                        elif local_name == "col" and int(element.attrib.get("style", "0") or 0) > 0:
+                            has_cell_formatting = True
+                        elif local_name == "row" and int(element.attrib.get("s", "0") or 0) > 0:
+                            has_cell_formatting = True
                         elif local_name == "dataValidations":
                             has_validations = True
                         elif local_name == "conditionalFormatting":
@@ -464,6 +472,7 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
                             has_hidden_columns = True
                         element.clear()
             report["Formula cells"] = formula_count
+            report["Cell formatting present"] = has_cell_formatting
             report["Tables present"] = any(name.startswith("xl/tables/") for name in names)
             report["Auto filters present"] = has_auto_filters
             report["Merged cells present"] = has_merged_cells
@@ -481,6 +490,8 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         unsupported.append("Macros / VBA")
     if report["Formula cells"]:
         unsupported.append(f"Source formulas ({report['Formula cells']:,} formula cell(s))")
+    if report["Cell formatting present"]:
+        unsupported.append("Source cell formatting (the governed export uses a new presentation style)")
     if report["Tables present"]:
         unsupported.append("Source Excel tables (table structure is rebuilt in the data-focused output)")
     if report["Auto filters present"]:
