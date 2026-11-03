@@ -17,6 +17,7 @@ import io
 import math
 import re
 import zipfile
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -686,6 +687,10 @@ def build_excel_intelligence_plan(prompt: str, sheet_name: str, df: pd.DataFrame
 
     plan = build_workflow_plan(instruction, "Excel Intelligence", df.copy(deep=True))
     return {
+        # A fresh identifier binds a single explicit human approval to one
+        # planned execution. Rebuilding even an identical request creates a
+        # new plan and therefore requires a new approval.
+        "plan_id": uuid.uuid4().hex,
         "request_fingerprint": excel_intelligence_request_fingerprint(instruction, sheet_name, df),
         "plan_fingerprint": excel_intelligence_plan_fingerprint(plan),
         "prompt": instruction,
@@ -745,26 +750,108 @@ def execute_excel_intelligence_plan(
     ):
         raise ValueError("The approved plan changed or is stale. Rebuild and review the current plan before execution.")
 
-    # The orchestrator receives an isolated copy. The source/cleaned worksheet is
-    # never modified by this analysis route.
-    source_snapshot = df.copy(deep=True)
-    from shoir_copilot_orchestrator import run_orchestration
+    plan_id = str(plan_envelope.get("plan_id") or "").strip()
+    if not re.fullmatch(r"[a-f0-9]{32}", plan_id):
+        raise ValueError("This plan has no valid one-use identifier. Build and review a new plan.")
 
-    run = run_orchestration(
-        str(prompt).strip(),
-        "Excel Intelligence",
-        df.copy(deep=True),
-        context={"actor": actor, "username": actor, "workspace": str(st.session_state.get("workspace_id") or "default")},
-    )
-    if not df.equals(source_snapshot):
-        raise RuntimeError("Copilot unexpectedly modified the source dataframe; execution was stopped.")
-    if not isinstance(run, dict) or not isinstance(run.get("export"), (bytes, bytearray)):
-        raise RuntimeError("Copilot did not produce a valid evidence export; no success state was recorded.")
-    run["source_sheet"] = str(sheet_name)
-    run["source_data_fingerprint"] = expected
-    run["planner"] = "Shoir-IE deterministic Copilot orchestrator"
-    run["external_model_used"] = False
-    return run
+    workspace = str(st.session_state.get("workspace_id") or "default")
+    registry_key = "excel_intelligence_copilot_execution_registry"
+    registry = st.session_state.get(registry_key)
+    if not isinstance(registry, dict):
+        registry = {"in_progress": [], "completed": []}
+    in_progress = [str(value) for value in registry.get("in_progress", [])]
+    completed = [str(value) for value in registry.get("completed", [])]
+    if plan_id in in_progress or plan_id in completed:
+        raise PermissionError(
+            "This approved plan has already run or is currently running. "
+            "Build a new plan and review it before another execution."
+        )
+
+    # Claim the one-use plan before invoking the analysis engine. This blocks
+    # double-clicks and reruns in the same authenticated Streamlit session.
+    registry["in_progress"] = [*in_progress, plan_id]
+    registry["completed"] = completed[-500:]
+    st.session_state[registry_key] = registry
+
+    try:
+        # The orchestrator receives an isolated copy. The source/cleaned worksheet
+        # is never modified by this analysis route.
+        source_snapshot = df.copy(deep=True)
+        from shoir_copilot_orchestrator import run_orchestration
+
+        run = run_orchestration(
+            str(prompt).strip(),
+            "Excel Intelligence",
+            df.copy(deep=True),
+            context={"actor": actor, "username": actor, "workspace": workspace},
+        )
+        if not df.equals(source_snapshot):
+            raise RuntimeError("Copilot unexpectedly modified the source dataframe; execution was stopped.")
+        if not isinstance(run, dict) or not isinstance(run.get("export"), (bytes, bytearray)):
+            raise RuntimeError("Copilot did not produce a valid evidence export; no success state was recorded.")
+
+        approved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        approval_evidence = {
+            "schema_version": "1.0",
+            "plan_id": plan_id,
+            "actor": actor,
+            "workspace": workspace,
+            "approved": True,
+            "approved_at_utc": approved_at,
+            "source_worksheet": str(sheet_name),
+            "source_data_fingerprint": expected,
+            "request_fingerprint": supplied,
+            "plan_fingerprint": canonical_plan_fingerprint,
+            "planner": "Shoir-IE deterministic Copilot orchestrator",
+            "external_model_used": False,
+            "source_data_preserved": True,
+            "execution_status": "COMPLETED",
+        }
+
+        evidence_manifest = run.get("evidence_manifest")
+        if not isinstance(evidence_manifest, dict):
+            evidence_manifest = {}
+            run["evidence_manifest"] = evidence_manifest
+        evidence_manifest["approval"] = approval_evidence
+
+        # Include the approval record in the downloadable evidence archive as
+        # well as the UI manifest. Rebuild the ZIP rather than mutating or
+        # replacing the analysis workbook.
+        evidence_buffer = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(bytes(run["export"])), "r") as source_archive:
+            with zipfile.ZipFile(evidence_buffer, "w", compression=zipfile.ZIP_DEFLATED) as target_archive:
+                for item in source_archive.infolist():
+                    if item.filename == "copilot_approval.json":
+                        continue
+                    target_archive.writestr(item, source_archive.read(item.filename))
+                target_archive.writestr(
+                    "copilot_approval.json",
+                    json.dumps(approval_evidence, ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+
+        run["export"] = evidence_buffer.getvalue()
+        run["approval_record"] = approval_evidence
+        run["plan_id"] = plan_id
+        run["source_sheet"] = str(sheet_name)
+        run["source_data_fingerprint"] = expected
+        run["planner"] = "Shoir-IE deterministic Copilot orchestrator"
+        run["external_model_used"] = False
+
+        registry = st.session_state.get(registry_key)
+        if not isinstance(registry, dict):
+            registry = {"in_progress": [], "completed": []}
+        registry["completed"] = [*[
+            str(value) for value in registry.get("completed", []) if str(value) != plan_id
+        ], plan_id][-500:]
+        st.session_state[registry_key] = registry
+        return run
+    finally:
+        registry = st.session_state.get(registry_key)
+        if isinstance(registry, dict):
+            registry["in_progress"] = [
+                str(value) for value in registry.get("in_progress", []) if str(value) != plan_id
+            ]
+            st.session_state[registry_key] = registry
 
 
 def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: bool = False) -> None:
@@ -1056,6 +1143,10 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             ):
                 try:
                     envelope = build_excel_intelligence_plan(copilot_prompt, selected, cleaned[selected])
+                    approval_key = "excel_intelligence_copilot_approved_" + str(envelope["plan_id"])[:12]
+                    # A rebuilt plan always needs a new, explicit approval even
+                    # when the instruction and workbook contents are identical.
+                    st.session_state[approval_key] = False
                     st.session_state["excel_intelligence_copilot_plan"] = envelope
                     st.session_state.pop("excel_intelligence_copilot_run", None)
                     st.session_state.pop("excel_intelligence_copilot_run_fingerprint", None)
@@ -1086,15 +1177,21 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                         st.write(f"**Selected method:** {plan['method'].get('method', 'Not specified')}")
                     _render_excel_dataframe(pd.DataFrame(plan.get("steps") or []), "Copilot proposed steps")
                     st.caption("Execution is read-only against a copy of the selected cleaned sheet. The source workbook remains unchanged.")
-                    approval_key = "excel_intelligence_copilot_approved_" + current_fingerprint[:12]
+                    plan_id = str(envelope.get("plan_id") or "")
+                    approval_key = "excel_intelligence_copilot_approved_" + plan_id[:12]
+                    registry = st.session_state.get("excel_intelligence_copilot_execution_registry") or {}
+                    already_executed = plan_id in [str(value) for value in registry.get("completed", [])]
+                    if already_executed:
+                        st.success("This approved plan has already completed. Build a new plan to run another analysis.")
                     approved = st.checkbox(
                         "I have reviewed this plan and approve running the analysis.",
                         key=approval_key,
+                        disabled=already_executed,
                     )
                     if st.button(
                         "Approve and run analysis",
                         type="primary",
-                        disabled=not approved,
+                        disabled=(not approved or already_executed),
                         use_container_width=True,
                         key="excel_intelligence_copilot_execute",
                     ):
