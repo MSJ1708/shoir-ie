@@ -452,11 +452,11 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
                         local_name = element.tag.rsplit("}", 1)[-1]
                         if local_name == "f":
                             formula_count += 1
-                        elif local_name == "c" and int(element.attrib.get("s", "0") or 0) > 0:
+                        elif local_name == "c" and str(element.attrib.get("s", "0")).isdigit() and int(element.attrib.get("s", "0")) > 0:
                             has_cell_formatting = True
-                        elif local_name == "col" and int(element.attrib.get("style", "0") or 0) > 0:
+                        elif local_name == "col" and str(element.attrib.get("style", "0")).isdigit() and int(element.attrib.get("style", "0")) > 0:
                             has_cell_formatting = True
-                        elif local_name == "row" and int(element.attrib.get("s", "0") or 0) > 0:
+                        elif local_name == "row" and str(element.attrib.get("s", "0")).isdigit() and int(element.attrib.get("s", "0")) > 0:
                             has_cell_formatting = True
                         elif local_name == "dataValidations":
                             has_validations = True
