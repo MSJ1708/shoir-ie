@@ -351,3 +351,24 @@ def test_excel_table_renderer_falls_back_when_streamlit_dataframe_rendering_fail
 
     assert warnings and "text preview instead" in warnings[0]
     assert text_previews and "A" in text_previews[0]
+
+
+def test_excel_display_frame_sanitizes_mixed_objects_and_duplicate_headers_without_mutating_source():
+    from shoir_excel_runtime import _safe_excel_display_frame
+
+    source = pd.DataFrame(
+        [[1, "alpha"], ["two", {"nested": [1, 2]}], [None, b"binary"]],
+        columns=["Mixed", "Mixed"],
+    )
+    original = source.copy(deep=True)
+    display = _safe_excel_display_frame(source)
+
+    assert list(display.columns) == ["Mixed", "Mixed (2)"]
+    assert str(display.dtypes.iloc[0]) == "string"
+    assert str(display.dtypes.iloc[1]) == "string"
+    assert display.iloc[0, 0] == "1"
+    assert display.iloc[1, 0] == "two"
+    assert display.iloc[1, 1] == '{"nested": [1, 2]}'
+    assert display.iloc[2, 0] is pd.NA
+    assert display.iloc[2, 1] == "binary"
+    pd.testing.assert_frame_equal(source, original)
