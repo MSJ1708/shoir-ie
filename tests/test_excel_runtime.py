@@ -237,6 +237,7 @@ def test_process_fast_rejects_unsupported_large_upload_before_parsing():
         raise AssertionError("Large uploads must be rejected before workbook parsing.")
 
 def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only(monkeypatch):
+    import json
     import zipfile
 
     import pytest
@@ -261,6 +262,8 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
     assert plan["plan"]["requires_approval"] is True
     assert plan["external_model_used"] is False
     assert len(plan["request_fingerprint"]) == 64
+    assert len(plan["plan_id"]) == 32
+    assert plan["plan_id"].isalnum()
 
     monkeypatch.delenv("SHOIR_EXCEL_INTELLIGENCE_MINIMUM_TIER", raising=False)
     monkeypatch.setattr(
@@ -310,10 +313,33 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
     assert run["external_model_used"] is False
     assert run["source_sheet"] == "Production"
     assert run["evidence_manifest"]["approval_required"] is True
+    assert run["approval_record"]["approved"] is True
+    assert run["approval_record"]["plan_id"] == plan["plan_id"]
+    assert run["approval_record"]["source_data_preserved"] is True
+    assert run["approval_record"]["execution_status"] == "COMPLETED"
     with zipfile.ZipFile(io.BytesIO(run["export"]), "r") as archive:
         assert "copilot_analysis.xlsx" in archive.namelist()
         assert "inspection.json" in archive.namelist()
         assert "evidence_manifest.json" in archive.namelist()
+        assert "copilot_approval.json" in archive.namelist()
+        approval = json.loads(archive.read("copilot_approval.json"))
+        assert approval["plan_id"] == plan["plan_id"]
+        assert approval["approved"] is True
+        assert approval["source_worksheet"] == "Production"
+
+    # A repeated click/replay of the exact same plan must be rejected, even
+    # though its request, data and approval checkbox value have not changed.
+    with pytest.raises(PermissionError, match="already run"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+
+    # Rebuilding the same request creates a different plan ID, so a genuinely
+    # new review/approval is possible without carrying the old approval forward.
+    rebuilt_plan = build_excel_intelligence_plan(prompt, "Production", source)
+    assert rebuilt_plan["request_fingerprint"] == plan["request_fingerprint"]
+    assert rebuilt_plan["plan_id"] != plan["plan_id"]
 
 
 def test_bounded_excel_preview_limits_render_size_without_mutating_source():
