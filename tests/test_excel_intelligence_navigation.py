@@ -81,7 +81,13 @@ def test_workbench_and_renderer_are_explicitly_wired_to_the_existing_safe_engine
     assert 'render_module(selected, RAW_TIER, USER)' in workbench
     assert 'if module=="Excel Intelligence":' in platform
     assert "excel_intelligence_allowed(tier)" in platform
-    assert "render_excel_intelligence_safe(tier, username)" in platform
+    assert "render_excel_intelligence_safe(tier, username, enable_copilot=True)" in platform
+
+    runtime = (ROOT / "shoir_excel_runtime.py").read_text(encoding="utf-8")
+    assert "def scan_source_formulas(" in runtime
+    assert "Inspect source formulas" in runtime
+    assert "MAX_FORMULA_SCAN_CELLS" in runtime
+    assert "formula_inventory=formula_inventory" in runtime
 
 
 def test_premium_excel_runtime_rechecks_entitlement_and_preserves_starter_route():
