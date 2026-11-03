@@ -94,3 +94,10 @@ test("text trimming flags values that would become executable formula-like input
   const plan = planner.buildPlan("Trim extra spaces", source);
   assert.ok(plan.warnings.some(warning => warning.includes("prevent formula injection")));
 });
+
+test("local plan fingerprint is compact and does not retain source cell content", () => {
+  const source = payload([["Line", "Cost"], ["Confidential-Order-42", 1234]]);
+  const plan = planner.buildPlan("Inspect this data", source);
+  assert.match(plan.dataFingerprint, /^LOCAL-[0-9a-f]{16}$/);
+  assert.equal(plan.dataFingerprint.includes("Confidential-Order-42"), false);
+});
