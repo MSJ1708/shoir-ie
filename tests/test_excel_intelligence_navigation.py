@@ -203,7 +203,7 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
 
     manifest = (ROOT / "excel_addin" / "manifest.xml").read_text(encoding="utf-8")
     assert "<Permissions>ReadWriteDocument</Permissions>" in manifest
-    assert '<Sets DefaultMinVersion="1.7">' in manifest
+    assert '<Sets DefaultMinVersion="1.9">' in manifest
     assert '<Set Name="ExcelApi"/>' in manifest
     assert "does not upload workbook contents" in readme
     assert "Save a backup" in readme
