@@ -5,6 +5,33 @@ import pandas as pd
 from shoir_excel_runtime import process_fast
 
 
+def test_ooxml_preflight_rejects_traversal_and_resource_exhaustion(monkeypatch):
+    import zipfile
+
+    import pytest
+
+    import shoir_excel_runtime as runtime
+
+    traversal = io.BytesIO()
+    with zipfile.ZipFile(traversal, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("../outside.xml", b"not allowed")
+    with pytest.raises(ValueError, match="unsafe package path"):
+        runtime._validate_ooxml_package(traversal.getvalue(), "unsafe.xlsx")
+
+    compressed = io.BytesIO()
+    with zipfile.ZipFile(compressed, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("xl/workbook.xml", b"A" * 4096)
+
+    monkeypatch.setattr(runtime, "MAX_OOXML_COMPRESSION_RATIO", 5)
+    with pytest.raises(ValueError, match="unusually compressed"):
+        runtime._validate_ooxml_package(compressed.getvalue(), "compressed.xlsx")
+
+    monkeypatch.setattr(runtime, "MAX_OOXML_COMPRESSION_RATIO", 100_000)
+    monkeypatch.setattr(runtime, "MAX_OOXML_UNCOMPRESSED_BYTES", 128)
+    with pytest.raises(ValueError, match="expands beyond"):
+        runtime._validate_ooxml_package(compressed.getvalue(), "oversized.xlsx")
+
+
 def test_process_fast_loads_workbook_without_building_exports():
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
