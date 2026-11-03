@@ -7,6 +7,7 @@ import {
   normalizeWorkspaceStateJson,
   publicErrorFor,
   readBoundedJsonObject,
+  sessionEntitlementFields,
   shouldAutoAssignReferralCode,
 } from "./security.ts";
 
@@ -498,21 +499,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const expiry = typeof row.subscription_expires_at === "string"
-        ? row.subscription_expires_at
-        : null;
-      if (!expiry || !Number.isFinite(Date.parse(expiry))) {
-        return sendResponse({
-          error: "Subscription entitlement could not be verified.",
-        }, 403);
-      }
-      return sendResponse({
-        ok: true,
-        username: row.username,
-        tier: row.tier,
-        active: row.active === true,
-        expires_at: expiry,
-      });
+      const entitlement = sessionEntitlementFields(
+        row as Record<string, unknown>,
+      );
+      return sendResponse({ ok: true, ...entitlement });
     }
 
     if (action === "account_exists") {
