@@ -26,6 +26,8 @@ import json
 import math
 import re
 import sqlite3
+
+from shoir_excel_entitlements import excel_intelligence_minimum_tier
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import product
@@ -86,6 +88,7 @@ MODULE_MATRIX = [
     ("Platform","Industrial Operating System","Enterprise"),
     ("Core Platform","Engineering Validation Center","Starter"),
     ("Core Platform","Excel Data Cleaning & Import","Starter"),
+    ("Data","Excel Intelligence",excel_intelligence_minimum_tier()),
     ("Digital Thread","Industrial Data Model & Digital Thread","Professional"),
     ("Planning","Advanced Planning & Scheduling","Professional"),
     ("Planning","Production Planning & Control (PPC)","Professional"),
