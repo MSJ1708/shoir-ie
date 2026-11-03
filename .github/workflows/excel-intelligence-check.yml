@@ -8,6 +8,7 @@ on:
       - "excel_addin/**"
       - "shoir_excel_entitlements.py"
       - "shoir_excel_runtime.py"
+      - "shoir_excel_foundation.py"
       - "shoir_tier_capabilities.py"
       - "industrial_platform.py"
       - "industrial_platform_excellence.py"
@@ -55,7 +56,7 @@ jobs:
       - name: Compile Excel Intelligence integration
         run: |
           python -m py_compile app.py industrial_platform.py industrial_platform_excellence.py
-          python -m py_compile shoir_excel_entitlements.py shoir_excel_runtime.py
+          python -m py_compile shoir_excel_entitlements.py shoir_excel_runtime.py shoir_excel_foundation.py
           python -m py_compile shoir_tier_capabilities.py shoir_live_visuals.py
           python -m py_compile pages/Industrial_Engineering_Workbench.py
       - name: Run focused Excel Intelligence and navigation regression tests
