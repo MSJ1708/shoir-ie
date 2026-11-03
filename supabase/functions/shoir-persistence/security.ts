@@ -211,6 +211,50 @@ export function hasCanonicalMasterAdminInvariant(
     actualExpiry === expectedExpiry;
 }
 
+
+/**
+ * Return only safe subscription fields after the caller's opaque workspace
+ * session has already been revalidated by getSession().
+ */
+export function sessionEntitlementFields(
+  account: Record<string, unknown>,
+): {
+  username: string;
+  tier: string;
+  active: true;
+  expires_at: string;
+} {
+  const username = typeof account.username === "string"
+    ? account.username.trim()
+    : "";
+  const tier = typeof account.tier === "string" ? account.tier.trim() : "";
+  const expiresAt = typeof account.subscription_expires_at === "string"
+    ? account.subscription_expires_at.trim()
+    : "";
+  const expiryTime = Date.parse(expiresAt);
+
+  if (
+    !username ||
+    !tier ||
+    account.active !== true ||
+    !expiresAt ||
+    !Number.isFinite(expiryTime) ||
+    expiryTime <= Date.now()
+  ) {
+    throw new PublicRequestError(
+      "Subscription entitlement could not be verified.",
+      403,
+    );
+  }
+
+  return {
+    username,
+    tier,
+    active: true,
+    expires_at: expiresAt,
+  };
+}
+
 export function publicErrorFor(
   error: unknown,
 ): { status: number; message: string } {
