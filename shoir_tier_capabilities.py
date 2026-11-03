@@ -255,7 +255,12 @@ def tier_allows(current: str, required: str) -> bool:
 
 
 def module_required_tier(module: str) -> Optional[str]:
-    return MODULE_REQUIREMENTS.get(str(module).strip())
+    name = str(module).strip()
+    if name == "Excel Intelligence":
+        # Its operator-configurable minimum tier is a single shared policy.
+        from shoir_excel_entitlements import excel_intelligence_minimum_tier
+        return excel_intelligence_minimum_tier()
+    return MODULE_REQUIREMENTS.get(name)
 
 
 def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, object]:
