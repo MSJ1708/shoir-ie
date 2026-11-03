@@ -42,7 +42,35 @@ Office.onReady((info) => {
 
   function setPlan(plan) {
     latestPlan = plan;
-    planView.textContent = plan ? JSON.stringify(plan, null, 2) : "No task plan has been prepared.";
+    if (plan) {
+      const profile = plan.profile || {};
+      const visiblePlan = {
+        planner: plan.planner,
+        workbookTitle: plan.workbookTitle,
+        worksheet: plan.sheetName,
+        selection: plan.selectionAddress,
+        assumptions: profile.assumption,
+        inspection: {
+          dataRows: profile.rows,
+          columns: profile.columns,
+          missingCells: profile.missingCells,
+          duplicateRows: profile.duplicateRows,
+          formulaErrors: profile.formulaErrors,
+          numericColumns: profile.numericColumns
+        },
+        operations: (plan.operations || []).map(operation => ({
+          title: operation.title,
+          description: operation.description,
+          requiresApproval: operation.requiresWriteApproval
+        })),
+        warnings: plan.warnings || [],
+        requiresWriteApproval: plan.requiresWriteApproval,
+        externalModelUsed: plan.externalModelUsed
+      };
+      planView.textContent = JSON.stringify(visiblePlan, null, 2);
+    } else {
+      planView.textContent = "No task plan has been prepared.";
+    }
     const hasWriteActions = Boolean(plan && plan.requiresWriteApproval);
     approvalLabel.hidden = !hasWriteActions;
     approval.checked = false;
