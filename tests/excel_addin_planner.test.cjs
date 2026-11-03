@@ -38,9 +38,9 @@ test("builds an approval-gated plan for cleaning, totals and charts", () => {
   assert.equal(plan.requiresWriteApproval, true);
   assert.deepEqual(
     plan.operations.map(operation => operation.type),
-    ["inspect", "trim_text", "add_summary_formulas", "create_column_chart"]
+    ["inspect", "copy_selection_to_results", "trim_text", "add_summary_formulas", "create_column_chart"]
   );
-  assert.deepEqual(plan.operations[2].columnIndexes, [1]);
+  assert.deepEqual(plan.operations[3].columnIndexes, [1]);
   assert.equal(plan.profile.rows, 3);
   assert.equal(plan.profile.numericColumns.length, 2);
 });
