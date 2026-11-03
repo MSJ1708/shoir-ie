@@ -34,6 +34,7 @@ MAX_FORMULA_INVENTORY_ROWS = 10_000
 MAX_RENDER_PREVIEW_ROWS = 2_000
 MAX_RENDER_PREVIEW_COLUMNS = 50
 MAX_RENDER_JSON_CHARS = 250_000
+MAX_RENDER_CHART_POINTS = 20_000
 
 
 def bounded_excel_preview(frame: pd.DataFrame, max_rows: int = MAX_RENDER_PREVIEW_ROWS,
@@ -133,6 +134,38 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
             f"Showing {len(preview):,} row(s) and {len(preview.columns):,} column(s) in this preview "
             f"from {len(frame):,} row(s) and {len(frame.columns):,} column(s). "
             "The source data is not truncated by this display limit."
+        )
+
+
+def _render_excel_plotly_figure(figure: Any, label: str = "Analysis chart") -> None:
+    """Render Plotly only when its point count is safe for the browser."""
+    if figure is None:
+        return
+    try:
+        point_count = 0
+        for trace in getattr(figure, "data", ()):
+            trace_points = []
+            for attribute in ("x", "y", "z", "values", "labels"):
+                values = getattr(trace, attribute, None)
+                if values is not None:
+                    try:
+                        trace_points.append(len(values))
+                    except (TypeError, ValueError):
+                        continue
+            point_count += max(trace_points, default=0)
+
+        if point_count > MAX_RENDER_CHART_POINTS:
+            st.warning(
+                f"{label} contains {point_count:,} plotted points, above the "
+                f"{MAX_RENDER_CHART_POINTS:,}-point display limit. The chart was not drawn "
+                "to protect the browser; the full result table and evidence remain available."
+            )
+            return
+        st.plotly_chart(figure, use_container_width=True)
+    except Exception as exc:
+        st.warning(
+            f"{label} could not be rendered ({type(exc).__name__}). "
+            "The underlying analysis table and evidence remain available."
         )
 
 
@@ -1096,13 +1129,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                     _render_excel_dataframe(result_df, "Copilot analysis results")
                 figure = run.get("figure")
                 if figure is not None:
-                    try:
-                        st.plotly_chart(figure, use_container_width=True)
-                    except Exception as exc:
-                        st.warning(
-                            "The analysis table is available, but its chart could not be rendered "
-                            f"({type(exc).__name__})."
-                        )
+                    _render_excel_plotly_figure(figure, "Copilot analysis chart")
                 st.markdown("**Explanation**")
                 st.write(str(run.get("explanation") or "No explanation was generated."))
                 with st.expander("Evidence manifest and analysis assumptions"):
