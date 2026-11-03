@@ -189,6 +189,9 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "resultSheet.charts.add" in taskpane
     assert "AVERAGE" in taskpane and "SUM" in taskpane
     assert "formulaLikeTextSkipped" in taskpane
+    assert "Office.FileType.Compressed" in taskpane
+    assert "isSetSupported(\"CompressedFile\")" in taskpane
+    assert "maxDownloadBytes = 100 * 1024 * 1024" in taskpane
     assert "Do not turn previously inert text into executable spreadsheet logic" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
@@ -210,4 +213,5 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert '<Sets DefaultMinVersion="1.9">' in manifest
     assert '<Set Name="ExcelApi"/>' in manifest
     assert "does not upload workbook contents" in readme
+    assert "Excel for the web" in readme
     assert "Save a backup" in readme
