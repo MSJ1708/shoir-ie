@@ -8,12 +8,13 @@
 ## Implemented in this change
 
 - Added **Workbench → Data → Excel Intelligence** using the existing Workbench `MODULE_MATRIX` and module renderer. No separate navigation system or duplicate application was introduced.
-- Added an entry to the shared platform catalog under the `Data Platform` category, so the existing application-shell grouping can route it to **Data**.
+- Registered the feature only in the Workbench Data module matrix; it is deliberately not added as a 97th item to the fixed 96-module subscription catalogue.
 - Reused the existing safe Excel ingestion/runtime for workbook import, multi-sheet processing, cleaned-table review, quality flags, field intelligence, provenance, and explicit export.
 - Kept the existing Starter **Excel Data Cleaning & Import** module and its access policy intact.
 - Added server-side entitlement enforcement for the new premium module. Default minimum tier: **Enterprise**. The operator may configure `SHOIR_EXCEL_INTELLIGENCE_MINIMUM_TIER` to one of the six existing package names. Invalid values fail closed to **Enterprise Plus**.
 - Removed the prior Office add-in behavior that POSTed a selected range to any manually configured host without authentication. The Office.js task pane now performs local-only sheet/selection inspection, limits a selected range to 10,000 cells, and supports clipboard export.
-- Kept Shoir-IE's fixed 96-module subscription inventory intact; Excel Intelligence is a separately governed Workbench Data capability with its own server-side entitlement policy. Added regression tests for navigation, routing, tier policy, and the add-in's local-only data boundary.
+- Added an approval-first Copilot tab. It binds the plan to the current instruction, worksheet and data fingerprint; enforces authentication and the configurable tier again at execution; runs the existing deterministic Copilot orchestrator against a copy; checks source preservation; and exports a separate analysis workbook plus evidence ZIP.
+- Kept Shoir-IE's fixed 96-module subscription inventory intact; Excel Intelligence is a separately governed Workbench Data capability with its own server-side entitlement policy. Added regression tests for navigation, routing, tier policy, Copilot approval/source preservation and the add-in's local-only data boundary.
 
 ## Not yet complete — Stage 1 remains open
 
@@ -22,8 +23,8 @@ This change does **not** establish that the full Excel Intelligence specificatio
 - No authenticated Shoir-IE workbook API is deployed. The former `POST /api/workbook/import` endpoint was documentation only.
 - The Office add-in manifest still contains `YOUR-SHOIR-IE-HOST` placeholders and has not been hosted/sideloaded in the staging Excel desktop or web clients.
 - No task-pane Shoir-IE sign-in or validated token exchange exists.
-- Natural-language AI planning and controlled task execution are not implemented in this increment.
-- The Office add-in does not write formulas, create charts/PivotTables, or return an output workbook.
+- The current Copilot uses the existing deterministic intent classifier and analysis engine. External generative-model/LLM task authoring is not configured and is not claimed.
+- The Office add-in does not write formulas, create PivotTables, or modify the source workbook. In-app Copilot analysis can generate a separate result workbook and evidence package; add-in workbook editing remains unimplemented.
 - The in-app upload runtime cleans and profiles data but does not yet deliver every Stage 1 operation (formula generation, chart creation, and full preservation of all advanced workbook features).
 - No authenticated browser test has proved the exact menu selection under each supported account/tier.
 - No Office desktop/web compatibility acceptance has been run.
