@@ -211,7 +211,6 @@ export function hasCanonicalMasterAdminInvariant(
     actualExpiry === expectedExpiry;
 }
 
-
 /**
  * Return only safe subscription fields after the caller's opaque workspace
  * session has already been revalidated by getSession().
