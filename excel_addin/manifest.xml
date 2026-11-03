@@ -19,5 +19,5 @@
   <DefaultSettings>
     <SourceLocation DefaultValue="https://YOUR-SHOIR-IE-HOST/excel_addin/taskpane.html"/>
   </DefaultSettings>
-  <Permissions>ReadDocument</Permissions>
+  <Permissions>ReadWriteDocument</Permissions>
 </OfficeApp>
