@@ -57,11 +57,28 @@ def _validate_ooxml_package(raw: bytes, filename: str) -> None:
         normalized = str(member.filename or "").replace(chr(92), "/")
         clean_path = normalized.rstrip("/")
         parts = clean_path.split("/")
-        if not clean_path or normalized.startswith("/") or any(part in {"", ".", ".."} for part in parts):
+        drive_qualified = bool(parts and re.fullmatch(r"[A-Za-z]:", parts[0]))
+        if (
+            not clean_path
+            or "\\x00" in normalized
+            or normalized.startswith("/")
+            or drive_qualified
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
             raise ValueError("The workbook contains an unsafe package path.")
-        if normalized in seen_names:
+        path_key = normalized.casefold()
+        if path_key in seen_names:
             raise ValueError("The workbook contains duplicate package member paths.")
-        seen_names.add(normalized)
+        seen_names.add(path_key)
+
+        # Excel OOXML packages use stored/deflated members. Reject exotic
+        # compression and symlink entries rather than relying on downstream
+        # parsers to interpret them consistently.
+        if member.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+            raise ValueError("The workbook contains an unsupported package compression method.")
+        unix_mode = (int(member.external_attr) >> 16) & 0o170000
+        if unix_mode == 0o120000:
+            raise ValueError("Symbolic links are not supported in workbook packages.")
 
         if member.flag_bits & 0x1:
             raise ValueError("Encrypted workbook package members are not supported.")
