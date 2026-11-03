@@ -29,7 +29,7 @@ This change does **not** establish that the full Excel Intelligence specificatio
 - No task-pane Shoir-IE sign-in or validated token exchange exists. The existing browser `remote_session_token` is a broad, long-lived workspace session and must not be copied into Excel. A future bridge must mint and validate a separate short-lived Excel-scoped token, bind it to the user and entitlement, and revoke/expire it independently.
 - The current persistence Edge Function response helper emits wildcard CORS. A workbook-data API must not be enabled for Excel under that policy; it needs an explicit allowlist for the actual Office task-pane origins, bounded request parsing, consent, and negative cross-user tests before any workbook transfer is activated.
 - The current Copilot uses the existing deterministic intent classifier and analysis engine. External generative-model/LLM task authoring is not configured and is not claimed.
-- The Office add-in can now create a results worksheet and apply the limited approved local operations listed above. It still does not generate a separate `.xlsx` output file, does not create PivotTables, and does not provide a dedicated add-in-to-Shoir-IE authenticated workflow. The selected source worksheet remains unchanged by the current write path.
+- The Office add-in can now create a results worksheet and apply the limited approved local operations listed above. It can download a separate compressed OOXML copy of the current workbook on hosts that support the Office CompressedFile requirement set (Excel desktop for Windows/Mac). Excel for the web does not expose that compressed export API, so cross-host file download is not complete. The local add-in still does not create PivotTables or provide a dedicated add-in-to-Shoir-IE authenticated workflow. The selected source worksheet remains unchanged by the current write path.
 - The in-app upload runtime cleans and profiles data but does not yet deliver every Stage 1 operation (formula generation, chart creation, and full preservation of all advanced workbook features).
 - No authenticated browser test has proved the exact menu selection under each supported account/tier.
 - No Office desktop/web compatibility acceptance has been run.
@@ -44,6 +44,7 @@ The API host, identity/token validation, allowed origins, maximum payload limits
 - Server-side tier gate: **IMPLEMENTED_NEEDS_VALIDATION**
 - Local Office.js inspection and deterministic planner: **IMPLEMENTED_NEEDS_VALIDATION**
 - Copy-first, approval-gated local operations (text trim, SUM/AVERAGE, column chart): **IMPLEMENTED_NEEDS_VALIDATION**
+- Local separate workbook-copy download on Excel desktop hosts with CompressedFile support (100 MB cap): **IMPLEMENTED_NEEDS_VALIDATION**
 - Full Stage 1 Excel Intelligence: **BLOCKED / NOT VERIFIED**
 - Stages 2–4: **NOT STARTED**
 
