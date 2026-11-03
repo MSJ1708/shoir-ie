@@ -186,6 +186,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "sourceWorksheetPreserved: true" in taskpane
     assert "resultSheet.charts.add" in taskpane
     assert "AVERAGE" in taskpane and "SUM" in taskpane
+    assert "formulaLikeTextSkipped" in taskpane
+    assert "Do not turn previously inert text into executable spreadsheet logic" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
 
