@@ -7,6 +7,9 @@ on:
     paths:
       - "excel_addin/**"
       - "shoir_excel_entitlements.py"
+      - "durable_account_store.py"
+      - "supabase/functions/shoir-persistence/**"
+      - "tests/test_durable_account_store_environment.py"
       - "shoir_excel_runtime.py"
       - "shoir_excel_foundation.py"
       - "shoir_tier_capabilities.py"
@@ -24,6 +27,9 @@ on:
     paths:
       - "excel_addin/**"
       - "shoir_excel_entitlements.py"
+      - "durable_account_store.py"
+      - "supabase/functions/shoir-persistence/**"
+      - "tests/test_durable_account_store_environment.py"
       - "shoir_excel_runtime.py"
       - "shoir_excel_foundation.py"
       - "shoir_tier_capabilities.py"
