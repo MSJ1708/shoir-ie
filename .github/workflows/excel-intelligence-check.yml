@@ -15,6 +15,7 @@ on:
       - "pages/Industrial_Engineering_Workbench.py"
       - "shoir_live_visuals.py"
       - "tests/test_excel_*.py"
+      - "tests/excel_addin_planner.test.cjs"
       - "tests/test_module_catalog_categories.py"
       - ".github/workflows/excel-intelligence-check.yml"
   pull_request:
@@ -31,6 +32,7 @@ on:
       - "pages/Industrial_Engineering_Workbench.py"
       - "shoir_live_visuals.py"
       - "tests/test_excel_*.py"
+      - "tests/excel_addin_planner.test.cjs"
       - "tests/test_module_catalog_categories.py"
       - ".github/workflows/excel-intelligence-check.yml"
 
@@ -69,8 +71,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Check Office.js task pane JavaScript syntax
-        run: node --check excel_addin/taskpane.js
+      - name: Check Office.js task pane and run local planner tests
+        run: |
+          node --check excel_addin/planner.js
+          node --check excel_addin/taskpane.js
+          node --test tests/excel_addin_planner.test.cjs
       - name: Validate Office add-in manifest XML
         run: |
           python - <<'PY'
@@ -83,11 +88,11 @@ jobs:
           permissions = root.find("o:Permissions", ns)
           source = root.find("o:DefaultSettings/o:SourceLocation", ns)
           requirements = root.find("o:Requirements/o:Sets", ns)
-          assert permissions is not None and permissions.text == "ReadDocument"
+          assert permissions is not None and permissions.text == "ReadWriteDocument"
           assert requirements is not None
           assert requirements.attrib.get("DefaultMinVersion") == "1.7"
           assert any(item.attrib.get("Name") == "ExcelApi" for item in requirements)
           assert source is not None
           assert "YOUR-SHOIR-IE-HOST" in source.attrib.get("DefaultValue", "")
-          print("Manifest is valid XML and remains read-only/local-only until a staging host is deployed.")
+          print("Manifest is valid XML; local write operations require explicit user approval and no server transfer is enabled.")
           PY
