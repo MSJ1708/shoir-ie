@@ -59,11 +59,11 @@
   function numericColumnIndexes(selection) {
     const indexes = [];
     for (let column = 0; column < Number(selection.columns); column += 1) {
+      // Office.js values contain the calculated cell result. Do not classify a
+      // formula returning text/error as numeric merely because a formula exists.
       const data = selection.values.slice(1).map(row => row[column]);
-      const formulaData = selection.formulas.slice(1).map(row => row[column]);
       const hasNumericValue = data.some(value => typeof value === "number" && Number.isFinite(value));
-      const hasNumericFormula = formulaData.some(value => typeof value === "string" && value.startsWith("="));
-      if (hasNumericValue || hasNumericFormula) indexes.push(column);
+      if (hasNumericValue) indexes.push(column);
     }
     return indexes;
   }
