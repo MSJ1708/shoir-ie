@@ -80,6 +80,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from urllib.parse import urlparse
           import xml.etree.ElementTree as ET
 
           path = Path("excel_addin/manifest.xml")
@@ -87,12 +88,30 @@ jobs:
           ns = {"o": "http://schemas.microsoft.com/office/appforoffice/1.1"}
           permissions = root.find("o:Permissions", ns)
           source = root.find("o:DefaultSettings/o:SourceLocation", ns)
+          icon = root.find("o:IconUrl", ns)
           requirements = root.find("o:Requirements/o:Sets", ns)
           assert permissions is not None and permissions.text == "ReadWriteDocument"
           assert requirements is not None
           assert requirements.attrib.get("DefaultMinVersion") == "1.9"
           assert any(item.attrib.get("Name") == "ExcelApi" for item in requirements)
-          assert source is not None
-          assert "YOUR-SHOIR-IE-HOST" in source.attrib.get("DefaultValue", "")
-          print("Manifest is valid XML for ExcelApi 1.9; local write operations require explicit approval and no server transfer is enabled.")
+          assert source is not None and icon is not None
+
+          urls = {
+              "taskpane": source.attrib.get("DefaultValue", ""),
+              "icon": icon.attrib.get("DefaultValue", ""),
+          }
+          placeholders = any("YOUR-SHOIR-IE-HOST" in value for value in urls.values())
+          if placeholders:
+              print("::warning::Office add-in manifest is an unhosted template. It is valid XML, not an installable or deployed add-in.")
+          else:
+              parsed = {name: urlparse(value) for name, value in urls.items()}
+              for name, value in parsed.items():
+                  assert value.scheme == "https" and value.netloc, f"{name} URL must use an absolute HTTPS origin."
+              assert parsed["taskpane"].netloc == parsed["icon"].netloc, "Task-pane and icon must use the same approved host."
+              assert Path("excel_addin/taskpane.html").is_file()
+              assert Path("excel_addin/taskpane.js").is_file()
+              assert Path("excel_addin/planner.js").is_file()
+              print("Manifest URLs are absolute HTTPS URLs on one host. Hosted Office-client tests are still required.")
+
+          print("Manifest XML, minimum ExcelApi 1.9 and ReadWriteDocument permissions are valid. Local write operations require explicit approval; remote workbook transfer is disabled.")
           PY
