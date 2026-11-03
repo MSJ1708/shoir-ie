@@ -95,3 +95,4 @@ module_name,minimum_tier,declared_in,catalog_sources,authenticated_browser_statu
 "Real-Time Quantum-Classical Hybrid Optimization Router","Research Pack","app.py:research_pack_features","app.py MODULE_CATALOG","UNVERIFIED"
 "Research AI","Research Pack","app.py:research_pack_features","app.py MODULE_CATALOG; industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Statistical Hypothesis Testing","Research Pack","app.py:research_pack_features","app.py MODULE_CATALOG","UNVERIFIED"
+"Excel Intelligence","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
