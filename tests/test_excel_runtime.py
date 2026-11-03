@@ -305,6 +305,8 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
             "authenticated": True,
             "current_user": "shoir-e2e-excel-copilot",
             "workspace_id": "test-workspace",
+            "user_tier": "Enterprise Tier",
+            "subscription_expires_at": "2099-01-01T00:00:00Z",
         },
     )
 
@@ -328,6 +330,36 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
             prompt, "Production", source, plan,
             "shoir-e2e-excel-copilot", "Starter", approved=True,
         )
+
+    # A caller cannot claim Enterprise when the authenticated session is Starter.
+    st.session_state["user_tier"] = "Starter Tier"
+    with pytest.raises(PermissionError, match="subscription"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    st.session_state["user_tier"] = "Enterprise Tier"
+
+    # Expired, missing and malformed authenticated expiry values fail closed.
+    st.session_state["subscription_expires_at"] = "2000-01-01T00:00:00Z"
+    with pytest.raises(PermissionError, match="expired"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    st.session_state["subscription_expires_at"] = None
+    with pytest.raises(PermissionError, match="expiry"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    st.session_state["subscription_expires_at"] = "not-a-date"
+    with pytest.raises(PermissionError, match="expiry"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    st.session_state["subscription_expires_at"] = "2099-01-01T00:00:00Z"
 
     with pytest.raises(ValueError, match="stale"):
         execute_excel_intelligence_plan(
