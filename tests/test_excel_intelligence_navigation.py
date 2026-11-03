@@ -77,6 +77,16 @@ def test_workbench_and_renderer_are_explicitly_wired_to_the_existing_safe_engine
     assert "render_excel_intelligence_safe(tier, username)" in platform
 
 
+def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
+    platform = (ROOT / "industrial_platform.py").read_text(encoding="utf-8")
+    route = platform.split('if module=="Excel Intelligence":', 1)[1].split(
+        'if module=="Excel Data Cleaning & Import":', 1
+    )[0]
+    assert 'st.session_state.get("authenticated") is not True' in route
+    assert 'actor.casefold() in {"", "guest", "guest visitor", "anonymous"}' in route
+    assert 'Sign in with an active Shoir-IE account' in route
+
+
 def test_office_addin_does_not_post_workbook_data_without_authenticated_api():
     taskpane = (ROOT / "excel_addin" / "taskpane.js").read_text(encoding="utf-8")
     readme = (ROOT / "excel_addin" / "README.md").read_text(encoding="utf-8")
