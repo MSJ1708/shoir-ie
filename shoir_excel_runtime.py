@@ -57,10 +57,10 @@ def _validate_ooxml_package(raw: bytes, filename: str) -> None:
         normalized = str(member.filename or "").replace(chr(92), "/")
         clean_path = normalized.rstrip("/")
         parts = clean_path.split("/")
-        drive_qualified = bool(parts and re.fullmatch(r"[A-Za-z]:", parts[0]))
+        drive_qualified = bool(parts and re.match(r"^[A-Za-z]:", parts[0]))
         if (
             not clean_path
-            or "\\x00" in normalized
+            or chr(0) in normalized
             or normalized.startswith("/")
             or drive_qualified
             or any(part in {"", ".", ".."} for part in parts)
