@@ -9,7 +9,7 @@ This is the Microsoft Office JavaScript (Office.js) task-pane client for Shoir-I
 3. Inspect the selected range locally. The profile reports missing cells, duplicate data rows, formula-error values, text cells and numeric columns.
 4. Enter a natural-language instruction and build a deterministic, reviewable task plan.
 5. Run read-only inspection without changing workbook cells, or explicitly approve creation of a separate results worksheet.
-6. In Excel desktop, optionally download a separate copy of the current workbook containing the results worksheet.
+6. In Excel desktop, prepare a separate copy of the current workbook containing the results worksheet, then select the download link that appears.
 
 The first selected row is treated as the header row for planning. This assumption appears in the plan.
 
@@ -28,7 +28,7 @@ Read-only inspection is the default and does not modify workbook cells. Every op
 
 Approved operations add a new worksheet in the active workbook. They do not modify the selected source worksheet. If a results sheet with the default name already exists, the add-in creates a new uniquely named results sheet instead of overwriting an existing sheet.
 
-**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; the selected source worksheet remains unchanged. On Excel desktop hosts that support the Office CompressedFile requirement set, the add-in can download a separate OOXML copy of the current workbook. The download is capped at 100 MB and preserves the current .xlsx or .xlsm extension. The source workbook in the Excel session remains open and is not replaced by the downloaded copy.
+**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; the selected source worksheet remains unchanged. On Excel desktop hosts that support the Office CompressedFile requirement set, the add-in prepares a separate OOXML copy of the current workbook and exposes a download link for an explicit user click. The download is capped at 100 MB, verifies that all file slices were received, and preserves the current .xlsx or .xlsm extension. The source workbook in the Excel session remains open and is not replaced by the downloaded copy.
 
 The manifest requests ReadWriteDocument because approved operations create and write to a results worksheet. Excel's normal add-in permission consent applies. The code still restricts edits to its explicit operation allow-list.
 
