@@ -25,6 +25,66 @@ import pandas as pd
 import streamlit as st
 
 MAX_UPLOAD_BYTES = 75 * 1024 * 1024
+MAX_OOXML_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_OOXML_MEMBER_BYTES = 256 * 1024 * 1024
+MAX_OOXML_MEMBER_COUNT = 10_000
+MAX_OOXML_COMPRESSION_RATIO = 500
+
+
+def _validate_ooxml_package(raw: bytes, filename: str) -> None:
+    """Reject oversized, suspicious or path-traversing OOXML packages before parsing."""
+    lower = str(filename or "").casefold()
+    if not lower.endswith((".xlsx", ".xlsm")):
+        return
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), "r") as package:
+            members = package.infolist()
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ValueError("The uploaded Excel workbook is not a valid OOXML package.") from exc
+
+    if not members:
+        raise ValueError("The uploaded Excel workbook package is empty.")
+    if len(members) > MAX_OOXML_MEMBER_COUNT:
+        raise ValueError(
+            f"The workbook contains too many package members ({len(members):,}); "
+            f"the limit is {MAX_OOXML_MEMBER_COUNT:,}."
+        )
+
+    total_uncompressed = 0
+    seen_names: set[str] = set()
+    for member in members:
+        normalized = str(member.filename or "").replace("\\\\", "/")
+        parts = normalized.split("/")
+        if normalized.startswith("/") or any(part in {"", ".", ".."} for part in parts[:-1]):
+            raise ValueError("The workbook contains an unsafe package path.")
+        if normalized in seen_names:
+            raise ValueError("The workbook contains duplicate package member paths.")
+        seen_names.add(normalized)
+
+        if member.flag_bits & 0x1:
+            raise ValueError("Encrypted workbook package members are not supported.")
+        if member.file_size > MAX_OOXML_MEMBER_BYTES:
+            raise ValueError(
+                f"Workbook package member {normalized!r} exceeds the "
+                f"{MAX_OOXML_MEMBER_BYTES / (1024 * 1024):.0f} MB safety limit."
+            )
+        total_uncompressed += int(member.file_size)
+        if total_uncompressed > MAX_OOXML_UNCOMPRESSED_BYTES:
+            raise ValueError(
+                "The workbook expands beyond the allowed uncompressed package size "
+                f"of {MAX_OOXML_UNCOMPRESSED_BYTES / (1024 * 1024):.0f} MB."
+            )
+
+        if member.file_size and not member.compress_size:
+            raise ValueError("The workbook contains a suspicious zero-byte compressed member.")
+        if member.compress_size:
+            ratio = float(member.file_size) / float(member.compress_size)
+            if ratio > MAX_OOXML_COMPRESSION_RATIO:
+                raise ValueError(
+                    "The workbook contains an unusually compressed package member; "
+                    "the upload was rejected to protect processing resources."
+                )
 
 
 def _load_primitives():
@@ -88,6 +148,7 @@ def _read_raw_sheets(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
         }
 
     if lower.endswith((".xlsx", ".xlsm", ".csv", ".tsv", ".txt")):
+        _validate_ooxml_package(raw, name)
         return p["read"](raw, name)
 
     raise ValueError("Supported imports are .xlsx, .xlsm, .xls, .csv, .tsv and .txt.")
