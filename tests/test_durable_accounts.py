@@ -181,10 +181,15 @@ def test_login_throttle_contract_is_server_only_and_atomic():
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
     migration = (root / "supabase/migrations/20261019124815_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
 
-    assert _source_contract_contains(edge_source, 'loginThrottleBuckets(usernameLc,req)')
-    assert _source_contract_contains(edge_source, 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")')
-    assert _source_contract_contains(edge_source, 'return sendResponse({error:"Too many sign-in attempts. Please wait and try again."},429)')
-    assert _source_contract_contains(edge_source, 'return sendResponse({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
+    login_block = edge_source.split(
+        'if (action === "login") {', 1
+    )[1].split(
+        'if (action === "referral_summary_session") {', 1
+    )[0]
+    assert _source_contract_contains(login_block, 'loginThrottleBuckets(usernameLc,req)')
+    assert _source_contract_contains(login_block, 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")')
+    assert _source_contract_contains(login_block, 'return sendResponse({error:"Too many sign-in attempts. Please wait and try again."},429)')
+    assert _source_contract_contains(login_block, 'return sendResponse({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
     assert 'SECURITY INVOKER' in migration
     assert 'pg_advisory_xact_lock' in migration
     assert 'ALTER TABLE public.shoir_login_throttle ENABLE ROW LEVEL SECURITY' in migration
