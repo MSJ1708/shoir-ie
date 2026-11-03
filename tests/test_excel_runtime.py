@@ -114,11 +114,14 @@ def test_ooxml_fidelity_scan_detects_tables_filters_merges_and_hidden_bands():
         )
         worksheet.autofilter(0, 0, 2, 2)
         worksheet.merge_range("E1:F1", "Merged title")
+        styled_header = writer.book.add_format({"bold": True, "bg_color": "#163A5F"})
+        worksheet.write("A1", "Line", styled_header)
         worksheet.set_row(1, None, None, {"hidden": True})
         worksheet.set_column("C:C", None, None, {"hidden": True})
 
     report = fast_workbook_fidelity_report(buf.getvalue(), "fidelity-matrix.xlsx")
 
+    assert report["Cell formatting present"] is True
     assert report["Tables present"] is True
     assert report["Auto filters present"] is True
     assert report["Merged cells present"] is True
@@ -372,6 +375,56 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
     rebuilt_plan = build_excel_intelligence_plan(prompt, "Production", source)
     assert rebuilt_plan["request_fingerprint"] == plan["request_fingerprint"]
     assert rebuilt_plan["plan_id"] != plan["plan_id"]
+
+
+def test_excel_evidence_csv_neutralizes_formula_like_text_and_preserves_source_frames():
+    import csv
+    import zipfile
+
+    from shoir_excel_studio import build_ultimate_bundle
+
+    source = pd.DataFrame({
+        "=UntrustedHeader": [
+            "  =HYPERLINK(\\"https://invalid.example\\",\\"open\\")",
+            "\\t+1+1",
+            "-1+2",
+            "@SUM(A1:A2)",
+            "ordinary text",
+        ]
+    })
+    original = source.copy(deep=True)
+    bundle = build_ultimate_bundle(
+        "Synthetic formula injection test",
+        b"synthetic-xlsx-bytes",
+        audits={"Sheet1": []},
+        profiles={"Sheet1": {}},
+        cleaned_sheets={"Sheet1": source},
+        raw_sheets={"Sheet1": source},
+        field_intelligence=[{"Field": "=1+2"}],
+        review_register=[{"Finding": "\\t=CMD()"}],
+        source_metadata=[{"Source": "+HYPERLINK()"}],
+    )
+
+    with zipfile.ZipFile(io.BytesIO(bundle), "r") as archive:
+        names = set(archive.namelist())
+        assert "clean_csv/Sheet1.csv" in names
+        assert "raw_csv/Sheet1.csv" in names
+        for name in (
+            "clean_csv/Sheet1.csv",
+            "raw_csv/Sheet1.csv",
+            "field_intelligence.csv",
+            "validation_review.csv",
+            "source_metadata.csv",
+        ):
+            rows = list(csv.reader(io.StringIO(archive.read(name).decode("utf-8"))))
+            for row in rows:
+                for value in row:
+                    candidate = value.lstrip(" \\t\\r\\n\\x00\\x0b\\x0c")
+                    assert not candidate.startswith(("=", "+", "-", "@"))
+                    if candidate.startswith(("=", "+", "-", "@")):
+                        raise AssertionError("Formula-like CSV text was not neutralized.")
+
+    pd.testing.assert_frame_equal(source, original)
 
 
 def test_bounded_excel_preview_limits_render_size_without_mutating_source():
