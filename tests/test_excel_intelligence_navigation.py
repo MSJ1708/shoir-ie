@@ -200,6 +200,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "receivedBytes !== Number(file.size)" in taskpane
     assert "planExecutionInProgress" in taskpane
     assert "downloadInProgress" in taskpane
+    assert "MAX_SELECTION_SERIALIZED_BYTES = 8 * 1024 * 1024" in taskpane
+    assert "approximateBytes > MAX_SELECTION_SERIALIZED_BYTES" in taskpane
     assert "downloadReadyLink.href = workbookObjectUrl" in taskpane
     assert "selectionSummary(latestPayload)" in taskpane
     assert "setPlan(null);" in taskpane
