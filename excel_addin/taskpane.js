@@ -43,6 +43,8 @@ Office.onReady((info) => {
   );
   let resultsWorkbookReady = false;
   let workbookObjectUrl = null;
+  let planExecutionInProgress = false;
+  let downloadInProgress = false;
 
   downloadButton.disabled = true;
   downloadReadyLink.hidden = true;
@@ -614,18 +616,40 @@ Office.onReady((info) => {
     buildPlan().catch(() => {});
   });
 
-  runButton.addEventListener("click", () => {
-    executePlan().catch(error => {
+  runButton.addEventListener("click", async () => {
+    if (planExecutionInProgress) return;
+    planExecutionInProgress = true;
+    runButton.disabled = true;
+    [inspectButton, copyButton, planButton].forEach(control => {
+      control.disabled = true;
+    });
+    try {
+      await executePlan();
+    } catch (error) {
       showStatus("Execution stopped: " +
         (error && error.message ? error.message : "Unknown Excel error"));
-    });
+    } finally {
+      planExecutionInProgress = false;
+      [inspectButton, copyButton, planButton].forEach(control => {
+        control.disabled = false;
+      });
+      if (latestPlan) runButton.disabled = false;
+    }
   });
 
-  downloadButton.addEventListener("click", () => {
-    downloadWorkbookCopy().catch(error => {
+  downloadButton.addEventListener("click", async () => {
+    if (downloadInProgress) return;
+    downloadInProgress = true;
+    downloadButton.disabled = true;
+    try {
+      await downloadWorkbookCopy();
+    } catch (error) {
       showStatus("Workbook download failed: " +
         (error && error.message ? error.message : "Unknown Excel error"));
-    });
+    } finally {
+      downloadInProgress = false;
+      downloadButton.disabled = !canDownloadCompressedWorkbook || !resultsWorkbookReady;
+    }
   });
 
   window.addEventListener("pagehide", () => {
