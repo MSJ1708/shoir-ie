@@ -289,7 +289,8 @@ else:
         unsafe_allow_html=True,
     )
 
-required = next((x[2] for x in MODULE_MATRIX if x[1] == selected), "Starter")
+_selected_requirement = available.loc[available["Module"] == selected, "Required Tier"]
+required = str(_selected_requirement.iloc[0]) if not _selected_requirement.empty else "Starter"
 _selected_module_allowed = tier_allows(RAW_TIER, required)
 if not _selected_module_allowed:
     # Keep the tool directory usable for discovery on every tier, but do not
@@ -2535,7 +2536,11 @@ if not _selected_module_allowed:
     st.stop()
 
 # Specialized upgraded surfaces
-if selected == "Engineering Validation Center":
+if selected == "Excel Intelligence":
+    # This dedicated Data route reuses the governed Excel runtime and its
+    # server-side premium entitlement check in industrial_platform.render_module.
+    render_module(selected, RAW_TIER, USER)
+elif selected == "Engineering Validation Center":
     st.subheader("🔎 Engineering Validation Center")
     st.caption("Validate schema, missingness, duplicates, types, units, ranges and cross-table references before running engineering logic.")
     source = st.session_state.get("workbench_df", pd.DataFrame({

@@ -141,8 +141,60 @@ export function normalizeWorkspaceStateJson(
 }
 
 /**
- * Validate the protected master-administrator invariant without mutating the account.
- * Use this only for the reserved administrator identity before issuing a session.
+ * Browser origins allowed to call this function directly.
+ *
+ * Keep this list aligned with the Streamlit app host/origin allowlists. The
+ * Python server-to-server caller normally sends no Origin header; that traffic
+ * remains supported and must still satisfy action-level authentication.
+ */
+const ALLOWED_BROWSER_ORIGINS = new Set<string>([
+  "https://shoir-ie-app.streamlit.app",
+  "https://shoirieverified.streamlit.app",
+  "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+  "http://127.0.0.1:8501",
+  "http://localhost:8501",
+]);
+
+/** Missing Origin is allowed for non-browser server-to-server clients only. */
+export function isAllowedBrowserOrigin(origin: string | null): boolean {
+  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+}
+
+/**
+ * Return restrictive CORS headers. Never emit a wildcard origin; callers must
+ * reject non-allowlisted Origin values before reaching this helper.
+ */
+export function corsHeadersForOrigin(origin: string | null): Headers {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  });
+  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+  return headers;
+}
+
+/**
+ * Existing account codes may be normalized for ordinary users, but the
+ * reserved administrator is never mutated as a side effect of login or
+ * referral-summary reads. Any repair of its metadata is a reviewed operation.
+ */
+export function shouldAutoAssignReferralCode(
+  usernameLc: string,
+  referralCode: string,
+): boolean {
+  if (usernameLc.trim().toLowerCase() === "sho") return false;
+  return !referralCode || referralCode.startsWith("AFF-");
+}
+
+/**
+ * Validate the reserved master-administrator invariant without mutating the
+ * account. Any discrepancy must fail closed and be corrected through a reviewed
+ * operational procedure rather than as a side effect of login.
  */
 export function hasCanonicalMasterAdminInvariant(
   account: Record<string, unknown>,
@@ -157,6 +209,49 @@ export function hasCanonicalMasterAdminInvariant(
     account.active === true &&
     Number.isFinite(actualExpiry) &&
     actualExpiry === expectedExpiry;
+}
+
+/**
+ * Return only safe subscription fields after the caller's opaque workspace
+ * session has already been revalidated by getSession().
+ */
+export function sessionEntitlementFields(
+  account: Record<string, unknown>,
+): {
+  username: string;
+  tier: string;
+  active: true;
+  expires_at: string;
+} {
+  const username = typeof account.username === "string"
+    ? account.username.trim()
+    : "";
+  const tier = typeof account.tier === "string" ? account.tier.trim() : "";
+  const expiresAt = typeof account.subscription_expires_at === "string"
+    ? account.subscription_expires_at.trim()
+    : "";
+  const expiryTime = Date.parse(expiresAt);
+
+  if (
+    !username ||
+    !tier ||
+    account.active !== true ||
+    !expiresAt ||
+    !Number.isFinite(expiryTime) ||
+    expiryTime <= Date.now()
+  ) {
+    throw new PublicRequestError(
+      "Subscription entitlement could not be verified.",
+      403,
+    );
+  }
+
+  return {
+    username,
+    tier,
+    active: true,
+    expires_at: expiresAt,
+  };
 }
 
 export function publicErrorFor(

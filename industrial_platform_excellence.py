@@ -26,6 +26,8 @@ import json
 import math
 import re
 import sqlite3
+
+from shoir_excel_entitlements import excel_intelligence_minimum_tier
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import product
@@ -86,6 +88,7 @@ MODULE_MATRIX = [
     ("Platform","Industrial Operating System","Enterprise"),
     ("Core Platform","Engineering Validation Center","Starter"),
     ("Core Platform","Excel Data Cleaning & Import","Starter"),
+    ("Data","Excel Intelligence",excel_intelligence_minimum_tier()),
     ("Digital Thread","Industrial Data Model & Digital Thread","Professional"),
     ("Planning","Advanced Planning & Scheduling","Professional"),
     ("Planning","Production Planning & Control (PPC)","Professional"),
@@ -197,7 +200,11 @@ def tier_matrix() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 def module_matrix() -> pd.DataFrame:
-    return pd.DataFrame(MODULE_MATRIX, columns=["Category","Module","Required Tier"])
+    data = pd.DataFrame(MODULE_MATRIX, columns=["Category","Module","Required Tier"])
+    # Resolve the premium Excel setting on every availability calculation so an
+    # invalid environment override can never leave a stale, weaker UI tier gate.
+    data.loc[data["Module"] == "Excel Intelligence", "Required Tier"] = excel_intelligence_minimum_tier()
+    return data
 
 def module_availability(current: str) -> pd.DataFrame:
     d = module_matrix()

@@ -2,12 +2,12 @@ name: Shoir-IE Edge Function verification
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "feature/**", "feat/**"]
     paths:
       - "supabase/functions/**"
       - ".github/workflows/edge-function-check.yml"
   pull_request:
-    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
+    branches: ["main", "staging-e2e-20261019", "feat/shoir-100-tools-integration-20261025"]
     paths:
       - "supabase/functions/**"
       - ".github/workflows/edge-function-check.yml"

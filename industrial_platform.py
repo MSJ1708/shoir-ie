@@ -37,6 +37,7 @@ from shoir_engine_studio import (
 )
 from shoir_investor_demo import render_investor_control_center
 from shoir_workspace_rbac import list_workspace_members, save_workspace_members, WORKSPACE_ROLES
+from shoir_excel_entitlements import excel_intelligence_allowed, excel_intelligence_entitlement_config, excel_intelligence_minimum_tier
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
@@ -1198,9 +1199,52 @@ def render_module(module: str, tier: str, username: str):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
 
+    if module=="Excel Intelligence":
+        # Enforce the configurable premium entitlement at the renderer boundary,
+        # even when this function is called outside the Workbench selector.
+        entitlement = excel_intelligence_entitlement_config()
+        actor = str(username or "").strip()
+        session_actor = str(st.session_state.get("current_user") or "").strip()
+        if (
+            st.session_state.get("authenticated") is not True
+            or actor.casefold() in {"", "guest", "guest visitor", "anonymous"}
+            or session_actor.casefold() != actor.casefold()
+        ):
+            st.warning("Sign in with an active Shoir-IE account before using Excel Intelligence.")
+            return
+        if not excel_intelligence_allowed(tier):
+            st.warning(
+                f"Excel Intelligence requires {excel_intelligence_minimum_tier()}. "
+                f"Your current tier is {tier}."
+            )
+            if not entitlement["valid"]:
+                st.error(str(entitlement["warning"]))
+            return
+        with sqlite3.connect("enterprise_full_workspace.db") as _excel_usage_conn:
+            _excel_usage_conn.execute(
+                "INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",
+                (username,module,_now()),
+            )
+            _excel_usage_conn.commit()
+        st.markdown("## 📊 Shoir-IE Excel Intelligence")
+        st.caption(
+            "A governed Data workspace using Shoir-IE's existing Excel processing engine."
+        )
+        st.info(
+            "Available in this staging implementation: workbook import, multi-sheet inspection, "
+            "cleaned-table review, quality flags, field intelligence, source provenance, approval-first "
+            "Copilot analysis on a copy of the selected cleaned sheet, and separate workbook/evidence exports. "
+            "The Microsoft Excel task-pane API/authentication bridge and external generative-model integration "
+            "are not connected; workbook contents are not sent to an external AI service by this route."
+        )
+        if not entitlement["valid"]:
+            st.error(str(entitlement["warning"]))
+        from shoir_excel_runtime import render_excel_intelligence_safe
+        render_excel_intelligence_safe(tier, username, enable_copilot=True)
+        return
+
     if module=="Excel Data Cleaning & Import":
-        # Use the safe/lazy renderer so upload itself never builds the full
-        # XLSX + ZIP evidence package and takes down the Streamlit process.
+        # Keep the original Starter data-cleaning module and its existing access.
         from shoir_excel_runtime import render_excel_intelligence_safe
         render_excel_intelligence_safe(tier, username)
         return

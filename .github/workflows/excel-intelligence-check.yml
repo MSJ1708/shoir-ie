@@ -1,0 +1,123 @@
+name: Shoir-IE Excel Intelligence
+
+on:
+  push:
+    branches:
+      - feat/excel-intelligence-workbench-data-20261103
+    paths:
+      - "excel_addin/**"
+      - "shoir_excel_entitlements.py"
+      - "durable_account_store.py"
+      - "supabase/functions/shoir-persistence/**"
+      - "tests/test_durable_account_store_environment.py"
+      - "shoir_excel_runtime.py"
+      - "shoir_excel_foundation.py"
+      - "shoir_tier_capabilities.py"
+      - "industrial_platform.py"
+      - "industrial_platform_excellence.py"
+      - "pages/Industrial_Engineering_Workbench.py"
+      - "shoir_live_visuals.py"
+      - "tests/test_excel_*.py"
+      - "tests/excel_addin_planner.test.cjs"
+      - "tests/test_module_catalog_categories.py"
+      - ".github/workflows/excel-intelligence-check.yml"
+  pull_request:
+    branches:
+      - staging-e2e-20261019
+    paths:
+      - "excel_addin/**"
+      - "shoir_excel_entitlements.py"
+      - "durable_account_store.py"
+      - "supabase/functions/shoir-persistence/**"
+      - "tests/test_durable_account_store_environment.py"
+      - "shoir_excel_runtime.py"
+      - "shoir_excel_foundation.py"
+      - "shoir_tier_capabilities.py"
+      - "industrial_platform.py"
+      - "industrial_platform_excellence.py"
+      - "pages/Industrial_Engineering_Workbench.py"
+      - "shoir_live_visuals.py"
+      - "tests/test_excel_*.py"
+      - "tests/excel_addin_planner.test.cjs"
+      - "tests/test_module_catalog_categories.py"
+      - ".github/workflows/excel-intelligence-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  excel-intelligence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install application and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile Excel Intelligence integration
+        run: |
+          python -m py_compile app.py industrial_platform.py industrial_platform_excellence.py
+          python -m py_compile shoir_excel_entitlements.py shoir_excel_runtime.py shoir_excel_foundation.py
+          python -m py_compile shoir_tier_capabilities.py shoir_live_visuals.py
+          python -m py_compile pages/Industrial_Engineering_Workbench.py
+      - name: Run focused Excel Intelligence and navigation regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_excel_runtime.py \
+            tests/test_excel_intelligence_navigation.py \
+            tests/test_module_catalog_categories.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check Office.js task pane and run local planner tests
+        run: |
+          node --check excel_addin/planner.js
+          node --check excel_addin/taskpane.js
+          node --test tests/excel_addin_planner.test.cjs
+      - name: Validate Office add-in manifest XML
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import xml.etree.ElementTree as ET
+
+          path = Path("excel_addin/manifest.xml")
+          root = ET.parse(path).getroot()
+          ns = {"o": "http://schemas.microsoft.com/office/appforoffice/1.1"}
+          permissions = root.find("o:Permissions", ns)
+          source = root.find("o:DefaultSettings/o:SourceLocation", ns)
+          icon = root.find("o:IconUrl", ns)
+          requirements = root.find("o:Requirements/o:Sets", ns)
+          assert permissions is not None and permissions.text == "ReadWriteDocument"
+          assert requirements is not None
+          assert requirements.attrib.get("DefaultMinVersion") == "1.9"
+          assert any(item.attrib.get("Name") == "ExcelApi" for item in requirements)
+          assert source is not None and icon is not None
+
+          urls = {
+              "taskpane": source.attrib.get("DefaultValue", ""),
+              "icon": icon.attrib.get("DefaultValue", ""),
+          }
+          placeholders = any("YOUR-SHOIR-IE-HOST" in value for value in urls.values())
+          if placeholders:
+              print("::warning::Office add-in manifest is an unhosted template. It is valid XML, not an installable or deployed add-in.")
+          else:
+              parsed = {name: urlparse(value) for name, value in urls.items()}
+              for name, value in parsed.items():
+                  assert value.scheme == "https" and value.netloc, f"{name} URL must use an absolute HTTPS origin."
+              assert parsed["taskpane"].netloc == parsed["icon"].netloc, "Task-pane and icon must use the same approved host."
+              assert Path("excel_addin/taskpane.html").is_file()
+              assert Path("excel_addin/taskpane.js").is_file()
+              assert Path("excel_addin/planner.js").is_file()
+              print("Manifest URLs are absolute HTTPS URLs on one host. Hosted Office-client tests are still required.")
+
+          print("Manifest XML, minimum ExcelApi 1.9 and ReadWriteDocument permissions are valid. Local write operations require explicit approval; remote workbook transfer is disabled.")
+          PY

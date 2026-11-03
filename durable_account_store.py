@@ -543,6 +543,18 @@ def edge_logout(username: str, token: str) -> dict[str, Any]:
     return _edge_call("logout", {"username": username, "token": token})
 
 
+def edge_session_entitlement(username: str, token: str) -> dict[str, Any]:
+    """Revalidate this user's live workspace session and current subscription."""
+    actor = str(username or "").strip()
+    session_token = str(token or "").strip()
+    if not actor or not session_token:
+        raise PermissionError("An authenticated workspace session is required.")
+    return _edge_call(
+        "session_entitlement",
+        {"username": actor, "token": session_token},
+    )
+
+
 def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
     proof_path = str(request.get("screenshot_path") or "").strip()
     proof_base64 = str(request.get("proof_base64") or "").strip() or None

@@ -1,25 +1,60 @@
-# Shoir-IE Excel interoperability bridge
+# Shoir-IE Excel Intelligence — Office.js task pane
 
-This directory contains the Office Add-in scaffold for the Industrial Workbook layer.
+This is the Microsoft Office JavaScript (Office.js) task-pane client for Shoir-IE Excel Intelligence. It is a real add-in scaffold, not an imitation of Excel embedded in a web page.
 
-## What is implemented
+## Implemented local workflow
 
-The task pane can read the currently selected Excel range with Office.js, show a clear connection state, save a Shoir-IE API host per browser profile, copy the selection as JSON, and POST the selected range to:
+1. Open the add-in task pane in Excel.
+2. Select a range containing no more than 10,000 cells and an estimated serialized payload no larger than 8 MB.
+3. Inspect the selected range locally. The profile reports missing cells, duplicate data rows, formula-error values, text cells and numeric columns.
+4. Enter a natural-language instruction and build a deterministic, reviewable task plan.
+5. Run read-only inspection without changing workbook cells, or explicitly approve creation of a separate results worksheet.
+6. In Excel desktop, prepare a separate copy of the current workbook containing the results worksheet, then select the download link that appears.
 
-`POST /api/workbook/import`
+The first selected row is treated as the header row for planning. This assumption appears in the plan. If formulas are present, the plan warns that formulas are copied with Excel's relative-reference behavior and may depend on cells outside the selected range; users must review those formula results on the results worksheet.
 
-## Deployment boundary
+The current local operation allow-list is intentionally small:
 
-The repository does **not** claim that the API endpoint above is already deployed. The add-in becomes a live two-way bridge only when a Shoir-IE deployment exposes that endpoint behind HTTPS and the host is entered in the task pane.
+- **Copy selection to results:** create a uniquely named Shoir-IE Results worksheet and copy the selected values, formulas and number formats. The selected source worksheet is not written to.
+- **Trim text:** trim leading/trailing whitespace in text constants on the new results worksheet. Cells containing formulas are left unchanged, and text that would become formula-like after trimming is skipped and counted to prevent formula injection.
+- **SUM / AVERAGE formulas:** add a summary row below the copied range on the results worksheet. The current first column is reserved for the TOTAL/AVERAGE label.
+- **Column chart:** create a column chart from the copied range and position it below the selection.
 
-The manifest therefore uses `https://YOUR-SHOIR-IE-HOST/` placeholders rather than pretending there is a production host.
+Unsupported requests, including deletion/removal of duplicates, PivotTables, macros/VBA, solver/optimization, forecasting and prediction, are warned about and not executed by this local add-in. Workbook text is treated only as data; it is never interpreted as instructions or code.
 
-## Install
+## Approval and workbook preservation
 
-1. Host `taskpane.html` and `taskpane.js` on the same HTTPS origin.
-2. Replace the placeholder SourceLocation and IconUrl values in `manifest.xml`.
-3. Sideload the manifest into Excel using Microsoft's Office Add-ins flow.
-4. Enter the deployed API host in the task pane.
-5. Select an Excel range and send it to Shoir-IE.
+Read-only inspection is the default and does not modify workbook cells. Every operation that writes to the workbook is displayed before execution and requires a separate approval checkbox.
 
-The main Shoir-IE application remains the authoritative engineering workbook, formula, query, semantic, visualization and decision workflow.
+Approved operations add a new worksheet in the active workbook. They do not modify the selected source worksheet. If a results sheet with the default name already exists, the add-in creates a new uniquely named results sheet instead of overwriting an existing sheet.
+
+**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; the selected source worksheet remains unchanged. When the active Excel host supports the Office CompressedFile API, the add-in prepares a separate OOXML copy of the current workbook and exposes a download link for an explicit user click. The download is capped at 100 MB, verifies that all file slices were received, and preserves the current .xlsx or .xlsm extension when the host exposes it. Host support is feature-detected; actual export behaviour still requires acceptance testing in each target Excel client. The source workbook in the Excel session remains open and is not replaced by the downloaded copy.
+
+The manifest requests ReadWriteDocument because approved operations create and write to a results worksheet. Excel's normal add-in permission consent applies. The code still restricts edits to its explicit operation allow-list.
+
+## Data transfer boundary
+
+The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. The default task-pane preview is a bounded metadata summary rather than a full 10,000-cell JSON render; full cell values are copied only after the user explicitly chooses the JSON action. Repeated clicks are blocked while a reviewed task is running or a workbook copy is being prepared. Re-inspection or changing the instruction invalidates the old plan. The instruction is temporarily disabled while a reviewed plan is executing. Its planner is deterministic rule-based code, not an LLM. The compact local change fingerprint is used only to invalidate a stale plan; it is not a cryptographic digest, authentication token, or authorization control. The displayed plan does not duplicate the selected cell values.
+
+A deployed authenticated Shoir-IE workbook API and a separate short-lived add-in identity/token exchange do not currently exist. The browser remote_session_token must not be copied into the add-in. Do not enable workbook transfer until user authentication, server-side tier/workspace checks, explicit data-transfer consent, origin/request bounds, audit/retention policy and cross-tenant denial tests are implemented.
+
+## Manifest hosting and validation
+
+manifest.xml intentionally retains YOUR-SHOIR-IE-HOST placeholders. Replace them only with an approved HTTPS staging host after the task-pane assets are actually deployed there. Do not submit the placeholder manifest to users or represent the add-in as hosted or ready for sideloading.
+
+The repository CI validates manifest XML, JavaScript syntax and deterministic planner unit tests. That does not prove Excel desktop/web runtime compatibility. The download control is feature-detected and disabled when the host does not report CompressedFile support; an API failure is shown to the user instead of being treated as a successful export. Excel desktop and web behaviour has not yet been runtime-accepted in this repository. Sideloading, Office host-matrix acceptance and authenticated server transfer remain unimplemented or unverified.
+
+## Remaining Stage 1 work
+
+- **Excel for the web:** do not assume compressed OOXML export is available. The add-in checks the host's CompressedFile capability at runtime; support on the target Excel desktop and web clients must be tested before the add-in is described as supported.
+
+- Host the task-pane assets and replace manifest placeholders on staging.
+- Sideload and test on the supported Excel desktop and web clients.
+- Establish a dedicated, short-lived Shoir-IE add-in authentication flow.
+- Implement and deploy an authenticated workbook API only after security review.
+- Validate compressed workbook-copy downloads on supported Excel desktop hosts and verify that the original source worksheet is preserved.
+- Complete host-specific export validation and document any Excel desktop/web limitations before claiming cross-client parity.
+- Expand the controlled operation registry and add acceptance tests for every added operation.
+- Complete end-to-end testing with dedicated synthetic accounts only.
+
+The in-app Workbench route separately reuses Shoir-IE's safe Excel processing engine and can generate separate analysis workbooks/evidence exports. This does not imply that the Office add-in can currently upload workbooks to Shoir-IE or provide a dedicated add-in authentication/API workflow.

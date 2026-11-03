@@ -96,6 +96,7 @@ _MODULE_KEYS = {
     "Carbon Accounting": ["carbon_latest_df"],
     "Industrial Workbook": ["industrial_workbook_current_df", "industrial_workbook_query_result_df", "industrial_workbook_analysis_df", "industrial_workbook_formula_audit_df", "industrial_workbook_semantic_map_df"],
     "Excel Data Cleaning & Import": ["excel_studio_visual_df", "excel_studio_result"],
+    "Excel Intelligence": ["excel_studio_visual_df"],
     "Research AI": ["research_ai_dataset"],
     "ShadowShift — Micro-Loss & Recovery Intelligence": ["shadowshift_event_df", "shadowshift_loss_summary_df", "shadowshift_next_experiments_df", "shadowshift_experiments_df"],
     "Autonomous Global Supply Chain & Resilient Logistics Network": ["resilience_global_supply_routes_df", "resilience_global_supply_shortages_df", "resilience_global_supply_capacity_df"],
