@@ -725,7 +725,11 @@ def _require_live_excel_entitlement(actor: str, tier: str) -> dict[str, Any]:
     from shoir_tier_capabilities import normalize_tier
     from shoir_excel_entitlements import excel_intelligence_allowed
 
-    if not edge_backend_configured():
+    try:
+        backend_ready = edge_backend_configured()
+    except Exception as exc:
+        raise PermissionError("Live account verification is unavailable. Excel Intelligence is disabled.") from exc
+    if not backend_ready:
         raise PermissionError("Live account verification is unavailable. Excel Intelligence is disabled.")
     session_token = str(st.session_state.get("remote_session_token") or "").strip()
     if not session_token:
