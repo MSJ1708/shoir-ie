@@ -86,6 +86,8 @@ def test_workbench_and_renderer_are_explicitly_wired_to_the_existing_safe_engine
     runtime = (ROOT / "shoir_excel_runtime.py").read_text(encoding="utf-8")
     assert "def _render_excel_dataframe(" in runtime
     assert "MAX_RENDER_PREVIEW_ROWS = 2_000" in runtime
+    assert "def _safe_excel_display_frame(" in runtime
+    assert "pd.array(" in runtime
     assert "def scan_source_formulas(" in runtime
     assert "Inspect source formulas" in runtime
     assert "MAX_FORMULA_SCAN_CELLS" in runtime
@@ -196,6 +198,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "isSetSupported(\"CompressedFile\")" in taskpane
     assert "maxDownloadBytes = 100 * 1024 * 1024" in taskpane
     assert "receivedBytes !== Number(file.size)" in taskpane
+    assert "planExecutionInProgress" in taskpane
+    assert "downloadInProgress" in taskpane
     assert "downloadReadyLink.href = workbookObjectUrl" in taskpane
     assert "selectionSummary(latestPayload)" in taskpane
     assert "setPlan(null);" in taskpane
