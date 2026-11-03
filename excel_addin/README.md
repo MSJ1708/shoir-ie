@@ -5,7 +5,7 @@ This is the Microsoft Office JavaScript (Office.js) task-pane client for Shoir-I
 ## Implemented local workflow
 
 1. Open the add-in task pane in Excel.
-2. Select a range containing no more than 10,000 cells.
+2. Select a range containing no more than 10,000 cells and an estimated serialized payload no larger than 8 MB.
 3. Inspect the selected range locally. The profile reports missing cells, duplicate data rows, formula-error values, text cells and numeric columns.
 4. Enter a natural-language instruction and build a deterministic, reviewable task plan.
 5. Run read-only inspection without changing workbook cells, or explicitly approve creation of a separate results worksheet.
@@ -34,7 +34,7 @@ The manifest requests ReadWriteDocument because approved operations create and w
 
 ## Data transfer boundary
 
-The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. The default task-pane preview is a bounded metadata summary rather than a full 10,000-cell JSON render; full cell values are copied only after the user explicitly chooses the JSON action. Repeated clicks are blocked while a reviewed task is running or a workbook copy is being prepared. Re-inspection or changing the instruction invalidates the old plan. Its planner is deterministic rule-based code, not an LLM. The compact local change fingerprint is used only to invalidate a stale plan; it is not a cryptographic digest, authentication token, or authorization control. The displayed plan does not duplicate the selected cell values.
+The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. The default task-pane preview is a bounded metadata summary rather than a full 10,000-cell JSON render; full cell values are copied only after the user explicitly chooses the JSON action. Repeated clicks are blocked while a reviewed task is running or a workbook copy is being prepared. Re-inspection or changing the instruction invalidates the old plan. The instruction is temporarily disabled while a reviewed plan is executing. Its planner is deterministic rule-based code, not an LLM. The compact local change fingerprint is used only to invalidate a stale plan; it is not a cryptographic digest, authentication token, or authorization control. The displayed plan does not duplicate the selected cell values.
 
 A deployed authenticated Shoir-IE workbook API and a separate short-lived add-in identity/token exchange do not currently exist. The browser remote_session_token must not be copied into the add-in. Do not enable workbook transfer until user authentication, server-side tier/workspace checks, explicit data-transfer consent, origin/request bounds, audit/retention policy and cross-tenant denial tests are implemented.
 
