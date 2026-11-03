@@ -357,7 +357,7 @@ def test_excel_display_frame_sanitizes_mixed_objects_and_duplicate_headers_witho
     from shoir_excel_runtime import _safe_excel_display_frame
 
     source = pd.DataFrame(
-        [[1, "alpha"], ["two", {"nested": [1, 2]}], [None, b"binary"]],
+        [[1, "alpha"], ["two", {"nested": [1, 2]}], [None, b"binary"], ["long", "z" * 2100]],
         columns=["Mixed", "Mixed"],
     )
     original = source.copy(deep=True)
@@ -371,4 +371,6 @@ def test_excel_display_frame_sanitizes_mixed_objects_and_duplicate_headers_witho
     assert display.iloc[1, 1] == '{"nested": [1, 2]}'
     assert pd.isna(display.iloc[2, 0])
     assert display.iloc[2, 1] == "binary"
+    assert len(display.iloc[3, 1]) == 2000
+    assert display.iloc[3, 1].endswith("…")
     pd.testing.assert_frame_equal(source, original)
