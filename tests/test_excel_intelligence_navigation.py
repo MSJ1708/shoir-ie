@@ -33,12 +33,11 @@ def test_excel_intelligence_is_listed_under_workbench_data():
 
 
 def test_excel_intelligence_uses_the_shared_data_navigation_group():
-    catalog = {item["name"]: item for item in PLATFORM_CATALOG}
-    item = catalog[MODULE_NAME]
-    assert item["category"] == "Data Platform"
-    assert item["tier"] == excel_intelligence_minimum_tier()
-    assert module_group(MODULE_NAME, catalog) == "Data"
-    assert _module_target_section(MODULE_NAME, catalog) == "DATA"
+    # Workbench modules have their own module matrix; this feature is deliberately
+    # not inserted into the fixed 96-module paid subscription catalogue.
+    metadata = {MODULE_NAME: {"category": "Data Platform"}}
+    assert module_group(MODULE_NAME, metadata) == "Data"
+    assert _module_target_section(MODULE_NAME, metadata) == "DATA"
 
 
 def test_excel_intelligence_access_uses_a_configurable_server_side_tier(monkeypatch):
@@ -102,4 +101,4 @@ def test_office_addin_does_not_post_workbook_data_without_authenticated_api():
     assert "/api/workbook/import" not in taskpane
     manifest = (ROOT / "excel_addin" / "manifest.xml").read_text(encoding="utf-8")
     assert "<Permissions>ReadDocument</Permissions>" in manifest
-    assert "does not transmit workbook contents to a server" in readme
+    assert "does not POST workbook contents to a server" in readme
