@@ -90,9 +90,9 @@ jobs:
           requirements = root.find("o:Requirements/o:Sets", ns)
           assert permissions is not None and permissions.text == "ReadWriteDocument"
           assert requirements is not None
-          assert requirements.attrib.get("DefaultMinVersion") == "1.7"
+          assert requirements.attrib.get("DefaultMinVersion") == "1.9"
           assert any(item.attrib.get("Name") == "ExcelApi" for item in requirements)
           assert source is not None
           assert "YOUR-SHOIR-IE-HOST" in source.attrib.get("DefaultValue", "")
-          print("Manifest is valid XML; local write operations require explicit user approval and no server transfer is enabled.")
+          print("Manifest is valid XML for ExcelApi 1.9; local write operations require explicit approval and no server transfer is enabled.")
           PY
