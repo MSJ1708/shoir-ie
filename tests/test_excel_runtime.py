@@ -52,7 +52,7 @@ def test_ooxml_fidelity_scan_flags_formula_chart_named_range_and_validation_risk
     assert report["Data validations present"] is True
     assert report["Requires acknowledgement"] is True
     assert any("Source formulas" in item for item in report["Unsupported features"])
-    assert "original source remains unchanged" in report["Fidelity warning"]
+    assert "original upload remains unchanged" in report["Fidelity warning"]
 
 
 def test_prepare_exports_requires_acknowledgement_for_unsupported_source_features():
