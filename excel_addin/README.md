@@ -9,7 +9,7 @@ This is the Microsoft Office JavaScript (Office.js) task-pane client for Shoir-I
 3. Inspect the selected range locally. The profile reports missing cells, duplicate data rows, formula-error values, text cells and numeric columns.
 4. Enter a natural-language instruction and build a deterministic, reviewable task plan.
 5. Run read-only inspection without changing workbook cells, or explicitly approve creation of a separate results worksheet.
-6. Review the result worksheet and save the workbook in Excel.
+6. In Excel desktop, optionally download a separate copy of the current workbook containing the results worksheet.
 
 The first selected row is treated as the header row for planning. This assumption appears in the plan.
 
@@ -28,7 +28,7 @@ Read-only inspection is the default and does not modify workbook cells. Every op
 
 Approved operations add a new worksheet in the active workbook. They do not modify the selected source worksheet. If a results sheet with the default name already exists, the add-in creates a new uniquely named results sheet instead of overwriting an existing sheet.
 
-**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; it does not create or download a separate XLSX file. The user must save the workbook in Excel to keep the results.
+**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; the selected source worksheet remains unchanged. On Excel desktop hosts that support the Office CompressedFile requirement set, the add-in can download a separate OOXML copy of the current workbook. The download is capped at 100 MB and preserves the current .xlsx or .xlsm extension. The source workbook in the Excel session remains open and is not replaced by the downloaded copy.
 
 The manifest requests ReadWriteDocument because approved operations create and write to a results worksheet. Excel's normal add-in permission consent applies. The code still restricts edits to its explicit operation allow-list.
 
@@ -42,7 +42,7 @@ A deployed authenticated Shoir-IE workbook API and a separate short-lived add-in
 
 manifest.xml intentionally retains YOUR-SHOIR-IE-HOST placeholders. Replace them only with an approved HTTPS staging host after the task-pane assets are actually deployed there. Do not submit the placeholder manifest to users or represent the add-in as hosted or ready for sideloading.
 
-The repository CI validates manifest XML, JavaScript syntax and deterministic planner unit tests. That does not prove Excel desktop/web runtime compatibility. Sideloading, Office desktop/web acceptance, authenticated server transfer and a separate output workbook file from the add-in remain unimplemented or unverified.
+The repository CI validates manifest XML, JavaScript syntax and deterministic planner unit tests. That does not prove Excel desktop/web runtime compatibility. Microsoft documents that compressed workbook export is supported in Excel desktop for Windows/Mac but not Excel for the web. The download control is feature-detected and disabled where the host does not support it. Sideloading, Office desktop/web acceptance and authenticated server transfer remain unimplemented or unverified.
 
 ## Remaining Stage 1 work
 
@@ -50,7 +50,8 @@ The repository CI validates manifest XML, JavaScript syntax and deterministic pl
 - Sideload and test on the supported Excel desktop and web clients.
 - Establish a dedicated, short-lived Shoir-IE add-in authentication flow.
 - Implement and deploy an authenticated workbook API only after security review.
-- Add a downloadable separate output workbook workflow to the add-in, without silently modifying the source.
+- Validate compressed workbook-copy downloads on supported Excel desktop hosts and verify that the original source worksheet is preserved.
+- Document the Excel for the web export limitation and provide a separate supported web export strategy before claiming parity.
 - Expand the controlled operation registry and add acceptance tests for every added operation.
 - Complete end-to-end testing with dedicated synthetic accounts only.
 
