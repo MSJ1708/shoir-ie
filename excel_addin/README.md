@@ -28,13 +28,13 @@ Read-only inspection is the default and does not modify workbook cells. Every op
 
 Approved operations add a new worksheet in the active workbook. They do not modify the selected source worksheet. If a results sheet with the default name already exists, the add-in creates a new uniquely named results sheet instead of overwriting an existing sheet.
 
-**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; the selected source worksheet remains unchanged. On Excel desktop hosts that support the Office CompressedFile requirement set, the add-in prepares a separate OOXML copy of the current workbook and exposes a download link for an explicit user click. The download is capped at 100 MB, verifies that all file slices were received, and preserves the current .xlsx or .xlsm extension. The source workbook in the Excel session remains open and is not replaced by the downloaded copy.
+**Save a backup before approving edits.** The add-in adds a worksheet to the active workbook; the selected source worksheet remains unchanged. When the active Excel host supports the Office CompressedFile API, the add-in prepares a separate OOXML copy of the current workbook and exposes a download link for an explicit user click. The download is capped at 100 MB, verifies that all file slices were received, and preserves the current .xlsx or .xlsm extension when the host exposes it. Host support is feature-detected; actual export behaviour still requires acceptance testing in each target Excel client. The source workbook in the Excel session remains open and is not replaced by the downloaded copy.
 
 The manifest requests ReadWriteDocument because approved operations create and write to a results worksheet. Excel's normal add-in permission consent applies. The code still restricts edits to its explicit operation allow-list.
 
 ## Data transfer boundary
 
-The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. Its planner is deterministic rule-based code, not an LLM. The compact local change fingerprint is used only to invalidate a stale plan; it is not a cryptographic digest, authentication token, or authorization control. The displayed plan does not duplicate the selected cell values.
+The task pane is LOCAL_ONLY. It does not upload workbook contents, send them to a configurable host, or call an external AI provider. The default task-pane preview is a bounded metadata summary rather than a full 10,000-cell JSON render; full cell values are copied only after the user explicitly chooses the JSON action. Re-inspection or changing the instruction invalidates the old plan. Its planner is deterministic rule-based code, not an LLM. The compact local change fingerprint is used only to invalidate a stale plan; it is not a cryptographic digest, authentication token, or authorization control. The displayed plan does not duplicate the selected cell values.
 
 A deployed authenticated Shoir-IE workbook API and a separate short-lived add-in identity/token exchange do not currently exist. The browser remote_session_token must not be copied into the add-in. Do not enable workbook transfer until user authentication, server-side tier/workspace checks, explicit data-transfer consent, origin/request bounds, audit/retention policy and cross-tenant denial tests are implemented.
 
@@ -42,7 +42,7 @@ A deployed authenticated Shoir-IE workbook API and a separate short-lived add-in
 
 manifest.xml intentionally retains YOUR-SHOIR-IE-HOST placeholders. Replace them only with an approved HTTPS staging host after the task-pane assets are actually deployed there. Do not submit the placeholder manifest to users or represent the add-in as hosted or ready for sideloading.
 
-The repository CI validates manifest XML, JavaScript syntax and deterministic planner unit tests. That does not prove Excel desktop/web runtime compatibility. Microsoft documents that compressed workbook export is supported in Excel desktop for Windows/Mac but not Excel for the web. The download control is feature-detected and disabled where the host does not support it. Sideloading, Office desktop/web acceptance and authenticated server transfer remain unimplemented or unverified.
+The repository CI validates manifest XML, JavaScript syntax and deterministic planner unit tests. That does not prove Excel desktop/web runtime compatibility. The download control is feature-detected and disabled when the host does not report CompressedFile support; an API failure is shown to the user instead of being treated as a successful export. Excel desktop and web behaviour has not yet been runtime-accepted in this repository. Sideloading, Office host-matrix acceptance and authenticated server transfer remain unimplemented or unverified.
 
 ## Remaining Stage 1 work
 
@@ -55,4 +55,4 @@ The repository CI validates manifest XML, JavaScript syntax and deterministic pl
 - Expand the controlled operation registry and add acceptance tests for every added operation.
 - Complete end-to-end testing with dedicated synthetic accounts only.
 
-The in-app Workbench route separately reuses Shoir-IE's safe Excel processing engine and can generate separate analysis workbooks/evidence exports. This does not imply that the Office add-in can currently upload workbooks or generate a separate output file.
+The in-app Workbench route separately reuses Shoir-IE's safe Excel processing engine and can generate separate analysis workbooks/evidence exports. This does not imply that the Office add-in can currently upload workbooks to Shoir-IE or provide a dedicated add-in authentication/API workflow.
