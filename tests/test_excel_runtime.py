@@ -87,8 +87,12 @@ def test_prepare_exports_requires_acknowledgement_for_unsupported_source_feature
 
     from shoir_excel_runtime import prepare_exports
 
+    clean = pd.DataFrame({"Value": [1, 2]})
     result = {
-        "cleaned_sheets": {"Data": pd.DataFrame({"Value": [1, 2]})},
+        "cleaned_sheets": {"Data": clean},
+        "raw_sheets": {"Data": clean.copy(deep=True)},
+        "audits": {"Data": []},
+        "profiles": {"Data": {"Readiness": "READY", "Quality score": 100.0, "Schema fingerprint": "TEST"}},
         "fidelity_report": {
             "Requires acknowledgement": True,
             "Unsupported features": ["Source formulas"],
