@@ -9,7 +9,6 @@ on:
       - "shoir_excel_entitlements.py"
       - "shoir_excel_runtime.py"
       - "shoir_excel_foundation.py"
-      - "shoir_excel_foundation.py"
       - "shoir_tier_capabilities.py"
       - "industrial_platform.py"
       - "industrial_platform_excellence.py"
