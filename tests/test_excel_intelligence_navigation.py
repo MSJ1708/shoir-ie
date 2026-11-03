@@ -192,6 +192,8 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert "Office.FileType.Compressed" in taskpane
     assert "isSetSupported(\"CompressedFile\")" in taskpane
     assert "maxDownloadBytes = 100 * 1024 * 1024" in taskpane
+    assert "receivedBytes !== Number(file.size)" in taskpane
+    assert "downloadReadyLink.href = workbookObjectUrl" in taskpane
     assert "Do not turn previously inert text into executable spreadsheet logic" in taskpane
     assert "fetch(" not in taskpane
     assert "/api/workbook/import" not in taskpane
@@ -206,6 +208,7 @@ def test_office_addin_uses_a_local_approval_gated_operation_allowlist():
     assert 'id="instruction"' in html
     assert 'id="buildPlan"' in html
     assert 'id="approveWorkbookEdits"' in html
+    assert 'id="downloadReadyLink"' in html
     assert "planner.js" in html
 
     manifest = (ROOT / "excel_addin" / "manifest.xml").read_text(encoding="utf-8")
