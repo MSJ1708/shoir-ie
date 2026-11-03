@@ -407,3 +407,41 @@ def test_excel_json_renderer_bounds_large_evidence_previews(monkeypatch):
 
     assert len(code_blocks[0]) <= runtime.MAX_RENDER_JSON_CHARS
     assert captions and "complete evidence remains" in captions[0]
+
+
+def test_excel_plotly_renderer_skips_oversized_charts(monkeypatch):
+    from types import SimpleNamespace
+
+    import shoir_excel_runtime as runtime
+
+    warnings = []
+    rendered = []
+    monkeypatch.setattr(runtime.st, "warning", warnings.append)
+    monkeypatch.setattr(runtime.st, "plotly_chart", lambda *args, **kwargs: rendered.append(args[0]))
+
+    oversized = SimpleNamespace(
+        data=[SimpleNamespace(x=list(range(runtime.MAX_RENDER_CHART_POINTS + 1)),
+                              y=list(range(runtime.MAX_RENDER_CHART_POINTS + 1)))]
+    )
+    runtime._render_excel_plotly_figure(oversized, "Copilot chart")
+
+    assert not rendered
+    assert warnings and "above the" in warnings[0]
+    assert "full result table" in warnings[0]
+
+
+def test_excel_plotly_renderer_falls_back_when_plotly_rendering_raises(monkeypatch):
+    import shoir_excel_runtime as runtime
+
+    warnings = []
+    monkeypatch.setattr(runtime.st, "warning", warnings.append)
+    monkeypatch.setattr(
+        runtime.st,
+        "plotly_chart",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("frontend chart serialization")),
+    )
+    figure = type("Figure", (), {"data": []})()
+
+    runtime._render_excel_plotly_figure(figure, "Copilot chart")
+
+    assert warnings and "underlying analysis table" in warnings[0]
