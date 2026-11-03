@@ -466,9 +466,11 @@ def fast_workbook_fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
                             has_auto_filters = True
                         elif local_name == "mergeCell":
                             has_merged_cells = True
-                        elif local_name == "row" and str(element.attrib.get("hidden", "")).casefold() in {"1", "true"}:
+                        # Hidden state and formatting are independent OOXML
+                        # properties; a styled hidden row/column must set both flags.
+                        if local_name == "row" and str(element.attrib.get("hidden", "")).casefold() in {"1", "true"}:
                             has_hidden_rows = True
-                        elif local_name == "col" and str(element.attrib.get("hidden", "")).casefold() in {"1", "true"}:
+                        if local_name == "col" and str(element.attrib.get("hidden", "")).casefold() in {"1", "true"}:
                             has_hidden_columns = True
                         element.clear()
             report["Formula cells"] = formula_count
