@@ -1206,6 +1206,13 @@ def render_module(module: str, tier: str, username: str):
         # Enforce the configurable premium entitlement at the renderer boundary,
         # even when this function is called outside the Workbench selector.
         entitlement = excel_intelligence_entitlement_config()
+        actor = str(username or st.session_state.get("current_user") or "").strip()
+        if (
+            st.session_state.get("authenticated") is not True
+            or actor.casefold() in {"", "guest", "guest visitor", "anonymous"}
+        ):
+            st.warning("Sign in with an active Shoir-IE account before using Excel Intelligence.")
+            return
         if not excel_intelligence_allowed(tier):
             st.warning(
                 f"Excel Intelligence requires {excel_intelligence_minimum_tier()}. "
