@@ -16,7 +16,7 @@ The first selected row is treated as the header row for planning. This assumptio
 The current local operation allow-list is intentionally small:
 
 - **Copy selection to results:** create a uniquely named Shoir-IE Results worksheet and copy the selected values, formulas and number formats. The selected source worksheet is not written to.
-- **Trim text:** trim leading/trailing whitespace in text constants on the new results worksheet. Cells containing formulas are left unchanged.
+- **Trim text:** trim leading/trailing whitespace in text constants on the new results worksheet. Cells containing formulas are left unchanged, and text that would become formula-like after trimming is skipped and counted to prevent formula injection.
 - **SUM / AVERAGE formulas:** add a summary row below the copied range on the results worksheet. The current first column is reserved for the TOTAL/AVERAGE label.
 - **Column chart:** create a column chart from the copied range and position it below the selection.
 
