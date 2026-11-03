@@ -307,8 +307,26 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
             "workspace_id": "test-workspace",
             "user_tier": "Enterprise Tier",
             "subscription_expires_at": "2099-01-01T00:00:00Z",
+            "remote_session_token": "synthetic-live-session-token",
         },
     )
+
+    import durable_account_store as account_store
+    live_account = {
+        "ok": True,
+        "username": "shoir-e2e-excel-copilot",
+        "tier": "Enterprise Tier",
+        "active": True,
+        "expires_at": "2099-01-01T00:00:00Z",
+    }
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+
+    def mock_live_entitlement(username, token):
+        assert username == "shoir-e2e-excel-copilot"
+        assert token == "synthetic-live-session-token"
+        return dict(live_account)
+
+    monkeypatch.setattr(account_store, "edge_session_entitlement", mock_live_entitlement)
 
     plan = build_excel_intelligence_plan(prompt, "Production", source)
     assert plan["plan"]["requires_approval"] is True
@@ -340,26 +358,59 @@ def test_excel_intelligence_copilot_requires_approval_and_keeps_source_read_only
         )
     st.session_state["user_tier"] = "Enterprise Tier"
 
-    # Expired, missing and malformed authenticated expiry values fail closed.
-    st.session_state["subscription_expires_at"] = "2000-01-01T00:00:00Z"
+    # Expired, missing and malformed live account expiry values fail closed.
+    live_account["expires_at"] = "2000-01-01T00:00:00Z"
     with pytest.raises(PermissionError, match="expired"):
         execute_excel_intelligence_plan(
             prompt, "Production", source, plan,
             "shoir-e2e-excel-copilot", "Enterprise", approved=True,
         )
-    st.session_state["subscription_expires_at"] = None
+    live_account["expires_at"] = None
     with pytest.raises(PermissionError, match="expiry"):
         execute_excel_intelligence_plan(
             prompt, "Production", source, plan,
             "shoir-e2e-excel-copilot", "Enterprise", approved=True,
         )
-    st.session_state["subscription_expires_at"] = "not-a-date"
+    live_account["expires_at"] = "not-a-date"
     with pytest.raises(PermissionError, match="expiry"):
         execute_excel_intelligence_plan(
             prompt, "Production", source, plan,
             "shoir-e2e-excel-copilot", "Enterprise", approved=True,
         )
-    st.session_state["subscription_expires_at"] = "2099-01-01T00:00:00Z"
+    live_account["expires_at"] = "2099-01-01T00:00:00Z"
+
+    # Live entitlement, not a client-supplied tier, controls execution.
+    live_account["tier"] = "Starter Tier"
+    with pytest.raises(PermissionError, match="subscription"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    live_account["tier"] = "Enterprise Tier"
+
+    live_account["active"] = False
+    with pytest.raises(PermissionError, match="inactive"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    live_account["active"] = True
+
+    live_account["username"] = "another-user"
+    with pytest.raises(PermissionError, match="does not match"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    live_account["username"] = "shoir-e2e-excel-copilot"
+
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: False)
+    with pytest.raises(PermissionError, match="unavailable"):
+        execute_excel_intelligence_plan(
+            prompt, "Production", source, plan,
+            "shoir-e2e-excel-copilot", "Enterprise", approved=True,
+        )
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
 
     with pytest.raises(ValueError, match="stale"):
         execute_excel_intelligence_plan(
