@@ -374,3 +374,36 @@ def test_excel_display_frame_sanitizes_mixed_objects_and_duplicate_headers_witho
     assert len(display.iloc[3, 1]) == 2000
     assert display.iloc[3, 1].endswith("…")
     pd.testing.assert_frame_equal(source, original)
+
+
+def test_excel_json_renderer_falls_back_when_interactive_json_display_fails(monkeypatch):
+    import shoir_excel_runtime as runtime
+
+    warnings = []
+    code_blocks = []
+
+    def fail_json(*args, **kwargs):
+        raise RuntimeError("simulated JSON tree rendering issue")
+
+    monkeypatch.setattr(runtime.st, "json", fail_json)
+    monkeypatch.setattr(runtime.st, "warning", warnings.append)
+    monkeypatch.setattr(runtime.st, "code", lambda value, **kwargs: code_blocks.append(value))
+
+    runtime._render_excel_json({"source": "synthetic", "rows": 12}, "Evidence manifest")
+
+    assert warnings and "interactive JSON tree" in warnings[0]
+    assert code_blocks and '"rows": 12' in code_blocks[0]
+
+
+def test_excel_json_renderer_bounds_large_evidence_previews(monkeypatch):
+    import shoir_excel_runtime as runtime
+
+    code_blocks = []
+    captions = []
+    monkeypatch.setattr(runtime.st, "code", lambda value, **kwargs: code_blocks.append(value))
+    monkeypatch.setattr(runtime.st, "caption", captions.append)
+
+    runtime._render_excel_json({"evidence": "x" * 300_000}, "Evidence manifest")
+
+    assert len(code_blocks[0]) <= runtime.MAX_RENDER_JSON_CHARS
+    assert captions and "complete evidence remains" in captions[0]
