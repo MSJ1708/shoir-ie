@@ -200,7 +200,11 @@ def tier_matrix() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 def module_matrix() -> pd.DataFrame:
-    return pd.DataFrame(MODULE_MATRIX, columns=["Category","Module","Required Tier"])
+    data = pd.DataFrame(MODULE_MATRIX, columns=["Category","Module","Required Tier"])
+    # Resolve the premium Excel setting on every availability calculation so an
+    # invalid environment override can never leave a stale, weaker UI tier gate.
+    data.loc[data["Module"] == "Excel Intelligence", "Required Tier"] = excel_intelligence_minimum_tier()
+    return data
 
 def module_availability(current: str) -> pd.DataFrame:
     d = module_matrix()
