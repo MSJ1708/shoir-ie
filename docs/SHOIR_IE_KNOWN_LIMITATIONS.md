@@ -42,7 +42,7 @@ This register records limitations confirmed or not yet ruled out by the current 
 
 ## Security and enterprise
 
-- Twelve `shoir_internal` tables have RLS disabled. Follow-up anon/authenticated privilege checks did not show USAGE or SELECT for the checked paths; Data API schema exposure and all application callers still need review.
+- Twelve `shoir_internal` tables now have RLS enabled without policies. Preflight confirmed postgres-only ACLs and zero rows; Data API schema exposure, service-role usage and operational regression still require review.
 - `public.shoir_referrals` has RLS enabled and no policy, with server-only grants defined in the migration. Preserve and test that boundary.
 - Cross-tenant persistence, storage, search, export and AI-tool denial needs current authenticated hosted evidence.
 - SSO/MFA provider activation, legal clearance, customer support ownership and commercial readiness are not established here.
