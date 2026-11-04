@@ -927,6 +927,144 @@ Deno.serve(async (req) => {
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
 
+    if (action === "dataset_upload_create") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(String(body.token || ""), username, "workspace");
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+          !/^[0-9a-f]{64}$/.test(dataHash)) {
+        return sendResponse({ error: "Dataset upload identity is invalid." }, 400);
+      }
+      const uploadPath = "tmp/" + workspaceKey + "/" + datasetId + "/" +
+        crypto.randomUUID().replace(/-/g, "") + ".csv";
+      const { data, error } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .createSignedUploadUrl(uploadPath, { upsert: false });
+      if (error) throw error;
+      if (!data?.signedUrl || !data?.token) {
+        throw new Error("Storage provider did not return a signed upload URL.");
+      }
+      return sendResponse({
+        ok: true,
+        upload_url: data.signedUrl,
+        upload_token: data.token,
+        upload_path: uploadPath,
+        max_bytes: 52428800,
+      });
+    }
+
+    if (action === "dataset_version_finalize") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(String(body.token || ""), username, "workspace");
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const uploadPath = String(body.upload_path || "").trim();
+      const name = String(body.name || "").trim();
+      const sourceName = String(body.source_name || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      const fingerprint = String(body.version_fingerprint || "").toLowerCase();
+      const rowCount = Number(body.row_count);
+      const columnCount = Number(body.column_count);
+      const schema = body.schema;
+      const transformations = body.transformations || [];
+      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+          !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
+          uploadPath.includes("..") || uploadPath.length > 240 ||
+          !name || name.length > 200 || sourceName.length > 500 ||
+          !/^[0-9a-f]{64}$/.test(dataHash) ||
+          !/^[0-9a-f]{64}$/.test(fingerprint) ||
+          !Number.isSafeInteger(rowCount) || rowCount < 0 || rowCount > 100000000 ||
+          !Number.isSafeInteger(columnCount) || columnCount < 0 || columnCount > 5000 ||
+          !schema || typeof schema !== "object" || Array.isArray(schema) ||
+          new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+          !Array.isArray(transformations) || transformations.length > 50 ||
+          new TextEncoder().encode(JSON.stringify(transformations)).byteLength > 16384) {
+        return sendResponse({ error: "Dataset version metadata is invalid." }, 400);
+      }
+      const { data: uploaded, error: downloadError } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .download(uploadPath);
+      if (downloadError || !uploaded) throw downloadError || new Error("Uploaded dataset file is missing.");
+      if (uploaded.size > 52428800) {
+        await supabase.storage.from("shoir-industrial-datasets").remove([uploadPath]);
+        return sendResponse({ error: "Dataset file exceeds the 50 MiB storage limit." }, 413);
+      }
+      const bytes = new Uint8Array(await uploaded.arrayBuffer());
+      const digest = await sha256Hex(
+        Array.from(bytes).map((value) => String.fromCharCode(value)).join(""),
+      );
+      if (digest !== dataHash) {
+        await supabase.storage.from("shoir-industrial-datasets").remove([uploadPath]);
+        return sendResponse({ error: "Uploaded dataset content hash does not match the registered data hash." }, 422);
+      }
+      const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash + ".csv";
+      const bucket = supabase.storage.from("shoir-industrial-datasets");
+      const { data: existingFile, error: existingError } = await bucket.download(storageKey);
+      if (!existingError && existingFile) {
+        const existingBytes = new Uint8Array(await existingFile.arrayBuffer());
+        const existingHash = await sha256Hex(
+          Array.from(existingBytes).map((value) => String.fromCharCode(value)).join(""),
+        );
+        if (existingHash !== dataHash) {
+          await bucket.remove([uploadPath]);
+          throw new Error("Existing immutable dataset object does not match its content hash.");
+        }
+      } else {
+        const { error: storeError } = await bucket.upload(
+          storageKey,
+          new Blob([bytes], { type: "text/csv" }),
+          { contentType: "text/csv", upsert: false },
+        );
+        if (storeError) {
+          const { data: racedFile, error: racedError } = await bucket.download(storageKey);
+          if (racedError || !racedFile) throw storeError;
+          const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
+          const racedHash = await sha256Hex(
+            Array.from(racedBytes).map((value) => String.fromCharCode(value)).join(""),
+          );
+          if (racedHash !== dataHash) throw new Error("Concurrent immutable dataset upload has a different content hash.");
+        }
+      }
+      await bucket.remove([uploadPath]);
+      const versionRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const headRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const { data, error } = await supabase.rpc(
+        "shoir_platform_register_dataset_version_with_storage",
+        {
+          p_workspace_key: workspaceKey,
+          p_dataset_id: datasetId,
+          p_name: name,
+          p_source_name: sourceName,
+          p_data_hash: dataHash,
+          p_version_fingerprint: fingerprint,
+          p_row_count: rowCount,
+          p_column_count: columnCount,
+          p_schema_json: schema,
+          p_transformations_json: transformations,
+          p_actor: row.username_lc,
+          p_version_record_id: versionRecordId,
+          p_head_record_id: headRecordId,
+          p_event_id: eventId,
+          p_storage_key: storageKey,
+        },
+      );
+      if (error) throw error;
+      const registration = Array.isArray(data) ? data[0] : data;
+      return sendResponse({ ok: true, registration });
+    }
+
     if (action === "dataset_version_register") {
       const username = String(body.username || "").trim();
       const row = await getSession(String(body.token || ""), username, "workspace");
