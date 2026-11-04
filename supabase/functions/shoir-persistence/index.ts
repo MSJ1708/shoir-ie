@@ -349,6 +349,16 @@ function validatePlatformPayload(value: unknown, depth = 0): Record<string, unkn
   walk(value, depth);
   return value as Record<string, unknown>;
 }
+function stablePlatformJson(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(stablePlatformJson).join(",") + "]";
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return "{" + Object.keys(object).sort().map((key) =>
+      JSON.stringify(key) + ":" + stablePlatformJson(object[key])
+    ).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return bytesToHex(digest);
@@ -865,7 +875,7 @@ Deno.serve(async (req) => {
         return sendResponse({ error: "Platform entity key is invalid." }, 400);
       }
       const payload = validatePlatformPayload(body.payload);
-      const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+      const canonical = stablePlatformJson(payload);
       const contentHash = await sha256Hex(canonical);
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
