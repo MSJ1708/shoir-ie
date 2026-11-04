@@ -16,7 +16,7 @@ def test_canonical_identity_survives_display_name_rename(tmp_path, monkeypatch):
     legacy_entity_id = layer.canonical_entity_id(
         "tester", "site-a", "Asset", "Press 1001", "asset:1001"
     )
-    state_json = json.dumps({"thread_node_id": "AST-LEGACY-1001"})
+    state_json = json.dumps({"legacy_record": True})
     stamp = layer.now_iso()
     with layer._local_connect() as conn:
         conn.execute(
