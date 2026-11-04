@@ -317,6 +317,7 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
 const PLATFORM_RECORD_TYPES = new Set([
   "asset",
   "dataset",
+  "dataset_version",
   "process",
   "product",
   "material",
