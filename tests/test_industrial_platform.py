@@ -245,3 +245,46 @@ def test_staging_dataset_registration_rejects_too_many_transformations(monkeypat
             pd.DataFrame({"units": [1]}),
             transformations=[{"operation": "clean"}] * 51,
         )
+
+
+
+def test_load_registered_dataset_activates_verified_shared_frame(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    raw = b"asset_id,throughput_tph\nA-1,12.5\nA-2,14.0\n"
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_download_dataset_version",
+        lambda **kwargs: (raw, {
+            "data_hash": "f" * 64, "version": 2, "row_count": 2, "column_count": 2
+        }),
+    )
+    state = {}
+    monkeypatch.setattr(platform.st, "session_state", state, raising=False)
+    frame = platform.load_registered_dataset(
+        "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
+    )
+    assert list(frame.columns) == ["asset_id", "throughput_tph"]
+    assert len(frame) == 2
+    assert state["universal_active_dataset"].equals(frame)
+    assert state["data_platform_latest_version"] == 2
+
+
+def test_load_registered_dataset_rejects_metadata_row_count_mismatch(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_download_dataset_version",
+        lambda **kwargs: (
+            b"asset_id\nA-1\n",
+            {"data_hash": "f" * 64, "version": 1, "row_count": 2, "column_count": 1},
+        ),
+    )
+    monkeypatch.setattr(platform.st, "session_state", {}, raising=False)
+    with pytest.raises(RuntimeError, match="row count"):
+        platform.load_registered_dataset(
+            "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
+        )
