@@ -1215,6 +1215,57 @@ def _validate_platform_record_payload(payload: Mapping[str, Any]) -> dict[str, A
     return value
 
 
+def edge_register_dataset_version(
+    username: str,
+    token: str,
+    workspace: str,
+    dataset_id: str,
+    name: str,
+    source_name: str,
+    data_hash: str,
+    version_fingerprint: str,
+    row_count: int,
+    column_count: int,
+    schema: Mapping[str, Any],
+    transformations: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Atomically register an immutable dataset version through the authenticated Edge API."""
+    import re
+
+    if not str(username or "").strip() or not str(token or ""):
+        raise PermissionError("An authenticated workspace session is required.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", str(workspace or "default")):
+        raise ValueError("Workspace identifier is invalid.")
+    if not re.fullmatch(r"DS-[A-F0-9]{12,32}", str(dataset_id or "")):
+        raise ValueError("Dataset identifier is invalid.")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(data_hash or "").lower()):
+        raise ValueError("Dataset content hash is invalid.")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(version_fingerprint or "").lower()):
+        raise ValueError("Dataset version fingerprint is invalid.")
+    if isinstance(row_count, bool) or not isinstance(row_count, int) or not 0 <= row_count <= 100_000_000:
+        raise ValueError("Dataset row count is invalid.")
+    if isinstance(column_count, bool) or not isinstance(column_count, int) or not 0 <= column_count <= 5000:
+        raise ValueError("Dataset column count is invalid.")
+    if not isinstance(schema, Mapping):
+        raise ValueError("Dataset schema must be an object.")
+    if not isinstance(transformations, (list, tuple)) or len(transformations) > 50:
+        raise ValueError("Dataset transformation history is invalid.")
+    return _edge_call("dataset_version_register", {
+        "username": str(username).strip(),
+        "token": str(token),
+        "workspace": str(workspace or "default").strip(),
+        "dataset_id": str(dataset_id),
+        "name": str(name)[:200],
+        "source_name": str(source_name)[:500],
+        "data_hash": str(data_hash).lower(),
+        "version_fingerprint": str(version_fingerprint).lower(),
+        "row_count": row_count,
+        "column_count": column_count,
+        "schema": dict(schema),
+        "transformations": [dict(x) for x in transformations],
+    })
+
+
 def edge_save_platform_record(
     username: str,
     token: str,
