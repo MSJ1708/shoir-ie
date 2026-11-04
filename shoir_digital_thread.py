@@ -239,85 +239,6 @@ def rename_thread_node(node_id: str, new_name: str) -> dict[str, Any]:
     return updated
 
 
-def _persist_current_thread(
-    owner: str,
-    workspace: str,
-    event_type: str,
-    event_payload: dict[str, Any] | None = None,
-) -> str:
-    """Persist the current graph and event; propagate errors so callers fail closed."""
-    from shoir_enterprise_layer import (
-        record_artifact,
-        record_canonical_event,
-        upsert_canonical_entity,
-        upsert_canonical_relationship,
-    )
-
-    keys = _keys()
-    project = st.session_state[keys["project"]]
-    nodes = st.session_state[keys["nodes"]]
-    edges = st.session_state[keys["edges"]]
-    canonical_ids: dict[str, str] = {}
-    for node in nodes:
-        state = dict(node)
-        state["thread_node_id"] = str(node.get("node_id") or "")
-        entity_id = upsert_canonical_entity(
-            owner,
-            str(node.get("node_type", "Entity")),
-            str(node.get("name", "")),
-            str(node.get("source", "")),
-            state=state,
-            status=str(node.get("status", "Observed")),
-            workspace=workspace,
-        )
-        canonical_ids[str(node.get("node_id"))] = entity_id
-
-    relationship_ids: list[str] = []
-    for edge in edges:
-        source_id = canonical_ids.get(str(edge.get("source_id")))
-        target_id = canonical_ids.get(str(edge.get("target_id")))
-        if not source_id or not target_id:
-            continue
-        relationship_ids.append(
-            upsert_canonical_relationship(
-                owner,
-                source_id,
-                target_id,
-                str(edge.get("relation", "Linked")),
-                status=str(edge.get("status", "Linked")),
-                metadata=edge.get("metadata", {}),
-                workspace=workspace,
-            )
-        )
-
-    if event_type:
-        record_canonical_event(
-            owner,
-            event_type,
-            event_payload or {
-                "project_id": project.get("project_id", "global-thread"),
-                "entity_count": len(canonical_ids),
-                "relationship_count": len(relationship_ids),
-                "canonical_lifecycle": CANONICAL_LIFECYCLE,
-            },
-            workspace=workspace,
-        )
-
-    return record_artifact(
-        owner,
-        "digital_thread_state",
-        project.get("project_id", "global-thread"),
-        {
-            "project": project,
-            "nodes": nodes,
-            "edges": edges,
-            "canonical_lifecycle": CANONICAL_LIFECYCLE,
-            "version": int(st.session_state.get(keys["version"], 1)),
-        },
-        workspace,
-    )
-
-
 def _upsert_edge(source_id: str, target_id: str, relation: str, status: str = "Linked", metadata: dict[str, Any] | None = None) -> str:
     keys = _keys()
     raw = f"{source_id}|{target_id}|{relation}"
@@ -1108,43 +1029,40 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                     previous_name = str(selected_node.get("name", ""))
                     try:
                         renamed = rename_thread_node(rename_target_id, proposed_name)
-                        workspace_name = str(
-                            st.session_state.get("shoir_workspace_name")
-                            or st.session_state.get("workspace")
-                            or st.session_state.get("active_workspace_name")
-                            or "default"
-                        )
-                        artifact_id = _persist_current_thread(
-                            username,
-                            workspace_name,
-                            "digital_thread_node_renamed",
-                            {
-                                "node_id": renamed["node_id"],
-                                "node_type": renamed["node_type"],
-                                "previous_name": previous_name,
-                                "new_name": renamed["name"],
-                                "canonical_id_preserved": True,
-                            },
-                        )
-                        st.success(
-                            f"Display name saved. Canonical ID remains {renamed['node_id']}. "
-                            f"Evidence snapshot: {artifact_id}"
-                        )
-                        st.rerun()
                     except ValueError as exc:
                         st.warning(str(exc))
-                    except Exception:
-                        for idx, existing in enumerate(st.session_state[keys["nodes"]]):
-                            if str(existing.get("node_id")) == str(rename_target_id):
-                                st.session_state[keys["nodes"]][idx] = previous_node
-                                break
-                        st.session_state[keys["version"]] = previous_version
-                        project["updated_at"] = previous_project_updated
-                        st.error(
-                            "The rename could not be confirmed as durably saved. "
-                            "The previous label has been restored in this session. "
-                            "Check the persistence service before retrying."
-                        )
+                    else:
+                        try:
+                            from shoir_enterprise_layer import persist_thread_node_rename
+                            workspace_name = str(
+                                st.session_state.get("shoir_workspace_name")
+                                or st.session_state.get("workspace")
+                                or st.session_state.get("active_workspace_name")
+                                or "default"
+                            )
+                            entity_id, event_id = persist_thread_node_rename(
+                                username,
+                                workspace_name,
+                                renamed,
+                                previous_name,
+                            )
+                            st.success(
+                                f"Display name saved. Canonical ID remains {renamed['node_id']}. "
+                                f"Audit event: {event_id}"
+                            )
+                            st.rerun()
+                        except Exception:
+                            for idx, existing in enumerate(st.session_state[keys["nodes"]]):
+                                if str(existing.get("node_id")) == str(rename_target_id):
+                                    st.session_state[keys["nodes"]][idx] = previous_node
+                                    break
+                            st.session_state[keys["version"]] = previous_version
+                            project["updated_at"] = previous_project_updated
+                            st.error(
+                                "The rename could not be durably confirmed. "
+                                "The previous label has been restored in this session. "
+                                "Check the persistence service before retrying."
+                            )
         else:
             st.info("Sync the workspace before renaming a Digital Thread node.")
 
