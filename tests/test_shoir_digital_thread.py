@@ -139,3 +139,87 @@ def test_upsert_fails_closed_when_source_matches_multiple_legacy_nodes(monkeypat
 def test_source_less_stable_id_keeps_legacy_hash_formula():
     expected = "DAT-" + hashlib.sha1(b"Dataset|Orders|").hexdigest()[:12].upper()
     assert stable_id("Dataset", "Orders", "") == expected
+
+
+
+def test_digital_thread_workspace_save_uses_authenticated_managed_backend(monkeypatch):
+    from types import SimpleNamespace
+    import shoir_digital_thread as thread
+    import durable_account_store
+    import workspace_persistence
+
+    session_state = {
+        "authenticated": True,
+        "current_user": "tester",
+        "remote_session_token": "opaque-test-token",
+        "shoir_digital_thread_rename_history": [{"event_id": "DTR-1"}],
+    }
+    calls = []
+    monkeypatch.setattr(thread, "st", SimpleNamespace(session_state=session_state))
+    monkeypatch.setattr(durable_account_store, "edge_backend_configured", lambda: True)
+    monkeypatch.setattr(
+        workspace_persistence,
+        "save_user_workspace",
+        lambda actor, state: calls.append((actor, state)) or True,
+    )
+
+    assert thread.persist_digital_thread_workspace("tester") is True
+    assert calls == [("tester", session_state)]
+
+
+def test_digital_thread_workspace_save_fails_closed_without_managed_backend(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    import shoir_digital_thread as thread
+    import durable_account_store
+
+    monkeypatch.setattr(
+        thread,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "tester"}),
+    )
+    monkeypatch.setattr(durable_account_store, "edge_backend_configured", lambda: False)
+
+    with pytest.raises(RuntimeError, match="not configured"):
+        thread.persist_digital_thread_workspace("tester")
+
+
+def test_digital_thread_workspace_save_denies_wrong_actor_and_guest(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    import shoir_digital_thread as thread
+
+    monkeypatch.setattr(
+        thread,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "another-user"}),
+    )
+    with pytest.raises(PermissionError, match="does not match"):
+        thread.persist_digital_thread_workspace("tester")
+
+    monkeypatch.setattr(
+        thread,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "Guest Visitor"}),
+    )
+    with pytest.raises(PermissionError, match="Guest and anonymous"):
+        thread.persist_digital_thread_workspace("Guest Visitor")
+
+
+def test_digital_thread_workspace_save_requires_successful_remote_write(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    import shoir_digital_thread as thread
+    import durable_account_store
+    import workspace_persistence
+
+    monkeypatch.setattr(
+        thread,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "tester"}),
+    )
+    monkeypatch.setattr(durable_account_store, "edge_backend_configured", lambda: True)
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda actor, state: False)
+
+    with pytest.raises(RuntimeError, match="save failed"):
+        thread.persist_digital_thread_workspace("tester")
