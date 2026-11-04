@@ -554,7 +554,9 @@ def persist_thread_node_rename(
     if not str(username or "").strip() or actor.casefold() != str(username).strip().casefold():
         raise PermissionError("The requested identity does not match the signed-in account.")
 
-    ensure_enterprise_schema()
+    remote = _remote()
+    if not remote:
+        ensure_enterprise_schema()
     wid = workspace_key(actor, workspace)
     node_id = str(node.get("node_id") or "").strip()
     entity_type = str(node.get("node_type") or "Entity")[:100]
@@ -572,12 +574,12 @@ def persist_thread_node_rename(
         "entity_type": entity_type,
         "previous_name": str(previous_name or "")[:240],
         "new_name": name,
-        "canonical_id_preserved": True,
+        "thread_node_id_preserved": True,
     })
     event_id = "CEVT-" + uuid.uuid4().hex[:14].upper()
     stamp = now_iso()
 
-    if _remote():
+    if remote:
         with _pg_connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
