@@ -37,35 +37,20 @@ Supabase table inspection identified 12 `shoir_internal` tables with RLS disable
 - report_provenance
 - security
 
-The Supabase table inspection raised a critical RLS-disabled advisory for these tables. Read-only follow-up checks showed:
+The Supabase table inspection raised a critical RLS-disabled advisory before remediation. The staging-only migration now enables RLS on all 12 tables. Read-only follow-up checks showed:
 - anon: no USAGE privilege on `shoir_internal`;
 - authenticated: no USAGE privilege on `shoir_internal`;
 - anon: no SELECT privilege on the checked `shoir_internal.artifacts` table;
 - authenticated: no SELECT privilege on the checked table;
 - the SQL session did not return a value for `pgrst.db_schemas`, so API schema exposure was not established.
 
-This evidence does not support a claim that anon/authenticated currently read these tables. It also does not remove the need for defense-in-depth, review of all application/service roles, or confirmation of Data API exposed schemas. The tables have no RLS policies today. The observed row count was zero at the time of metadata inspection.
+The staging-only hardening migration enabled RLS without policies, kept FORCE RLS disabled, and made no grant changes. This intentionally denies access to future non-owner roles until table-specific least-privilege policies are designed. It does not remove the need to review service-role callers and confirm Data API exposed schemas. The tables have no RLS policies today. The observed row count was zero at the time of metadata inspection.
 
-### Candidate hardening statements — NOT EXECUTED
+### Applied staging hardening
 
-The advisor's RLS enablement statements are shown below for review only. Do not run them until every table's caller, connection role, required operation and policy has been mapped. Enabling RLS with no applicable policy can block legitimate non-owner access.
+Migration `20261104183132_enable_shoir_internal_rls_20261104` was applied to staging only. Verification confirms all 12 tables now have RLS enabled, FORCE RLS disabled, zero policies and zero rows. The migration did not change grants or application data. This is intentionally deny-by-default for any future non-owner/non-BYPASSRLS role.
 
-```sql
-ALTER TABLE shoir_internal.artifacts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.twin_assets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.twin_snapshots ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.twin_scenarios ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.connector_health ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.jobs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.collaboration ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.knowledge ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.monitoring_rules ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.monitoring_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.report_provenance ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shoir_internal.security ENABLE ROW LEVEL SECURITY;
-```
-
-This is not a complete remediation by itself. For each table, define least-privilege policies for the actual intended caller, add update `USING` and `WITH CHECK` predicates where appropriate, and test denied as well as authorised access. Do not add broad `TO authenticated USING (true)` policies.
+This is a containment step, not a complete multi-tenant policy model. Before introducing any non-owner connector, worker or API role, define table-specific least-privilege policies with workspace predicates and test authorised and denied operations. Do not add broad `TO authenticated USING (true)` policies.
 
 ## 5. Other security observations
 
