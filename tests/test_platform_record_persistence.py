@@ -374,3 +374,19 @@ def test_private_dataset_download_rejects_hash_mismatch(monkeypatch):
         store.edge_download_dataset_version(
             "synthetic-user", "opaque-session-token", "plant-a", "DS-ABCDEF012345"
         )
+
+
+
+def test_dataset_download_edge_action_is_session_and_workspace_scoped():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    action = source.split('if (action === "dataset_download_url") {', 1)[1].split(
+        'if (action === "dataset_upload_create") {', 1
+    )[0]
+    assert 'getSession(String(body.token || ""), username, "workspace")' in action
+    assert '.eq("workspace_key", workspaceKey)' in action
+    assert '.eq("record_type", "dataset")' in action
+    assert '.eq("entity_key", datasetId)' in action
+    assert '.createSignedUrl(storageKey, 300, { download: true })' in action
+    assert 'expectedPrefix = workspaceKey + "/" + datasetId + "/"' in action
