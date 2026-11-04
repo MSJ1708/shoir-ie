@@ -426,6 +426,11 @@ async function sha256Hex(value: string): Promise<string> {
   );
   return bytesToHex(digest);
 }
+
+async function sha256Bytes(value: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", value);
+  return bytesToHex(digest);
+}
 async function platformWorkspaceKey(
   username: string,
   workspace: string,
@@ -998,9 +1003,7 @@ Deno.serve(async (req) => {
         return sendResponse({ error: "Dataset file exceeds the 50 MiB storage limit." }, 413);
       }
       const bytes = new Uint8Array(await uploaded.arrayBuffer());
-      const digest = await sha256Hex(
-        Array.from(bytes).map((value) => String.fromCharCode(value)).join(""),
-      );
+      const digest = await sha256Bytes(bytes);
       if (digest !== dataHash) {
         await supabase.storage.from("shoir-industrial-datasets").remove([uploadPath]);
         return sendResponse({ error: "Uploaded dataset content hash does not match the registered data hash." }, 422);
@@ -1010,9 +1013,7 @@ Deno.serve(async (req) => {
       const { data: existingFile, error: existingError } = await bucket.download(storageKey);
       if (!existingError && existingFile) {
         const existingBytes = new Uint8Array(await existingFile.arrayBuffer());
-        const existingHash = await sha256Hex(
-          Array.from(existingBytes).map((value) => String.fromCharCode(value)).join(""),
-        );
+        const existingHash = await sha256Bytes(existingBytes);
         if (existingHash !== dataHash) {
           await bucket.remove([uploadPath]);
           throw new Error("Existing immutable dataset object does not match its content hash.");
@@ -1027,9 +1028,7 @@ Deno.serve(async (req) => {
           const { data: racedFile, error: racedError } = await bucket.download(storageKey);
           if (racedError || !racedFile) throw storeError;
           const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
-          const racedHash = await sha256Hex(
-            Array.from(racedBytes).map((value) => String.fromCharCode(value)).join(""),
-          );
+          const racedHash = await sha256Bytes(racedBytes);
           if (racedHash !== dataHash) throw new Error("Concurrent immutable dataset upload has a different content hash.");
         }
       }
