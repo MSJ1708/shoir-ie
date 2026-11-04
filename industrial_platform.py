@@ -294,6 +294,37 @@ def register_dataset(
         conn.commit()
     return dataset_id
 
+def load_registered_dataset(
+    dataset_id: str,
+    username: str,
+    workspace: str = "default",
+    token: str = "",
+) -> pd.DataFrame:
+    """Load a versioned staging dataset from private object storage and verify its bytes."""
+    from durable_account_store import APP_ENVIRONMENT, edge_download_dataset_version
+
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Managed dataset loading is currently available through staging persistence.")
+    content, metadata = edge_download_dataset_version(
+        username=username,
+        token=token,
+        workspace=workspace,
+        dataset_id=dataset_id,
+    )
+    frame = pd.read_csv(io.BytesIO(content))
+    if len(frame) != int(metadata.get("row_count") or 0):
+        raise RuntimeError("Downloaded dataset row count does not match its registered metadata.")
+    if len(frame.columns) != int(metadata.get("column_count") or 0):
+        raise RuntimeError("Downloaded dataset column count does not match its registered metadata.")
+    st.session_state["data_platform_latest_df"] = frame.copy(deep=True)
+    st.session_state["data_platform_latest_dataset_id"] = dataset_id
+    st.session_state["data_platform_latest_version"] = int(metadata.get("version") or 1)
+    st.session_state["universal_active_dataset"] = frame.copy(deep=True)
+    st.session_state["shoir_data_version"] = str(metadata.get("data_hash") or "")[:12]
+    st.session_state["shoir_data_provenance"] = "IMPORTED"
+    return frame
+
+
 def data_quality_report(df: pd.DataFrame) -> dict:
     if df is None: return {"score":0.0,"rows":0,"columns":0,"missing_pct":100.0,"duplicate_pct":100.0,"issues":["No data"]}
     rows=max(1,len(df)); missing=float(df.isna().mean().mean()*100) if df.shape[1] else 100.0
@@ -1979,6 +2010,28 @@ def render_module(module: str, tier: str, username: str):
                     with sqlite3.connect("enterprise_full_workspace.db") as c:
                         cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
                 st.dataframe(cat,use_container_width=True,hide_index=True)
+                if not cat.empty and "dataset_id" in cat.columns:
+                    dataset_choices = cat["dataset_id"].dropna().astype(str).drop_duplicates().tolist()
+                    selected_dataset = st.selectbox(
+                        "Load a registered dataset version",
+                        dataset_choices,
+                        key="data_platform_load_dataset_id",
+                    )
+                    if st.button("Load selected dataset into the shared workspace", key="data_platform_load_dataset"):
+                        try:
+                            loaded = load_registered_dataset(
+                                selected_dataset,
+                                username,
+                                current_workspace,
+                                str(st.session_state.get("remote_session_token") or ""),
+                            )
+                            st.success(
+                                f"Loaded {selected_dataset} · {len(loaded):,} rows · version "
+                                f"{st.session_state.get('data_platform_latest_version', 1)}"
+                            )
+                            st.dataframe(loaded.head(25), use_container_width=True)
+                        except Exception as load_exc:
+                            st.error(f"Dataset load failed safely: {load_exc}")
             except Exception as exc: st.error(f"Ingestion failed safely: {exc}")
     elif module=="Capital Investment & Engineering Economics":
         cf=st.data_editor(st.session_state.setdefault("capex_df",pd.DataFrame({"Year":[1,2,3,4,5],"Cash Flow":[45000,50000,55000,60000,65000]})),num_rows="dynamic",use_container_width=True,key="capex_editor")
