@@ -25,7 +25,7 @@
 
 ## Staging migration
 
-The migration `20261104191500_shoir_atomic_dataset_version_registry.sql` was applied to staging project `hfhrosthswcybccepmak` through the authorised staging database tool. The source migration is tracked in this branch.
+The migration `20261104192112_shoir_atomic_dataset_version_registry.sql` was applied to staging project `hfhrosthswcybccepmak` through the authorised staging database tool. The source migration is tracked in this branch.
 
 ## Important limits
 
