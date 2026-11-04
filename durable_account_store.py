@@ -1170,7 +1170,11 @@ _PLATFORM_RECORD_TYPES = {
     "canonical_entity", "canonical_relationship", "canonical_event",
     "twin_asset", "twin_snapshot", "twin_scenario", "connector_health",
     "job", "knowledge_document", "monitoring_event", "report_provenance",
-    "security_policy",
+    "security_policy", "twin_snapshot", "connector_run", "connector_schedule",
+    "collaboration_item", "monitoring_rule", "cost_baseline", "kpi_definition",
+    "project_record", "work_order", "change_request", "risk_record",
+    "traceability_record", "laboratory_sample", "procurement_record",
+    "spare_part", "shutdown_package", "competency_record",
 }
 _PLATFORM_FORBIDDEN_KEY = __import__("re").compile(
     r"(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\\bdob\\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)",
@@ -1252,6 +1256,7 @@ def edge_list_platform_records(
     workspace: str = "default",
     record_type: str = "",
     limit: int = 100,
+    entity_key: str = "",
 ) -> list[dict[str, Any]]:
     """List only records belonging to the authenticated user's workspace."""
     import re
@@ -1273,6 +1278,7 @@ def edge_list_platform_records(
         "token": bearer,
         "workspace": scope,
         "record_type": kind,
+        "entity_key": str(entity_key or "").strip(),
         "limit": limit,
     })
     records = result.get("records", [])
