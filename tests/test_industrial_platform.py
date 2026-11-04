@@ -338,7 +338,7 @@ def test_data_platform_route_has_stable_t020_entitlement_guard_and_visual_panel(
 def test_dataset_profile_renderer_calls_plotly_for_each_generated_figure(monkeypatch):
     import sys
     from types import SimpleNamespace
-    from industrial_platform import _render_dataset_profile
+    from industrial_platform import _dataset_profile_figures, _render_dataset_profile
 
     rendered = []
     metrics = []
