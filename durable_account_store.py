@@ -1215,6 +1215,82 @@ def _validate_platform_record_payload(payload: Mapping[str, Any]) -> dict[str, A
     return value
 
 
+def edge_upload_and_register_dataset_version(
+    username: str,
+    token: str,
+    workspace: str,
+    dataset_id: str,
+    name: str,
+    source_name: str,
+    file_bytes: bytes,
+    data_hash: str,
+    version_fingerprint: str,
+    row_count: int,
+    column_count: int,
+    schema: Mapping[str, Any],
+    transformations: Sequence[Mapping[str, Any]] = (),
+    content_type: str = "text/csv",
+) -> dict[str, Any]:
+    """Upload a bounded dataset file to private staging storage, then server-verify and register it."""
+    import hashlib
+    import re
+    import requests
+    from urllib.parse import urlsplit
+
+    if not str(username or "").strip() or not str(token or ""):
+        raise PermissionError("An authenticated workspace session is required.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Private dataset upload helper is restricted to the staging environment.")
+    if not isinstance(file_bytes, bytes) or not file_bytes or len(file_bytes) > 50 * 1024 * 1024:
+        raise ValueError("Dataset upload must be between 1 byte and 50 MiB.")
+    actual_hash = hashlib.sha256(file_bytes).hexdigest()
+    if actual_hash != str(data_hash or "").lower():
+        raise ValueError("Dataset bytes do not match the supplied content hash.")
+    if content_type != "text/csv":
+        raise ValueError("The normalized dataset artifact must be uploaded as text/csv.")
+    upload = _edge_call("dataset_upload_create", {
+        "username": str(username).strip(),
+        "token": str(token),
+        "workspace": str(workspace or "default").strip(),
+        "dataset_id": str(dataset_id),
+        "data_hash": actual_hash,
+    })
+    signed_url = str(upload.get("upload_url") or "")
+    parsed = urlsplit(signed_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
+        or not parsed.path.startswith("/storage/v1/object/upload/sign/shoir-industrial-datasets/")
+        or not parsed.query
+    ):
+        raise RuntimeError("Storage provider returned an unexpected signed upload URL.")
+    response = requests.put(
+        signed_url,
+        data=file_bytes,
+        headers={"Content-Type": content_type, "x-upsert": "false"},
+        timeout=(10, 90),
+    )
+    if response.status_code not in {200, 201}:
+        raise RuntimeError(
+            f"Private dataset upload failed ({response.status_code}): {response.text[:300]}"
+        )
+    return _edge_call("dataset_version_finalize", {
+        "username": str(username).strip(),
+        "token": str(token),
+        "workspace": str(workspace or "default").strip(),
+        "dataset_id": str(dataset_id),
+        "upload_path": str(upload.get("upload_path") or ""),
+        "name": str(name)[:200],
+        "source_name": str(source_name)[:500],
+        "data_hash": actual_hash,
+        "version_fingerprint": str(version_fingerprint).lower(),
+        "row_count": row_count,
+        "column_count": column_count,
+        "schema": dict(schema),
+        "transformations": [dict(x) for x in transformations],
+    })
+
+
 def edge_register_dataset_version(
     username: str,
     token: str,
