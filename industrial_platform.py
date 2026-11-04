@@ -225,6 +225,23 @@ def _industrial_platform_session_state():
     return streamlit.session_state
 
 
+def _activate_dataset_for_shared_workspace(
+    df: pd.DataFrame,
+    filename: str,
+    sheet: str,
+    signature: str,
+) -> None:
+    """Use the original application shell's single shared-dataset activation contract."""
+    from shoir_application_shell import _activate_shared_dataset
+
+    _activate_shared_dataset(
+        df,
+        filename=str(filename),
+        sheet=str(sheet),
+        signature=str(signature),
+    )
+
+
 def register_dataset(
     name: str,
     source_name: str,
@@ -329,12 +346,20 @@ def load_registered_dataset(
         raise RuntimeError("Downloaded dataset row count does not match its registered metadata.")
     if len(frame.columns) != int(metadata.get("column_count") or 0):
         raise RuntimeError("Downloaded dataset column count does not match its registered metadata.")
-    _industrial_platform_session_state()["data_platform_latest_df"] = frame.copy(deep=True)
-    _industrial_platform_session_state()["data_platform_latest_dataset_id"] = dataset_id
-    _industrial_platform_session_state()["data_platform_latest_version"] = int(metadata.get("version") or 1)
-    _industrial_platform_session_state()["universal_active_dataset"] = frame.copy(deep=True)
-    _industrial_platform_session_state()["shoir_data_version"] = str(metadata.get("data_hash") or "")[:12]
-    _industrial_platform_session_state()["shoir_data_provenance"] = "IMPORTED"
+    version = int(metadata.get("version") or 1)
+    signature = str(metadata.get("data_hash") or "")
+    _activate_dataset_for_shared_workspace(
+        frame,
+        filename=dataset_id,
+        sheet=f"Version {version}",
+        signature=signature,
+    )
+    state = _industrial_platform_session_state()
+    state["data_platform_latest_dataset_id"] = dataset_id
+    state["data_platform_latest_version"] = version
+    state["shoir_data_provenance"] = "IMPORTED"
+    state["shoir_active_dataset_id"] = dataset_id
+    state["shoir_active_dataset_version"] = version
     return frame
 
 
@@ -2167,9 +2192,22 @@ def render_module(module: str, tier: str, username: str):
                             token=staging_token,
                             transformations=transform_log,
                         )
-                        state["data_platform_latest_df"] = frame.copy(deep=True)
                         registration = state.get("data_platform_latest_registration", {})
                         version = registration.get("version")
+                        shared_signature = str(
+                            registration.get("data_hash")
+                            or hashlib.sha256(
+                                frame.to_csv(index=False, lineterminator="\\n").encode("utf-8")
+                            ).hexdigest()
+                        )
+                        _activate_dataset_for_shared_workspace(
+                            frame,
+                            filename=up.name,
+                            sheet=str(sheet_name),
+                            signature=shared_signature,
+                        )
+                        state["shoir_active_dataset_id"] = dataset_id
+                        state["shoir_active_dataset_version"] = int(version or 1)
                         st.subheader(str(sheet_name))
                         st.caption(
                             f"IMPORTED · {len(frame):,} rows · {len(frame.columns):,} columns · "
