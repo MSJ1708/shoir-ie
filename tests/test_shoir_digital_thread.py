@@ -106,3 +106,28 @@ def test_rename_does_not_mutate_existing_alias_history():
     assert original["metadata"]["name_aliases"] == ["Original Press"]
     assert renamed["metadata"]["name_aliases"] == ["Original Press", "Press"]
     assert renamed["node_id"] == original["node_id"]
+
+
+
+def test_upsert_fails_closed_when_source_matches_multiple_legacy_nodes(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    import shoir_digital_thread as thread
+
+    keys = thread._keys()
+    original_nodes = [
+        {"node_id": "AST-OLD-1", "node_type": "Asset", "name": "Press A", "source": "asset:duplicate"},
+        {"node_id": "AST-OLD-2", "node_type": "Asset", "name": "Press B", "source": "asset:duplicate"},
+    ]
+    fake_st = SimpleNamespace(session_state={
+        keys["nodes"]: [dict(node) for node in original_nodes],
+        keys["edges"]: [],
+        keys["version"]: 1,
+        keys["project"]: {"updated_at": ""},
+    })
+    monkeypatch.setattr(thread, "st", fake_st)
+
+    with pytest.raises(ValueError, match="multiple existing nodes"):
+        thread._upsert_node("Asset", "Press C", "asset:duplicate")
+
+    assert fake_st.session_state[keys["nodes"]] == original_nodes
