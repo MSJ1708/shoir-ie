@@ -1161,3 +1161,117 @@ def renewed_expiry(existing_expiry: Any, days: int = 30, now: Optional[dt.dateti
     else:
         start = now
     return start + dt.timedelta(days=int(days))
+
+_PLATFORM_RECORD_TYPES = {
+    "asset", "dataset", "process", "product", "material", "calculation",
+    "kpi", "scenario", "recommendation", "decision", "project", "action",
+    "document", "workbook", "model", "quality", "maintenance", "energy",
+    "cost", "traceability", "risk", "workflow",
+}
+_PLATFORM_FORBIDDEN_KEY = __import__("re").compile(
+    r"(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport)",
+    __import__("re").IGNORECASE,
+)
+
+
+def _validate_platform_record_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    import json
+    import math
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("Platform record payload must be an object.")
+    value = dict(payload)
+    encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > 256 * 1024:
+        raise ValueError("Platform record payload exceeds the 256 KiB limit.")
+
+    def inspect(item: Any, depth: int = 0) -> None:
+        if depth > 8:
+            raise ValueError("Platform record payload nesting is too deep.")
+        if isinstance(item, Mapping):
+            for key, child in item.items():
+                if _PLATFORM_FORBIDDEN_KEY.search(str(key)):
+                    raise ValueError("Credential or sensitive identifier fields are not accepted.")
+                inspect(child, depth + 1)
+        elif isinstance(item, (list, tuple)):
+            if len(item) > 5000:
+                raise ValueError("Platform record payload contains too many items.")
+            for child in item:
+                inspect(child, depth + 1)
+        elif isinstance(item, float) and not math.isfinite(item):
+            raise ValueError("Platform record payload contains a non-finite number.")
+        elif item is not None and not isinstance(item, (str, int, float, bool)):
+            raise ValueError("Platform record payload contains an unsupported value.")
+
+    inspect(value)
+    return value
+
+
+def edge_save_platform_record(
+    username: str,
+    token: str,
+    workspace: str,
+    record_type: str,
+    entity_key: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Persist one validated workspace-scoped engineering record through the staging Edge API."""
+    import re
+
+    user = str(username or "").strip()
+    bearer = str(token or "")
+    scope = str(workspace or "default").strip()
+    kind = str(record_type or "").strip().lower()
+    key = str(entity_key or "").strip()
+    if not user or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", scope):
+        raise ValueError("Workspace identifier is invalid.")
+    if kind not in _PLATFORM_RECORD_TYPES:
+        raise ValueError("Platform record type is not supported.")
+    if not key or len(key) > 240 or any(ord(ch) < 32 or ord(ch) == 127 for ch in key):
+        raise ValueError("Platform entity key is invalid.")
+    safe_payload = _validate_platform_record_payload(payload)
+    return _edge_call("platform_record_save", {
+        "username": user,
+        "token": bearer,
+        "workspace": scope,
+        "record_type": kind,
+        "entity_key": key,
+        "payload": safe_payload,
+    })
+
+
+def edge_list_platform_records(
+    username: str,
+    token: str,
+    workspace: str = "default",
+    record_type: str = "",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List only records belonging to the authenticated user's workspace."""
+    import re
+
+    user = str(username or "").strip()
+    bearer = str(token or "")
+    scope = str(workspace or "default").strip()
+    kind = str(record_type or "").strip().lower()
+    if not user or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", scope):
+        raise ValueError("Workspace identifier is invalid.")
+    if kind and kind not in _PLATFORM_RECORD_TYPES:
+        raise ValueError("Platform record type is not supported.")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError("Platform record limit must be between 1 and 200.")
+    result = _edge_call("platform_record_list", {
+        "username": user,
+        "token": bearer,
+        "workspace": scope,
+        "record_type": kind,
+        "limit": limit,
+    })
+    records = result.get("records", [])
+    if not isinstance(records, list):
+        raise RuntimeError("Platform persistence returned an invalid record list.")
+    return records
