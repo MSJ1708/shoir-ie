@@ -141,3 +141,60 @@ def test_edge_platform_list_uses_stable_secondary_ordering_and_safe_offset():
     assert '.order("record_id", { ascending: true })' in listing
     assert '.range(requestedOffset, requestedOffset + requestedLimit)' in listing
     assert 'next_offset: requestedOffset + records.length' in listing
+
+
+
+def test_dataset_version_registration_requires_session_and_calls_atomic_rpc(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda action, payload: calls.append((action, payload)) or {
+            "ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}
+        },
+    )
+    result = store.edge_register_dataset_version(
+        username="synthetic-user",
+        token="opaque-session-token",
+        workspace="plant-a",
+        dataset_id="DS-ABCDEF012345",
+        name="Production",
+        source_name="production.csv",
+        data_hash="a" * 64,
+        version_fingerprint="b" * 64,
+        row_count=100,
+        column_count=8,
+        schema={"asset_id": {"dtype": "object"}},
+        transformations=[{"operation": "import", "status": "validated"}],
+    )
+    assert result["ok"] is True
+    assert calls[0][0] == "dataset_version_register"
+    assert calls[0][1]["workspace"] == "plant-a"
+    assert calls[0][1]["dataset_id"] == "DS-ABCDEF012345"
+
+
+def test_dataset_version_registration_rejects_invalid_metadata_before_network(monkeypatch):
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda *_: pytest.fail("invalid dataset metadata must not reach the Edge Function"),
+    )
+    with pytest.raises(ValueError, match="content hash"):
+        store.edge_register_dataset_version(
+            username="synthetic-user", token="opaque-session-token",
+            workspace="plant-a", dataset_id="DS-ABCDEF012345",
+            name="Production", source_name="production.csv",
+            data_hash="not-a-hash", version_fingerprint="b" * 64,
+            row_count=100, column_count=8, schema={},
+        )
+
+
+def test_dataset_version_edge_action_uses_authenticated_session_and_atomic_rpc():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    action = source.split('if (action === "dataset_version_register") {', 1)[1].split(
+        'if (action === "platform_record_save") {', 1
+    )[0]
+    assert 'getSession(String(body.token || ""), username, "workspace")' in action
+    assert 'supabase.rpc(' in action
+    assert '"shoir_platform_register_dataset_version"' in action
+    assert 'p_workspace_key: workspaceKey' in action
