@@ -2106,66 +2106,87 @@ def render_module(module: str, tier: str, username: str):
                             sheet: pd.read_excel(workbook, sheet_name=sheet)
                             for sheet in workbook.sheet_names
                         }
-                st.write({
-                    "file": up.name,
-                    "sheets": list(sheets),
-                    "bytes": len(raw),
-                    "sha256": hashlib.sha256(raw).hexdigest(),
-                    "provenance": "IMPORTED",
-                })
-                for sheet_name, frame in sheets.items():
-                    if frame.columns.duplicated().any():
-                        duplicate_columns = frame.columns[frame.columns.duplicated()].astype(str).tolist()
-                        raise ValueError(
-                            "The source contains duplicate column labels; rename them before registration: "
-                            + ", ".join(duplicate_columns[:8])
-                        )
-                    if staging_environment:
-                        if (
-                            not _industrial_platform_session_state().get("authenticated")
-                            or str(_industrial_platform_session_state().get("current_user") or "").casefold()
-                            != str(username or "").casefold()
-                            or not staging_token
-                        ):
-                            raise PermissionError(
-                                "Sign in to the matching staging account before registering a durable dataset."
+                upload_sha256 = hashlib.sha256(raw).hexdigest()
+                upload_fingerprint = hashlib.sha256(
+                    json.dumps(
+                        [
+                            str(username).casefold(),
+                            current_workspace,
+                            up.name,
+                            upload_sha256,
+                        ],
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                state = _industrial_platform_session_state()
+                if state.get("data_platform_processed_upload_fingerprint") == upload_fingerprint:
+                    st.info(
+                        "This exact file has already been registered in this session. "
+                        "The persistent catalogue below shows its saved dataset versions."
+                    )
+                else:
+                    st.write({
+                        "file": up.name,
+                        "sheets": list(sheets),
+                        "bytes": len(raw),
+                        "sha256": upload_sha256,
+                        "provenance": "IMPORTED",
+                    })
+                    for sheet_name, frame in sheets.items():
+                        if frame.columns.duplicated().any():
+                            duplicate_columns = frame.columns[
+                                frame.columns.duplicated()
+                            ].astype(str).tolist()
+                            raise ValueError(
+                                "The source contains duplicate column labels; rename them before registration: "
+                                + ", ".join(duplicate_columns[:8])
                             )
-                    transform_log = [{
-                        "operation": "normalize_sheet_to_csv",
-                        "source_file": up.name[:240],
-                        "sheet_name": str(sheet_name)[:160],
-                        "status": "completed",
-                    }]
-                    dataset_id = register_dataset(
-                        str(sheet_name),
-                        up.name,
-                        frame,
-                        username=username,
-                        workspace=current_workspace,
-                        token=staging_token,
-                        transformations=transform_log,
-                    )
-                    _industrial_platform_session_state()["data_platform_latest_df"] = frame.copy(deep=True)
-                    registration = _industrial_platform_session_state().get(
-                        "data_platform_latest_registration", {}
-                    )
-                    version = registration.get("version")
-                    st.subheader(str(sheet_name))
-                    st.caption(
-                        f"IMPORTED · {len(frame):,} rows · {len(frame.columns):,} columns · "
-                        f"dataset {dataset_id}"
-                    )
-                    if version:
-                        st.success(f"Registered immutable dataset version {version}.")
-                    else:
-                        st.success(f"Registered dataset {dataset_id}.")
-                    _render_dataset_profile(
-                        frame,
-                        str(sheet_name),
-                        f"data_platform_import_{hashlib.sha1(str(sheet_name).encode()).hexdigest()[:10]}",
-                    )
-                    with st.expander("Preview imported records", expanded=False):
-                        st.dataframe(frame.head(100), use_container_width=True)
+                        if staging_environment:
+                            if (
+                                not state.get("authenticated")
+                                or str(state.get("current_user") or "").casefold()
+                                != str(username or "").casefold()
+                                or not staging_token
+                            ):
+                                raise PermissionError(
+                                    "Sign in to the matching staging account before registering a durable dataset."
+                                )
+                        transform_log = [{
+                            "operation": "normalize_sheet_to_csv",
+                            "source_file": up.name[:240],
+                            "sheet_name": str(sheet_name)[:160],
+                            "status": "completed",
+                        }]
+                        dataset_id = register_dataset(
+                            str(sheet_name),
+                            up.name,
+                            frame,
+                            username=username,
+                            workspace=current_workspace,
+                            token=staging_token,
+                            transformations=transform_log,
+                        )
+                        state["data_platform_latest_df"] = frame.copy(deep=True)
+                        registration = state.get("data_platform_latest_registration", {})
+                        version = registration.get("version")
+                        st.subheader(str(sheet_name))
+                        st.caption(
+                            f"IMPORTED · {len(frame):,} rows · {len(frame.columns):,} columns · "
+                            f"dataset {dataset_id}"
+                        )
+                        if version:
+                            st.success(f"Registered immutable dataset version {version}.")
+                        else:
+                            st.success(f"Registered dataset {dataset_id}.")
+                        _render_dataset_profile(
+                            frame,
+                            str(sheet_name),
+                            f"data_platform_import_{hashlib.sha1(str(sheet_name).encode()).hexdigest()[:10]}",
+                        )
+                        with st.expander("Preview imported records", expanded=False):
+                            st.dataframe(frame.head(100), use_container_width=True)
+                    state["data_platform_processed_upload_fingerprint"] = upload_fingerprint
             except Exception as exc:
                 st.error(f"Dataset import/registration failed safely: {exc}")
 
