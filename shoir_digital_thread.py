@@ -17,6 +17,7 @@ import json
 import re
 import sqlite3
 import zipfile
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -82,7 +83,17 @@ def _slug(value: str) -> str:
 
 
 def stable_id(node_type: str, name: str, source: str = "") -> str:
-    raw = f"{node_type}|{name}|{source}"
+    """Return an ID from a source identity key, not a mutable display label.
+
+    Callers should supply a stable, unique source key (ideally an immutable
+    asset, order, dataset, or record identifier). Source-less legacy callers
+    retain the name-based fallback. If a source itself contains a mutable
+    business label, the caller must provide a true record key to support
+    identity across source-data changes.
+    """
+    source_key = str(source or "").strip()
+    identity = f"source|{source_key}" if source_key else f"name|{str(name).strip()}"
+    raw = f"{str(node_type).strip()}|{identity}"
     return f"{node_type[:3].upper()}-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
 
 
@@ -131,12 +142,180 @@ def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", 
         "metadata": metadata or {},
         "updated_at": _now(),
     }
-    for idx, existing in enumerate(nodes):
-        if existing.get("node_id") == node_id:
-            nodes[idx] = payload
-            return node_id
+
+    # Keep a previously issued node ID where the stable source identity matches.
+    # This preserves legacy graph edges while transitioning to source-key IDs.
+    existing_index = next(
+        (idx for idx, existing in enumerate(nodes) if existing.get("node_id") == node_id),
+        None,
+    )
+    if existing_index is None and str(source or "").strip():
+        matches = [
+            idx for idx, existing in enumerate(nodes)
+            if existing.get("node_type") == node_type
+            and str(existing.get("source") or "").strip() == str(source).strip()
+        ]
+        if len(matches) == 1:
+            existing_index = matches[0]
+
+    if existing_index is not None:
+        existing = nodes[existing_index]
+        existing_id = str(existing.get("node_id") or node_id)
+        old_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        new_metadata = payload["metadata"] if isinstance(payload["metadata"], dict) else {}
+        merged_metadata = {**old_metadata, **new_metadata}
+        if old_metadata.get("display_name_override") is True:
+            payload["name"] = str(existing.get("name") or payload["name"])[:180]
+            merged_metadata["display_name_override"] = True
+            for preserved_key in ("name_aliases", "display_name_updated_at"):
+                if preserved_key in old_metadata:
+                    merged_metadata[preserved_key] = old_metadata[preserved_key]
+        payload["node_id"] = existing_id
+        payload["metadata"] = merged_metadata
+        nodes[existing_index] = payload
+        return existing_id
+
     nodes.append(payload)
     return node_id
+
+
+def renamed_node_record(node: dict[str, Any], new_name: str) -> dict[str, Any]:
+    """Create a new display label while retaining the immutable node ID/source."""
+    clean_name = str(new_name or "").strip()
+    if not clean_name:
+        raise ValueError("Enter a non-empty display name.")
+    clean_name = clean_name[:180]
+    node_id = str(node.get("node_id") or "").strip()
+    if not node_id:
+        raise ValueError("This node has no stable identifier and cannot be renamed safely.")
+
+    updated = dict(node)
+    old_name = str(updated.get("name") or "")
+    if not str(updated.get("source") or "").strip():
+        # Give source-less legacy nodes a durable key before changing the label.
+        updated["source"] = f"thread-node:{node_id}"
+
+    metadata = dict(updated.get("metadata") or {})
+    aliases = metadata.get("name_aliases", [])
+    if not isinstance(aliases, list):
+        aliases = []
+    if old_name and old_name != clean_name and old_name not in aliases:
+        aliases.append(old_name)
+    metadata["name_aliases"] = aliases[-20:]
+    metadata["display_name_override"] = True
+    metadata["display_name_updated_at"] = _now()
+    updated["metadata"] = metadata
+    updated["name"] = clean_name
+    updated["updated_at"] = _now()
+    return updated
+
+
+def rename_thread_node(node_id: str, new_name: str) -> dict[str, Any]:
+    """Rename a display label without changing node identity or connected edges."""
+    keys = _keys()
+    nodes = st.session_state[keys["nodes"]]
+    target_index = next(
+        (idx for idx, node in enumerate(nodes) if str(node.get("node_id")) == str(node_id)),
+        None,
+    )
+    if target_index is None:
+        raise ValueError("The selected Digital Thread node no longer exists.")
+
+    updated = renamed_node_record(nodes[target_index], new_name)
+    for idx, other in enumerate(nodes):
+        if idx == target_index:
+            continue
+        if (
+            other.get("node_type") == updated.get("node_type")
+            and str(other.get("source") or "").strip() == str(updated.get("source") or "").strip()
+            and str(other.get("name") or "").strip().casefold() == updated["name"].casefold()
+        ):
+            raise ValueError("A node with this source and display name already exists.")
+
+    nodes[target_index] = updated
+    st.session_state[keys["version"]] = int(st.session_state.get(keys["version"], 1)) + 1
+    if isinstance(st.session_state.get(keys["project"]), dict):
+        st.session_state[keys["project"]]["updated_at"] = _now()
+    return updated
+
+
+def _persist_current_thread(
+    owner: str,
+    workspace: str,
+    event_type: str,
+    event_payload: dict[str, Any] | None = None,
+) -> str:
+    """Persist the current graph and event; propagate errors so callers fail closed."""
+    from shoir_enterprise_layer import (
+        record_artifact,
+        record_canonical_event,
+        upsert_canonical_entity,
+        upsert_canonical_relationship,
+    )
+
+    keys = _keys()
+    project = st.session_state[keys["project"]]
+    nodes = st.session_state[keys["nodes"]]
+    edges = st.session_state[keys["edges"]]
+    canonical_ids: dict[str, str] = {}
+    for node in nodes:
+        state = dict(node)
+        state["thread_node_id"] = str(node.get("node_id") or "")
+        entity_id = upsert_canonical_entity(
+            owner,
+            str(node.get("node_type", "Entity")),
+            str(node.get("name", "")),
+            str(node.get("source", "")),
+            state=state,
+            status=str(node.get("status", "Observed")),
+            workspace=workspace,
+        )
+        canonical_ids[str(node.get("node_id"))] = entity_id
+
+    relationship_ids: list[str] = []
+    for edge in edges:
+        source_id = canonical_ids.get(str(edge.get("source_id")))
+        target_id = canonical_ids.get(str(edge.get("target_id")))
+        if not source_id or not target_id:
+            continue
+        relationship_ids.append(
+            upsert_canonical_relationship(
+                owner,
+                source_id,
+                target_id,
+                str(edge.get("relation", "Linked")),
+                status=str(edge.get("status", "Linked")),
+                metadata=edge.get("metadata", {}),
+                workspace=workspace,
+            )
+        )
+
+    if event_type:
+        record_canonical_event(
+            owner,
+            event_type,
+            event_payload or {
+                "project_id": project.get("project_id", "global-thread"),
+                "entity_count": len(canonical_ids),
+                "relationship_count": len(relationship_ids),
+                "canonical_lifecycle": CANONICAL_LIFECYCLE,
+            },
+            workspace=workspace,
+        )
+
+    return record_artifact(
+        owner,
+        "digital_thread_state",
+        project.get("project_id", "global-thread"),
+        {
+            "project": project,
+            "nodes": nodes,
+            "edges": edges,
+            "canonical_lifecycle": CANONICAL_LIFECYCLE,
+            "version": int(st.session_state.get(keys["version"], 1)),
+        },
+        workspace,
+    )
 
 
 def _upsert_edge(source_id: str, target_id: str, relation: str, status: str = "Linked", metadata: dict[str, Any] | None = None) -> str:
@@ -624,7 +803,11 @@ def canonical_flow_figure(nodes: list[dict[str, Any]], edges: list[dict[str, Any
     return fig
 
 def _stable_kpi_for(module: str, col: str) -> str:
-    return stable_id("KPI", str(col), f"{module}|kpi|{col}")
+    source = f"{module}|kpi|{col}"
+    for node in st.session_state.get(_keys()["nodes"], []):
+        if node.get("node_type") == "KPI" and str(node.get("source") or "") == source:
+            return str(node.get("node_id"))
+    return stable_id("KPI", str(col), source)
 
 
 def node_frame() -> pd.DataFrame:
@@ -901,6 +1084,70 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                     st.success("Traceability link created.")
         else:
             st.info("Sync the workspace first to populate nodes.")
+        st.markdown("### Rename an existing node (keep its canonical ID)")
+        if raw_nodes:
+            rename_labels = {n["node_id"]: f"{n['node_type']} · {n['name']}" for n in raw_nodes}
+            rename_target_id = st.selectbox(
+                "Node to rename",
+                list(rename_labels.keys()),
+                format_func=rename_labels.get,
+                key="global_thread_rename_target",
+            )
+            selected_node = next((n for n in raw_nodes if n.get("node_id") == rename_target_id), None)
+            if selected_node:
+                proposed_name = st.text_input(
+                    "New display name",
+                    value=str(selected_node.get("name", "")),
+                    key=f"global_thread_rename_name_{rename_target_id}",
+                )
+                if st.button("Save display name and keep canonical ID", use_container_width=True, key="global_thread_rename_save"):
+                    previous_node = dict(selected_node)
+                    previous_node["metadata"] = dict(selected_node.get("metadata") or {})
+                    previous_version = int(st.session_state.get(keys["version"], 1))
+                    previous_project_updated = project.get("updated_at", "")
+                    previous_name = str(selected_node.get("name", ""))
+                    try:
+                        renamed = rename_thread_node(rename_target_id, proposed_name)
+                        workspace_name = str(
+                            st.session_state.get("shoir_workspace_name")
+                            or st.session_state.get("workspace")
+                            or st.session_state.get("active_workspace_name")
+                            or "default"
+                        )
+                        artifact_id = _persist_current_thread(
+                            username,
+                            workspace_name,
+                            "digital_thread_node_renamed",
+                            {
+                                "node_id": renamed["node_id"],
+                                "node_type": renamed["node_type"],
+                                "previous_name": previous_name,
+                                "new_name": renamed["name"],
+                                "canonical_id_preserved": True,
+                            },
+                        )
+                        st.success(
+                            f"Display name saved. Canonical ID remains {renamed['node_id']}. "
+                            f"Evidence snapshot: {artifact_id}"
+                        )
+                        st.rerun()
+                    except ValueError as exc:
+                        st.warning(str(exc))
+                    except Exception:
+                        for idx, existing in enumerate(st.session_state[keys["nodes"]]):
+                            if str(existing.get("node_id")) == str(rename_target_id):
+                                st.session_state[keys["nodes"]][idx] = previous_node
+                                break
+                        st.session_state[keys["version"]] = previous_version
+                        project["updated_at"] = previous_project_updated
+                        st.error(
+                            "The rename could not be confirmed as durably saved. "
+                            "The previous label has been restored in this session. "
+                            "Check the persistence service before retrying."
+                        )
+        else:
+            st.info("Sync the workspace before renaming a Digital Thread node.")
+
         st.markdown("### Create a node manually")
         n1, n2, n3 = st.columns(3)
         with n1:
@@ -911,7 +1158,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             node_status = st.selectbox("Status", ["Observed", "Inferred", "Pending verification"], key="global_thread_new_status")
         if st.button("＋ Add node", use_container_width=True, key="global_thread_add_node"):
             if node_name.strip():
-                _upsert_node(node_type, node_name.strip(), f"manual:{username}", module, node_status)
+                _upsert_node(node_type, node_name.strip(), f"manual:{username}:{uuid.uuid4().hex}", module, node_status)
                 st.success("Node added to the project thread.")
             else:
                 st.warning("Enter a node name first.")
