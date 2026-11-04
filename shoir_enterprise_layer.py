@@ -563,7 +563,7 @@ def upsert_canonical_entity(
             "state_json": json.loads(payload_json),
             "content_hash": content_hash,
             "created_by": username,
-            "secret_ref_configured": bool(safe_secret_ref),
+            "has_connector_reference": bool(safe_secret_ref),
             "created_at": stamp,
             "updated_at": stamp,
         },
