@@ -23,6 +23,7 @@ EXPECTED_VERSIONS = [
     "20261022110000",
     "20261023130000",
     "20261026110000",
+    "20261104183132",
 ]
 
 
@@ -86,3 +87,21 @@ def test_additive_referral_migration_does_not_rewrite_existing_account_identifie
     assert "on public.shoir_accounts (lower(btrim(affiliate_code)))" in executable_sql
     assert "where affiliate_code is not null and btrim(affiliate_code) <> ''" in executable_sql
     assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in executable_sql
+
+
+
+def test_private_internal_schema_rls_migration_is_deny_by_default():
+    source = (
+        MIGRATIONS
+        / "20261104183132_enable_shoir_internal_rls_20261104.sql"
+    ).read_text(encoding="utf-8")
+    expected_tables = (
+        "artifacts", "twin_assets", "twin_snapshots", "twin_scenarios",
+        "connector_health", "jobs", "collaboration", "knowledge",
+        "monitoring_rules", "monitoring_events", "report_provenance", "security",
+    )
+    for table in expected_tables:
+        assert f"ALTER TABLE shoir_internal.{table} ENABLE ROW LEVEL SECURITY;" in source
+    assert "FORCE ROW LEVEL SECURITY" not in source
+    assert "CREATE POLICY" not in source.upper()
+    assert "GRANT " not in source.upper()
