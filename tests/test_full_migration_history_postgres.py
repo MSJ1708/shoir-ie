@@ -527,6 +527,45 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             assert dataset_version_function[3] is False
             assert dataset_version_function[4] is True
 
+            dataset_storage_bucket = _fetchone(
+                target,
+                "SELECT public, file_size_limit FROM storage.buckets WHERE id='shoir-industrial-datasets';",
+            )
+            assert dataset_storage_bucket == (False, 52428800), (
+                "Industrial dataset storage must be private and limited to 50 MiB."
+            )
+            storage_policy = _fetchone(
+                target,
+                """
+                SELECT qual, with_check
+                FROM pg_policies
+                WHERE schemaname='storage' AND tablename='objects'
+                  AND policyname='private_subscription_payment_proofs_only_server';
+                """,
+            )
+            assert storage_policy is not None
+            assert "shoir-industrial-datasets" in storage_policy[0]
+            assert "shoir-industrial-datasets" in storage_policy[1]
+
+            storage_function = _fetchone(
+                target,
+                """
+                SELECT p.prosecdef, p.proconfig,
+                       has_function_privilege('anon', p.oid, 'EXECUTE'),
+                       has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                       has_function_privilege('service_role', p.oid, 'EXECUTE')
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='public'
+                  AND p.proname='shoir_platform_register_dataset_version_with_storage';
+                """,
+            )
+            assert storage_function is not None
+            assert storage_function[0] is True
+            assert "search_path=pg_catalog, public" in (storage_function[1] or [])
+            assert storage_function[2:4] == (False, False)
+            assert storage_function[4] is True
+
             workspace_key = "a" * 32
             dataset_id = "DS-AABBCCDDEEFF"
             first_data_hash = "b" * 64
