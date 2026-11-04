@@ -927,6 +927,61 @@ Deno.serve(async (req) => {
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
 
+    if (action === "dataset_version_register") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(String(body.token || ""), username, "workspace");
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const name = String(body.name || "").trim();
+      const sourceName = String(body.source_name || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      const fingerprint = String(body.version_fingerprint || "").toLowerCase();
+      const rowCount = Number(body.row_count);
+      const columnCount = Number(body.column_count);
+      const schema = body.schema;
+      const transformations = body.transformations || [];
+      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+          !name || name.length > 200 || sourceName.length > 500 ||
+          !/^[0-9a-f]{64}$/.test(dataHash) ||
+          !/^[0-9a-f]{64}$/.test(fingerprint) ||
+          !Number.isSafeInteger(rowCount) || rowCount < 0 || rowCount > 100000000 ||
+          !Number.isSafeInteger(columnCount) || columnCount < 0 || columnCount > 5000 ||
+          !schema || typeof schema !== "object" || Array.isArray(schema) ||
+          new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+          !Array.isArray(transformations) || transformations.length > 50 ||
+          new TextEncoder().encode(JSON.stringify(transformations)).byteLength > 16384) {
+        return sendResponse({ error: "Dataset version metadata is invalid." }, 400);
+      }
+      const versionRecordId = "SPR-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const headRecordId = "SPR-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const { data, error } = await supabase.rpc(
+        "shoir_platform_register_dataset_version",
+        {
+          p_workspace_key: workspaceKey,
+          p_dataset_id: datasetId,
+          p_name: name,
+          p_source_name: sourceName,
+          p_data_hash: dataHash,
+          p_version_fingerprint: fingerprint,
+          p_row_count: rowCount,
+          p_column_count: columnCount,
+          p_schema_json: schema,
+          p_transformations_json: transformations,
+          p_actor: row.username_lc,
+          p_version_record_id: versionRecordId,
+          p_head_record_id: headRecordId,
+          p_event_id: eventId,
+        },
+      );
+      if (error) throw error;
+      const registration = Array.isArray(data) ? data[0] : data;
+      return sendResponse({ ok: true, registration });
+    }
+
     if (action === "platform_record_save") {
       const username = String(body.username || "").trim();
       const token = String(body.token || "");
