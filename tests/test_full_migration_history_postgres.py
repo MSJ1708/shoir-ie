@@ -494,6 +494,38 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "SELECT public IS FALSE FROM storage.buckets WHERE id='subscription-payment-proofs';",
             )[0] is True, "Subscription payment proof bucket is not private after replay."
 
+            dataset_version_signature = (
+                "public.shoir_platform_register_dataset_version("
+                "text,text,text,text,text,text,bigint,integer,jsonb,jsonb,text,text,text,text)"
+            )
+            dataset_version_function = _fetchone(
+                target,
+                """
+                SELECT p.prosecdef, p.proconfig,
+                       has_function_privilege('anon', p.oid, 'EXECUTE'),
+                       has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                       has_function_privilege('service_role', p.oid, 'EXECUTE')
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='public'
+                  AND p.proname='shoir_platform_register_dataset_version'
+                  AND pg_get_function_identity_arguments(p.oid) =
+                      'p_workspace_key text, p_dataset_id text, p_name text, p_source_name text, p_data_hash text, p_version_fingerprint text, p_row_count bigint, p_column_count integer, p_schema_json jsonb, p_transformations_json jsonb, p_actor text, p_version_record_id text, p_head_record_id text, p_event_id text';
+                """,
+            )
+            assert dataset_version_function is not None, (
+                "Atomic dataset version registration function is missing after replay."
+            )
+            assert dataset_version_function[0] is True, (
+                "Dataset version registration must run as SECURITY DEFINER."
+            )
+            assert "search_path=pg_catalog, public" in (dataset_version_function[1] or []), (
+                "Dataset version registration must pin its search_path."
+            )
+            assert dataset_version_function[2] is False
+            assert dataset_version_function[3] is False
+            assert dataset_version_function[4] is True
+
             for signature in (
                 "public.shoir_check_login_throttle(text,text,integer,integer,integer)",
                 "public.shoir_finalize_subscription_request(bigint,text)",
