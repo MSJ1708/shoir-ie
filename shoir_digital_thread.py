@@ -145,18 +145,24 @@ def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", 
 
     # Keep a previously issued node ID where the stable source identity matches.
     # This preserves legacy graph edges while transitioning to source-key IDs.
+    source_matches = [
+        idx for idx, existing in enumerate(nodes)
+        if str(source or "").strip()
+        and existing.get("node_type") == node_type
+        and str(existing.get("source") or "").strip() == str(source).strip()
+    ]
+    if len(source_matches) > 1:
+        raise ValueError(
+            "This Digital Thread source key maps to multiple existing nodes. "
+            "Resolve the duplicate identity records before synchronizing."
+        )
+
     existing_index = next(
         (idx for idx, existing in enumerate(nodes) if existing.get("node_id") == node_id),
         None,
     )
-    if existing_index is None and str(source or "").strip():
-        matches = [
-            idx for idx, existing in enumerate(nodes)
-            if existing.get("node_type") == node_type
-            and str(existing.get("source") or "").strip() == str(source).strip()
-        ]
-        if len(matches) == 1:
-            existing_index = matches[0]
+    if existing_index is None and len(source_matches) == 1:
+        existing_index = source_matches[0]
 
     if existing_index is not None:
         existing = nodes[existing_index]
