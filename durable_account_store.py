@@ -1166,7 +1166,11 @@ _PLATFORM_RECORD_TYPES = {
     "asset", "dataset", "process", "product", "material", "calculation",
     "kpi", "scenario", "recommendation", "decision", "project", "action",
     "document", "workbook", "model", "quality", "maintenance", "energy",
-    "cost", "traceability", "risk", "workflow",
+    "cost", "traceability", "risk", "workflow", "artifact",
+    "canonical_entity", "canonical_relationship", "canonical_event",
+    "twin_asset", "twin_snapshot", "twin_scenario", "connector_health",
+    "job", "knowledge_document", "monitoring_event", "report_provenance",
+    "security_policy",
 }
 _PLATFORM_FORBIDDEN_KEY = __import__("re").compile(
     r"(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport)",
