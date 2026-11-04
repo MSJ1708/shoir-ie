@@ -309,7 +309,7 @@ def test_dataset_upload_edge_actions_require_session_and_private_storage():
 def test_private_dataset_storage_migration_excludes_bucket_from_permissive_policy():
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] /
-              "supabase/migrations/20261104193000_shoir_private_dataset_file_storage_and_linkage.sql").read_text(encoding="utf-8")
+              "supabase/migrations/20261104192857_shoir_private_dataset_file_storage_and_linkage.sql").read_text(encoding="utf-8")
     assert "'shoir-industrial-datasets'" in source
     assert "public = false" in source
     assert "file_size_limit = EXCLUDED.file_size_limit" in source
