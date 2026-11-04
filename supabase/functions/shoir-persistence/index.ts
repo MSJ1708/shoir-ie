@@ -5,7 +5,6 @@ import {
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
-  normalizePlatformTier,
   platformTierAllows,
   publicErrorFor,
   readBoundedJsonObject,
