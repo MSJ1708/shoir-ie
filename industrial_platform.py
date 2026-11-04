@@ -255,23 +255,24 @@ def register_dataset(
     ).hexdigest()
 
     try:
-        from durable_account_store import APP_ENVIRONMENT, edge_register_dataset_version
+        from durable_account_store import APP_ENVIRONMENT, edge_upload_and_register_dataset_version
     except Exception:
         APP_ENVIRONMENT = "local"
-        edge_register_dataset_version = None
+        edge_upload_and_register_dataset_version = None
 
     if str(APP_ENVIRONMENT).casefold() == "staging":
-        if not username or not token or edge_register_dataset_version is None:
+        if not username or not token or edge_upload_and_register_dataset_version is None:
             raise PermissionError(
                 "An authenticated staging session is required to register a durable dataset version."
             )
-        result = edge_register_dataset_version(
+        result = edge_upload_and_register_dataset_version(
             username=username,
             token=token,
             workspace=workspace,
             dataset_id=dataset_id,
             name=str(name),
             source_name=str(source_name),
+            file_bytes=raw,
             data_hash=data_hash,
             version_fingerprint=fingerprint,
             row_count=int(len(df)),
