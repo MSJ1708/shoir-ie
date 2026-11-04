@@ -314,6 +314,54 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
   return keys;
 }
 
+
+const PLATFORM_RECORD_TYPES = new Set([
+  "asset", "dataset", "process", "product", "material", "calculation",
+  "kpi", "scenario", "recommendation", "decision", "project", "action",
+  "document", "workbook", "model", "quality", "maintenance", "energy",
+  "cost", "traceability", "risk", "workflow",
+]);
+const PLATFORM_SECRET_KEY = /(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport)/i;
+function validatePlatformPayload(value: unknown, depth = 0): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value) || depth > 8) {
+    throw new Error("Platform payload must be a bounded JSON object.");
+  }
+  const encoded = JSON.stringify(value);
+  if (new TextEncoder().encode(encoded).byteLength > 256 * 1024) {
+    throw new Error("Platform payload exceeds the 256 KiB limit.");
+  }
+  const walk = (item: unknown, level: number): void => {
+    if (level > 8) throw new Error("Platform payload nesting is too deep.");
+    if (Array.isArray(item)) {
+      if (item.length > 5000) throw new Error("Platform payload contains too many items.");
+      for (const child of item) walk(child, level + 1);
+    } else if (item && typeof item === "object") {
+      for (const [key, child] of Object.entries(item as Record<string, unknown>)) {
+        if (PLATFORM_SECRET_KEY.test(key)) {
+          throw new Error("Credential or sensitive identifier fields are not accepted in platform records.");
+        }
+        walk(child, level + 1);
+      }
+    } else if (typeof item === "number" && !Number.isFinite(item)) {
+      throw new Error("Platform payload contains a non-finite number.");
+    }
+  };
+  walk(value, depth);
+  return value as Record<string, unknown>;
+}
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return bytesToHex(digest);
+}
+async function platformWorkspaceKey(username: string, workspace: string): Promise<string> {
+  const user = username.trim().toLowerCase();
+  const scope = workspace.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(scope)) {
+    throw new Error("Workspace identifier is invalid.");
+  }
+  return (await sha256Hex(user + "::" + scope)).slice(0, 32);
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
   if (!isAllowedBrowserOrigin(origin)) {
@@ -801,6 +849,68 @@ Deno.serve(async (req) => {
         );
       if (error) throw error;
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
+    }
+
+
+    if (action === "platform_record_save") {
+      const username = String(body.username || "").trim();
+      const token = String(body.token || "");
+      const row = await getSession(token, username, "workspace");
+      const recordType = String(body.record_type || "").trim().toLowerCase();
+      const entityKey = String(body.entity_key || "").trim();
+      if (!PLATFORM_RECORD_TYPES.has(recordType)) {
+        return sendResponse({ error: "Platform record type is not supported." }, 400);
+      }
+      if (!entityKey || entityKey.length > 240 || /[\\x00-\\x1f\\x7f]/.test(entityKey)) {
+        return sendResponse({ error: "Platform entity key is invalid." }, 400);
+      }
+      const payload = validatePlatformPayload(body.payload);
+      const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+      const contentHash = await sha256Hex(canonical);
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const recordId = "SPR-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const { data, error } = await supabase.rpc("shoir_platform_upsert_record", {
+        p_record_id: recordId,
+        p_workspace_key: workspaceKey,
+        p_record_type: recordType,
+        p_entity_key: entityKey,
+        p_payload: payload,
+        p_content_hash: contentHash,
+        p_actor: row.username_lc,
+        p_event_id: eventId,
+      });
+      if (error) throw error;
+      const saved = Array.isArray(data) ? data[0] : data;
+      return sendResponse({ ok: true, record: saved });
+    }
+    if (action === "platform_record_list") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(String(body.token || ""), username, "workspace");
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const recordType = String(body.record_type || "").trim().toLowerCase();
+      if (recordType && !PLATFORM_RECORD_TYPES.has(recordType)) {
+        return sendResponse({ error: "Platform record type is not supported." }, 400);
+      }
+      const requestedLimit = Number(body.limit || 100);
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
+        return sendResponse({ error: "Platform record limit must be between 1 and 200." }, 400);
+      }
+      let query = supabase.from("shoir_platform_records")
+        .select("record_id,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at")
+        .eq("workspace_key", workspaceKey)
+        .order("updated_at", { ascending: false })
+        .limit(requestedLimit);
+      if (recordType) query = query.eq("record_type", recordType);
+      const { data, error } = await query;
+      if (error) throw error;
+      return sendResponse({ ok: true, records: data || [] });
     }
 
     if (action === "workspace_load") {
