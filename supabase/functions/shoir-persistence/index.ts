@@ -314,7 +314,6 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
   return keys;
 }
 
-
 const PLATFORM_RECORD_TYPES = new Set([
   "asset",
   "dataset",
@@ -898,7 +897,6 @@ Deno.serve(async (req) => {
       if (error) throw error;
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
-
 
     if (action === "platform_record_save") {
       const username = String(body.username || "").trim();
