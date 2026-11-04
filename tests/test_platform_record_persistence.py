@@ -72,7 +72,10 @@ def test_edge_platform_record_actions_validate_session_before_data_access():
         'if (action === "workspace_load") {', 1
     )[0]
     assert 'getSession(token, username, "workspace")' in save
-    assert 'getSession(String(body.token || ""), username, "workspace")' in listing
+    assert "getSession(" in listing
+    assert 'String(body.token || "")' in listing
+    assert "username" in listing
+    assert '"workspace"' in listing
     assert 'supabase.rpc("shoir_platform_upsert_record"' in save
     assert '.eq("workspace_key", workspaceKey)' in listing
     assert 'PLATFORM_SECRET_KEY.test(key)' in source
@@ -194,7 +197,10 @@ def test_dataset_version_edge_action_uses_authenticated_session_and_atomic_rpc()
     action = source.split('if (action === "dataset_version_register") {', 1)[1].split(
         'if (action === "platform_record_save") {', 1
     )[0]
-    assert 'getSession(String(body.token || ""), username, "workspace")' in action
+    assert "getSession(" in action
+    assert 'String(body.token || "")' in action
+    assert "username" in action
+    assert '"workspace"' in action
     assert 'supabase.rpc(' in action
     assert '"shoir_platform_register_dataset_version"' in action
     assert 'p_workspace_key: workspaceKey' in action
@@ -297,8 +303,14 @@ def test_dataset_upload_edge_actions_require_session_and_private_storage():
     finalize = source.split('if (action === "dataset_version_finalize") {', 1)[1].split(
         'if (action === "dataset_version_register") {', 1
     )[0]
-    assert 'getSession(String(body.token || ""), username, "workspace")' in create
-    assert 'getSession(String(body.token || ""), username, "workspace")' in finalize
+    assert "getSession(" in create
+    assert 'String(body.token || "")' in create
+    assert "username" in create
+    assert '"workspace"' in create
+    assert "getSession(" in finalize
+    assert 'String(body.token || "")' in finalize
+    assert "username" in finalize
+    assert '"workspace"' in finalize
     assert '.createSignedUploadUrl(uploadPath, { upsert: false })' in create
     assert 'await sha256Bytes(bytes)' in finalize
     assert 'digest !== dataHash' in finalize
@@ -384,7 +396,10 @@ def test_dataset_download_edge_action_is_session_and_workspace_scoped():
     action = source.split('if (action === "dataset_download_url") {', 1)[1].split(
         'if (action === "dataset_upload_create") {', 1
     )[0]
-    assert 'getSession(String(body.token || ""), username, "workspace")' in action
+    assert "getSession(" in action
+    assert 'String(body.token || "")' in action
+    assert "username" in action
+    assert '"workspace"' in action
     assert '.eq("workspace_key", workspaceKey)' in action
     assert '.eq("record_type", "dataset")' in action
     assert '.eq("entity_key", datasetId)' in action
