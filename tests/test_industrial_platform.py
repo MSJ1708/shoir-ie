@@ -290,3 +290,45 @@ def test_load_registered_dataset_rejects_metadata_row_count_mismatch(monkeypatch
         platform.load_registered_dataset(
             "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
         )
+
+
+
+def test_dataset_profile_figures_render_real_missingness_and_numeric_distributions():
+    from industrial_platform import _dataset_profile_figures
+
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2", "A-3", "A-4"],
+        "throughput_tph": [10.0, 12.0, None, 18.0],
+        "temperature_c": [40.0, 42.0, 43.0, 47.0],
+    })
+    figures = _dataset_profile_figures(frame, "Synthetic production")
+    assert len(figures) == 3
+    assert figures[0][0] == "Missingness"
+    assert len(figures[0][1].data) >= 1
+    assert any("throughput_tph" in label for label, _ in figures[1:])
+    for label, figure in figures:
+        assert figure.data, label
+        assert figure.layout.title.text
+        assert figure.layout.xaxis.title.text
+        assert figure.layout.yaxis.title.text
+
+
+def test_dataset_profile_figures_handle_empty_and_non_numeric_data():
+    from industrial_platform import _dataset_profile_figures
+
+    assert _dataset_profile_figures(pd.DataFrame(), "Empty") == []
+    frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "status": ["Run", "Stop"]})
+    figures = _dataset_profile_figures(frame, "Categorical only")
+    assert len(figures) == 1
+    assert figures[0][0] == "Missingness"
+    assert figures[0][1].data
+
+
+def test_data_platform_route_has_stable_t020_entitlement_guard_and_visual_panel():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "industrial_platform.py").read_text(encoding="utf-8")
+    assert 'require_tool_access(tier, "T020")' in source
+    assert "def _render_dataset_profile(" in source
+    assert "st.plotly_chart(" in source
+    assert "data_platform_processed_upload_fingerprint" in source
