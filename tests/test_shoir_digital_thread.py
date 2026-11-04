@@ -1,3 +1,5 @@
+import hashlib
+
 import pandas as pd
 
 from shoir_digital_thread import network_figure, sankey_figure, stable_id
@@ -131,3 +133,9 @@ def test_upsert_fails_closed_when_source_matches_multiple_legacy_nodes(monkeypat
         thread._upsert_node("Asset", "Press C", "asset:duplicate")
 
     assert fake_st.session_state[keys["nodes"]] == original_nodes
+
+
+
+def test_source_less_stable_id_keeps_legacy_hash_formula():
+    expected = "DAT-" + hashlib.sha1(b"Dataset|Orders|").hexdigest()[:12].upper()
+    assert stable_id("Dataset", "Orders", "") == expected
