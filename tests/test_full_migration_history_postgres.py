@@ -437,6 +437,34 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "Populated referral codes must be protected by a unique partial index."
             )
 
+            internal_tables = (
+                "artifacts", "twin_assets", "twin_snapshots", "twin_scenarios",
+                "connector_health", "jobs", "collaboration", "knowledge",
+                "monitoring_rules", "monitoring_events", "report_provenance", "security",
+            )
+            for table in internal_tables:
+                rls_state = _fetchone(
+                    target,
+                    """
+                    SELECT c.relrowsecurity
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid=c.relnamespace
+                    WHERE n.nspname='shoir_internal' AND c.relname=%s;
+                    """,
+                    (table,),
+                )
+                assert rls_state == (True,), f"RLS is not enabled on shoir_internal.{table}"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('anon', %s, 'SELECT');",
+                    (f"shoir_internal.{table}",),
+                )[0] is False, f"anon has a direct SELECT grant on shoir_internal.{table}"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('authenticated', %s, 'SELECT');",
+                    (f"shoir_internal.{table}",),
+                )[0] is False, f"authenticated has a direct SELECT grant on shoir_internal.{table}"
+
             for table in ("shoir_accounts", "shoir_pending_credentials", "shoir_sessions",
                           "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states", "shoir_login_throttle"):
                 assert _fetchone(
