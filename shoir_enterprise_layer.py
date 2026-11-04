@@ -579,7 +579,7 @@ def _existing_thread_entity_id(
             saved_identity = str(saved_state.get("thread_node_id") or "").strip()
             if identity and saved_identity == identity:
                 identity_matches.append(saved_id)
-            if names and saved_name in names and saved_source == source_key:
+            if names and saved_name.casefold() in {item.casefold() for item in names} and saved_source == source_key:
                 alias_matches.append(saved_id)
         if len(set(identity_matches)) > 1:
             raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
@@ -612,10 +612,10 @@ def _existing_thread_entity_id(
                         """SELECT entity_id
                            FROM shoir_internal.canonical_entities
                            WHERE workspace_id=%s AND entity_type=%s
-                             AND name = ANY(%s) AND source=%s
+                             AND lower(name) = ANY(%s) AND source=%s
                            ORDER BY updated_at DESC
                            LIMIT 2""",
-                        (workspace_key(username, workspace), kind, names, source_key),
+                        (workspace_key(username, workspace), kind, [item.casefold() for item in names], source_key),
                     )
                     rows = cur.fetchall()
                     if len(rows) > 1:
@@ -641,7 +641,7 @@ def _existing_thread_entity_id(
             saved = {}
         if identity and isinstance(saved, Mapping) and str(saved.get("thread_node_id") or "").strip() == identity:
             identity_matches.append(str(entity_id))
-        if names and str(saved_name or "") in names and str(saved_source or "") == source_key:
+        if names and str(saved_name or "").casefold() in {item.casefold() for item in names} and str(saved_source or "") == source_key:
             alias_matches.append(str(entity_id))
     if len(set(identity_matches)) > 1:
         raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
