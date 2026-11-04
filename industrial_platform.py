@@ -227,7 +227,7 @@ def register_dataset(
     """Register a dataset; staging uses immutable managed versions, local uses SQLite."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Dataset registration requires a pandas DataFrame.")
-    raw = df.to_csv(index=False, lineterminator="\\n").encode("utf-8")
+    raw = df.to_csv(index=False, lineterminator="\n").encode("utf-8")
     data_hash = hashlib.sha256(raw).hexdigest()
     logical_key = json.dumps(
         {"name": str(name).strip(), "source": str(source_name).strip()},
