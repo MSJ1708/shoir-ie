@@ -308,7 +308,12 @@ export interface CsvShape {
  * malformed quoting, duplicate/blank headers and invalid UTF-8.
  */
 export function inspectCsvShape(bytes: Uint8Array): CsvShape {
-  let source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new PublicRequestError("Dataset CSV must be valid UTF-8.", 400);
+  }
   if (source.startsWith("\uFEFF")) source = source.slice(1);
   if (!source.length) {
     throw new PublicRequestError("Dataset CSV is empty.", 400);
@@ -316,6 +321,7 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
 
   const headers: string[] = [];
   let field = "";
+  let fieldHasContent = false;
   let inQuotes = false;
   let firstRecord = true;
   let rowCount = 0;
@@ -347,21 +353,24 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
       } else if (firstRecord) {
         field += character;
       }
+      fieldHasContent = true;
       recordHasContent = true;
       continue;
     }
 
     if (character === '"') {
-      if (field.length !== 0) {
+      if (fieldHasContent) {
         throw new PublicRequestError("Dataset CSV contains an invalid quote.", 400);
       }
       inQuotes = true;
+      fieldHasContent = true;
       recordHasContent = true;
       continue;
     }
     if (character === ",") {
       if (firstRecord) headers.push(field);
       field = "";
+      fieldHasContent = false;
       recordHasContent = true;
       continue;
     }
@@ -372,16 +381,15 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
         rowCount += 1;
       }
       field = "";
+      fieldHasContent = false;
       recordHasContent = false;
-      if (
-        character === "\r" &&
-        source[index + 1] === "\n"
-      ) {
+      if (character === "\r" && source[index + 1] === "\n") {
         index += 1;
       }
       continue;
     }
     if (firstRecord) field += character;
+    fieldHasContent = true;
     recordHasContent = true;
   }
 
