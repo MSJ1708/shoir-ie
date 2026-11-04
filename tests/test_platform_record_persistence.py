@@ -534,18 +534,18 @@ def test_every_dataset_edge_action_enforces_server_side_professional_entitlement
         next_action = action.find('if (action === "')
         action = action[:next_action] if next_action >= 0 else action
         assert "getSession(" in action, action_name
-        assert "requireDatasetEntitlementResponse(" in action, action_name
+        assert "datasetEntitlementDenial(" in action, action_name
 
     save = source.split('if (action === "platform_record_save") {', 1)[1].split(
         'if (action === "platform_record_list") {', 1
     )[0]
     assert 'recordType === "dataset"' in save
     assert 'recordType === "dataset_version"' in save
-    assert "requireDatasetEntitlementResponse(" in save
+    assert "datasetEntitlementDenial(" in save
 
     listing = source.split('if (action === "platform_record_list") {', 1)[1].split(
         'if (action === "workspace_load") {', 1
     )[0]
     assert 'recordType === "dataset"' in listing
     assert 'recordType === "dataset_version"' in listing
-    assert "requireDatasetEntitlementResponse(" in listing
+    assert "datasetEntitlementDenial(" in listing
