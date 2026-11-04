@@ -127,13 +127,15 @@ def _staging_platform_list(
     workspace: str,
     record_type: str,
     limit: int = 200,
+    entity_key: str = "",
 ) -> list[dict[str, Any]] | None:
     identity = _staging_platform_identity(username)
     if identity is None:
         return None
     actor, token = identity
     return edge_list_platform_records(
-        actor, token, workspace, record_type, max(1, min(200, int(limit)))
+        actor, token, workspace, record_type, max(1, min(200, int(limit))),
+        entity_key=entity_key,
     )
 
 
