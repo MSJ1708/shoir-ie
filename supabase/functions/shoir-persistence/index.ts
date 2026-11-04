@@ -350,7 +350,6 @@ const PLATFORM_RECORD_TYPES = new Set([
   "monitoring_event",
   "report_provenance",
   "security_policy",
-  "twin_snapshot",
   "connector_run",
   "connector_schedule",
   "collaboration_item",
@@ -432,7 +431,7 @@ async function platformWorkspaceKey(
   workspace: string,
 ): Promise<string> {
   const user = username.trim().toLowerCase();
-  const scope = workspace.trim();
+  const scope = workspace.trim().toLowerCase();
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(scope)) {
     throw new Error("Workspace identifier is invalid.");
   }
