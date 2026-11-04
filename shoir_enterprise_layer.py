@@ -412,9 +412,61 @@ def _canonical_json(payload: Any) -> tuple[str, str]:
     return raw, hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def canonical_entity_id(username: str, workspace: str, entity_type: str, name: str, source: str = "") -> str:
+def _existing_thread_entity_id(workspace_id: str, entity_type: str, thread_node_id: str) -> str:
+    """Find the existing durable entity linked to an immutable thread node ID."""
+    identity = str(thread_node_id or "").strip()
+    if not identity:
+        return ""
+
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT entity_id
+                       FROM shoir_internal.canonical_entities
+                       WHERE workspace_id=%s AND entity_type=%s
+                         AND state_json::jsonb ->> 'thread_node_id' = %s
+                       ORDER BY updated_at DESC
+                       LIMIT 1""",
+                    (workspace_id, entity_type, identity),
+                )
+                row = cur.fetchone()
+        return str(row[0]) if row and row[0] else ""
+
+    with _local_connect() as conn:
+        rows = conn.execute(
+            """SELECT entity_id,state_json
+               FROM shoir_ent_canonical_entities
+               WHERE workspace_id=? AND entity_type=?
+               ORDER BY updated_at DESC
+               LIMIT 5000""",
+            (workspace_id, entity_type),
+        ).fetchall()
+    for entity_id, state_json in rows:
+        try:
+            saved = json.loads(state_json or "{}")
+        except Exception:
+            continue
+        if isinstance(saved, dict) and str(saved.get("thread_node_id") or "").strip() == identity:
+            return str(entity_id)
+    return ""
+
+
+def canonical_entity_id(
+    username: str,
+    workspace: str,
+    entity_type: str,
+    name: str,
+    source: str = "",
+    identity_key: str = "",
+) -> str:
     wid = workspace_key(username, workspace)
-    raw = f"{wid}|{str(entity_type).strip()}|{str(name).strip()}|{str(source).strip()}"
+    immutable_key = str(identity_key or "").strip()
+    raw = (
+        f"{wid}|{str(entity_type).strip()}|identity|{immutable_key}"
+        if immutable_key
+        else f"{wid}|{str(entity_type).strip()}|{str(name).strip()}|{str(source).strip()}"
+    )
     return "CEN-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
 
 
@@ -431,8 +483,19 @@ def upsert_canonical_entity(
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     safe_secret_ref = str(secret_ref or "")[:300]
-    eid = canonical_entity_id(username, workspace, entity_type, name, source)
-    payload_json, content_hash = _canonical_json(state or {})
+    safe_state = _canonical_safe(state or {})
+    thread_node_id = (
+        str(safe_state.get("thread_node_id") or "").strip()
+        if isinstance(safe_state, dict) else ""
+    )
+    existing_id = (
+        _existing_thread_entity_id(wid, str(entity_type)[:100], thread_node_id)
+        if thread_node_id else ""
+    )
+    eid = existing_id or canonical_entity_id(
+        username, workspace, entity_type, name, source, identity_key=thread_node_id
+    )
+    payload_json, content_hash = _canonical_json(safe_state)
     stamp = now_iso()
     values = (eid, wid, str(entity_type)[:100], str(name)[:240], str(source)[:300],
               str(status)[:80] or "Observed", payload_json, content_hash, username, stamp, stamp)
@@ -444,8 +507,9 @@ def upsert_canonical_entity(
                     (entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (entity_id) DO UPDATE SET
-                      status=EXCLUDED.status,state_json=EXCLUDED.state_json,
-                      content_hash=EXCLUDED.content_hash,updated_at=EXCLUDED.updated_at""",
+                      name=EXCLUDED.name,source=EXCLUDED.source,status=EXCLUDED.status,
+                      state_json=EXCLUDED.state_json,content_hash=EXCLUDED.content_hash,
+                      updated_at=EXCLUDED.updated_at""",
                     values,
                 )
             conn.commit()
@@ -456,8 +520,9 @@ def upsert_canonical_entity(
                 (entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(entity_id) DO UPDATE SET
-                  status=excluded.status,state_json=excluded.state_json,
-                  content_hash=excluded.content_hash,updated_at=excluded.updated_at""",
+                  name=excluded.name,source=excluded.source,status=excluded.status,
+                  state_json=excluded.state_json,content_hash=excluded.content_hash,
+                  updated_at=excluded.updated_at""",
                 values,
             )
             conn.commit()
