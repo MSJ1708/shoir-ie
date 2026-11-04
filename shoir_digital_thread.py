@@ -17,6 +17,7 @@ import json
 import re
 import sqlite3
 import zipfile
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -82,7 +83,20 @@ def _slug(value: str) -> str:
 
 
 def stable_id(node_type: str, name: str, source: str = "") -> str:
-    raw = f"{node_type}|{name}|{source}"
+    """Return an ID from a source identity key, not a mutable display label.
+
+    Callers should supply a stable, unique source key (ideally an immutable
+    asset, order, dataset, or record identifier). Source-less legacy callers
+    retain the name-based fallback. If a source itself contains a mutable
+    business label, the caller must provide a true record key to support
+    identity across source-data changes.
+    """
+    source_key = str(source or "").strip()
+    if source_key:
+        raw = f"{str(node_type).strip()}|source|{source_key}"
+    else:
+        # Preserve the pre-change ID for source-less legacy nodes.
+        raw = f"{node_type}|{name}|{source}"
     return f"{node_type[:3].upper()}-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
 
 
@@ -131,12 +145,129 @@ def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", 
         "metadata": metadata or {},
         "updated_at": _now(),
     }
-    for idx, existing in enumerate(nodes):
-        if existing.get("node_id") == node_id:
-            nodes[idx] = payload
-            return node_id
+
+    # Keep a previously issued node ID where the stable source identity matches.
+    # This preserves legacy graph edges while transitioning to source-key IDs.
+    source_matches = [
+        idx for idx, existing in enumerate(nodes)
+        if str(source or "").strip()
+        and existing.get("node_type") == node_type
+        and str(existing.get("source") or "").strip() == str(source).strip()
+    ]
+    if len(source_matches) > 1:
+        raise ValueError(
+            "This Digital Thread source key maps to multiple existing nodes. "
+            "Resolve the duplicate identity records before synchronizing."
+        )
+
+    existing_index = next(
+        (idx for idx, existing in enumerate(nodes) if existing.get("node_id") == node_id),
+        None,
+    )
+    if existing_index is None and len(source_matches) == 1:
+        existing_index = source_matches[0]
+
+    if existing_index is not None:
+        existing = nodes[existing_index]
+        existing_id = str(existing.get("node_id") or node_id)
+        old_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        new_metadata = payload["metadata"] if isinstance(payload["metadata"], dict) else {}
+        merged_metadata = {**old_metadata, **new_metadata}
+        if old_metadata.get("display_name_override") is True:
+            payload["name"] = str(existing.get("name") or payload["name"])[:180]
+            merged_metadata["display_name_override"] = True
+            for preserved_key in ("name_aliases", "display_name_updated_at"):
+                if preserved_key in old_metadata:
+                    merged_metadata[preserved_key] = old_metadata[preserved_key]
+        payload["node_id"] = existing_id
+        payload["metadata"] = merged_metadata
+        nodes[existing_index] = payload
+        return existing_id
+
     nodes.append(payload)
     return node_id
+
+
+def renamed_node_record(node: dict[str, Any], new_name: str) -> dict[str, Any]:
+    """Create a new display label while retaining the immutable node ID/source."""
+    clean_name = str(new_name or "").strip()
+    if not clean_name:
+        raise ValueError("Enter a non-empty display name.")
+    clean_name = clean_name[:180]
+    node_id = str(node.get("node_id") or "").strip()
+    if not node_id:
+        raise ValueError("This node has no stable identifier and cannot be renamed safely.")
+
+    updated = dict(node)
+    old_name = str(updated.get("name") or "")
+    if not str(updated.get("source") or "").strip():
+        # Give source-less legacy nodes a durable key before changing the label.
+        updated["source"] = f"thread-node:{node_id}"
+
+    metadata = dict(updated.get("metadata") or {})
+    aliases = metadata.get("name_aliases", [])
+    if not isinstance(aliases, list):
+        aliases = []
+    else:
+        aliases = list(aliases)
+    if old_name and old_name != clean_name and old_name not in aliases:
+        aliases.append(old_name)
+    metadata["name_aliases"] = aliases[-20:]
+    metadata["display_name_override"] = True
+    metadata["display_name_updated_at"] = _now()
+    updated["metadata"] = metadata
+    updated["name"] = clean_name
+    updated["updated_at"] = _now()
+    return updated
+
+
+def rename_thread_node(node_id: str, new_name: str) -> dict[str, Any]:
+    """Rename a display label without changing node identity or connected edges."""
+    keys = _keys()
+    nodes = st.session_state[keys["nodes"]]
+    target_index = next(
+        (idx for idx, node in enumerate(nodes) if str(node.get("node_id")) == str(node_id)),
+        None,
+    )
+    if target_index is None:
+        raise ValueError("The selected Digital Thread node no longer exists.")
+
+    updated = renamed_node_record(nodes[target_index], new_name)
+    for idx, other in enumerate(nodes):
+        if idx == target_index:
+            continue
+        if (
+            other.get("node_type") == updated.get("node_type")
+            and str(other.get("source") or "").strip() == str(updated.get("source") or "").strip()
+            and str(other.get("name") or "").strip().casefold() == updated["name"].casefold()
+        ):
+            raise ValueError("A node with this source and display name already exists.")
+
+    nodes[target_index] = updated
+    st.session_state[keys["version"]] = int(st.session_state.get(keys["version"], 1)) + 1
+    if isinstance(st.session_state.get(keys["project"]), dict):
+        st.session_state[keys["project"]]["updated_at"] = _now()
+    return updated
+
+
+def persist_digital_thread_workspace(username: str) -> bool:
+    """Save Digital Thread state through the authenticated managed workspace backend."""
+    actor = str(st.session_state.get("current_user") or "").strip()
+    if st.session_state.get("authenticated") is not True:
+        raise PermissionError("Sign in with an active Shoir-IE account before saving Digital Thread changes.")
+    if not actor or actor.casefold() in {"guest", "guest visitor", "anonymous"}:
+        raise PermissionError("Guest and anonymous sessions cannot save Digital Thread changes.")
+    if not str(username or "").strip() or actor.casefold() != str(username).strip().casefold():
+        raise PermissionError("The requested identity does not match the signed-in account.")
+
+    from durable_account_store import edge_backend_configured
+    from workspace_persistence import save_user_workspace
+
+    if not edge_backend_configured():
+        raise RuntimeError("Managed Supabase workspace persistence is not configured; no change was saved.")
+    if not save_user_workspace(actor, st.session_state):
+        raise RuntimeError("The managed workspace save failed; the Digital Thread change was not confirmed.")
+    return True
 
 
 def _upsert_edge(source_id: str, target_id: str, relation: str, status: str = "Linked", metadata: dict[str, Any] | None = None) -> str:
@@ -624,7 +755,11 @@ def canonical_flow_figure(nodes: list[dict[str, Any]], edges: list[dict[str, Any
     return fig
 
 def _stable_kpi_for(module: str, col: str) -> str:
-    return stable_id("KPI", str(col), f"{module}|kpi|{col}")
+    source = f"{module}|kpi|{col}"
+    for node in st.session_state.get(_keys()["nodes"], []):
+        if node.get("node_type") == "KPI" and str(node.get("source") or "") == source:
+            return str(node.get("node_id"))
+    return stable_id("KPI", str(col), source)
 
 
 def node_frame() -> pd.DataFrame:
@@ -901,6 +1036,101 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                     st.success("Traceability link created.")
         else:
             st.info("Sync the workspace first to populate nodes.")
+        st.markdown("### Rename an existing node (keep its canonical ID)")
+        if raw_nodes:
+            rename_labels = {n["node_id"]: f"{n['node_type']} · {n['name']}" for n in raw_nodes}
+            rename_target_id = st.selectbox(
+                "Node to rename",
+                list(rename_labels.keys()),
+                format_func=rename_labels.get,
+                key="global_thread_rename_target",
+            )
+            selected_node = next((n for n in raw_nodes if n.get("node_id") == rename_target_id), None)
+            if selected_node:
+                proposed_name = st.text_input(
+                    "New display name",
+                    value=str(selected_node.get("name", "")),
+                    key=f"global_thread_rename_name_{rename_target_id}",
+                )
+                if st.button("Save display name and keep canonical ID", use_container_width=True, key="global_thread_rename_save"):
+                    previous_node = dict(selected_node)
+                    previous_node["metadata"] = dict(selected_node.get("metadata") or {})
+                    previous_version = int(st.session_state.get(keys["version"], 1))
+                    previous_project_updated = project.get("updated_at", "")
+                    previous_name = str(selected_node.get("name", ""))
+                    raw_previous_history = st.session_state.get("shoir_digital_thread_rename_history", [])
+                    previous_history = list(raw_previous_history) if isinstance(raw_previous_history, list) else []
+                    try:
+                        renamed = rename_thread_node(rename_target_id, proposed_name)
+                    except ValueError as exc:
+                        st.warning(str(exc))
+                    else:
+                        try:
+                            workspace_name = str(
+                                st.session_state.get("shoir_workspace_name")
+                                or st.session_state.get("workspace")
+                                or st.session_state.get("active_workspace_name")
+                                or "default"
+                            )
+                            history_entry = {
+                                "event_id": "DTR-" + uuid.uuid4().hex[:14].upper(),
+                                "actor": username,
+                                "workspace": workspace_name,
+                                "node_id": renamed["node_id"],
+                                "node_type": renamed["node_type"],
+                                "previous_name": previous_name,
+                                "new_name": renamed["name"],
+                                "created_at": _now(),
+                            }
+                            st.session_state["shoir_digital_thread_rename_history"] = (
+                                previous_history + [history_entry]
+                            )[-200:]
+                            persist_digital_thread_workspace(username)
+                            st.success(
+                                f"Display name saved to the managed workspace. "
+                                f"Canonical ID remains {renamed['node_id']}. "
+                                f"Change reference: {history_entry['event_id']}"
+                            )
+                            st.rerun()
+                        except Exception:
+                            for idx, existing in enumerate(st.session_state[keys["nodes"]]):
+                                if str(existing.get("node_id")) == str(rename_target_id):
+                                    st.session_state[keys["nodes"]][idx] = previous_node
+                                    break
+                            st.session_state[keys["version"]] = previous_version
+                            project["updated_at"] = previous_project_updated
+                            st.session_state["shoir_digital_thread_rename_history"] = previous_history
+                            st.error(
+                                "The managed workspace save could not be confirmed. "
+                                "The previous label has been restored in this session. "
+                                "Check the connection and retry."
+                            )
+        else:
+            st.info("Sync the workspace before renaming a Digital Thread node.")
+
+        rename_history = st.session_state.get("shoir_digital_thread_rename_history", [])
+        st.markdown("### Recent rename history")
+        st.caption(
+            "This history is stored with your authenticated workspace. "
+            "It is not an append-only or tamper-proof enterprise audit log."
+        )
+        if isinstance(rename_history, list) and rename_history:
+            history_frame = pd.DataFrame(rename_history[-25:][::-1])
+            visible_columns = [
+                column for column in (
+                    "created_at", "actor", "node_type", "previous_name",
+                    "new_name", "node_id", "event_id",
+                )
+                if column in history_frame.columns
+            ]
+            st.dataframe(
+                history_frame[visible_columns],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No rename history has been saved in this workspace yet.")
+
         st.markdown("### Create a node manually")
         n1, n2, n3 = st.columns(3)
         with n1:
@@ -911,7 +1141,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             node_status = st.selectbox("Status", ["Observed", "Inferred", "Pending verification"], key="global_thread_new_status")
         if st.button("＋ Add node", use_container_width=True, key="global_thread_add_node"):
             if node_name.strip():
-                _upsert_node(node_type, node_name.strip(), f"manual:{username}", module, node_status)
+                _upsert_node(node_type, node_name.strip(), f"manual:{username}:{uuid.uuid4().hex}", module, node_status)
                 st.success("Node added to the project thread.")
             else:
                 st.warning("Enter a node name first.")
