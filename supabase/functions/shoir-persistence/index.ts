@@ -1192,7 +1192,11 @@ Deno.serve(async (req) => {
 
     if (action === "dataset_version_register") {
       const username = String(body.username || "").trim();
-      const row = await getSession(String(body.token || ""), username, "workspace");
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1206,21 +1210,32 @@ Deno.serve(async (req) => {
       const columnCount = Number(body.column_count);
       const schema = body.schema;
       const transformations = body.transformations || [];
-      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
-          !name || name.length > 200 || sourceName.length > 500 ||
-          !/^[0-9a-f]{64}$/.test(dataHash) ||
-          !/^[0-9a-f]{64}$/.test(fingerprint) ||
-          !Number.isSafeInteger(rowCount) || rowCount < 0 || rowCount > 100000000 ||
-          !Number.isSafeInteger(columnCount) || columnCount < 0 || columnCount > 5000 ||
-          !schema || typeof schema !== "object" || Array.isArray(schema) ||
-          new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
-          !Array.isArray(transformations) || transformations.length > 50 ||
-          new TextEncoder().encode(JSON.stringify(transformations)).byteLength > 16384) {
-        return sendResponse({ error: "Dataset version metadata is invalid." }, 400);
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !name || name.length > 200 || sourceName.length > 500 ||
+        !/^[0-9a-f]{64}$/.test(dataHash) ||
+        !/^[0-9a-f]{64}$/.test(fingerprint) ||
+        !Number.isSafeInteger(rowCount) || rowCount < 0 ||
+        rowCount > 100000000 ||
+        !Number.isSafeInteger(columnCount) || columnCount < 0 ||
+        columnCount > 5000 ||
+        !schema || typeof schema !== "object" || Array.isArray(schema) ||
+        new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+        !Array.isArray(transformations) || transformations.length > 50 ||
+        new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
+          16384
+      ) {
+        return sendResponse(
+          { error: "Dataset version metadata is invalid." },
+          400,
+        );
       }
-      const versionRecordId = "SPR-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const headRecordId = "SPR-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const eventId = "SPE-" + crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const versionRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const headRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
       const { data, error } = await supabase.rpc(
         "shoir_platform_register_dataset_version",
         {
@@ -1327,7 +1342,10 @@ Deno.serve(async (req) => {
         !Number.isSafeInteger(requestedOffset) || requestedOffset < 0 ||
         requestedOffset > 100000
       ) {
-        return sendResponse({ error: "Platform record offset is invalid." }, 400);
+        return sendResponse(
+          { error: "Platform record offset is invalid." },
+          400,
+        );
       }
       let query = supabase.from("shoir_platform_records")
         .select(
