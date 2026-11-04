@@ -255,9 +255,9 @@ Deno.test("protected administrator invariant is read-only and fails closed on dr
 
 Deno.test("dataset API package gate follows the canonical tier hierarchy", () => {
   const allowed = [
-    "Professional Tier",
     "Enterprise Tier",
     "Enterprise Plus Tier ($399)",
+    "Enterprise Tier",
     "Research Pack",
   ];
   assert(
@@ -272,18 +272,19 @@ Deno.test("dataset API package gate follows the canonical tier hierarchy", () =>
     "Starter Tier",
     "Mid-Tier Pro",
     "Pro Tier",
+    "Professional Tier",
     "",
     undefined,
   ];
   for (const tier of allowed) {
     assert(
-      platformTierAllows(tier, "Professional"),
+      platformTierAllows(tier, "Enterprise"),
       "Professional dataset capability should be allowed for " + String(tier),
     );
   }
   for (const tier of denied) {
     assert(
-      !platformTierAllows(tier, "Professional"),
+      !platformTierAllows(tier, "Enterprise"),
       "Professional dataset capability must be denied for " + String(tier),
     );
   }
@@ -292,7 +293,7 @@ Deno.test("dataset API package gate follows the canonical tier hierarchy", () =>
     "Enterprise Plus must not be treated as the Research Pack add-on.",
   );
   assert(
-    platformTierAllows("Research Pack", "Professional"),
+    platformTierAllows("Research Pack", "Enterprise"),
     "Research Pack should retain its inherited base capabilities.",
   );
 });
