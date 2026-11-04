@@ -1201,7 +1201,6 @@ def record_connector_health(
     workspace: str = "default",
     secret_ref: str = "",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     cid = "CONN-" + hashlib.sha256((wid + "|" + name + "|" + system_type + "|" + protocol).encode()).hexdigest()[:14].upper()
     stamp = now_iso()
@@ -1211,6 +1210,28 @@ def record_connector_health(
         cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms,
         detail, stamp, username, safe_secret_ref,
     )
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "connector_health",
+        cid,
+        {
+            "connector_id": cid,
+            "name": str(name)[:160],
+            "system_type": str(system_type)[:80],
+            "protocol": str(protocol)[:80],
+            "endpoint": safe_endpoint[:500],
+            "status": str(status)[:80],
+            "latency_ms": float(latency_ms) if latency_ms is not None else None,
+            "detail": str(detail)[:1000],
+            "checked_at": stamp,
+            "checked_by": username,
+            "has_connector_reference": bool(safe_secret_ref),
+        },
+    )
+    if staging_saved is not None:
+        return cid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -1240,6 +1261,9 @@ def record_connector_health(
 
 
 def connector_health_frame(username: str, workspace: str = "default") -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "connector_health", 200)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.connector_health" if _remote() else "shoir_ent_connector_health"
@@ -1804,11 +1828,37 @@ def run_due_connector_syncs(
 
 
 def create_job_record(username: str, module: str, job_type: str, payload: Mapping[str, Any], workspace: str = "default") -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     jid = "JOB-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     params = (jid, wid, str(module), str(job_type), "Queued", 0.0, "Queued", _json(payload), None, 0, False, False, stamp, None, None, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "job",
+        jid,
+        {
+            "job_id": jid,
+            "workspace_id": wid,
+            "module": str(module)[:160],
+            "job_type": str(job_type)[:100],
+            "status": "Queued",
+            "progress": 0.0,
+            "message": "Queued",
+            "payload_json": _canonical_safe(payload),
+            "result_json": None,
+            "attempts": 0,
+            "cancel_requested": False,
+            "pause_requested": False,
+            "created_at": stamp,
+            "started_at": None,
+            "finished_at": None,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return jid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -1834,6 +1884,33 @@ def create_job_record(username: str, module: str, job_type: str, payload: Mappin
 
 
 def update_job_record(username: str, job_id: str, status: Optional[str] = None, progress: Optional[float] = None, message: Optional[str] = None, result: Any = None, workspace: str = "default") -> None:
+    staging_records = _staging_platform_list(username, workspace, "job", 1, entity_key=job_id)
+    if staging_records is not None:
+        if not staging_records:
+            return
+        current = staging_records[0].get("payload_json") or {}
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except Exception:
+                current = {}
+        updated = dict(current) if isinstance(current, Mapping) else {}
+        stamp = now_iso()
+        if status is not None:
+            updated["status"] = status
+        if progress is not None:
+            updated["progress"] = float(max(0, min(100, progress)))
+        if message is not None:
+            updated["message"] = str(message)[:2000]
+        if result is not None:
+            updated["result_json"] = _canonical_safe(result)
+        if status == "Running" and not updated.get("started_at"):
+            updated["started_at"] = stamp
+        if status in {"Completed", "Failed", "Cancelled"}:
+            updated["finished_at"] = stamp
+        updated["updated_at"] = stamp
+        _staging_platform_save(username, workspace, "job", job_id, updated)
+        return
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     fields: list[str] = []
@@ -1948,6 +2025,9 @@ def request_job_action(username: str, job_id: str, action: str, workspace: str =
 
 
 def list_jobs(username: str, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "job", limit)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.jobs" if _remote() else "shoir_ent_jobs"
@@ -1966,11 +2046,32 @@ def add_collaboration_item(
     status: str = "Open",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     iid = "COL-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     params = (iid, wid, item_type, subject, body, username, assignee, reviewer, status, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "collaboration_item",
+        iid,
+        {
+            "item_id": iid,
+            "workspace_id": wid,
+            "item_type": str(item_type)[:100],
+            "subject": str(subject)[:240],
+            "body": str(body)[:10000],
+            "actor": username,
+            "assignee": str(assignee)[:160],
+            "reviewer": str(reviewer)[:160],
+            "status": str(status)[:80],
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return iid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -1990,6 +2091,9 @@ def add_collaboration_item(
 
 
 def collaboration_frame(username: str, workspace: str = "default") -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "collaboration_item", 200)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.collaboration" if _remote() else "shoir_ent_collaboration"
@@ -2297,15 +2401,38 @@ def add_knowledge_document(
     tags: Sequence[str] = (),
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     clean = str(content or "")
+    staging_identity = _staging_platform_identity(username)
+    if staging_identity is not None and len(clean.encode("utf-8")) > 200 * 1024:
+        raise ValueError("Staging knowledge documents are limited to 200 KiB per record.")
     if len(clean) > 2_000_000:
         raise ValueError("Knowledge document is larger than the 2 MB text limit.")
     did = "KN-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()
     vals = (did, wid, str(name), clean, source_type, _json(list(tags)), digest, username, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "knowledge_document",
+        did,
+        {
+            "doc_id": did,
+            "name": str(name)[:240],
+            "content": clean,
+            "source_type": str(source_type)[:80],
+            "tags": [str(tag)[:80] for tag in list(tags)[:30]],
+            "sha256": digest,
+            "created_by": username,
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        record_artifact(username, "knowledge_document", name, {"doc_id": did, "sha256": digest, "source_type": source_type}, workspace)
+        return did
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -2326,10 +2453,16 @@ def add_knowledge_document(
 
 
 def search_knowledge(username: str, query: str, workspace: str = "default", limit: int = 20) -> pd.DataFrame:
-    ensure_enterprise_schema()
     q = str(query or "").strip()
     if not q:
         return pd.DataFrame()
+    staging_records = _staging_platform_list(username, workspace, "knowledge_document", 200)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return frame
+        matches = frame[frame["content"].astype(str).str.contains(re.escape(q), case=False, na=False)]
+        return matches.head(max(1, min(100, int(limit))))
     wid = workspace_key(username, workspace)
     table = "shoir_internal.knowledge" if _remote() else "shoir_ent_knowledge"
     if _remote():
@@ -2423,11 +2556,30 @@ def save_report_provenance(
     artifact_ids: Sequence[str] = (),
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     rid = "REP-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     vals = (rid, wid, str(module), str(report_format).upper(), str(filename), source_hash, _json(list(figure_hashes)), _json(list(artifact_ids)), username, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "report_provenance",
+        rid,
+        {
+            "report_id": rid,
+            "module": str(module)[:160],
+            "format": str(report_format).upper()[:20],
+            "filename": os.path.basename(str(filename))[:240],
+            "source_hash": str(source_hash)[:128],
+            "figure_hashes": [str(x)[:128] for x in list(figure_hashes)[:100]],
+            "artifact_ids": [str(x)[:80] for x in list(artifact_ids)[:100]],
+            "created_by": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return rid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -2873,11 +3025,32 @@ def record_monitoring_event(
     message: str = "",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     eid = "MON-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
-    vals = (eid, wid, rule_id or None, asset_id or None, str(metric), float(value), str(status), str(message), stamp)
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise ValueError("Monitoring event value must be finite.")
+    vals = (eid, wid, rule_id or None, asset_id or None, str(metric), numeric_value, str(status), str(message), stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "monitoring_event",
+        eid,
+        {
+            "event_id": eid,
+            "rule_id": str(rule_id or ""),
+            "asset_id": str(asset_id or ""),
+            "metric": str(metric)[:160],
+            "value": numeric_value,
+            "status": str(status)[:80],
+            "message": str(message)[:1000],
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return eid
+    ensure_enterprise_schema()
     table = "shoir_internal.monitoring_events" if _remote() else "shoir_ent_monitoring_events"
     if _remote():
         with _pg_connect() as conn:
@@ -2898,6 +3071,9 @@ def record_monitoring_event(
 
 
 def monitoring_events_frame(username: str, workspace: str = "default", limit: int = 2000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "monitoring_event", limit)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records).head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.monitoring_events" if _remote() else "shoir_ent_monitoring_events"
