@@ -264,7 +264,7 @@ function datasetEntitlementDenial(
 } | null {
   if (!datasetEntitlementDenied(row)) return null;
   return {
-    error: "FEATURE_REQUIRES_PROFESSIONAL",
+    error: "FEATURE_REQUIRES_ENTERPRISE",
     required_tier: "Enterprise",
     current_tier: String(row.tier || "Starter"),
   };
