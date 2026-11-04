@@ -879,12 +879,22 @@ def record_canonical_event(
 
 
 def canonical_entities_frame(username: str, workspace: str = "default", entity_type: str = "", limit: int = 2000) -> pd.DataFrame:
-    staging_records = _staging_platform_list(username, workspace, "canonical_entity", limit)
+    staging_records = _staging_platform_list(username, workspace, "canonical_entity", max(1, min(5000, int(limit))))
     if staging_records is not None:
         frame = _platform_records_frame(staging_records)
-        if not frame.empty and entity_type:
-            frame = frame[frame["entity_type"].astype(str).str.casefold() == str(entity_type).casefold()]
-        return frame.head(max(1, min(200, int(limit))))
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "entity_id", "workspace_id", "entity_type", "name", "source",
+                "status", "state_json", "content_hash", "created_by",
+                "created_at", "updated_at", "entity_key", "version",
+            ])
+        if "entity_id" not in frame.columns:
+            frame["entity_id"] = frame.get("entity_key", "")
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        if not entity_type:
+            return frame.head(max(1, min(5000, int(limit))))
+        return frame[frame["entity_type"].astype(str).str.casefold() == str(entity_type).casefold()].head(max(1, min(5000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_entities" if _remote() else "shoir_ent_canonical_entities"
@@ -900,9 +910,20 @@ def canonical_entities_frame(username: str, workspace: str = "default", entity_t
 
 
 def canonical_relationships_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
-    staging_records = _staging_platform_list(username, workspace, "canonical_relationship", limit)
+    staging_records = _staging_platform_list(username, workspace, "canonical_relationship", max(1, min(10000, int(limit))))
     if staging_records is not None:
-        return _platform_records_frame(staging_records).head(max(1, min(200, int(limit))))
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "relationship_id", "workspace_id", "source_entity_id",
+                "target_entity_id", "relation", "status", "metadata_json",
+                "created_at", "updated_at", "entity_key", "version",
+            ])
+        if "relationship_id" not in frame.columns:
+            frame["relationship_id"] = frame.get("entity_key", "")
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        return frame.head(max(1, min(10000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_relationships" if _remote() else "shoir_ent_canonical_relationships"
@@ -912,9 +933,20 @@ def canonical_relationships_frame(username: str, workspace: str = "default", lim
 
 
 def canonical_events_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
-    staging_records = _staging_platform_list(username, workspace, "canonical_event", limit)
+    staging_records = _staging_platform_list(username, workspace, "canonical_event", max(1, min(10000, int(limit))))
     if staging_records is not None:
-        return _platform_records_frame(staging_records).head(max(1, min(200, int(limit))))
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "event_id", "workspace_id", "event_type", "entity_id",
+                "relationship_id", "payload_json", "actor", "created_at",
+                "entity_key", "version",
+            ])
+        if "event_id" not in frame.columns:
+            frame["event_id"] = frame.get("entity_key", "")
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        return frame.head(max(1, min(10000, int(limit)))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_events" if _remote() else "shoir_ent_canonical_events"
@@ -1012,9 +1044,21 @@ def list_artifacts(username: str, artifact_type: Optional[str] = None, workspace
         frame = _platform_records_frame(staging_records)
         if artifact_type and not frame.empty:
             frame = frame[frame["artifact_type"].astype(str) == str(artifact_type)]
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "artifact_id", "workspace_id", "artifact_type", "name",
+                "payload", "payload_json", "content_hash", "owner",
+                "created_at", "updated_at", "entity_key", "version",
+            ])
         if "artifact_id" not in frame.columns and "entity_key" in frame.columns:
             frame["artifact_id"] = frame["entity_key"]
-        return frame.head(max(1, min(200, int(limit))))
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        if "payload_json" not in frame.columns:
+            frame["payload_json"] = frame.get("payload", {})
+        if "owner" not in frame.columns:
+            frame["owner"] = username
+        return frame.head(max(1, min(1000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.artifacts" if _remote() else "shoir_ent_artifacts"
