@@ -949,23 +949,36 @@ Deno.serve(async (req) => {
         String(body.workspace || "default"),
       );
       const datasetId = String(body.dataset_id || "").trim();
-      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId)) {
+      const requestedVersion = body.version == null || body.version === ""
+        ? null
+        : Number(body.version);
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        (requestedVersion !== null &&
+          (!Number.isSafeInteger(requestedVersion) || requestedVersion < 1))
+      ) {
         return sendResponse(
-          { error: "Dataset identifier is invalid." },
+          { error: "Dataset identifier or version is invalid." },
           400,
         );
       }
+      const recordType = requestedVersion === null
+        ? "dataset"
+        : "dataset_version";
+      const entityKey = requestedVersion === null
+        ? datasetId
+        : datasetId + ":v" + requestedVersion;
       const { data: record, error } = await supabase
         .from("shoir_platform_records")
         .select("payload_json")
         .eq("workspace_key", workspaceKey)
-        .eq("record_type", "dataset")
-        .eq("entity_key", datasetId)
+        .eq("record_type", recordType)
+        .eq("entity_key", entityKey)
         .maybeSingle();
       if (error) throw error;
       if (!record?.payload_json) {
         return sendResponse(
-          { error: "Dataset was not found in this workspace." },
+          { error: "Dataset version was not found in this workspace." },
           404,
         );
       }
@@ -994,9 +1007,11 @@ Deno.serve(async (req) => {
         ok: true,
         download_url: data.signedUrl,
         data_hash: String(payload.data_hash || ""),
-        version: Number(payload.version || 1),
+        version: Number(payload.version || requestedVersion || 1),
         row_count: Number(payload.row_count || 0),
         column_count: Number(payload.column_count || 0),
+        version_record_id: String(payload.version_record_id || ""),
+        registered_at: String(payload.registered_at || ""),
       });
     }
 
