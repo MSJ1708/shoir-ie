@@ -89,3 +89,20 @@ def test_rename_preserves_legacy_node_id_and_existing_edges(monkeypatch):
     assert refreshed["name"] == "Main Press"
     assert refreshed["metadata"]["display_name_override"] is True
     assert refreshed["metadata"]["field"] == "Asset ID"
+
+
+
+def test_rename_does_not_mutate_existing_alias_history():
+    from shoir_digital_thread import renamed_node_record
+
+    original = {
+        "node_id": "AST-1001",
+        "node_type": "Asset",
+        "name": "Press",
+        "source": "asset:1001",
+        "metadata": {"name_aliases": ["Original Press"]},
+    }
+    renamed = renamed_node_record(original, "Main Press")
+    assert original["metadata"]["name_aliases"] == ["Original Press"]
+    assert renamed["metadata"]["name_aliases"] == ["Original Press", "Press"]
+    assert renamed["node_id"] == original["node_id"]
