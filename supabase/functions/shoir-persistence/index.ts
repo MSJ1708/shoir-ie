@@ -428,7 +428,12 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 async function sha256Bytes(value: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", value);
+  const bytes = new Uint8Array(value.byteLength);
+  bytes.set(value);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    bytes.buffer as ArrayBuffer,
+  );
   return bytesToHex(digest);
 }
 async function platformWorkspaceKey(
