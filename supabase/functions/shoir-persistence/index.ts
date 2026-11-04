@@ -1109,6 +1109,20 @@ Deno.serve(async (req) => {
           400,
         );
       }
+      const expectedFingerprint = await sha256Hex(
+        stablePlatformJson({
+          dataset_id: datasetId,
+          data_hash: dataHash,
+          schema,
+          transformations,
+        }),
+      );
+      if (expectedFingerprint !== fingerprint) {
+        return sendResponse(
+          { error: "Dataset version fingerprint does not match the submitted metadata." },
+          422,
+        );
+      }
       const { data: uploaded, error: downloadError } = await supabase.storage
         .from("shoir-industrial-datasets")
         .download(uploadPath);
