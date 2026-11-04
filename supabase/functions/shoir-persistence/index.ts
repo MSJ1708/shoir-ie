@@ -1017,6 +1017,7 @@ Deno.serve(async (req) => {
         )
         .eq("workspace_key", workspaceKey)
         .order("updated_at", { ascending: false })
+        .order("record_id", { ascending: true })
         .range(requestedOffset, requestedOffset + requestedLimit);
       if (recordType) query = query.eq("record_type", recordType);
       if (entityKey) query = query.eq("entity_key", entityKey);
