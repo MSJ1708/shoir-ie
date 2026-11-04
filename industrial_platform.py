@@ -2197,7 +2197,7 @@ def render_module(module: str, tier: str, username: str):
                         shared_signature = str(
                             registration.get("data_hash")
                             or hashlib.sha256(
-                                frame.to_csv(index=False, lineterminator="\\n").encode("utf-8")
+                                frame.to_csv(index=False, lineterminator="\n").encode("utf-8")
                             ).hexdigest()
                         )
                         _activate_dataset_for_shared_workspace(
