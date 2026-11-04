@@ -214,13 +214,83 @@ def log_security_event(username: str, event_type: str, details: str="", db_path:
     except Exception:
         pass
 
-def register_dataset(name: str, source_name: str, df: pd.DataFrame, db_path: str="enterprise_full_workspace.db") -> str:
-    raw=df.to_csv(index=False).encode()
-    dataset_id="DS-"+hashlib.sha256((name+source_name+str(len(raw))).encode()).hexdigest()[:12].upper()
-    schema={str(c):str(df[c].dtype) for c in df.columns}
-    with sqlite3.connect(db_path) as c:
-        c.execute("INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",(dataset_id,name,source_name,len(df),len(df.columns),hashlib.sha256(raw).hexdigest(),_now(),json.dumps(schema)))
-        c.commit()
+def register_dataset(
+    name: str,
+    source_name: str,
+    df: pd.DataFrame,
+    db_path: str = "enterprise_full_workspace.db",
+    username: str = "",
+    workspace: str = "default",
+    token: str = "",
+    transformations: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> str:
+    """Register a dataset; staging uses immutable managed versions, local uses SQLite."""
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Dataset registration requires a pandas DataFrame.")
+    raw = df.to_csv(index=False, lineterminator="\\n").encode("utf-8")
+    data_hash = hashlib.sha256(raw).hexdigest()
+    logical_key = json.dumps(
+        {"name": str(name).strip(), "source": str(source_name).strip()},
+        sort_keys=True, separators=(",", ":"),
+    )
+    dataset_id = "DS-" + hashlib.sha256(logical_key.encode("utf-8")).hexdigest()[:12].upper()
+    schema = {
+        str(column): {
+            "dtype": str(df[column].dtype),
+            "nullable": bool(df[column].isna().any()),
+        }
+        for column in df.columns
+    }
+    transform_log = [dict(item) for item in (transformations or ())]
+    if len(transform_log) > 50:
+        raise ValueError("Dataset transformation history is limited to 50 entries.")
+    fingerprint_payload = {
+        "dataset_id": dataset_id,
+        "data_hash": data_hash,
+        "schema": schema,
+        "transformations": transform_log,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+    try:
+        from durable_account_store import APP_ENVIRONMENT, edge_register_dataset_version
+    except Exception:
+        APP_ENVIRONMENT = "local"
+        edge_register_dataset_version = None
+
+    if str(APP_ENVIRONMENT).casefold() == "staging":
+        if not username or not token or edge_register_dataset_version is None:
+            raise PermissionError(
+                "An authenticated staging session is required to register a durable dataset version."
+            )
+        result = edge_register_dataset_version(
+            username=username,
+            token=token,
+            workspace=workspace,
+            dataset_id=dataset_id,
+            name=str(name),
+            source_name=str(source_name),
+            data_hash=data_hash,
+            version_fingerprint=fingerprint,
+            row_count=int(len(df)),
+            column_count=int(len(df.columns)),
+            schema=schema,
+            transformations=transform_log,
+        )
+        registration = result.get("registration") or {}
+        st.session_state["data_platform_latest_registration"] = dict(registration)
+        st.session_state["data_platform_latest_dataset_id"] = dataset_id
+        st.session_state["data_platform_latest_version"] = int(registration.get("version") or 1)
+        return dataset_id
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",
+            (dataset_id, name, source_name, len(df), len(df.columns), data_hash, _now(), json.dumps(schema)),
+        )
+        conn.commit()
     return dataset_id
 
 def data_quality_report(df: pd.DataFrame) -> dict:
@@ -1865,11 +1935,48 @@ def render_module(module: str, tier: str, username: str):
                 sheets={"CSV":pd.read_csv(io.BytesIO(raw))} if lower.endswith(".csv") else {s:pd.read_excel(io.BytesIO(raw),sheet_name=s) for s in pd.ExcelFile(io.BytesIO(raw)).sheet_names}
                 st.write({"file":up.name,"sheets":list(sheets),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()})
                 for name,df in sheets.items():
-                    did=register_dataset(name,up.name,df)
+                    current_workspace = str(
+                        st.session_state.get("shoir_workspace_name")
+                        or st.session_state.get("workspace")
+                        or st.session_state.get("active_workspace_name")
+                        or "default"
+                    )
+                    did=register_dataset(
+                        name, up.name, df,
+                        username=username,
+                        workspace=current_workspace,
+                        token=str(st.session_state.get("remote_session_token") or ""),
+                    )
                     st.session_state["data_platform_latest_df"] = df.copy(deep=True)
                     st.subheader(name); st.write(data_quality_report(df)); st.dataframe(df.head(25),use_container_width=True)
-                    st.success(f"Registered dataset {did}")
-                with sqlite3.connect("enterprise_full_workspace.db") as c: cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
+                    registration = st.session_state.get("data_platform_latest_registration", {})
+                    version = registration.get("version")
+                    if version:
+                        st.success(f"Registered dataset {did} · immutable version {version}")
+                    else:
+                        st.success(f"Registered dataset {did}")
+                if str(__import__("durable_account_store").APP_ENVIRONMENT).casefold() == "staging":
+                    from durable_account_store import edge_list_platform_records
+                    current_workspace = str(
+                        st.session_state.get("shoir_workspace_name")
+                        or st.session_state.get("workspace")
+                        or st.session_state.get("active_workspace_name")
+                        or "default"
+                    )
+                    managed = edge_list_platform_records(
+                        username, str(st.session_state.get("remote_session_token") or ""),
+                        current_workspace, "dataset", 5000,
+                    )
+                    catalog_rows = []
+                    for record in managed:
+                        payload = record.get("payload_json") or {}
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+                        catalog_rows.append(payload)
+                    cat = pd.DataFrame(catalog_rows)
+                else:
+                    with sqlite3.connect("enterprise_full_workspace.db") as c:
+                        cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
                 st.dataframe(cat,use_container_width=True,hide_index=True)
             except Exception as exc: st.error(f"Ingestion failed safely: {exc}")
     elif module=="Capital Investment & Engineering Economics":
