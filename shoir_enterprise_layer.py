@@ -589,6 +589,7 @@ def _existing_thread_entity_id(
             raise RuntimeError("Legacy display name maps to multiple canonical entities.")
         return alias_matches[0] if alias_matches else ""
 
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
