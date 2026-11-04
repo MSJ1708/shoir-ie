@@ -427,11 +427,13 @@ def _existing_thread_entity_id(workspace_id: str, entity_type: str, thread_node_
                        WHERE workspace_id=%s AND entity_type=%s
                          AND state_json::jsonb ->> 'thread_node_id' = %s
                        ORDER BY updated_at DESC
-                       LIMIT 1""",
+                       LIMIT 2""",
                     (workspace_id, entity_type, identity),
                 )
-                row = cur.fetchone()
-        return str(row[0]) if row and row[0] else ""
+                rows = cur.fetchall()
+        if len(rows) > 1:
+            raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+        return str(rows[0][0]) if rows and rows[0][0] else ""
 
     with _local_connect() as conn:
         rows = conn.execute(
@@ -442,14 +444,17 @@ def _existing_thread_entity_id(workspace_id: str, entity_type: str, thread_node_
                LIMIT 5000""",
             (workspace_id, entity_type),
         ).fetchall()
+    matches = []
     for entity_id, state_json in rows:
         try:
             saved = json.loads(state_json or "{}")
         except Exception:
             continue
         if isinstance(saved, dict) and str(saved.get("thread_node_id") or "").strip() == identity:
-            return str(entity_id)
-    return ""
+            matches.append(str(entity_id))
+    if len(matches) > 1:
+        raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+    return matches[0] if matches else ""
 
 
 def canonical_entity_id(
@@ -527,6 +532,145 @@ def upsert_canonical_entity(
             )
             conn.commit()
     return eid
+
+
+def persist_thread_node_rename(
+    username: str,
+    workspace: str,
+    node: Mapping[str, Any],
+    previous_name: str,
+) -> tuple[str, str]:
+    """Atomically persist a Digital Thread rename and its audit event.
+
+    The durable entity ID is looked up using the immutable thread_node_id first,
+    preserving pre-existing canonical IDs and therefore existing relationships.
+    The entity row and audit event are committed in one database transaction.
+    """
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    node_id = str(node.get("node_id") or "").strip()
+    entity_type = str(node.get("node_type") or "Entity")[:100]
+    name = str(node.get("name") or "")[:240]
+    source = str(node.get("source") or "")[:300]
+    status = str(node.get("status") or "Observed")[:80]
+    if not node_id or not name:
+        raise ValueError("A Digital Thread node ID and display name are required.")
+
+    state = dict(node)
+    state["thread_node_id"] = node_id
+    payload_json, content_hash = _canonical_json(state)
+    event_payload, _ = _canonical_json({
+        "thread_node_id": node_id,
+        "entity_type": entity_type,
+        "previous_name": str(previous_name or "")[:240],
+        "new_name": name,
+        "canonical_id_preserved": True,
+    })
+    event_id = "CEVT-" + uuid.uuid4().hex[:14].upper()
+    stamp = now_iso()
+
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT entity_id
+                       FROM shoir_internal.canonical_entities
+                       WHERE workspace_id=%s AND entity_type=%s
+                         AND state_json::jsonb ->> 'thread_node_id' = %s
+                       ORDER BY updated_at DESC
+                       LIMIT 2
+                       FOR UPDATE""",
+                    (wid, entity_type, node_id),
+                )
+                rows = cur.fetchall()
+                if len(rows) > 1:
+                    raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+                if rows:
+                    entity_id = str(rows[0][0])
+                    cur.execute(
+                        """UPDATE shoir_internal.canonical_entities
+                           SET name=%s, source=%s, status=%s, state_json=%s,
+                               content_hash=%s, updated_at=%s
+                           WHERE entity_id=%s AND workspace_id=%s""",
+                        (name, source, status, payload_json, content_hash, stamp, entity_id, wid),
+                    )
+                    if cur.rowcount != 1:
+                        raise RuntimeError("Canonical entity changed during rename.")
+                else:
+                    entity_id = canonical_entity_id(
+                        username, workspace, entity_type, name, source, identity_key=node_id
+                    )
+                    cur.execute(
+                        """INSERT INTO shoir_internal.canonical_entities
+                           (entity_id,workspace_id,entity_type,name,source,status,state_json,
+                            content_hash,created_by,created_at,updated_at)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (entity_id, wid, entity_type, name, source, status,
+                         payload_json, content_hash, username, stamp, stamp),
+                    )
+                cur.execute(
+                    """INSERT INTO shoir_internal.canonical_events
+                       (event_id,workspace_id,event_type,entity_id,relationship_id,
+                        payload_json,actor,created_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (event_id, wid, "digital_thread_node_renamed", entity_id,
+                     None, event_payload, username, stamp),
+                )
+            conn.commit()
+        return entity_id, event_id
+
+    with _local_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """SELECT entity_id,state_json
+               FROM shoir_ent_canonical_entities
+               WHERE workspace_id=? AND entity_type=?
+               ORDER BY updated_at DESC
+               LIMIT 5000""",
+            (wid, entity_type),
+        ).fetchall()
+        matches = []
+        for saved_entity_id, saved_state_json in rows:
+            try:
+                saved_state = json.loads(saved_state_json or "{}")
+            except Exception:
+                continue
+            if isinstance(saved_state, dict) and str(saved_state.get("thread_node_id") or "").strip() == node_id:
+                matches.append(str(saved_entity_id))
+        if len(matches) > 1:
+            raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+        if matches:
+            entity_id = matches[0]
+            cursor = conn.execute(
+                """UPDATE shoir_ent_canonical_entities
+                   SET name=?,source=?,status=?,state_json=?,content_hash=?,updated_at=?
+                   WHERE entity_id=? AND workspace_id=?""",
+                (name, source, status, payload_json, content_hash, stamp, entity_id, wid),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Canonical entity changed during rename.")
+        else:
+            entity_id = canonical_entity_id(
+                username, workspace, entity_type, name, source, identity_key=node_id
+            )
+            conn.execute(
+                """INSERT INTO shoir_ent_canonical_entities
+                   (entity_id,workspace_id,entity_type,name,source,status,state_json,
+                    content_hash,created_by,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (entity_id, wid, entity_type, name, source, status,
+                 payload_json, content_hash, username, stamp, stamp),
+            )
+        conn.execute(
+            """INSERT INTO shoir_ent_canonical_events
+               (event_id,workspace_id,event_type,entity_id,relationship_id,
+                payload_json,actor,created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (event_id, wid, "digital_thread_node_renamed", entity_id,
+             None, event_payload, username, stamp),
+        )
+        conn.commit()
+    return entity_id, event_id
 
 
 def canonical_relationship_id(username: str, workspace: str, source_entity_id: str, target_entity_id: str, relation: str) -> str:
