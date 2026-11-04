@@ -18,7 +18,10 @@
 - Dataset version registration event in `shoir_platform_events`.
 - Idempotent return for the same current fingerprint.
 - New version number when content, schema or transformation fingerprint changes.
-- Bounded metadata validation and server-side advisory transaction lock for concurrent writes.
+- Bounded metadata validation, server-side fingerprint recomputation from dataset ID/content hash/schema/transformations, and server-side advisory transaction lock for concurrent writes.
+- The Workbench Data Platform route shows a persistent dataset catalogue, historical version selector, and integrity-checked shared-workspace loading.
+- Dataset quality profiles render a missingness chart and up to three numeric distributions with explicit axis labels and descriptive-only interpretation notes.
+- The route is guarded by the stable T020 entitlement at render/execution time and caches the last processed upload fingerprint to prevent repeating a same-file upload on Streamlit reruns.
 - Staging UI path uses the authenticated session and does not query local SQLite for the dataset catalogue.
 - Authenticated signed download URLs are issued only after checking the workspace-scoped dataset head record.
 - Downloads are hash-verified client-side before CSV parsing, row/column counts are compared with metadata, and the dataset can be activated in the shared workspace.
