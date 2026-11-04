@@ -440,8 +440,7 @@ def _existing_thread_entity_id(workspace_id: str, entity_type: str, thread_node_
             """SELECT entity_id,state_json
                FROM shoir_ent_canonical_entities
                WHERE workspace_id=? AND entity_type=?
-               ORDER BY updated_at DESC
-               LIMIT 5000""",
+               ORDER BY updated_at DESC""",
             (workspace_id, entity_type),
         ).fetchall()
     matches = []
@@ -585,6 +584,20 @@ def persist_thread_node_rename(
                 rows = cur.fetchall()
                 if len(rows) > 1:
                     raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+                if not rows and previous_name:
+                    cur.execute(
+                        """SELECT entity_id
+                           FROM shoir_internal.canonical_entities
+                           WHERE workspace_id=%s AND entity_type=%s
+                             AND name=%s AND source=%s
+                           ORDER BY updated_at DESC
+                           LIMIT 2
+                           FOR UPDATE""",
+                        (wid, entity_type, str(previous_name)[:240], source),
+                    )
+                    rows = cur.fetchall()
+                    if len(rows) > 1:
+                        raise RuntimeError("Previous name maps to multiple canonical entities.")
                 if rows:
                     entity_id = str(rows[0][0])
                     cur.execute(
@@ -625,8 +638,7 @@ def persist_thread_node_rename(
             """SELECT entity_id,state_json
                FROM shoir_ent_canonical_entities
                WHERE workspace_id=? AND entity_type=?
-               ORDER BY updated_at DESC
-               LIMIT 5000""",
+               ORDER BY updated_at DESC""",
             (wid, entity_type),
         ).fetchall()
         matches = []
@@ -639,6 +651,16 @@ def persist_thread_node_rename(
                 matches.append(str(saved_entity_id))
         if len(matches) > 1:
             raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+        if not matches and previous_name:
+            legacy_rows = conn.execute(
+                """SELECT entity_id FROM shoir_ent_canonical_entities
+                   WHERE workspace_id=? AND entity_type=? AND name=? AND source=?
+                   ORDER BY updated_at DESC LIMIT 2""",
+                (wid, entity_type, str(previous_name)[:240], source),
+            ).fetchall()
+            if len(legacy_rows) > 1:
+                raise RuntimeError("Previous name maps to multiple canonical entities.")
+            matches = [str(legacy_rows[0][0])] if legacy_rows else []
         if matches:
             entity_id = matches[0]
             cursor = conn.execute(
