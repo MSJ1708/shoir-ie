@@ -310,8 +310,9 @@ def load_registered_dataset(
     username: str,
     workspace: str = "default",
     token: str = "",
+    version: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Load a versioned staging dataset from private object storage and verify its bytes."""
+    """Load a selected immutable staging dataset version and verify its bytes."""
     from durable_account_store import APP_ENVIRONMENT, edge_download_dataset_version
 
     if str(APP_ENVIRONMENT).casefold() != "staging":
@@ -321,6 +322,7 @@ def load_registered_dataset(
         token=token,
         workspace=workspace,
         dataset_id=dataset_id,
+        version=version,
     )
     frame = pd.read_csv(io.BytesIO(content))
     if len(frame) != int(metadata.get("row_count") or 0):
