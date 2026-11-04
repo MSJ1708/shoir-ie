@@ -545,8 +545,17 @@ def persist_thread_node_rename(
     preserving pre-existing canonical IDs and therefore existing relationships.
     The entity row and audit event are committed in one database transaction.
     """
+    session_state = st.session_state
+    actor = str(session_state.get("current_user") or "").strip()
+    if session_state.get("authenticated") is not True:
+        raise PermissionError("Sign in with an active Shoir-IE account before renaming a Digital Thread node.")
+    if not actor or actor.casefold() in {"guest", "guest visitor", "anonymous"}:
+        raise PermissionError("Guest and anonymous sessions cannot rename durable Digital Thread records.")
+    if not str(username or "").strip() or actor.casefold() != str(username).strip().casefold():
+        raise PermissionError("The requested identity does not match the signed-in account.")
+
     ensure_enterprise_schema()
-    wid = workspace_key(username, workspace)
+    wid = workspace_key(actor, workspace)
     node_id = str(node.get("node_id") or "").strip()
     entity_type = str(node.get("node_type") or "Entity")[:100]
     name = str(node.get("name") or "")[:240]
