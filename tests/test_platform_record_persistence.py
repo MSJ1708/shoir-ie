@@ -6,7 +6,7 @@ import durable_account_store as store
 def test_platform_record_payload_rejects_nested_credentials():
     with pytest.raises(ValueError, match="Credential or sensitive"):
         store._validate_platform_record_payload({
-            "asset": {"id": "P-100", "metadata": {"api_key": "must-not-persist"}}
+            "asset": {"id": "P-100", "metadata": {"email": "person@example.invalid"}}
         })
 
 
