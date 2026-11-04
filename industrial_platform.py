@@ -2208,6 +2208,8 @@ def render_module(module: str, tier: str, username: str):
                         )
                         state["shoir_active_dataset_id"] = dataset_id
                         state["shoir_active_dataset_version"] = int(version or 1)
+                        state["data_platform_latest_dataset_id"] = dataset_id
+                        state["data_platform_latest_version"] = int(version or 1)
                         st.subheader(str(sheet_name))
                         st.caption(
                             f"IMPORTED · {len(frame):,} rows · {len(frame.columns):,} columns · "
