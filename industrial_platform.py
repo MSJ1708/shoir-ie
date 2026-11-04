@@ -1303,6 +1303,91 @@ def sanitize_module_session_state(st) -> None:
             })
         _industrial_platform_session_state()["agv_fleet"] = normalized
 
+def _dataset_profile_figures(
+    df: pd.DataFrame,
+    dataset_name: str = "Dataset",
+    max_numeric_charts: int = 3,
+) -> list[tuple[str, Any]]:
+    """Build bounded, labelled quality plots without changing source data."""
+    if not isinstance(df, pd.DataFrame) or df.empty or len(df.columns) == 0:
+        return []
+    import plotly.express as px
+
+    figures: list[tuple[str, Any]] = []
+    missing = (
+        df.isna().mean().mul(100.0)
+        .rename("Missing (%)")
+        .rename_axis("Column")
+        .reset_index()
+        .sort_values("Missing (%)", ascending=False, kind="stable")
+    )
+    missing_figure = px.bar(
+        missing,
+        x="Column",
+        y="Missing (%)",
+        title=f"{dataset_name} · Missing values by column",
+        hover_data={"Missing (%)": ":.2f"},
+    )
+    missing_figure.update_layout(
+        xaxis_title="Source column",
+        yaxis_title="Missing values (%)",
+        template="plotly_white",
+    )
+    figures.append(("Missingness", missing_figure))
+
+    numeric_columns = list(df.select_dtypes(include=[np.number]).columns)
+    for column in numeric_columns[:max(0, int(max_numeric_charts))]:
+        values = pd.to_numeric(df[column], errors="coerce").replace(
+            [np.inf, -np.inf], np.nan
+        ).dropna()
+        if values.empty:
+            continue
+        if len(values) > 100_000:
+            values = values.sample(n=100_000, random_state=42)
+        distribution = pd.DataFrame({str(column): values})
+        figure = px.histogram(
+            distribution,
+            x=str(column),
+            nbins=30,
+            title=f"{dataset_name} · Distribution of {column}",
+        )
+        figure.update_layout(
+            xaxis_title=f"{column} (source unit)",
+            yaxis_title="Observations",
+            template="plotly_white",
+        )
+        figures.append((f"Distribution · {column}", figure))
+    return figures
+
+
+def _render_dataset_profile(
+    df: pd.DataFrame,
+    dataset_name: str,
+    key_prefix: str,
+) -> None:
+    """Render quality metrics and real Plotly figures for the selected dataset."""
+    quality = data_quality_report(df)
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Data quality score", f"{quality['score']:.1f}/100")
+    metric_columns[1].metric("Rows", f"{quality['rows']:,}")
+    metric_columns[2].metric("Columns", f"{quality['columns']:,}")
+    metric_columns[3].metric("Missing values", f"{quality['missing_pct']:.2f}%")
+    if quality["issues"]:
+        st.warning("Data-quality observations: " + "; ".join(quality["issues"][:6]))
+    else:
+        st.success("No missing-value or duplicate-row threshold warnings were detected.")
+    st.caption(
+        "Plots are descriptive summaries of the imported values. They do not imply "
+        "process capability, causation, forecasting or a verified engineering conclusion."
+    )
+    for index, (label, figure) in enumerate(_dataset_profile_figures(df, dataset_name)):
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            key=f"{key_prefix}_{index}",
+        )
+
+
 def render_module(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
@@ -1973,79 +2058,272 @@ def render_module(module: str, tier: str, username: str):
         _industrial_platform_session_state()["decision_verification_df"]=ver.copy(deep=True)
         render_export_bar(module,[("Decision Alternatives",alternatives),("Decision KPIs",kpis),("Decision Verification",ver)],tier,username)
     elif module=="Industrial Data Platform":
-        up=st.file_uploader("📥 Ingest CSV / XLSX",type=["csv","xlsx"],key="data_platform_upload")
+        st.markdown("### Industrial Data Platform")
+        st.caption(
+            "Register reusable datasets, inspect their quality, browse immutable versions, "
+            "and load a selected version into the shared engineering workspace."
+        )
+        up = st.file_uploader(
+            "📥 Import a CSV or Excel workbook",
+            type=["csv", "xlsx"],
+            key="data_platform_upload",
+            help="Excel sheets are normalized to separate CSV dataset versions. The original workbook is not overwritten.",
+        )
+        current_workspace = str(
+            _industrial_platform_session_state().get("shoir_workspace_name")
+            or _industrial_platform_session_state().get("workspace")
+            or _industrial_platform_session_state().get("active_workspace_name")
+            or "default"
+        )
+        staging_environment = False
+        staging_token = str(
+            _industrial_platform_session_state().get("remote_session_token") or ""
+        )
+        try:
+            from durable_account_store import APP_ENVIRONMENT, edge_list_platform_records
+            staging_environment = str(APP_ENVIRONMENT).casefold() == "staging"
+        except Exception:
+            edge_list_platform_records = None
+
         if up is not None:
             try:
-                raw=up.getvalue(); lower=up.name.lower()
-                sheets={"CSV":pd.read_csv(io.BytesIO(raw))} if lower.endswith(".csv") else {s:pd.read_excel(io.BytesIO(raw),sheet_name=s) for s in pd.ExcelFile(io.BytesIO(raw)).sheet_names}
-                st.write({"file":up.name,"sheets":list(sheets),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()})
-                for name,df in sheets.items():
-                    current_workspace = str(
-                        _industrial_platform_session_state().get("shoir_workspace_name")
-                        or _industrial_platform_session_state().get("workspace")
-                        or _industrial_platform_session_state().get("active_workspace_name")
-                        or "default"
-                    )
-                    did=register_dataset(
-                        name, up.name, df,
+                raw = up.getvalue()
+                lower = up.name.lower()
+                if lower.endswith(".csv"):
+                    sheets = {"CSV": pd.read_csv(io.BytesIO(raw))}
+                else:
+                    with pd.ExcelFile(io.BytesIO(raw)) as workbook:
+                        sheets = {
+                            sheet: pd.read_excel(workbook, sheet_name=sheet)
+                            for sheet in workbook.sheet_names
+                        }
+                st.write({
+                    "file": up.name,
+                    "sheets": list(sheets),
+                    "bytes": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "provenance": "IMPORTED",
+                })
+                for sheet_name, frame in sheets.items():
+                    if frame.columns.duplicated().any():
+                        duplicate_columns = frame.columns[frame.columns.duplicated()].astype(str).tolist()
+                        raise ValueError(
+                            "The source contains duplicate column labels; rename them before registration: "
+                            + ", ".join(duplicate_columns[:8])
+                        )
+                    if staging_environment:
+                        if (
+                            not _industrial_platform_session_state().get("authenticated")
+                            or str(_industrial_platform_session_state().get("current_user") or "").casefold()
+                            != str(username or "").casefold()
+                            or not staging_token
+                        ):
+                            raise PermissionError(
+                                "Sign in to the matching staging account before registering a durable dataset."
+                            )
+                    transform_log = [{
+                        "operation": "normalize_sheet_to_csv",
+                        "source_file": up.name[:240],
+                        "sheet_name": str(sheet_name)[:160],
+                        "status": "completed",
+                    }]
+                    dataset_id = register_dataset(
+                        str(sheet_name),
+                        up.name,
+                        frame,
                         username=username,
                         workspace=current_workspace,
-                        token=str(_industrial_platform_session_state().get("remote_session_token") or ""),
+                        token=staging_token,
+                        transformations=transform_log,
                     )
-                    _industrial_platform_session_state()["data_platform_latest_df"] = df.copy(deep=True)
-                    st.subheader(name); st.write(data_quality_report(df)); st.dataframe(df.head(25),use_container_width=True)
-                    registration = _industrial_platform_session_state().get("data_platform_latest_registration", {})
+                    _industrial_platform_session_state()["data_platform_latest_df"] = frame.copy(deep=True)
+                    registration = _industrial_platform_session_state().get(
+                        "data_platform_latest_registration", {}
+                    )
                     version = registration.get("version")
-                    if version:
-                        st.success(f"Registered dataset {did} · immutable version {version}")
-                    else:
-                        st.success(f"Registered dataset {did}")
-                if str(__import__("durable_account_store").APP_ENVIRONMENT).casefold() == "staging":
-                    from durable_account_store import edge_list_platform_records
-                    current_workspace = str(
-                        _industrial_platform_session_state().get("shoir_workspace_name")
-                        or _industrial_platform_session_state().get("workspace")
-                        or _industrial_platform_session_state().get("active_workspace_name")
-                        or "default"
+                    st.subheader(str(sheet_name))
+                    st.caption(
+                        f"IMPORTED · {len(frame):,} rows · {len(frame.columns):,} columns · "
+                        f"dataset {dataset_id}"
                     )
-                    managed = edge_list_platform_records(
-                        username, str(_industrial_platform_session_state().get("remote_session_token") or ""),
-                        current_workspace, "dataset", 5000,
+                    if version:
+                        st.success(f"Registered immutable dataset version {version}.")
+                    else:
+                        st.success(f"Registered dataset {dataset_id}.")
+                    _render_dataset_profile(
+                        frame,
+                        str(sheet_name),
+                        f"data_platform_import_{hashlib.sha1(str(sheet_name).encode()).hexdigest()[:10]}",
+                    )
+                    with st.expander("Preview imported records", expanded=False):
+                        st.dataframe(frame.head(100), use_container_width=True)
+            except Exception as exc:
+                st.error(f"Dataset import/registration failed safely: {exc}")
+
+        st.markdown("### Registered dataset catalogue")
+        catalog = pd.DataFrame()
+        version_records: list[dict[str, Any]] = []
+        if staging_environment:
+            if (
+                _industrial_platform_session_state().get("authenticated")
+                and str(_industrial_platform_session_state().get("current_user") or "").casefold()
+                == str(username or "").casefold()
+                and staging_token
+                and edge_list_platform_records is not None
+            ):
+                try:
+                    records = edge_list_platform_records(
+                        username,
+                        staging_token,
+                        current_workspace,
+                        "dataset",
+                        5000,
                     )
                     catalog_rows = []
-                    for record in managed:
+                    for record in records:
                         payload = record.get("payload_json") or {}
                         if isinstance(payload, str):
                             payload = json.loads(payload)
-                        catalog_rows.append(payload)
-                    cat = pd.DataFrame(catalog_rows)
-                else:
-                    with sqlite3.connect("enterprise_full_workspace.db") as c:
-                        cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
-                st.dataframe(cat,use_container_width=True,hide_index=True)
-                if not cat.empty and "dataset_id" in cat.columns:
-                    dataset_choices = cat["dataset_id"].dropna().astype(str).drop_duplicates().tolist()
-                    selected_dataset = st.selectbox(
-                        "Load a registered dataset version",
-                        dataset_choices,
-                        key="data_platform_load_dataset_id",
+                        if isinstance(payload, dict):
+                            catalog_rows.append(payload)
+                    catalog = pd.DataFrame(catalog_rows)
+                except Exception as exc:
+                    st.error(f"Could not load the authenticated dataset catalogue: {exc}")
+            else:
+                st.info(
+                    "Sign in to the matching staging account to browse persisted datasets. "
+                    "This route will not fall back to local or guest data."
+                )
+        else:
+            try:
+                with sqlite3.connect("enterprise_full_workspace.db") as conn:
+                    catalog = pd.read_sql(
+                        "SELECT * FROM platform_datasets ORDER BY created_at DESC",
+                        conn,
                     )
-                    if st.button("Load selected dataset into the shared workspace", key="data_platform_load_dataset"):
-                        try:
-                            loaded = load_registered_dataset(
-                                selected_dataset,
-                                username,
-                                current_workspace,
-                                str(_industrial_platform_session_state().get("remote_session_token") or ""),
+            except Exception as exc:
+                st.error(f"Local dataset catalogue is unavailable: {exc}")
+
+        if catalog.empty:
+            st.info("No registered datasets are available in this workspace yet.")
+        else:
+            visible_columns = [
+                column for column in (
+                    "dataset_id", "name", "source_name", "version", "row_count",
+                    "column_count", "data_hash", "registered_at", "updated_at",
+                )
+                if column in catalog.columns
+            ]
+            st.dataframe(
+                catalog[visible_columns] if visible_columns else catalog,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            if staging_environment:
+                if edge_list_platform_records is not None and staging_token:
+                    try:
+                        records = edge_list_platform_records(
+                            username,
+                            staging_token,
+                            current_workspace,
+                            "dataset_version",
+                            10000,
+                        )
+                        for record in records:
+                            payload = record.get("payload_json") or {}
+                            if isinstance(payload, str):
+                                payload = json.loads(payload)
+                            if isinstance(payload, dict):
+                                version_records.append(payload)
+                    except Exception as exc:
+                        st.warning(f"Historical dataset versions could not be loaded: {exc}")
+
+                if "dataset_id" in catalog.columns:
+                    dataset_ids = catalog["dataset_id"].dropna().astype(str).drop_duplicates().tolist()
+                    if dataset_ids:
+                        selected_dataset = st.selectbox(
+                            "Dataset",
+                            dataset_ids,
+                            key="data_platform_load_dataset_id",
+                        )
+                        available_versions = [
+                            row for row in version_records
+                            if str(row.get("dataset_id") or "") == selected_dataset
+                            and isinstance(row.get("version"), (int, float))
+                        ]
+                        available_versions.sort(
+                            key=lambda row: int(row.get("version") or 0),
+                            reverse=True,
+                        )
+                        current_rows = catalog[
+                            catalog["dataset_id"].astype(str) == selected_dataset
+                        ]
+                        current_version = 1
+                        if not current_rows.empty:
+                            try:
+                                current_version = int(current_rows.iloc[0].get("version") or 1)
+                            except (TypeError, ValueError):
+                                current_version = 1
+                        version_numbers = sorted(
+                            {int(row["version"]) for row in available_versions},
+                            reverse=True,
+                        )
+                        if current_version not in version_numbers:
+                            version_numbers.insert(0, current_version)
+                        selected_version = st.selectbox(
+                            "Version",
+                            version_numbers,
+                            index=0,
+                            format_func=lambda value: (
+                                f"Version {value}"
+                                + (" · current" if int(value) == current_version else " · historical")
+                            ),
+                            key=f"data_platform_version_{hashlib.sha1(selected_dataset.encode()).hexdigest()[:10]}",
+                        )
+                        selected_metadata = next(
+                            (
+                                row for row in available_versions
+                                if int(row.get("version") or 0) == int(selected_version)
+                            ),
+                            {},
+                        )
+                        if selected_metadata:
+                            st.caption(
+                                f"SHA-256: {str(selected_metadata.get('data_hash') or '')[:16]}… · "
+                                f"{int(selected_metadata.get('row_count') or 0):,} rows · "
+                                f"{int(selected_metadata.get('column_count') or 0):,} columns"
                             )
-                            st.success(
-                                f"Loaded {selected_dataset} · {len(loaded):,} rows · version "
-                                f"{_industrial_platform_session_state().get('data_platform_latest_version', 1)}"
-                            )
-                            st.dataframe(loaded.head(25), use_container_width=True)
-                        except Exception as load_exc:
-                            st.error(f"Dataset load failed safely: {load_exc}")
-            except Exception as exc: st.error(f"Ingestion failed safely: {exc}")
+                        if st.button(
+                            "Load selected version into the shared workspace",
+                            key=f"data_platform_load_{hashlib.sha1((selected_dataset + str(selected_version)).encode()).hexdigest()[:12]}",
+                        ):
+                            try:
+                                loaded = load_registered_dataset(
+                                    selected_dataset,
+                                    username,
+                                    current_workspace,
+                                    staging_token,
+                                    version=int(selected_version),
+                                )
+                                st.success(
+                                    f"Loaded {selected_dataset} · version {selected_version} · "
+                                    f"{len(loaded):,} rows."
+                                )
+                                _render_dataset_profile(
+                                    loaded,
+                                    selected_dataset,
+                                    f"data_platform_loaded_{hashlib.sha1((selected_dataset + str(selected_version)).encode()).hexdigest()[:10]}",
+                                )
+                                with st.expander("Preview loaded records", expanded=False):
+                                    st.dataframe(loaded.head(100), use_container_width=True)
+                            except Exception as load_exc:
+                                st.error(f"Dataset version load failed safely: {load_exc}")
+            else:
+                st.caption(
+                    "Local development catalogues track metadata only. Durable file upload, "
+                    "historical-version retrieval and shared workspace activation require the staging backend."
+                )
     elif module=="Capital Investment & Engineering Economics":
         cf=st.data_editor(_industrial_platform_session_state().setdefault("capex_df",pd.DataFrame({"Year":[1,2,3,4,5],"Cash Flow":[45000,50000,55000,60000,65000]})),num_rows="dynamic",use_container_width=True,key="capex_editor")
         initial=st.number_input("Initial investment",0.0,100000000.0,180000.0,key="capex_initial"); rate=st.number_input("Discount rate",0.0,1.0,.1,key="capex_rate")
