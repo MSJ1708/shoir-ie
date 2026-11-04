@@ -3,6 +3,8 @@ import {
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizeWorkspaceStateJson,
+  normalizePlatformTier,
+  platformTierAllows,
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
@@ -257,6 +259,14 @@ Deno.test("dataset API package gate follows the canonical tier hierarchy", () =>
     "Enterprise Plus Tier ($399)",
     "Research Pack",
   ];
+  assert(
+    normalizePlatformTier("Research Pack Add-on") === "Research Pack",
+    "Research Pack should be recognized as a separate add-on state.",
+  );
+  assert(
+    normalizePlatformTier("Enterprise Plus Tier ($399)") === "Enterprise Plus",
+    "Enterprise Plus should keep its own tier identity.",
+  );
   const denied = [
     "Starter Tier",
     "Mid-Tier Pro",
