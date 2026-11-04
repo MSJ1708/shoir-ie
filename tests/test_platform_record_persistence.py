@@ -198,3 +198,89 @@ def test_dataset_version_edge_action_uses_authenticated_session_and_atomic_rpc()
     assert 'supabase.rpc(' in action
     assert '"shoir_platform_register_dataset_version"' in action
     assert 'p_workspace_key: workspaceKey' in action
+
+
+
+def test_private_dataset_upload_verifies_hash_and_finalizes_after_signed_upload(monkeypatch):
+    import hashlib
+    import durable_account_store as store
+    import requests
+
+    raw = b"asset_id,throughput_tph\nA-1,12.5\n"
+    calls = []
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
+    def edge(action, payload):
+        calls.append((action, dict(payload)))
+        if action == "dataset_upload_create":
+            return {
+                "ok": True,
+                "upload_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/upload/sign/shoir-industrial-datasets/tmp/workspace/DS-ABCDEF012345/upload.csv?token=opaque",
+                "upload_path": "tmp/workspace/DS-ABCDEF012345/upload.csv",
+            }
+        return {"ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}}
+    monkeypatch.setattr(store, "_edge_call", edge)
+    uploads = []
+    monkeypatch.setattr(
+        requests, "put",
+        lambda url, data, headers, timeout: uploads.append((url, data, headers, timeout)) or
+            type("Response", (), {"status_code": 200, "text": ""})(),
+    )
+    digest = hashlib.sha256(raw).hexdigest()
+    result = store.edge_upload_and_register_dataset_version(
+        "synthetic-user", "opaque-session-token", "plant-a",
+        "DS-ABCDEF012345", "Production", "production.csv", raw,
+        digest, "c" * 64, 1, 2, {"asset_id": {"dtype": "object"}}, [],
+    )
+    assert result["registration"]["version"] == 1
+    assert [item[0] for item in calls] == [
+        "dataset_upload_create", "dataset_version_finalize"
+    ]
+    assert uploads[0][1] == raw
+    assert uploads[0][2]["Content-Type"] == "text/csv"
+    assert calls[1][1]["upload_path"].startswith("tmp/workspace/")
+
+
+def test_private_dataset_upload_rejects_wrong_hash_before_network(monkeypatch):
+    import durable_account_store as store
+
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda *_: pytest.fail("wrong content hash must be rejected before creating an upload URL"),
+    )
+    with pytest.raises(ValueError, match="do not match"):
+        store.edge_upload_and_register_dataset_version(
+            "synthetic-user", "opaque-session-token", "plant-a",
+            "DS-ABCDEF012345", "Production", "production.csv", b"actual bytes",
+            "0" * 64, "c" * 64, 1, 1, {"asset_id": {"dtype": "object"}}, [],
+        )
+
+
+def test_private_dataset_upload_rejects_unexpected_signed_upload_host(monkeypatch):
+    import hashlib
+    import durable_account_store as store
+    import requests
+
+    raw = b"asset_id\nA-1\n"
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda *_: {
+            "ok": True,
+            "upload_url": "https://attacker.invalid/storage/v1/object/upload/sign/shoir-industrial-datasets/file.csv?token=x",
+            "upload_path": "tmp/workspace/DS-ABCDEF012345/file.csv",
+        },
+    )
+    monkeypatch.setattr(
+        requests, "put",
+        lambda *_args, **_kwargs: pytest.fail("unexpected upload host must not be contacted"),
+    )
+    with pytest.raises(RuntimeError, match="unexpected signed upload URL"):
+        store.edge_upload_and_register_dataset_version(
+            "synthetic-user", "opaque-session-token", "plant-a",
+            "DS-ABCDEF012345", "Production", "production.csv", raw,
+            hashlib.sha256(raw).hexdigest(), "c" * 64, 1, 1,
+            {"asset_id": {"dtype": "object"}}, [],
+        )
