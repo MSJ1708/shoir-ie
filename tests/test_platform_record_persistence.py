@@ -495,3 +495,21 @@ def test_historical_download_edge_action_selects_immutable_version_record():
     assert '"dataset_version"' in action
     assert 'datasetId + ":v" + requestedVersion' in action
     assert '.eq("workspace_key", workspaceKey)' in action
+
+
+
+def test_dataset_finalize_recomputes_version_fingerprint_server_side():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    action = source.split('if (action === "dataset_version_finalize") {', 1)[1].split(
+        'if (action === "dataset_version_register") {', 1
+    )[0]
+    assert "const expectedFingerprint = await sha256Hex(" in action
+    assert "stablePlatformJson({" in action
+    assert "dataset_id: datasetId" in action
+    assert "data_hash: dataHash" in action
+    assert "schema," in action
+    assert "transformations," in action
+    assert "expectedFingerprint !== fingerprint" in action
