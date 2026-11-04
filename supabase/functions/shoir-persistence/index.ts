@@ -996,13 +996,20 @@ Deno.serve(async (req) => {
         return sendResponse({ error: "Platform entity key is invalid." }, 400);
       }
       const requestedLimit = Number(body.limit || 100);
+      const requestedOffset = Number(body.offset || 0);
       if (
         !Number.isInteger(requestedLimit) || requestedLimit < 1 ||
         requestedLimit > 200
       ) {
         return sendResponse({
-          error: "Platform record limit must be between 1 and 200.",
+          error: "Platform record page size must be between 1 and 200.",
         }, 400);
+      }
+      if (
+        !Number.isSafeInteger(requestedOffset) || requestedOffset < 0 ||
+        requestedOffset > 100000
+      ) {
+        return sendResponse({ error: "Platform record offset is invalid." }, 400);
       }
       let query = supabase.from("shoir_platform_records")
         .select(
@@ -1010,12 +1017,20 @@ Deno.serve(async (req) => {
         )
         .eq("workspace_key", workspaceKey)
         .order("updated_at", { ascending: false })
-        .limit(requestedLimit);
+        .range(requestedOffset, requestedOffset + requestedLimit);
       if (recordType) query = query.eq("record_type", recordType);
       if (entityKey) query = query.eq("entity_key", entityKey);
       const { data, error } = await query;
       if (error) throw error;
-      return sendResponse({ ok: true, records: data || [] });
+      const page = data || [];
+      const hasMore = page.length > requestedLimit;
+      const records = hasMore ? page.slice(0, requestedLimit) : page;
+      return sendResponse({
+        ok: true,
+        records,
+        has_more: hasMore,
+        next_offset: requestedOffset + records.length,
+      });
     }
 
     if (action === "workspace_load") {
