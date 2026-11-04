@@ -332,3 +332,51 @@ def test_data_platform_route_has_stable_t020_entitlement_guard_and_visual_panel(
     assert "def _render_dataset_profile(" in source
     assert "st.plotly_chart(" in source
     assert "data_platform_processed_upload_fingerprint" in source
+
+
+
+def test_dataset_profile_renderer_calls_plotly_for_each_generated_figure(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from industrial_platform import _render_dataset_profile
+
+    rendered = []
+    metrics = []
+    def metric(label, value):
+        metrics.append((label, value))
+    fake_streamlit = SimpleNamespace(
+        columns=lambda count: [SimpleNamespace(metric=metric) for _ in range(count)],
+        warning=lambda message: None,
+        success=lambda message: None,
+        caption=lambda message: None,
+        plotly_chart=lambda figure, **kwargs: rendered.append((figure, kwargs)),
+    )
+    monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2", "A-3"],
+        "throughput_tph": [8.0, 11.0, None],
+    })
+    _render_dataset_profile(frame, "Production", "render-test")
+    assert len(metrics) == 4
+    assert len(rendered) == len(_dataset_profile_figures(frame, "Production"))
+    assert len(rendered) == 2
+    assert all(call[1]["use_container_width"] is True for call in rendered)
+    assert all(call[1]["key"].startswith("render-test_") for call in rendered)
+
+
+def test_industrial_data_platform_is_reachable_from_original_app_and_workbench():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+    workbench_source = (
+        root / "pages" / "Industrial_Engineering_Workbench.py"
+    ).read_text(encoding="utf-8")
+    platform_source = (root / "industrial_platform.py").read_text(encoding="utf-8")
+
+    assert "PLATFORM_CATALOG" in app_source
+    assert "render_industrial_module(mod" in app_source
+    assert '"Industrial Data Platform"' in platform_source
+    assert "from industrial_platform import render_module" in workbench_source
+    assert "render_module(selected, RAW_TIER, USER)" in workbench_source
+    assert 'elif module=="Industrial Data Platform":' in platform_source
