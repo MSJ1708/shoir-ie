@@ -316,3 +316,61 @@ def test_private_dataset_storage_migration_excludes_bucket_from_permissive_polic
     assert "bucket_id <> 'shoir-industrial-datasets'" in source
     assert "REVOKE ALL ON FUNCTION public.shoir_platform_register_dataset_version_with_storage" in source
     assert "TO service_role" in source
+
+
+
+def test_private_dataset_download_checks_signed_host_and_content_hash(monkeypatch):
+    import hashlib
+    import durable_account_store as store
+    import requests
+
+    content = b"asset_id,units\nA-1,10\n"
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda action, payload: {
+            "ok": True,
+            "download_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/sign/shoir-industrial-datasets/workspace/dataset/file.csv?token=x",
+            "data_hash": hashlib.sha256(content).hexdigest(),
+            "version": 2,
+            "row_count": 1,
+            "column_count": 2,
+        },
+    )
+    monkeypatch.setattr(
+        requests, "get",
+        lambda *_args, **_kwargs: type("Response", (), {
+            "status_code": 200, "content": content, "text": ""
+        })(),
+    )
+    raw, metadata = store.edge_download_dataset_version(
+        "synthetic-user", "opaque-session-token", "plant-a", "DS-ABCDEF012345"
+    )
+    assert raw == content
+    assert metadata["version"] == 2
+
+
+def test_private_dataset_download_rejects_hash_mismatch(monkeypatch):
+    import durable_account_store as store
+    import requests
+
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda *_: {
+            "download_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/sign/shoir-industrial-datasets/workspace/file.csv?token=x",
+            "data_hash": "0" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        requests, "get",
+        lambda *_args, **_kwargs: type("Response", (), {
+            "status_code": 200, "content": b"wrong", "text": ""
+        })(),
+    )
+    with pytest.raises(RuntimeError, match="SHA-256 integrity"):
+        store.edge_download_dataset_version(
+            "synthetic-user", "opaque-session-token", "plant-a", "DS-ABCDEF012345"
+        )
