@@ -252,7 +252,7 @@ async function getSession(
   return row;
 }
 function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
-  return !platformTierAllows(row.tier, "Professional");
+  return !platformTierAllows(row.tier, "Enterprise");
 }
 
 function datasetEntitlementDenial(
@@ -265,7 +265,7 @@ function datasetEntitlementDenial(
   if (!datasetEntitlementDenied(row)) return null;
   return {
     error: "FEATURE_REQUIRES_PROFESSIONAL",
-    required_tier: "Professional",
+    required_tier: "Enterprise",
     current_tier: String(row.tier || "Starter"),
   };
 }
