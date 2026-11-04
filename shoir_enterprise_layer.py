@@ -436,6 +436,7 @@ def record_artifact(
     payload_json = _json(body)
     stamp = now_iso()
     content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    safe_staging_body = _canonical_safe(body)
     staging_saved = _staging_platform_save(
         username,
         workspace,
@@ -444,7 +445,7 @@ def record_artifact(
         {
             "artifact_type": str(artifact_type)[:100],
             "name": str(name)[:240],
-            "payload": body,
+            "payload": safe_staging_body,
             "content_hash": content_hash,
             "owner": username,
             "created_at": stamp,
@@ -847,6 +848,14 @@ def build_control_tower_health_from_canonical(username: str, workspace: str = "d
 
 
 def list_artifacts(username: str, artifact_type: Optional[str] = None, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "artifact", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if artifact_type and not frame.empty:
+            frame = frame[frame["artifact_type"].astype(str) == str(artifact_type)]
+        if "artifact_id" not in frame.columns and "entity_key" in frame.columns:
+            frame["artifact_id"] = frame["entity_key"]
+        return frame.head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.artifacts" if _remote() else "shoir_ent_artifacts"
@@ -864,6 +873,21 @@ def _save_twin_asset(username: str, asset_id: str, state: Mapping[str, Any], sou
     wid = workspace_key(username, workspace)
     stamp = now_iso()
     body = _json(state)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "twin_asset",
+        str(asset_id),
+        {
+            "asset_id": str(asset_id),
+            "state_json": _canonical_safe(state),
+            "source": str(source)[:120],
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -895,7 +919,6 @@ def save_twin_snapshot(
     workspace: str = "default",
 ) -> str:
     """Update live asset state and append a replayable immutable snapshot."""
-    ensure_enterprise_schema()
     if isinstance(states, pd.DataFrame):
         records = states.to_dict("records")
     elif isinstance(states, Mapping):
@@ -913,6 +936,22 @@ def save_twin_snapshot(
     sid = "TWS-" + uuid.uuid4().hex[:14].upper()
     stamp = now_iso()
     body = _json(normalized)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "twin_snapshot",
+        sid,
+        {
+            "snapshot_id": sid,
+            "scenario_name": str(scenario_name)[:160],
+            "state_json": _canonical_safe(normalized),
+            "created_by": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return sid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -937,6 +976,23 @@ def save_twin_snapshot(
 
 
 def load_twin_state(username: str, workspace: str = "default", limit: int = 500) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "twin_asset", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        rows = []
+        for row in frame.to_dict("records"):
+            payload = row.get("state_json")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+            item = dict(payload) if isinstance(payload, Mapping) else {}
+            item.setdefault("Asset", row.get("asset_id") or row.get("entity_key"))
+            item["Source"] = row.get("source", "")
+            item["Updated At"] = row.get("updated_at", "")
+            rows.append(item)
+        return pd.DataFrame(rows)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_assets" if _remote() else "shoir_ent_twin_assets"
@@ -970,10 +1026,27 @@ def save_twin_scenario(
     notes: str = "",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     sid = "TWSCN-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "twin_scenario",
+        str(name).strip()[:160],
+        {
+            "scenario_id": sid,
+            "name": str(name)[:160],
+            "parent_name": str(parent_name)[:160],
+            "parameters_json": _canonical_safe(parameters),
+            "notes": str(notes)[:4000],
+            "created_by": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return sid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -1002,6 +1075,9 @@ def save_twin_scenario(
 
 
 def list_twin_scenarios(username: str, workspace: str = "default") -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "twin_scenario", 200)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_scenarios" if _remote() else "shoir_ent_twin_scenarios"
@@ -1034,6 +1110,12 @@ def twin_what_if(df: pd.DataFrame, changes: Mapping[str, float]) -> tuple[pd.Dat
 
 
 def twin_replay(username: str, scenario_name: Optional[str] = None, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "twin_snapshot", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if scenario_name and not frame.empty:
+            frame = frame[frame["scenario_name"].astype(str) == str(scenario_name)]
+        return frame.head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_snapshots" if _remote() else "shoir_ent_twin_snapshots"
