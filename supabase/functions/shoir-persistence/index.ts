@@ -1188,6 +1188,33 @@ Deno.serve(async (req) => {
           422,
         );
       }
+      let csvShape;
+      try {
+        csvShape = inspectCsvShape(bytes);
+      } catch (shapeError) {
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        throw shapeError;
+      }
+      const schemaColumns = Object.keys(schema as Record<string, unknown>);
+      if (
+        csvShape.rowCount !== rowCount ||
+        csvShape.columnCount !== columnCount ||
+        schemaColumns.length !== csvShape.columnCount ||
+        csvShape.headers.some((header) => !schemaColumns.includes(header))
+      ) {
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        return sendResponse(
+          {
+            error:
+              "Dataset row count, column count or schema does not match the uploaded CSV.",
+          },
+          422,
+        );
+      }
       const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
         ".csv";
       const bucket = supabase.storage.from("shoir-industrial-datasets");
