@@ -1119,7 +1119,10 @@ Deno.serve(async (req) => {
       );
       if (expectedFingerprint !== fingerprint) {
         return sendResponse(
-          { error: "Dataset version fingerprint does not match the submitted metadata." },
+          {
+            error:
+              "Dataset version fingerprint does not match the submitted metadata.",
+          },
           422,
         );
       }
