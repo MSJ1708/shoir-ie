@@ -28,6 +28,34 @@ def test_canonical_identity_survives_display_name_rename(tmp_path, monkeypatch):
         )
         conn.commit()
 
+    renamed_entity_id, rename_event_id = layer.persist_thread_node_rename(
+        "tester",
+        "site-a",
+        {
+            "node_id": "AST-LEGACY-1001",
+            "node_type": "Asset",
+            "name": "Main Press",
+            "source": "asset:1001",
+            "module": "Manufacturing",
+            "status": "Observed",
+            "metadata": {
+                "display_name_override": True,
+                "name_aliases": ["Press 1001"],
+            },
+        },
+        previous_name="Press 1001",
+    )
+    assert renamed_entity_id == legacy_entity_id
+    with layer._local_connect() as conn:
+        event = conn.execute(
+            "SELECT event_type,entity_id,payload_json FROM shoir_ent_canonical_events WHERE event_id=?",
+            (rename_event_id,),
+        ).fetchone()
+    assert event is not None
+    assert event[0] == "digital_thread_node_renamed"
+    assert event[1] == legacy_entity_id
+    assert json.loads(event[2])["canonical_id_preserved"] is True
+
     first_id = layer.upsert_canonical_entity(
         "tester", "Asset", "Main Press", "asset:1001",
         state={"thread_node_id": "AST-LEGACY-1001", "metadata": {"display_name_override": True}},
