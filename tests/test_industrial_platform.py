@@ -392,3 +392,50 @@ def test_industrial_data_platform_is_reachable_from_original_app_and_workbench()
     assert "from industrial_platform import render_module" in workbench_source
     assert "render_module(selected, RAW_TIER, USER)" in workbench_source
     assert 'elif module=="Industrial Data Platform":' in platform_source
+
+
+
+def test_shared_dataset_activation_delegates_to_existing_application_shell(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import industrial_platform as platform
+
+    calls = []
+    fake_shell = SimpleNamespace(
+        _activate_shared_dataset=lambda df, **kwargs: calls.append(
+            (df.copy(deep=True), dict(kwargs))
+        )
+    )
+    monkeypatch.setitem(sys.modules, "shoir_application_shell", fake_shell)
+    frame = pd.DataFrame({"asset_id": ["A-1"], "rate_tph": [9.5]})
+    platform._activate_dataset_for_shared_workspace(
+        frame,
+        filename="production.xlsx",
+        sheet="Line 1",
+        signature="a" * 64,
+    )
+    assert len(calls) == 1
+    assert calls[0][0].equals(frame)
+    assert calls[0][1] == {
+        "filename": "production.xlsx",
+        "sheet": "Line 1",
+        "signature": "a" * 64,
+    }
+
+
+def test_industrial_data_platform_entitlement_matches_existing_catalog_and_tool():
+    from industrial_platform import PLATFORM_CATALOG, tier_allows
+    from shoir_tool_registry import get_tool, require_tool_access
+
+    entry = next(
+        item for item in PLATFORM_CATALOG
+        if item["name"] == "Industrial Data Platform"
+    )
+    tool = get_tool("T020")
+    assert entry["tier"] == "Enterprise"
+    assert tool is not None
+    assert tool["target_minimum_tier"] == "Enterprise"
+    assert tier_allows("Enterprise", entry["tier"])
+    with pytest.raises(PermissionError):
+        require_tool_access("Professional", "T020")
+    require_tool_access("Enterprise", "T020")
