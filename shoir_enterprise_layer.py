@@ -946,7 +946,7 @@ def canonical_events_frame(username: str, workspace: str = "default", limit: int
             frame["event_id"] = frame.get("entity_key", "")
         if "workspace_id" not in frame.columns:
             frame["workspace_id"] = workspace_key(username, workspace)
-        return frame.head(max(1, min(10000, int(limit)))
+        return frame.head(max(1, min(10000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_events" if _remote() else "shoir_ent_canonical_events"
