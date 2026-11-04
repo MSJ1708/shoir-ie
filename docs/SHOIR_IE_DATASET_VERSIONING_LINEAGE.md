@@ -31,6 +31,8 @@ The migration `20261104192112_shoir_atomic_dataset_version_registry.sql` was app
 
 - The staging upload path now stores the normalized CSV artifact in the private `shoir-industrial-datasets` bucket, using a signed upload URL, a temporary object path, server-side SHA-256 verification, and a content-addressed final object key.
 - The raw original XLSX workbook is not preserved by this particular dataset registry path; the normalized tabular CSV representation is stored. Excel Intelligence separately preserves source workbooks through its own workflow.
+- Uploads currently use a bounded single-request signed upload (50 MiB maximum); resumable/TUS upload and progress recovery are not yet implemented.
+- A verified content-addressed object can be left orphaned if the subsequent metadata transaction fails. A scheduled, reference-aware orphan cleanup process is not yet implemented; do not delete objects by age alone.
 - Downstream model and run records are not yet automatically invalidated or linked to every dataset version.
 - This migration has not yet passed the full clean-database replay workflow and hosted authenticated staging acceptance.
 - No production schema, Edge Function, secrets, or customer data were changed.
@@ -44,4 +46,4 @@ The migration `20261104192112_shoir_atomic_dataset_version_registry.sql` was app
 5. Cross-workspace and cross-user access is denied.
 6. A hosted disposable-account workflow registers two versions, loads a version after a fresh session, and verifies private object access.
 7. Hosted disposable-account acceptance verifies signed upload, server-side byte hashing, private object retrieval after a fresh session, and no cross-workspace access.
-8. Raw original-workbook retention and model/run downstream invalidation/lineage are separately implemented and tested before claiming complete dataset lifecycle management.
+8. Raw original-workbook retention, resumable uploads, reference-aware orphan cleanup, and model/run downstream invalidation/lineage are separately implemented and tested before claiming complete dataset lifecycle management.
