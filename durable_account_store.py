@@ -1215,6 +1215,50 @@ def _validate_platform_record_payload(payload: Mapping[str, Any]) -> dict[str, A
     return value
 
 
+def edge_download_dataset_version(
+    username: str,
+    token: str,
+    workspace: str,
+    dataset_id: str,
+) -> tuple[bytes, dict[str, Any]]:
+    """Download a registered dataset from private storage and verify its SHA-256."""
+    import hashlib
+    import requests
+    from urllib.parse import urlsplit
+
+    if not str(username or "").strip() or not str(token or ""):
+        raise PermissionError("An authenticated workspace session is required.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Managed dataset download helper is restricted to staging.")
+    result = _edge_call("dataset_download_url", {
+        "username": str(username).strip(),
+        "token": str(token),
+        "workspace": str(workspace or "default").strip(),
+        "dataset_id": str(dataset_id),
+    })
+    signed_url = str(result.get("download_url") or "")
+    parsed = urlsplit(signed_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
+        or not parsed.path.startswith("/storage/v1/object/sign/shoir-industrial-datasets/")
+        or not parsed.query
+    ):
+        raise RuntimeError("Storage provider returned an unexpected signed download URL.")
+    response = requests.get(signed_url, timeout=(10, 90))
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Private dataset download failed ({response.status_code}): {response.text[:300]}"
+        )
+    content = response.content
+    if not content or len(content) > 50 * 1024 * 1024:
+        raise RuntimeError("Downloaded dataset is empty or exceeds the 50 MiB limit.")
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != str(result.get("data_hash") or "").lower():
+        raise RuntimeError("Downloaded dataset failed its SHA-256 integrity check.")
+    return content, result
+
+
 def edge_upload_and_register_dataset_version(
     username: str,
     token: str,
