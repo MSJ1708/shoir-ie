@@ -1,7 +1,5 @@
 # Shoir-IE Release Decision — 2026-11-04
 
-<badge-placeholder></badge-placeholder>
-
 **Decision: NO-GO for production deployment and paid customer launch.**  
 **Scope:** current staging candidate `f00da78a01e2ecf07fe263ddf570cbc1e075ac31` and staging Supabase `hfhrosthswcybccepmak`.  
 **Production mutation:** none.
