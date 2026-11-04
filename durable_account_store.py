@@ -1173,7 +1173,7 @@ _PLATFORM_RECORD_TYPES = {
     "security_policy",
 }
 _PLATFORM_FORBIDDEN_KEY = __import__("re").compile(
-    r"(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport)",
+    r"(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\\bdob\\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)",
     __import__("re").IGNORECASE,
 )
 
