@@ -214,6 +214,17 @@ def log_security_event(username: str, event_type: str, details: str="", db_path:
     except Exception:
         pass
 
+def _industrial_platform_session_state():
+    """Return Streamlit session state lazily so calculation imports remain headless-safe."""
+    try:
+        import streamlit
+    except ImportError as exc:
+        raise RuntimeError(
+            "The authenticated Streamlit workspace is not available in this runtime."
+        ) from exc
+    return streamlit.session_state
+
+
 def register_dataset(
     name: str,
     source_name: str,
@@ -281,9 +292,9 @@ def register_dataset(
             transformations=transform_log,
         )
         registration = result.get("registration") or {}
-        st.session_state["data_platform_latest_registration"] = dict(registration)
-        st.session_state["data_platform_latest_dataset_id"] = dataset_id
-        st.session_state["data_platform_latest_version"] = int(registration.get("version") or 1)
+        _industrial_platform_session_state()["data_platform_latest_registration"] = dict(registration)
+        _industrial_platform_session_state()["data_platform_latest_dataset_id"] = dataset_id
+        _industrial_platform_session_state()["data_platform_latest_version"] = int(registration.get("version") or 1)
         return dataset_id
 
     with sqlite3.connect(db_path) as conn:
@@ -316,12 +327,12 @@ def load_registered_dataset(
         raise RuntimeError("Downloaded dataset row count does not match its registered metadata.")
     if len(frame.columns) != int(metadata.get("column_count") or 0):
         raise RuntimeError("Downloaded dataset column count does not match its registered metadata.")
-    st.session_state["data_platform_latest_df"] = frame.copy(deep=True)
-    st.session_state["data_platform_latest_dataset_id"] = dataset_id
-    st.session_state["data_platform_latest_version"] = int(metadata.get("version") or 1)
-    st.session_state["universal_active_dataset"] = frame.copy(deep=True)
-    st.session_state["shoir_data_version"] = str(metadata.get("data_hash") or "")[:12]
-    st.session_state["shoir_data_provenance"] = "IMPORTED"
+    _industrial_platform_session_state()["data_platform_latest_df"] = frame.copy(deep=True)
+    _industrial_platform_session_state()["data_platform_latest_dataset_id"] = dataset_id
+    _industrial_platform_session_state()["data_platform_latest_version"] = int(metadata.get("version") or 1)
+    _industrial_platform_session_state()["universal_active_dataset"] = frame.copy(deep=True)
+    _industrial_platform_session_state()["shoir_data_version"] = str(metadata.get("data_hash") or "")[:12]
+    _industrial_platform_session_state()["shoir_data_provenance"] = "IMPORTED"
     return frame
 
 
@@ -1088,12 +1099,12 @@ def _module_slug(module: str) -> str:
 
 def module_reset(module: str, st) -> None:
     for key in MODULE_TABLE_KEYS.get(module, []):
-        st.session_state.pop(key, None)
-        st.session_state.pop(key.replace("_df","_editor"), None)
+        _industrial_platform_session_state().pop(key, None)
+        _industrial_platform_session_state().pop(key.replace("_df","_editor"), None)
     slug=_module_slug(module)
-    for key in list(st.session_state.keys()):
+    for key in list(_industrial_platform_session_state().keys()):
         if str(key).startswith(f"{slug}_"):
-            st.session_state.pop(key,None)
+            _industrial_platform_session_state().pop(key,None)
 
 def render_module_data_exchange(module: str, st, tier: str, username: str) -> None:
     """Provide one consistent, safe import/activation surface for every module.
@@ -1104,7 +1115,7 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
     """
     slug = _module_slug(module)
     table_keys = list(MODULE_TABLE_KEYS.get(module, []))
-    target_exists = any(isinstance(st.session_state.get(key), pd.DataFrame) for key in table_keys)
+    target_exists = any(isinstance(_industrial_platform_session_state().get(key), pd.DataFrame) for key in table_keys)
 
     with st.expander("📥 Import / activate module data", expanded=not target_exists):
         st.caption(
@@ -1128,14 +1139,14 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
                 if imported_frame.empty:
                     st.warning("The selected sheet contains no rows.")
                 else:
-                    st.session_state[f"{slug}_import_df"] = imported_frame
-                    st.session_state[f"{slug}_import_source"] = f"{up.name} · {sheet}"
+                    _industrial_platform_session_state()[f"{slug}_import_df"] = imported_frame
+                    _industrial_platform_session_state()[f"{slug}_import_source"] = f"{up.name} · {sheet}"
             except Exception as exc:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
 
-        imported = st.session_state.get(f"{slug}_import_df")
+        imported = _industrial_platform_session_state().get(f"{slug}_import_df")
         if isinstance(imported, pd.DataFrame) and not imported.empty:
-            source = st.session_state.get(f"{slug}_import_source", "Imported dataset")
+            source = _industrial_platform_session_state().get(f"{slug}_import_source", "Imported dataset")
             st.success(f"{source} · {len(imported):,} rows × {len(imported.columns):,} columns staged.")
             st.dataframe(imported.head(12), use_container_width=True, hide_index=True)
 
@@ -1145,16 +1156,16 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
                     if st.button("🔄 Apply to module tables", use_container_width=True, key=f"{slug}_apply_import"):
                         applied = 0
                         for key in table_keys:
-                            target = st.session_state.get(key)
+                            target = _industrial_platform_session_state().get(key)
                             if isinstance(target, pd.DataFrame) and len(set(imported.columns) & set(target.columns)):
-                                st.session_state[key] = align_imported_table(imported, target)
-                                st.session_state.pop(key.replace("_df", "_editor"), None)
+                                _industrial_platform_session_state()[key] = align_imported_table(imported, target)
+                                _industrial_platform_session_state().pop(key.replace("_df", "_editor"), None)
                                 applied += 1
                         if applied:
-                            st.session_state["universal_active_dataset"] = imported.copy(deep=True)
-                            st.session_state["industrial_workbook_current_df"] = imported.copy(deep=True)
-                            st.session_state["shoir_data_status"] = "IMPORTED"
-                            st.session_state["shoir_data_source"] = source
+                            _industrial_platform_session_state()["universal_active_dataset"] = imported.copy(deep=True)
+                            _industrial_platform_session_state()["industrial_workbook_current_df"] = imported.copy(deep=True)
+                            _industrial_platform_session_state()["shoir_data_status"] = "IMPORTED"
+                            _industrial_platform_session_state()["shoir_data_source"] = source
                             st.success(f"Imported data applied to {applied} compatible module table(s).")
                             st.rerun()
                         else:
@@ -1165,12 +1176,12 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
 
             with actions[1]:
                 if st.button("⚡ Activate as shared dataset", type="primary", use_container_width=True, key=f"{slug}_activate_import"):
-                    st.session_state["universal_active_dataset"] = imported.copy(deep=True)
-                    st.session_state["industrial_workbook_current_df"] = imported.copy(deep=True)
-                    st.session_state["shoir_data_status"] = "IMPORTED"
-                    st.session_state["shoir_data_source"] = source
-                    st.session_state["shoir_data_source_key"] = f"module:{slug}"
-                    st.session_state["shoir_data_version"] = f"module-import:{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                    _industrial_platform_session_state()["universal_active_dataset"] = imported.copy(deep=True)
+                    _industrial_platform_session_state()["industrial_workbook_current_df"] = imported.copy(deep=True)
+                    _industrial_platform_session_state()["shoir_data_status"] = "IMPORTED"
+                    _industrial_platform_session_state()["shoir_data_source"] = source
+                    _industrial_platform_session_state()["shoir_data_source_key"] = f"module:{slug}"
+                    _industrial_platform_session_state()["shoir_data_version"] = f"module-import:{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                     st.success("Dataset activated in the shared industrial workspace. Downstream shared surfaces can now reuse it.")
 
     with st.expander("⚙️ Module workspace controls", expanded=False):
@@ -1247,23 +1258,23 @@ def sanitize_module_session_state(st) -> None:
         "factory3d_dist": "factory3d_dist_result",
     }
     for old_key, new_key in legacy_result_keys.items():
-        if old_key in st.session_state:
-            legacy_value = st.session_state.get(old_key)
+        if old_key in _industrial_platform_session_state():
+            legacy_value = _industrial_platform_session_state().get(old_key)
             # A prior release sometimes used the same key for a button and a result.
             # Preserve a valid DataFrame under the new key; otherwise discard only the
             # incompatible widget scalar/object.
-            if isinstance(legacy_value, pd.DataFrame) and new_key not in st.session_state:
-                st.session_state[new_key] = legacy_value.copy(deep=True)
+            if isinstance(legacy_value, pd.DataFrame) and new_key not in _industrial_platform_session_state():
+                _industrial_platform_session_state()[new_key] = legacy_value.copy(deep=True)
             if not isinstance(legacy_value, pd.DataFrame):
-                st.session_state.pop(old_key, None)
+                _industrial_platform_session_state().pop(old_key, None)
 
-    if "quality_spc" in st.session_state and not isinstance(st.session_state.get("quality_spc"), dict):
-        st.session_state.pop("quality_spc", None)
-    if "quality_limits" in st.session_state and not isinstance(st.session_state.get("quality_limits"), dict):
-        st.session_state.pop("quality_limits", None)
+    if "quality_spc" in _industrial_platform_session_state() and not isinstance(_industrial_platform_session_state().get("quality_spc"), dict):
+        _industrial_platform_session_state().pop("quality_spc", None)
+    if "quality_limits" in _industrial_platform_session_state() and not isinstance(_industrial_platform_session_state().get("quality_limits"), dict):
+        _industrial_platform_session_state().pop("quality_limits", None)
 
     # Legacy AGV collections can contain records from older schemas.
-    fleet = st.session_state.get("agv_fleet")
+    fleet = _industrial_platform_session_state().get("agv_fleet")
     if isinstance(fleet, list):
         normalized = []
         seen = set()
@@ -1288,7 +1299,7 @@ def sanitize_module_session_state(st) -> None:
                 "x": x,
                 "y": y,
             })
-        st.session_state["agv_fleet"] = normalized
+        _industrial_platform_session_state()["agv_fleet"] = normalized
 
 def render_module(module: str, tier: str, username: str):
     import streamlit as st
@@ -1306,9 +1317,9 @@ def render_module(module: str, tier: str, username: str):
         # even when this function is called outside the Workbench selector.
         entitlement = excel_intelligence_entitlement_config()
         actor = str(username or "").strip()
-        session_actor = str(st.session_state.get("current_user") or "").strip()
+        session_actor = str(_industrial_platform_session_state().get("current_user") or "").strip()
         if (
-            st.session_state.get("authenticated") is not True
+            _industrial_platform_session_state().get("authenticated") is not True
             or actor.casefold() in {"", "guest", "guest visitor", "anonymous"}
             or session_actor.casefold() != actor.casefold()
         ):
@@ -1428,12 +1439,12 @@ def render_module(module: str, tier: str, username: str):
         render_decision_center_studio(tier, username)
         return
     if module=="Engineering Validation Center":
-        df=st.session_state.setdefault("validation_df",pd.DataFrame({"Metric":["Cost","Service Level","Capacity"],"Value":[100000,95,12000],"Unit":["USD","%","units"]}))
+        df=_industrial_platform_session_state().setdefault("validation_df",pd.DataFrame({"Metric":["Cost","Service Level","Capacity"],"Value":[100000,95,12000],"Unit":["USD","%","units"]}))
         edited=st.data_editor(df,num_rows="dynamic",use_container_width=True,key="validation_editor")
         if st.button("🔎 Validate Model",type="primary",use_container_width=True,key="validation_run"):
-            res=validate_table(edited,required=["Metric","Value"]); st.session_state["validation_result"]=res
-        if st.session_state.get("validation_result"):
-            res=st.session_state.validation_result; st.metric("Data Quality",f'{res["quality"]["score"]:.1f}%'); st.write(res)
+            res=validate_table(edited,required=["Metric","Value"]); _industrial_platform_session_state()["validation_result"]=res
+        if _industrial_platform_session_state().get("validation_result"):
+            res=_industrial_platform_session_state().validation_result; st.metric("Data Quality",f'{res["quality"]["score"]:.1f}%'); st.write(res)
         st.dataframe(edited,use_container_width=True)
         render_export_bar(module,[("Validation Table",edited)],tier,username=username)
     elif module=="Industrial Data Model & Digital Thread":
@@ -1444,8 +1455,8 @@ def render_module(module: str, tier: str, username: str):
             entity_type=st.selectbox("Entity type",["Product","SKU","Customer","Supplier","Facility","Machine","Employee","Material","Route","Operation","Order","Process","Quality","Maintenance","Energy","Cost","Scenario","Decision","Outcome"],key="thread_entity_type_v2")
             id_col=st.text_input("Identity column","ID",key="thread_id_col_v2")
             default_entity=pd.DataFrame({"ID":["FAC-001","MCH-001","WO-001"],"name":["Riyadh DC","CNC-01","WO-001"],"status":["Active","Active","Released"],"owner":["Operations","Maintenance","Production"],"capacity":[1000,80,100],"unit":["units/day","units/hour","units"]})
-            df=st.data_editor(st.session_state.setdefault("thread_df",default_entity),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_editor_v2")
-            st.session_state["thread_df"]=df.copy(deep=True)
+            df=st.data_editor(_industrial_platform_session_state().setdefault("thread_df",default_entity),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_editor_v2")
+            _industrial_platform_session_state()["thread_df"]=df.copy(deep=True)
             q=data_quality_report(df)
             m1,m2,m3,m4=st.columns(4)
             m1.metric("Rows",f"{len(df):,}"); m2.metric("Fields",f"{len(df.columns):,}"); m3.metric("Quality",f"{q['score']:.1f}%")
@@ -1465,8 +1476,8 @@ def render_module(module: str, tier: str, username: str):
                 entity_frame=pd.read_sql("SELECT entity_id,entity_type,name FROM industrial_entities ORDER BY entity_type,name",con)
             entity_ids=entity_frame["entity_id"].astype(str).tolist() if not entity_frame.empty else ["Facility:FAC-001","Machine:MCH-001"]
             default_rel=pd.DataFrame({"From":[entity_ids[0]],"Relationship":["contains"],"To":[entity_ids[1] if len(entity_ids)>1 else entity_ids[0]],"Evidence":["User-entered relationship"]})
-            rel=st.data_editor(st.session_state.setdefault("thread_rel",default_rel),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_rel_editor_v2")
-            st.session_state["thread_rel"]=rel.copy(deep=True)
+            rel=st.data_editor(_industrial_platform_session_state().setdefault("thread_rel",default_rel),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_rel_editor_v2")
+            _industrial_platform_session_state()["thread_rel"]=rel.copy(deep=True)
             persisted_rel=load_entity_relationships()
             a,b,c2=st.columns(3); a.metric("Registered entities",f"{len(entity_ids):,}"); b.metric("Persisted links",f"{len(persisted_rel):,}"); c2.metric("Relation types",f"{persisted_rel['Relationship'].nunique() if not persisted_rel.empty else 0:,}")
             if st.button("💾 Save explicit relationships",type="primary",use_container_width=True,key="thread_rel_save_v2"):
@@ -1515,19 +1526,19 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Advanced Planning & Scheduling":
         tabs=st.tabs(["Demand / MRP","Finite Schedule","Dispatch"])
         with tabs[0]:
-            demand=st.data_editor(st.session_state.setdefault("aps_demand",pd.DataFrame({"Product":["P-100","P-200"],"DemandQty":[1000,600]})),num_rows="dynamic",use_container_width=True,key="aps_demand_editor")
-            bom=st.data_editor(st.session_state.setdefault("aps_bom",pd.DataFrame({"Parent":["P-100","P-200"],"Component":["C-1","C-2"],"QtyPer":[2,3]})),num_rows="dynamic",use_container_width=True,key="aps_bom_editor")
-            if st.button("🧮 Explode MRP",use_container_width=True,key="aps_mrp"): st.session_state["aps_mrp_result"]=mrp_explode(demand,bom)
-            if "aps_mrp_result" in st.session_state: st.dataframe(st.session_state["aps_mrp_result"],use_container_width=True)
+            demand=st.data_editor(_industrial_platform_session_state().setdefault("aps_demand",pd.DataFrame({"Product":["P-100","P-200"],"DemandQty":[1000,600]})),num_rows="dynamic",use_container_width=True,key="aps_demand_editor")
+            bom=st.data_editor(_industrial_platform_session_state().setdefault("aps_bom",pd.DataFrame({"Parent":["P-100","P-200"],"Component":["C-1","C-2"],"QtyPer":[2,3]})),num_rows="dynamic",use_container_width=True,key="aps_bom_editor")
+            if st.button("🧮 Explode MRP",use_container_width=True,key="aps_mrp"): _industrial_platform_session_state()["aps_mrp_result"]=mrp_explode(demand,bom)
+            if "aps_mrp_result" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["aps_mrp_result"],use_container_width=True)
         with tabs[1]:
-            orders=st.data_editor(st.session_state.setdefault("aps_orders",pd.DataFrame({"Order":["WO-001","WO-002","WO-003"],"Product":["P-100","P-200","P-100"],"Qty":[100,200,150],"DueDate":[datetime.now()+timedelta(hours=8),datetime.now()+timedelta(hours=10),datetime.now()+timedelta(hours=12)],"ProcessingMin":[30,40,25],"SetupMin":[5,10,5],"Machine":["M-01","M-01","M-02"],"Priority":[2,1,3]})),num_rows="dynamic",use_container_width=True,key="aps_orders_editor")
-            if st.button("📅 Build Finite Schedule",type="primary",use_container_width=True,key="aps_schedule"): st.session_state["aps_schedule_result"]=finite_schedule(orders)
-            if "aps_schedule_result" in st.session_state:
-                sch=st.session_state["aps_schedule_result"]; st.dataframe(sch,use_container_width=True); fig=px.timeline(sch,x_start="Start",x_end="Finish",y="Machine",color="Product",hover_data=["Order","LateMin"]); st.plotly_chart(fig,use_container_width=True)
+            orders=st.data_editor(_industrial_platform_session_state().setdefault("aps_orders",pd.DataFrame({"Order":["WO-001","WO-002","WO-003"],"Product":["P-100","P-200","P-100"],"Qty":[100,200,150],"DueDate":[datetime.now()+timedelta(hours=8),datetime.now()+timedelta(hours=10),datetime.now()+timedelta(hours=12)],"ProcessingMin":[30,40,25],"SetupMin":[5,10,5],"Machine":["M-01","M-01","M-02"],"Priority":[2,1,3]})),num_rows="dynamic",use_container_width=True,key="aps_orders_editor")
+            if st.button("📅 Build Finite Schedule",type="primary",use_container_width=True,key="aps_schedule"): _industrial_platform_session_state()["aps_schedule_result"]=finite_schedule(orders)
+            if "aps_schedule_result" in _industrial_platform_session_state():
+                sch=_industrial_platform_session_state()["aps_schedule_result"]; st.dataframe(sch,use_container_width=True); fig=px.timeline(sch,x_start="Start",x_end="Finish",y="Machine",color="Product",hover_data=["Order","LateMin"]); st.plotly_chart(fig,use_container_width=True)
         with tabs[2]:
             st.info("Dispatch uses the validated finite schedule as the release list. Export it as Excel/PDF/PPT from the panel below.")
-            st.dataframe(st.session_state.get("aps_schedule_result",pd.DataFrame()),use_container_width=True)
-        tables=[("Demand",demand),("BOM",bom),("Finite Schedule",st.session_state.get("aps_schedule_result",pd.DataFrame()))]
+            st.dataframe(_industrial_platform_session_state().get("aps_schedule_result",pd.DataFrame()),use_container_width=True)
+        tables=[("Demand",demand),("BOM",bom),("Finite Schedule",_industrial_platform_session_state().get("aps_schedule_result",pd.DataFrame()))]
         figs=[("Finite Schedule",fig)] if "fig" in locals() else []
         render_export_bar(module,tables,figs,tier,username)
     elif module=="Manufacturing Execution System":
@@ -1555,8 +1566,8 @@ def render_module(module: str, tier: str, username: str):
                 pass
         with tabs[1]:
             wo_default=pd.DataFrame({"Work Order":["WO-001","WO-002"],"Product":["P-100","P-200"],"Quantity":[1000,600],"Due Date":[str(datetime.now()+timedelta(days=1)),str(datetime.now()+timedelta(days=2))],"Status":["Released","Released"],"Machine":["M-01","M-02"],"Operator":["",""]})
-            wo=st.data_editor(st.session_state.setdefault("mes_wo_df",wo_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_wo_editor_v2")
-            st.session_state["mes_wo_df"]=wo.copy(deep=True)
+            wo=st.data_editor(_industrial_platform_session_state().setdefault("mes_wo_df",wo_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_wo_editor_v2")
+            _industrial_platform_session_state()["mes_wo_df"]=wo.copy(deep=True)
             left,right=st.columns([1,1])
             with left:
                 st.markdown("#### Create work order")
@@ -1615,12 +1626,12 @@ def render_module(module: str, tier: str, username: str):
             st.dataframe(events,use_container_width=True,hide_index=True)
         with tabs[3]:
             oe_default=pd.DataFrame({"PlannedMin":[480],"DowntimeMin":[45],"IdealCycleSec":[30],"TotalCount":[800],"GoodCount":[760]})
-            oe=st.data_editor(st.session_state.setdefault("mes_oee_df",oe_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_oee_editor_v2")
-            st.session_state["mes_oee_df"]=oe.copy(deep=True)
+            oe=st.data_editor(_industrial_platform_session_state().setdefault("mes_oee_df",oe_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_oee_editor_v2")
+            _industrial_platform_session_state()["mes_oee_df"]=oe.copy(deep=True)
             if st.button("📊 Calculate OEE",type="primary",use_container_width=True,key="mes_oee_run_v2"):
-                try: st.session_state["mes_oee_result"]=oee_from_events(oe)
+                try: _industrial_platform_session_state()["mes_oee_result"]=oee_from_events(oe)
                 except Exception as exc: st.error(f"OEE calculation failed safely: {exc}")
-            res=st.session_state.get("mes_oee_result")
+            res=_industrial_platform_session_state().get("mes_oee_result")
             if isinstance(res,dict):
                 a,b,c2,d2=st.columns(4)
                 a.metric("Availability",f"{float(res.get('Availability %',0)):.1f}%"); b.metric("Performance",f"{float(res.get('Performance %',0)):.1f}%"); c2.metric("Quality",f"{float(res.get('Quality %',0)):.1f}%"); d2.metric("OEE",f"{float(res.get('OEE %',0)):.1f}%")
@@ -1665,16 +1676,16 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Quality Engineering & Reliability":
         tabs=st.tabs(["SPC & Capability","MSA","DOE / ANOVA / Regression","FMEA & Reliability"])
         with tabs[0]:
-            qc=st.data_editor(st.session_state.setdefault("quality_df",pd.DataFrame({"Sample":range(1,21),"Measurement":np.random.default_rng(1).normal(10,0.2,20)})),num_rows="dynamic",use_container_width=True,key="quality_editor")
+            qc=st.data_editor(_industrial_platform_session_state().setdefault("quality_df",pd.DataFrame({"Sample":range(1,21),"Measurement":np.random.default_rng(1).normal(10,0.2,20)})),num_rows="dynamic",use_container_width=True,key="quality_editor")
             lsl=st.number_input("LSL",value=9.0,key="quality_lsl"); usl=st.number_input("USL",value=11.0,key="quality_usl")
             if st.button("📈 Analyze SPC & Capability",type="primary",use_container_width=True,key="quality_spc_run"):
                 try:
-                    st.session_state["quality_spc_result"] = capability(qc["Measurement"], lsl, usl)
-                    st.session_state["quality_limits_result"] = spc_limits(qc["Measurement"])
+                    _industrial_platform_session_state()["quality_spc_result"] = capability(qc["Measurement"], lsl, usl)
+                    _industrial_platform_session_state()["quality_limits_result"] = spc_limits(qc["Measurement"])
                 except Exception as exc:
                     st.error(f"Quality analysis failed safely: {exc}")
-            if "quality_spc_result" in st.session_state:
-                _qr = {**dict(st.session_state.get("quality_spc_result", {})), **dict(st.session_state.get("quality_limits_result", {}))}
+            if "quality_spc_result" in _industrial_platform_session_state():
+                _qr = {**dict(_industrial_platform_session_state().get("quality_spc_result", {})), **dict(_industrial_platform_session_state().get("quality_limits_result", {}))}
                 q1,q2,q3,q4=st.columns(4)
                 q1.metric("Cpk", f"{_qr.get('Cpk', float('nan')):.3f}")
                 q2.metric("Cp", f"{_qr.get('Cp', float('nan')):.3f}")
@@ -1682,17 +1693,17 @@ def render_module(module: str, tier: str, username: str):
                 q4.metric("σ", f"{_qr.get('sigma', float('nan')):.3f}")
                 st.json(_qr)
         with tabs[1]:
-            msa=st.data_editor(st.session_state.setdefault("msa_df",pd.DataFrame({"Part":[1,1,2,2,3,3],"Operator":["A","B"]*3,"Measurement":[10.1,10.2,11.0,10.9,9.9,10.0]})),num_rows="dynamic",use_container_width=True,key="msa_editor")
+            msa=st.data_editor(_industrial_platform_session_state().setdefault("msa_df",pd.DataFrame({"Part":[1,1,2,2,3,3],"Operator":["A","B"]*3,"Measurement":[10.1,10.2,11.0,10.9,9.9,10.0]})),num_rows="dynamic",use_container_width=True,key="msa_editor")
             if st.button("🔬 Calculate Gage R&R",use_container_width=True,key="msa_run"): st.json(gage_rr(msa))
         with tabs[2]:
-            anova=st.data_editor(st.session_state.setdefault("anova_df",pd.DataFrame({"Group":["A","A","B","B","C","C"],"Value":[1.0,1.1,1.8,1.7,2.2,2.1],"X1":[1,2,3,4,5,6]})),num_rows="dynamic",use_container_width=True,key="anova_editor")
+            anova=st.data_editor(_industrial_platform_session_state().setdefault("anova_df",pd.DataFrame({"Group":["A","A","B","B","C","C"],"Value":[1.0,1.1,1.8,1.7,2.2,2.1],"X1":[1,2,3,4,5,6]})),num_rows="dynamic",use_container_width=True,key="anova_editor")
             if st.button("🧪 Run ANOVA",use_container_width=True,key="anova_run"): st.json(one_way_anova(anova,"Group","Value"))
             target=st.selectbox("Regression target",list(anova.columns),key="quality_reg_target"); feats=st.multiselect("Regression features",[c for c in anova.columns if c!=target],key="quality_reg_feats")
             if feats and st.button("📐 Fit Regression",use_container_width=True,key="reg_run"): coef,met=regression_fit(anova,target,feats); st.dataframe(coef); st.json(met)
         with tabs[3]:
-            fmea=st.data_editor(st.session_state.setdefault("fmea_df",pd.DataFrame({"Failure Mode":["Bearing wear","Loose fastener"],"Severity":[8,6],"Occurrence":[5,4],"Detection":[3,5]})),num_rows="dynamic",use_container_width=True,key="fmea_editor")
-            if st.button("⚠️ Calculate RPN",use_container_width=True,key="fmea_run"): st.session_state["fmea_result"]=fmea_score(fmea)
-            if "fmea_result" in st.session_state: st.dataframe(st.session_state["fmea_result"],use_container_width=True)
+            fmea=st.data_editor(_industrial_platform_session_state().setdefault("fmea_df",pd.DataFrame({"Failure Mode":["Bearing wear","Loose fastener"],"Severity":[8,6],"Occurrence":[5,4],"Detection":[3,5]})),num_rows="dynamic",use_container_width=True,key="fmea_editor")
+            if st.button("⚠️ Calculate RPN",use_container_width=True,key="fmea_run"): _industrial_platform_session_state()["fmea_result"]=fmea_score(fmea)
+            if "fmea_result" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["fmea_result"],use_container_width=True)
             failures=st.number_input("Weibull sample count",1,1000,20,key="weibull_n")
             sample=np.maximum(.1,np.random.default_rng(2).weibull(2,failures)*100)
             if st.button("📉 Fit Weibull",use_container_width=True,key="weibull_run"): st.json(weibull_analysis(sample))
@@ -1703,33 +1714,33 @@ def render_module(module: str, tier: str, username: str):
             c1,c2,c3=st.columns(3); ar=c1.number_input("Arrival rate / hr",1.0,1000.0,20.0,key="sim_ar"); sr=c2.number_input("Service rate / hr / server",1.0,1000.0,25.0,key="sim_sr"); servers=c3.number_input("Servers",1,20,2,key="sim_servers")
             if st.button("▶ Run DES Replications",type="primary",use_container_width=True,key="sim_des_run"):
                 try:
-                    st.session_state["sim_des_result"] = queue_simulation(ar,sr,servers)
+                    _industrial_platform_session_state()["sim_des_result"] = queue_simulation(ar,sr,servers)
                 except Exception as exc:
                     st.error(f"DES simulation failed safely: {exc}")
-            _sim_des_result = _safe_df(st.session_state.get("sim_des_result"))
+            _sim_des_result = _safe_df(_industrial_platform_session_state().get("sim_des_result"))
             if not _sim_des_result.empty:
                 st.dataframe(_sim_des_result,use_container_width=True)
         with tabs[1]:
             agents=st.slider("Agents",5,200,30,key="sim_agents"); steps=st.slider("Steps",20,500,100,key="sim_steps")
             if st.button("🤖 Run Agent Simulation",use_container_width=True,key="sim_agent_run"):
                 try:
-                    st.session_state["sim_agent_result"] = agent_simulation(agents,steps)
+                    _industrial_platform_session_state()["sim_agent_result"] = agent_simulation(agents,steps)
                 except Exception as exc:
                     st.error(f"Agent simulation failed safely: {exc}")
-            _sim_agent_result = _safe_df(st.session_state.get("sim_agent_result"))
+            _sim_agent_result = _safe_df(_industrial_platform_session_state().get("sim_agent_result"))
             if not _sim_agent_result.empty:
                 st.dataframe(_sim_agent_result,use_container_width=True)
         with tabs[2]:
             inv=st.number_input("Initial inventory",0.0,100000.0,5000.0,key="sd_inv"); demand=st.number_input("Demand/day",0.1,10000.0,500.0,key="sd_dem"); repl=st.number_input("Replenishment/day",0.0,10000.0,550.0,key="sd_repl")
-            if st.button("📈 Run System Dynamics",use_container_width=True,key="sd_run"): st.session_state["sd"]=system_dynamics_inventory(inv,demand,repl)
-            if "sd" in st.session_state: st.dataframe(st.session_state["sd"],use_container_width=True); st.line_chart(st.session_state["sd"].set_index("Day")[["Inventory","Demand","Replenishment"]])
+            if st.button("📈 Run System Dynamics",use_container_width=True,key="sd_run"): _industrial_platform_session_state()["sd"]=system_dynamics_inventory(inv,demand,repl)
+            if "sd" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["sd"],use_container_width=True); st.line_chart(_industrial_platform_session_state()["sd"].set_index("Day")[["Inventory","Demand","Replenishment"]])
         figs=[]; tables=[]
-        if "sim_des_result" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des_result"]))
-        if "sim_agent_result" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent_result"]))
-        if "sd" in st.session_state: tables.append(("System Dynamics",st.session_state["sd"]))
+        if "sim_des_result" in _industrial_platform_session_state(): tables.append(("DES Replications",_industrial_platform_session_state()["sim_des_result"]))
+        if "sim_agent_result" in _industrial_platform_session_state(): tables.append(("Agent Summary",_industrial_platform_session_state()["sim_agent_result"]))
+        if "sd" in _industrial_platform_session_state(): tables.append(("System Dynamics",_industrial_platform_session_state()["sd"]))
         render_export_bar(module,tables,[],tier,username)
     elif module=="3D Factory Designer":
-        df=st.data_editor(st.session_state.setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
+        df=st.data_editor(_industrial_platform_session_state().setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
         fig=px.scatter_3d(df,x="X",y="Y",z="Z",color="Type",text="Asset",size="Height",title="3D Factory Model"); st.plotly_chart(fig,use_container_width=True)
         if st.button("📏 Analyze Travel Distances",use_container_width=True,key="factory3d_dist_run"):
             try:
@@ -1737,17 +1748,17 @@ def render_module(module: str, tier: str, username: str):
                 for i in range(len(pts)):
                     for j in range(i+1,len(pts)):
                         pairs.append({"From":df.iloc[i]["Asset"],"To":df.iloc[j]["Asset"],"Distance":float(np.linalg.norm(pts[i]-pts[j]))})
-                st.session_state["factory3d_dist_result"]=pd.DataFrame(pairs).sort_values("Distance")
+                _industrial_platform_session_state()["factory3d_dist_result"]=pd.DataFrame(pairs).sort_values("Distance")
             except Exception as exc:
                 st.error(f"Travel analysis failed safely: {exc}")
-        _factory3d_dist_result = _safe_df(st.session_state.get("factory3d_dist_result"))
+        _factory3d_dist_result = _safe_df(_industrial_platform_session_state().get("factory3d_dist_result"))
         if not _factory3d_dist_result.empty:
             st.dataframe(_factory3d_dist_result.head(50),use_container_width=True)
-        render_export_bar(module,[("3D Layout",df),("Travel Matrix",st.session_state.get("factory3d_dist_result",pd.DataFrame()))],[("3D Factory",fig)],tier,username)
+        render_export_bar(module,[("3D Layout",df),("Travel Matrix",_industrial_platform_session_state().get("factory3d_dist_result",pd.DataFrame()))],[("3D Factory",fig)],tier,username)
     elif module=="Industrial Connectivity Hub":
         tabs=st.tabs(["REST / SAP / Oracle / WMS","SQL","MQTT / OPC-UA"])
         with tabs[0]:
-            conn_df=st.data_editor(st.session_state.setdefault("conn_df",pd.DataFrame({"Name":["SAP Demo","Oracle Demo","WMS Demo"],"System Type":["SAP","Oracle","WMS"],"Endpoint":["https://example.com","",""],"Status":["Not Tested","",""]})),num_rows="dynamic",use_container_width=True,key="conn_editor")
+            conn_df=st.data_editor(_industrial_platform_session_state().setdefault("conn_df",pd.DataFrame({"Name":["SAP Demo","Oracle Demo","WMS Demo"],"System Type":["SAP","Oracle","WMS"],"Endpoint":["https://example.com","",""],"Status":["Not Tested","",""]})),num_rows="dynamic",use_container_width=True,key="conn_editor")
             selected=st.selectbox("Connector",conn_df["Name"].tolist(),key="conn_selected"); token=st.text_input("Bearer token (session only)",type="password",key="conn_token")
             if st.button("🔌 Test REST Connector",type="primary",use_container_width=True,key="conn_rest"):
                 import requests
@@ -1775,21 +1786,21 @@ def render_module(module: str, tier: str, username: str):
         tabs_mo=st.tabs(["📈 Pareto Explorer","🧮 LP / Nonlinear / Robust / Stochastic"])
         with tabs_mo[0]:
             df=st.data_editor(
-                st.session_state.setdefault("multiobj_df",pd.DataFrame({
+                _industrial_platform_session_state().setdefault("multiobj_df",pd.DataFrame({
                     "Scenario":["A","B","C","D"],"Cost":[100,90,130,110],"Carbon":[80,120,60,75],
                     "Service":[94,97,99,96],"Risk":[12,20,8,15]
                 })),num_rows="dynamic",use_container_width=True,key="multiobj_editor"
             )
-            st.session_state["multiobj_df"]=df.copy(deep=True)
+            _industrial_platform_session_state()["multiobj_df"]=df.copy(deep=True)
             weights={x:st.number_input(x+" weight",0.0,1.0,0.25,key="mo_w_"+x) for x in ["Cost","Carbon","Service","Risk"]}
             if st.button("⚖️ Calculate Trade-offs & Pareto Frontier",type="primary",use_container_width=True,key="multiobj_run"):
                 try:
-                    st.session_state["multiobj_result"]=multiobjective_score(df,weights,{"Service":False,"Cost":True,"Carbon":True,"Risk":True})
-                    st.session_state["pareto"]=pareto_frontier(df,["Cost","Carbon","Risk"],[True,True,True])
-                    st.session_state["optimization_pareto_df"]=pareto_weight_sweep(df,["Cost","Carbon","Risk"],weights=[weights["Cost"],weights["Carbon"],weights["Risk"]],minimize=[True,True,True])
+                    _industrial_platform_session_state()["multiobj_result"]=multiobjective_score(df,weights,{"Service":False,"Cost":True,"Carbon":True,"Risk":True})
+                    _industrial_platform_session_state()["pareto"]=pareto_frontier(df,["Cost","Carbon","Risk"],[True,True,True])
+                    _industrial_platform_session_state()["optimization_pareto_df"]=pareto_weight_sweep(df,["Cost","Carbon","Risk"],weights=[weights["Cost"],weights["Carbon"],weights["Risk"]],minimize=[True,True,True])
                 except Exception as exc: st.error(f"Multi-objective analysis failed safely: {exc}")
-            result=st.session_state.get("multiobj_result",df); st.dataframe(result,use_container_width=True,hide_index=True)
-            pareto=st.session_state.get("pareto",pd.DataFrame())
+            result=_industrial_platform_session_state().get("multiobj_result",df); st.dataframe(result,use_container_width=True,hide_index=True)
+            pareto=_industrial_platform_session_state().get("pareto",pd.DataFrame())
             if not pareto.empty:
                 st.dataframe(pareto,use_container_width=True,hide_index=True)
                 if {"Cost","Carbon"}<=set(pareto.columns):
@@ -1798,13 +1809,13 @@ def render_module(module: str, tier: str, username: str):
             render_export_bar(module,[("Scenarios",df),("Scored Scenarios",result),("Pareto",pareto)],tier,username)
         with tabs_mo[1]:
             method=st.selectbox("Optimization method",["LP","Nonlinear (Quadratic)","Robust LP","Stochastic LP"],key="optimization_method")
-            obj=st.data_editor(st.session_state.setdefault("optimization_objective_df",pd.DataFrame({"Variable":["X1","X2","X3"],"Coefficient":[10.0,12.0,8.0],"Quadratic":[0.0,0.0,0.0]})),num_rows="fixed",use_container_width=True,key="optimization_objective_editor")
-            cons=st.data_editor(st.session_state.setdefault("optimization_constraints_df",pd.DataFrame({"Constraint":["Capacity","Required Output"],"X1":[1.0,-1.0],"X2":[1.0,-1.0],"X3":[1.0,-1.0],"RHS":[100.0,-100.0]})),num_rows="dynamic",use_container_width=True,key="optimization_constraint_editor")
+            obj=st.data_editor(_industrial_platform_session_state().setdefault("optimization_objective_df",pd.DataFrame({"Variable":["X1","X2","X3"],"Coefficient":[10.0,12.0,8.0],"Quadratic":[0.0,0.0,0.0]})),num_rows="fixed",use_container_width=True,key="optimization_objective_editor")
+            cons=st.data_editor(_industrial_platform_session_state().setdefault("optimization_constraints_df",pd.DataFrame({"Constraint":["Capacity","Required Output"],"X1":[1.0,-1.0],"X2":[1.0,-1.0],"X3":[1.0,-1.0],"RHS":[100.0,-100.0]})),num_rows="dynamic",use_container_width=True,key="optimization_constraint_editor")
             vars_=[str(v) for v in obj["Variable"].tolist()]
-            scen_df=st.session_state.setdefault("optimization_scenarios_df",pd.DataFrame({"Scenario":["Base","Demand Surge","Supply Shock"],"Probability":[0.6,0.25,0.15],"X1":[10,13,15],"X2":[12,15,18],"X3":[8,10,14]}))
+            scen_df=_industrial_platform_session_state().setdefault("optimization_scenarios_df",pd.DataFrame({"Scenario":["Base","Demand Surge","Supply Shock"],"Probability":[0.6,0.25,0.15],"X1":[10,13,15],"X2":[12,15,18],"X3":[8,10,14]}))
             if method in {"Robust LP","Stochastic LP"}:
                 scen_df=st.data_editor(scen_df,num_rows="dynamic",use_container_width=True,key="optimization_scenario_editor")
-                st.session_state["optimization_scenarios_df"]=scen_df.copy(deep=True)
+                _industrial_platform_session_state()["optimization_scenarios_df"]=scen_df.copy(deep=True)
             risk=st.slider("Risk aversion (stochastic only)",0.0,3.0,0.5,0.1,key="optimization_risk_aversion")
             if st.button("🚀 Solve Optimization Model",type="primary",use_container_width=True,key="optimization_engine_run"):
                 try:
@@ -1822,19 +1833,19 @@ def render_module(module: str, tier: str, username: str):
                         sol=(solve_robust_linear_program(scen_mat,A_ub=A_ub,b_ub=b_ub,bounds=bounds) if method=="Robust LP" else solve_stochastic_linear_program(scen_mat,probabilities=probs,risk_aversion=float(risk),A_ub=A_ub,b_ub=b_ub,bounds=bounds))
                     out={v:float(sol["variables"][i]) for i,v in enumerate(vars_)}
                     out.update({"Objective":float(sol.get("objective",sol.get("worst_case_objective",np.nan))),"Status":str(sol.get("status")),"Iterations":int(sol.get("iterations",0) or 0)})
-                    st.session_state["optimization_result_df"]=pd.DataFrame([out])
-                    st.session_state["optimization_summary"]={k:v for k,v in sol.items() if k not in {"variables","scenario_objectives","probabilities","expected_coefficients","scenario_std"}}
+                    _industrial_platform_session_state()["optimization_result_df"]=pd.DataFrame([out])
+                    _industrial_platform_session_state()["optimization_summary"]={k:v for k,v in sol.items() if k not in {"variables","scenario_objectives","probabilities","expected_coefficients","scenario_std"}}
                     st.success(f"{method} solve completed: {sol.get('status')}")
                 except Exception as exc: st.error(f"{method} optimization failed safely: {exc}")
-            if "optimization_result_df" in st.session_state:
-                st.dataframe(st.session_state["optimization_result_df"],use_container_width=True,hide_index=True)
-                st.json(st.session_state.get("optimization_summary",{}))
+            if "optimization_result_df" in _industrial_platform_session_state():
+                st.dataframe(_industrial_platform_session_state()["optimization_result_df"],use_container_width=True,hide_index=True)
+                st.json(_industrial_platform_session_state().get("optimization_summary",{}))
             st.caption("MILP remains the production facility-location/allocation solver; this studio adds LP, nonlinear, robust and stochastic method families.")
     elif module=="Robust & Resilient Optimization":
         st.subheader("🛡️ Robust & Resilient Optimization Studio")
         tabs_r=st.tabs(["🎲 Monte Carlo Risk","🧮 Robust / Stochastic Optimization"])
         with tabs_r[0]:
-            d=st.data_editor(st.session_state.setdefault("robust_df",pd.DataFrame({
+            d=st.data_editor(_industrial_platform_session_state().setdefault("robust_df",pd.DataFrame({
                 "Metric":["Demand Mean","Demand Std","Capacity","Lead Time Mean","Lead Time Std","Disruption Probability","Disruption Capacity Multiplier"],
                 "Value":[1000,150,1100,7,1.5,.05,.6]
             })),num_rows="dynamic",use_container_width=True,key="robust_editor")
@@ -1843,17 +1854,17 @@ def render_module(module: str, tier: str, username: str):
                 try:
                     vals=d.set_index("Metric")["Value"].to_dict()
                     res=robust_risk_analysis(float(vals["Demand Mean"]),float(vals["Demand Std"]),float(vals["Capacity"]),float(vals["Lead Time Mean"]),float(vals["Lead Time Std"]),float(vals["Disruption Probability"]),float(vals["Disruption Capacity Multiplier"]),int(sims))
-                    st.session_state["robust_result"]=res; st.session_state["robust_result_df"]=pd.DataFrame([res])
+                    _industrial_platform_session_state()["robust_result"]=res; _industrial_platform_session_state()["robust_result_df"]=pd.DataFrame([res])
                 except Exception as exc: st.error(f"Robust risk analysis failed safely: {exc}")
-            if "robust_result_df" in st.session_state:
-                st.dataframe(st.session_state["robust_result_df"],use_container_width=True,hide_index=True)
-                st.metric("Service probability",f'{float(st.session_state["robust_result"]["Service Probability"])*100:.1f}%')
-            render_export_bar(module,[("Risk Inputs",d),("Risk Result",st.session_state.get("robust_result_df",pd.DataFrame()))],tier,username)
+            if "robust_result_df" in _industrial_platform_session_state():
+                st.dataframe(_industrial_platform_session_state()["robust_result_df"],use_container_width=True,hide_index=True)
+                st.metric("Service probability",f'{float(_industrial_platform_session_state()["robust_result"]["Service Probability"])*100:.1f}%')
+            render_export_bar(module,[("Risk Inputs",d),("Risk Result",_industrial_platform_session_state().get("robust_result_df",pd.DataFrame()))],tier,username)
         with tabs_r[1]:
             st.info("Use Multi-Objective Optimization → Robust / Stochastic Optimization for explicit mathematical models. Results are shared with Universal Visualization and workspace evidence.")
 
     elif module=="Engineering Model Registry":
-        df=st.data_editor(st.session_state.setdefault("model_registry_df",pd.DataFrame({"Model Name":["Network Baseline"],"Type":["MILP"],"Version":["1.0.0"],"Status":["Draft"],"Data Hash":[""]})),num_rows="dynamic",use_container_width=True,key="model_registry_editor")
+        df=st.data_editor(_industrial_platform_session_state().setdefault("model_registry_df",pd.DataFrame({"Model Name":["Network Baseline"],"Type":["MILP"],"Version":["1.0.0"],"Status":["Draft"],"Data Hash":[""]})),num_rows="dynamic",use_container_width=True,key="model_registry_editor")
         name=st.text_input("Model name","My Industrial Model",key="registry_name"); model_type=st.text_input("Model type","Optimization",key="registry_type"); params=st.text_area("Parameters JSON",'{"objective":"cost"}',key="registry_params")
         solver_version=st.text_input("Solver / runtime version","Record the exact solver, library and runtime version",key="registry_solver_version")
         result_hash=st.text_input("Result hash (optional)",value=hashlib.sha256(df.to_csv(index=False).encode()).hexdigest(),key="registry_result_hash")
@@ -1878,7 +1889,7 @@ def render_module(module: str, tier: str, username: str):
         title=st.text_input("Decision title","Network redesign decision",key="decision_title")
         baseline=st.text_area("Baseline definition","Current operating policy and documented KPI baseline.",height=70,key="decision_baseline")
         alternatives=st.data_editor(
-            st.session_state.setdefault("decision_alternatives_df",pd.DataFrame({
+            _industrial_platform_session_state().setdefault("decision_alternatives_df",pd.DataFrame({
                 "Alternative":["Baseline","Alternative A","Alternative B"],"Cost":[100000,92000,96000],
                 "Service":[95,97,96],"Carbon":[1000,840,780],"Risk":[10,12,8]
             })),
@@ -1886,7 +1897,7 @@ def render_module(module: str, tier: str, username: str):
         )
         constraints=st.text_area("Constraints","Budget <= 100000; Service >= 95%; capacity and regulatory requirements must be respected.",height=65,key="decision_constraints")
         kpis=st.data_editor(
-            st.session_state.setdefault("decision_kpi_df",pd.DataFrame({
+            _industrial_platform_session_state().setdefault("decision_kpi_df",pd.DataFrame({
                 "KPI":["Cost","Service","Carbon","Risk"],"Target":[100000,95,800,10],"Unit":["USD","%","kg CO2e","index"]
             })),
             num_rows="dynamic",use_container_width=True,key="decision_kpi_editor"
@@ -1894,7 +1905,7 @@ def render_module(module: str, tier: str, username: str):
         uncertainty_text=st.text_area("Uncertainty / confidence","Record confidence intervals, scenario ranges, model validation metrics and limitations.",height=65,key="decision_uncertainty")
         evidence_text=st.text_area("Evidence references","Dataset IDs, model IDs, experiment/run IDs, result hashes, validation records or chart/evidence paths (one per line).",height=70,key="decision_evidence")
         verification=st.data_editor(
-            st.session_state.setdefault("decision_verification_df",pd.DataFrame({
+            _industrial_platform_session_state().setdefault("decision_verification_df",pd.DataFrame({
                 "KPI":["Cost","Service","Carbon"],"Target":[100000,95,800],"Actual":[np.nan,np.nan,np.nan],
                 "Tolerance":[5000,1,50],"Status":["Pending"]*3
             })),
@@ -1906,9 +1917,9 @@ def render_module(module: str, tier: str, username: str):
             tgt=pd.to_numeric(ver["Target"],errors="coerce"); act=pd.to_numeric(ver["Actual"],errors="coerce")
             tol=pd.to_numeric(ver["Tolerance"],errors="coerce").fillna(0).abs()
             ver["Status"]=np.where(act.isna(),"Pending",np.where((act-tgt).abs()<=tol,"Pass","Review"))
-            st.session_state["decision_verification_df"]=ver
+            _industrial_platform_session_state()["decision_verification_df"]=ver
 
-        did=st.session_state.get("decision_active_id")
+        did=_industrial_platform_session_state().get("decision_active_id")
         if st.button("💾 Save / Update Decision Card",type="primary",use_container_width=True,key="decision_save"):
             try:
                 metrics={"Baseline":baseline,"Alternatives":alternatives.to_dict("records"),"KPIs":kpis.to_dict("records")}
@@ -1920,12 +1931,12 @@ def render_module(module: str, tier: str, username: str):
                     {"definition":constraints},kpis.to_dict("records"),uncertainty,
                     [x.strip() for x in evidence_text.splitlines() if x.strip()],ver.to_dict("records")
                 )
-                st.session_state["decision_active_id"]=did
+                _industrial_platform_session_state()["decision_active_id"]=did
                 st.success(f"Decision card saved: {did}")
             except Exception as exc:
                 st.error(f"Decision card save failed safely: {exc}")
 
-        did=st.session_state.get("decision_active_id")
+        did=_industrial_platform_session_state().get("decision_active_id")
         if did:
             spec=load_decision_spec(did,username) or {}
             with sqlite3.connect("enterprise_full_workspace.db") as conn:
@@ -1955,9 +1966,9 @@ def render_module(module: str, tier: str, username: str):
                 hist=decision_approval_history(did)
                 if not hist.empty:
                     st.markdown("#### Approval history"); st.dataframe(hist,use_container_width=True,hide_index=True)
-        st.session_state["decision_alternatives_df"]=alternatives.copy(deep=True)
-        st.session_state["decision_kpi_df"]=kpis.copy(deep=True)
-        st.session_state["decision_verification_df"]=ver.copy(deep=True)
+        _industrial_platform_session_state()["decision_alternatives_df"]=alternatives.copy(deep=True)
+        _industrial_platform_session_state()["decision_kpi_df"]=kpis.copy(deep=True)
+        _industrial_platform_session_state()["decision_verification_df"]=ver.copy(deep=True)
         render_export_bar(module,[("Decision Alternatives",alternatives),("Decision KPIs",kpis),("Decision Verification",ver)],tier,username)
     elif module=="Industrial Data Platform":
         up=st.file_uploader("📥 Ingest CSV / XLSX",type=["csv","xlsx"],key="data_platform_upload")
@@ -1968,20 +1979,20 @@ def render_module(module: str, tier: str, username: str):
                 st.write({"file":up.name,"sheets":list(sheets),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()})
                 for name,df in sheets.items():
                     current_workspace = str(
-                        st.session_state.get("shoir_workspace_name")
-                        or st.session_state.get("workspace")
-                        or st.session_state.get("active_workspace_name")
+                        _industrial_platform_session_state().get("shoir_workspace_name")
+                        or _industrial_platform_session_state().get("workspace")
+                        or _industrial_platform_session_state().get("active_workspace_name")
                         or "default"
                     )
                     did=register_dataset(
                         name, up.name, df,
                         username=username,
                         workspace=current_workspace,
-                        token=str(st.session_state.get("remote_session_token") or ""),
+                        token=str(_industrial_platform_session_state().get("remote_session_token") or ""),
                     )
-                    st.session_state["data_platform_latest_df"] = df.copy(deep=True)
+                    _industrial_platform_session_state()["data_platform_latest_df"] = df.copy(deep=True)
                     st.subheader(name); st.write(data_quality_report(df)); st.dataframe(df.head(25),use_container_width=True)
-                    registration = st.session_state.get("data_platform_latest_registration", {})
+                    registration = _industrial_platform_session_state().get("data_platform_latest_registration", {})
                     version = registration.get("version")
                     if version:
                         st.success(f"Registered dataset {did} · immutable version {version}")
@@ -1990,13 +2001,13 @@ def render_module(module: str, tier: str, username: str):
                 if str(__import__("durable_account_store").APP_ENVIRONMENT).casefold() == "staging":
                     from durable_account_store import edge_list_platform_records
                     current_workspace = str(
-                        st.session_state.get("shoir_workspace_name")
-                        or st.session_state.get("workspace")
-                        or st.session_state.get("active_workspace_name")
+                        _industrial_platform_session_state().get("shoir_workspace_name")
+                        or _industrial_platform_session_state().get("workspace")
+                        or _industrial_platform_session_state().get("active_workspace_name")
                         or "default"
                     )
                     managed = edge_list_platform_records(
-                        username, str(st.session_state.get("remote_session_token") or ""),
+                        username, str(_industrial_platform_session_state().get("remote_session_token") or ""),
                         current_workspace, "dataset", 5000,
                     )
                     catalog_rows = []
@@ -2023,56 +2034,56 @@ def render_module(module: str, tier: str, username: str):
                                 selected_dataset,
                                 username,
                                 current_workspace,
-                                str(st.session_state.get("remote_session_token") or ""),
+                                str(_industrial_platform_session_state().get("remote_session_token") or ""),
                             )
                             st.success(
                                 f"Loaded {selected_dataset} · {len(loaded):,} rows · version "
-                                f"{st.session_state.get('data_platform_latest_version', 1)}"
+                                f"{_industrial_platform_session_state().get('data_platform_latest_version', 1)}"
                             )
                             st.dataframe(loaded.head(25), use_container_width=True)
                         except Exception as load_exc:
                             st.error(f"Dataset load failed safely: {load_exc}")
             except Exception as exc: st.error(f"Ingestion failed safely: {exc}")
     elif module=="Capital Investment & Engineering Economics":
-        cf=st.data_editor(st.session_state.setdefault("capex_df",pd.DataFrame({"Year":[1,2,3,4,5],"Cash Flow":[45000,50000,55000,60000,65000]})),num_rows="dynamic",use_container_width=True,key="capex_editor")
+        cf=st.data_editor(_industrial_platform_session_state().setdefault("capex_df",pd.DataFrame({"Year":[1,2,3,4,5],"Cash Flow":[45000,50000,55000,60000,65000]})),num_rows="dynamic",use_container_width=True,key="capex_editor")
         initial=st.number_input("Initial investment",0.0,100000000.0,180000.0,key="capex_initial"); rate=st.number_input("Discount rate",0.0,1.0,.1,key="capex_rate")
         salvage=st.number_input("Salvage value",0.0,100000000.0,0.0,key="capex_salvage")
-        if st.button("💰 Calculate NPV / IRR / Payback",type="primary",use_container_width=True,key="capex_run"): st.session_state["capex_result"]=capital_metrics(initial,cf["Cash Flow"].tolist(),rate,salvage)
-        if "capex_result" in st.session_state: st.json(st.session_state["capex_result"])
-        render_export_bar(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})]))],tier,username)
+        if st.button("💰 Calculate NPV / IRR / Payback",type="primary",use_container_width=True,key="capex_run"): _industrial_platform_session_state()["capex_result"]=capital_metrics(initial,cf["Cash Flow"].tolist(),rate,salvage)
+        if "capex_result" in _industrial_platform_session_state(): st.json(_industrial_platform_session_state()["capex_result"])
+        render_export_bar(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([_industrial_platform_session_state().get("capex_result",{})]))],tier,username)
     elif module=="Workforce Engineering":
         tabs=st.tabs(["Balance & Takt","Staffing","Skills / Ergonomics"])
         with tabs[0]:
-            elems=st.data_editor(st.session_state.setdefault("work_elements",pd.DataFrame({"Element":["Pick","Assemble","Inspect","Pack"],"TimeMin":[2.5,3.5,1.5,2.0]})),num_rows="dynamic",use_container_width=True,key="work_editor")
+            elems=st.data_editor(_industrial_platform_session_state().setdefault("work_elements",pd.DataFrame({"Element":["Pick","Assemble","Inspect","Pack"],"TimeMin":[2.5,3.5,1.5,2.0]})),num_rows="dynamic",use_container_width=True,key="work_editor")
             takt=st.number_input("Takt time (min)",0.1,120.0,5.0,key="takt")
-            if st.button("⚖️ Balance Line",type="primary",use_container_width=True,key="balance_run"): st.session_state["balance_result"],st.session_state["balance_metrics"]=line_balance(elems,takt)
-            if "balance_result" in st.session_state: st.dataframe(st.session_state["balance_result"],use_container_width=True); st.json(st.session_state["balance_metrics"])
+            if st.button("⚖️ Balance Line",type="primary",use_container_width=True,key="balance_run"): _industrial_platform_session_state()["balance_result"],_industrial_platform_session_state()["balance_metrics"]=line_balance(elems,takt)
+            if "balance_result" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["balance_result"],use_container_width=True); st.json(_industrial_platform_session_state()["balance_metrics"])
         with tabs[1]:
             staff=st.number_input("Staff",1,500,10,key="staff"); mins=st.number_input("Minutes/shift",60.0,1440.0,480.0,key="staff_mins"); prod=st.slider("Productive %",10,100,85,key="staff_prod")
             st.json(staffing_capacity(staff,mins,prod))
         with tabs[2]:
-            skill=st.data_editor(st.session_state.setdefault("skills_df",pd.DataFrame({"Employee":["E1","E2","E3"],"Skill":["Welding","Assembly","Inspection"],"Level":[3,2,4]})),num_rows="dynamic",use_container_width=True,key="skills_editor")
+            skill=st.data_editor(_industrial_platform_session_state().setdefault("skills_df",pd.DataFrame({"Employee":["E1","E2","E3"],"Skill":["Welding","Assembly","Inspection"],"Level":[3,2,4]})),num_rows="dynamic",use_container_width=True,key="skills_editor")
             st.dataframe(skill,use_container_width=True)
-        render_export_bar(module,[("Work Elements",elems),("Balance",st.session_state.get("balance_result",pd.DataFrame())),("Skills",skill)],tier,username)
+        render_export_bar(module,[("Work Elements",elems),("Balance",_industrial_platform_session_state().get("balance_result",pd.DataFrame())),("Skills",skill)],tier,username)
     elif module=="Industrial Sustainability & LCA":
-        df=st.data_editor(st.session_state.setdefault("sustain_df",pd.DataFrame({"Activity":["Electricity","Diesel","Freight"],"Scope":["Scope 2","Scope 1","Scope 3"],"LifeCycleStage":["Operations","Operations","Distribution"],"Quantity":[10000,2500,15000],"EmissionFactor":[0.42,2.68,0.1]})),num_rows="dynamic",use_container_width=True,key="sustain_editor")
-        if st.button("🌱 Calculate Footprint",type="primary",use_container_width=True,key="sustain_run"): st.session_state["sustain_result"]=sustainability_accounting(df)
-        if "sustain_result" in st.session_state:
-            res=st.session_state["sustain_result"]; st.metric("Total tCO2e",f'{res["tCO2e"].sum():,.2f}'); st.dataframe(lca_summary(res),use_container_width=True); fig=px.bar(res,x="Activity",y="tCO2e",color="Scope",title="Lifecycle Footprint")
+        df=st.data_editor(_industrial_platform_session_state().setdefault("sustain_df",pd.DataFrame({"Activity":["Electricity","Diesel","Freight"],"Scope":["Scope 2","Scope 1","Scope 3"],"LifeCycleStage":["Operations","Operations","Distribution"],"Quantity":[10000,2500,15000],"EmissionFactor":[0.42,2.68,0.1]})),num_rows="dynamic",use_container_width=True,key="sustain_editor")
+        if st.button("🌱 Calculate Footprint",type="primary",use_container_width=True,key="sustain_run"): _industrial_platform_session_state()["sustain_result"]=sustainability_accounting(df)
+        if "sustain_result" in _industrial_platform_session_state():
+            res=_industrial_platform_session_state()["sustain_result"]; st.metric("Total tCO2e",f'{res["tCO2e"].sum():,.2f}'); st.dataframe(lca_summary(res),use_container_width=True); fig=px.bar(res,x="Activity",y="tCO2e",color="Scope",title="Lifecycle Footprint")
             st.plotly_chart(fig,use_container_width=True)
-        render_export_bar(module,[("Sustainability Inputs",df),("Footprint",st.session_state.get("sustain_result",pd.DataFrame()))],[("Footprint",fig)] if "fig" in locals() else [],tier,username)
+        render_export_bar(module,[("Sustainability Inputs",df),("Footprint",_industrial_platform_session_state().get("sustain_result",pd.DataFrame()))],[("Footprint",fig)] if "fig" in locals() else [],tier,username)
     elif module=="Benchmarking & Engineering Standards":
-        actual=st.data_editor(st.session_state.setdefault("benchmark_actual",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Actual":[82,96,5.2,1.8]})),num_rows="dynamic",use_container_width=True,key="benchmark_actual_editor")
-        bench=st.data_editor(st.session_state.setdefault("benchmark_targets",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Benchmark":[85,98,6.0,1.5],"Unit":["%","%","x","kWh/unit"],"Source":["Company Target"]*4,"Source Date":["2026-01"]*4})),num_rows="dynamic",use_container_width=True,key="benchmark_targets_editor")
-        if st.button("📏 Compare Benchmarks",type="primary",use_container_width=True,key="benchmark_run"): st.session_state["benchmark_result"]=benchmark_compare(actual,bench)
-        if "benchmark_result" in st.session_state: st.dataframe(st.session_state["benchmark_result"],use_container_width=True)
-        render_export_bar(module,[("Actual",actual),("Benchmarks",bench),("Comparison",st.session_state.get("benchmark_result",pd.DataFrame()))],tier,username)
+        actual=st.data_editor(_industrial_platform_session_state().setdefault("benchmark_actual",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Actual":[82,96,5.2,1.8]})),num_rows="dynamic",use_container_width=True,key="benchmark_actual_editor")
+        bench=st.data_editor(_industrial_platform_session_state().setdefault("benchmark_targets",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Benchmark":[85,98,6.0,1.5],"Unit":["%","%","x","kWh/unit"],"Source":["Company Target"]*4,"Source Date":["2026-01"]*4})),num_rows="dynamic",use_container_width=True,key="benchmark_targets_editor")
+        if st.button("📏 Compare Benchmarks",type="primary",use_container_width=True,key="benchmark_run"): _industrial_platform_session_state()["benchmark_result"]=benchmark_compare(actual,bench)
+        if "benchmark_result" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["benchmark_result"],use_container_width=True)
+        render_export_bar(module,[("Actual",actual),("Benchmarks",bench),("Comparison",_industrial_platform_session_state().get("benchmark_result",pd.DataFrame()))],tier,username)
     elif module=="Engineering Validation Center":
         st.subheader("✅ Engineering Validation Center")
         st.caption("Validate structure, required fields, numeric ranges, data quality, model feasibility and result health before using a module output in a decision.")
-        staged_validation = st.session_state.get(f"{_module_slug(module)}_import_df")
-        if "validation_df" not in st.session_state:
-            st.session_state["validation_df"] = (
+        staged_validation = _industrial_platform_session_state().get(f"{_module_slug(module)}_import_df")
+        if "validation_df" not in _industrial_platform_session_state():
+            _industrial_platform_session_state()["validation_df"] = (
                 staged_validation.copy(deep=True)
                 if isinstance(staged_validation, pd.DataFrame) and not staged_validation.empty
                 else pd.DataFrame({
@@ -2081,7 +2092,7 @@ def render_module(module: str, tier: str, username: str):
                     "Unit":["USD","%","units","days"],
                 })
             )
-        default_validation = st.session_state["validation_df"]
+        default_validation = _industrial_platform_session_state()["validation_df"]
         validation_df = st.data_editor(
             default_validation,
             num_rows="dynamic",
@@ -2089,10 +2100,10 @@ def render_module(module: str, tier: str, username: str):
             hide_index=True,
             key="validation_editor_v2",
         )
-        st.session_state["validation_df"] = validation_df.copy(deep=True)
+        _industrial_platform_session_state()["validation_df"] = validation_df.copy(deep=True)
 
         st.markdown("#### Numeric validation limits")
-        default_ranges = st.session_state.setdefault(
+        default_ranges = _industrial_platform_session_state().setdefault(
             "validation_ranges_df",
             pd.DataFrame({
                 "Field":["Value"],
@@ -2107,7 +2118,7 @@ def render_module(module: str, tier: str, username: str):
             hide_index=True,
             key="validation_ranges_editor",
         )
-        st.session_state["validation_ranges_df"] = ranges_df.copy(deep=True)
+        _industrial_platform_session_state()["validation_ranges_df"] = ranges_df.copy(deep=True)
 
         if st.button("🔎 Validate dataset & model health", type="primary", use_container_width=True, key="validation_run_v2"):
             required = ["Metric","Value","Unit"]
@@ -2133,11 +2144,11 @@ def render_module(module: str, tier: str, username: str):
                 uncertainty="Not assessed unless explicitly recorded",
                 reproducible=True,
             )
-            st.session_state["validation_result"] = result
-            st.session_state["validation_health"] = health
+            _industrial_platform_session_state()["validation_result"] = result
+            _industrial_platform_session_state()["validation_health"] = health
 
-        result = st.session_state.get("validation_result")
-        health = st.session_state.get("validation_health")
+        result = _industrial_platform_session_state().get("validation_result")
+        health = _industrial_platform_session_state().get("validation_health")
         if isinstance(result, dict):
             q = result.get("quality", {})
             c1,c2,c3,c4 = st.columns(4)
@@ -2189,7 +2200,7 @@ def render_module(module: str, tier: str, username: str):
         st.info("Advanced Copilot orchestration is configured through the main AI Copilot module. Use the AI Copilot to approve multi-step workflows; this module exposes governance and execution history.")
         st.write("Available tool families:",[x["name"] for x in PLATFORM_CATALOG if x["tier"] in ("Starter","Mid-Tier Pro","Professional","Enterprise")][:20])
     elif module=="Live Industrial Digital Twin":
-        tel=st.data_editor(st.session_state.setdefault("twin_tel",pd.DataFrame({"Asset":["CNC-01","CNC-01","Packing-01"],"Timestamp":[_now(),_now(),_now()],"Metric":["Temperature","Vibration","Temperature"],"Value":[65,2.4,72],"Source":["simulated","simulated","simulated"]})),num_rows="dynamic",use_container_width=True,key="twin_editor")
+        tel=st.data_editor(_industrial_platform_session_state().setdefault("twin_tel",pd.DataFrame({"Asset":["CNC-01","CNC-01","Packing-01"],"Timestamp":[_now(),_now(),_now()],"Metric":["Temperature","Vibration","Temperature"],"Value":[65,2.4,72],"Source":["simulated","simulated","simulated"]})),num_rows="dynamic",use_container_width=True,key="twin_editor")
         if st.button("🌐 Update Twin State",type="primary",use_container_width=True,key="twin_update"):
             with sqlite3.connect("enterprise_full_workspace.db") as c:
                 for r in tel.to_dict("records"): c.execute("INSERT INTO telemetry_events(asset_id,ts,metric,value,source) VALUES(?,?,?,?,?)",(r["Asset"],str(r["Timestamp"]),r["Metric"],float(r["Value"]),r["Source"]))
@@ -2202,7 +2213,7 @@ def render_module(module: str, tier: str, username: str):
         st.subheader("📈 Advanced Engineering Forecasting Studio")
         st.caption("Forecast demand, capacity, downtime, inventory, lead time, quality and energy with one transparent validated engine.")
         df=st.data_editor(
-            st.session_state.setdefault("forecast_df",pd.DataFrame({
+            _industrial_platform_session_state().setdefault("forecast_df",pd.DataFrame({
                 "Date":pd.date_range("2026-01-01",periods=36,freq="MS"),
                 "Demand":np.maximum(100,np.linspace(500,760,36)+np.sin(np.arange(36))*60),
                 "Capacity":[720]*36,
@@ -2226,10 +2237,10 @@ def render_module(module: str, tier: str, username: str):
         if st.button("🧠 Train, Validate & Forecast",type="primary",use_container_width=True,key="forecast_run"):
             try:
                 result,metrics=engineering_forecast(df,date_col,target_col,ext,int(horizon),holdout=int(holdout))
-                st.session_state["forecast_result"]=result; st.session_state["forecast_metrics"]=metrics
+                _industrial_platform_session_state()["forecast_result"]=result; _industrial_platform_session_state()["forecast_metrics"]=metrics
             except Exception as exc: st.error(f"Forecast failed safely: {exc}")
-        if "forecast_result" in st.session_state:
-            fr=st.session_state["forecast_result"]; met=st.session_state.get("forecast_metrics",{})
+        if "forecast_result" in _industrial_platform_session_state():
+            fr=_industrial_platform_session_state()["forecast_result"]; met=_industrial_platform_session_state().get("forecast_metrics",{})
             future=fr[fr["Series"].astype(str).eq("Forecast")].copy() if "Series" in fr.columns else fr
             k1,k2,k3,k4=st.columns(4)
             k1.metric("Holdout MAE",f'{float(met.get("Holdout MAE",float("nan"))):.3g}')
@@ -2242,7 +2253,7 @@ def render_module(module: str, tier: str, username: str):
             render_export_bar(module,[("History + Forecast",fr),("Forecast Metrics",pd.DataFrame([met]))],[("Engineering Forecast",fig)],tier,username)
     elif module=="Scenario Versioning & Comparison":
         st.subheader("🧪 Scenario Versioning")
-        base=st.data_editor(st.session_state.setdefault("scenario_df",pd.DataFrame({"Scenario":["Baseline Q3 Logistics","High-Tariff Expansion","Supplier Shock"],"Cost":[100000,125000,140000],"Service":[95,91,84],"Capacity":[10000,9500,8200],"Carbon":[1000,1100,1250]})),num_rows="dynamic",use_container_width=True,key="scenario_editor")
+        base=st.data_editor(_industrial_platform_session_state().setdefault("scenario_df",pd.DataFrame({"Scenario":["Baseline Q3 Logistics","High-Tariff Expansion","Supplier Shock"],"Cost":[100000,125000,140000],"Service":[95,91,84],"Capacity":[10000,9500,8200],"Carbon":[1000,1100,1250]})),num_rows="dynamic",use_container_width=True,key="scenario_editor")
         if st.button("💾 Save Scenario Versions",type="primary",use_container_width=True,key="scenario_save"):
             for r in base.to_dict("records"): save_scenario(r["Scenario"],"Baseline Q3 Logistics",r,{},username)
             st.success("Scenario versions saved.")
@@ -2261,10 +2272,10 @@ def render_module(module: str, tier: str, username: str):
             st.info("Check the workspace name or ask its Owner to add your account before continuing.")
             return
         members_key="workspace_members_df_"+hashlib.sha256(ws.strip().casefold().encode("utf-8")).hexdigest()[:12]
-        if members_key not in st.session_state:
-            st.session_state[members_key]=saved.copy(deep=True)
+        if members_key not in _industrial_platform_session_state():
+            _industrial_platform_session_state()[members_key]=saved.copy(deep=True)
         members=st.data_editor(
-            st.session_state[members_key],
+            _industrial_platform_session_state()[members_key],
             num_rows="dynamic",
             use_container_width=True,
             key="workspace_members_editor_"+hashlib.sha256(ws.strip().casefold().encode("utf-8")).hexdigest()[:12],
@@ -2277,7 +2288,7 @@ def render_module(module: str, tier: str, username: str):
         if st.button("💾 Save Workspace Members",type="primary",use_container_width=True,key="workspace_save"):
             try:
                 saved=save_workspace_members(ws,username,members.to_dict("records"))
-                st.session_state[members_key]=saved.copy(deep=True)
+                _industrial_platform_session_state()[members_key]=saved.copy(deep=True)
                 st.success("Workspace membership saved after server-side identity and role validation.")
             except Exception as exc:
                 st.error(f"Workspace membership was not changed: {type(exc).__name__}: {exc}")
@@ -2286,42 +2297,42 @@ def render_module(module: str, tier: str, username: str):
         render_export_bar(module,[("Workspace Members",saved)],tier,username)
     elif module=="Executive Report Center":
         st.subheader("📋 Executive Report Center")
-        report=st.data_editor(st.session_state.setdefault("exec_report_df",pd.DataFrame({"KPI":["Cost","Service Level","Carbon","Risk"],"Baseline":[100,95,100,10],"Scenario":[92,97,84,8],"Unit":["index","%","index","index"]})),num_rows="dynamic",use_container_width=True,key="exec_report_editor")
+        report=st.data_editor(_industrial_platform_session_state().setdefault("exec_report_df",pd.DataFrame({"KPI":["Cost","Service Level","Carbon","Risk"],"Baseline":[100,95,100,10],"Scenario":[92,97,84,8],"Unit":["index","%","index","index"]})),num_rows="dynamic",use_container_width=True,key="exec_report_editor")
         fig=px.bar(report,x="KPI",y=["Baseline","Scenario"],barmode="group",title="Executive KPI Comparison")
         st.plotly_chart(fig,use_container_width=True)
         render_export_bar(module,[("Executive KPIs",report)],[("Executive KPI Chart",fig)],tier,username)
     elif module=="Predictive Maintenance Digital Twin":
         st.subheader("🛠️ Predictive Maintenance")
-        maint=st.data_editor(st.session_state.setdefault("maint_df",pd.DataFrame({"Asset":["CNC-01","Press-02","Packing-01"],"Temperature":[65,82,71],"Vibration":[1.1,3.8,2.2],"RuntimeHours":[1200,3200,2100]})),num_rows="dynamic",use_container_width=True,key="maint_editor")
+        maint=st.data_editor(_industrial_platform_session_state().setdefault("maint_df",pd.DataFrame({"Asset":["CNC-01","Press-02","Packing-01"],"Temperature":[65,82,71],"Vibration":[1.1,3.8,2.2],"RuntimeHours":[1200,3200,2100]})),num_rows="dynamic",use_container_width=True,key="maint_editor")
         if st.button("🔮 Score Maintenance Risk",type="primary",use_container_width=True,key="maint_run"):
-            try: st.session_state["maint_result"]=predictive_maintenance_score(maint)
+            try: _industrial_platform_session_state()["maint_result"]=predictive_maintenance_score(maint)
             except Exception as exc: st.error(f"Maintenance analysis failed safely: {exc}")
-        if "maint_result" in st.session_state: st.dataframe(st.session_state["maint_result"],use_container_width=True)
-        render_export_bar(module,[("Telemetry Features",maint),("Maintenance Risk",st.session_state.get("maint_result",pd.DataFrame()))],tier,username)
+        if "maint_result" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["maint_result"],use_container_width=True)
+        render_export_bar(module,[("Telemetry Features",maint),("Maintenance Risk",_industrial_platform_session_state().get("maint_result",pd.DataFrame()))],tier,username)
     elif module=="Localization & Multi-Currency":
         st.subheader("🌍 Localization & Multi-Currency")
-        fx=st.data_editor(st.session_state.setdefault("currency_df",pd.DataFrame({"Item":["Facility A","Facility B","Supplier C"],"Amount":[100000,85000,120000],"Currency":["USD","EUR","SAR"],"Region":["US","EU","SA"]})),num_rows="dynamic",use_container_width=True,key="currency_editor")
+        fx=st.data_editor(_industrial_platform_session_state().setdefault("currency_df",pd.DataFrame({"Item":["Facility A","Facility B","Supplier C"],"Amount":[100000,85000,120000],"Currency":["USD","EUR","SAR"],"Region":["US","EU","SA"]})),num_rows="dynamic",use_container_width=True,key="currency_editor")
         rates=st.text_area("Rates to base currency (1 base = rate units)",'{"USD":1,"EUR":0.92,"SAR":3.75}',key="currency_rates")
         base_cur=st.text_input("Base currency","USD",key="base_currency")
         if st.button("💱 Convert to Base Currency",type="primary",use_container_width=True,key="currency_run"):
-            try: st.session_state["currency_result"]=currency_convert(fx,"Amount","Currency",base_cur,json.loads(rates))
+            try: _industrial_platform_session_state()["currency_result"]=currency_convert(fx,"Amount","Currency",base_cur,json.loads(rates))
             except Exception as exc: st.error(f"Currency conversion failed safely: {exc}")
-        if "currency_result" in st.session_state: st.dataframe(st.session_state["currency_result"],use_container_width=True)
-        rules=st.data_editor(st.session_state.setdefault("trade_rules_df",pd.DataFrame({"Region From":["SA","EU"],"Region To":["EU","SA"],"Product Class":["Industrial","Industrial"],"Rule":["Check customs code","Check origin documentation"],"Active":[True,True]})),num_rows="dynamic",use_container_width=True,key="trade_rules_editor")
-        render_export_bar(module,[("Currency Inputs",fx),("Converted",st.session_state.get("currency_result",pd.DataFrame())),("Trade Rules",rules)],tier,username)
+        if "currency_result" in _industrial_platform_session_state(): st.dataframe(_industrial_platform_session_state()["currency_result"],use_container_width=True)
+        rules=st.data_editor(_industrial_platform_session_state().setdefault("trade_rules_df",pd.DataFrame({"Region From":["SA","EU"],"Region To":["EU","SA"],"Product Class":["Industrial","Industrial"],"Rule":["Check customs code","Check origin documentation"],"Active":[True,True]})),num_rows="dynamic",use_container_width=True,key="trade_rules_editor")
+        render_export_bar(module,[("Currency Inputs",fx),("Converted",_industrial_platform_session_state().get("currency_result",pd.DataFrame())),("Trade Rules",rules)],tier,username)
     elif module=="Enterprise Security & Governance":
         tabs=st.tabs(["Posture","Roles","Audit"])
         with tabs[0]:
             st.json({"MFA":"Configuration surface — provider enforcement not verified","SSO/OIDC":"Configuration surface — connection not verified","SAML":"Configuration surface — provider flow not verified","SCIM":"Configuration surface — provisioning not verified","Workspace isolation":"Partial — Team Workspaces membership is checked server-side; remaining routes require review","Audit logging":"Available in the application database; deployment durability not verified","Data retention":"Configurable — deletion/retention execution requires verification","Secrets":"Use Streamlit secrets/environment variables; deployment configuration requires review"})
         with tabs[1]:
-            role=st.session_state.setdefault("security_roles",pd.DataFrame({"Role":["Owner","Planner","Engineer","Viewer"],"Read":["Yes","Yes","Yes","Yes"],"Write":["Yes","Yes","Yes","No"],"Execute":["Yes","Yes","Yes","No"],"Admin":["Yes","No","No","No"]}))
+            role=_industrial_platform_session_state().setdefault("security_roles",pd.DataFrame({"Role":["Owner","Planner","Engineer","Viewer"],"Read":["Yes","Yes","Yes","Yes"],"Write":["Yes","Yes","Yes","No"],"Execute":["Yes","Yes","Yes","No"],"Admin":["Yes","No","No","No"]}))
             st.caption("Role matrix preview only. Editing this display does not change authorization policy. Enforced access checks are server-side and separately tested.")
             st.dataframe(role,use_container_width=True,hide_index=True)
         with tabs[2]:
             audit_workspace=str(
-                st.session_state.get("shoir_workspace_name")
-                or st.session_state.get("workspace")
-                or st.session_state.get("active_workspace_name")
+                _industrial_platform_session_state().get("shoir_workspace_name")
+                or _industrial_platform_session_state().get("workspace")
+                or _industrial_platform_session_state().get("active_workspace_name")
                 or "default"
             )
             try:
