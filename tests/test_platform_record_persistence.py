@@ -284,3 +284,35 @@ def test_private_dataset_upload_rejects_unexpected_signed_upload_host(monkeypatc
             hashlib.sha256(raw).hexdigest(), "c" * 64, 1, 1,
             {"asset_id": {"dtype": "object"}}, [],
         )
+
+
+
+def test_dataset_upload_edge_actions_require_session_and_private_storage():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    create = source.split('if (action === "dataset_upload_create") {', 1)[1].split(
+        'if (action === "dataset_version_finalize") {', 1
+    )[0]
+    finalize = source.split('if (action === "dataset_version_finalize") {', 1)[1].split(
+        'if (action === "dataset_version_register") {', 1
+    )[0]
+    assert 'getSession(String(body.token || ""), username, "workspace")' in create
+    assert 'getSession(String(body.token || ""), username, "workspace")' in finalize
+    assert '.createSignedUploadUrl(uploadPath, { upsert: false })' in create
+    assert 'await sha256Bytes(bytes)' in finalize
+    assert 'digest !== dataHash' in finalize
+    assert '"shoir_platform_register_dataset_version_with_storage"' in finalize
+    assert 'p_storage_key: storageKey' in finalize
+
+
+def test_private_dataset_storage_migration_excludes_bucket_from_permissive_policy():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/migrations/20261104193000_shoir_private_dataset_file_storage_and_linkage.sql").read_text(encoding="utf-8")
+    assert "'shoir-industrial-datasets'" in source
+    assert "public = false" in source
+    assert "file_size_limit = EXCLUDED.file_size_limit" in source
+    assert "bucket_id <> 'shoir-industrial-datasets'" in source
+    assert "REVOKE ALL ON FUNCTION public.shoir_platform_register_dataset_version_with_storage" in source
+    assert "TO service_role" in source
