@@ -441,3 +441,57 @@ def test_private_dataset_download_can_select_a_historical_version(monkeypatch):
     assert data == content
     assert metadata["version"] == 1
     assert calls[0][1]["version"] == 1
+
+
+
+def test_historical_dataset_download_passes_selected_version_to_edge_action(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        store, "APP_ENVIRONMENT", "staging"
+    )
+    import hashlib
+    import requests
+    content = b"asset_id,units\nA-1,8\n"
+    monkeypatch.setattr(
+        store, "STAGING_SUPABASE_PROJECT_HOST",
+        "hfhrosthswcybccepmak.supabase.co",
+    )
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda action, payload: calls.append((action, dict(payload))) or {
+            "ok": True,
+            "download_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/sign/shoir-industrial-datasets/workspace/DS-ABCDEF012345/file.csv?token=x",
+            "data_hash": hashlib.sha256(content).hexdigest(),
+            "version": 1,
+            "row_count": 1,
+            "column_count": 2,
+        },
+    )
+    monkeypatch.setattr(
+        requests, "get",
+        lambda *_args, **_kwargs: type("Response", (), {
+            "status_code": 200, "content": content, "text": ""
+        })(),
+    )
+    downloaded, metadata = store.edge_download_dataset_version(
+        "synthetic-user", "opaque-session-token", "plant-a",
+        "DS-ABCDEF012345", version=1,
+    )
+    assert downloaded == content
+    assert metadata["version"] == 1
+    assert calls[0][0] == "dataset_download_url"
+    assert calls[0][1]["version"] == 1
+
+
+def test_historical_download_edge_action_selects_immutable_version_record():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    action = source.split('if (action === "dataset_download_url") {', 1)[1].split(
+        'if (action === "dataset_upload_create") {', 1
+    )[0]
+    assert 'const recordType = requestedVersion === null' in action
+    assert '"dataset_version"' in action
+    assert 'datasetId + ":v" + requestedVersion' in action
+    assert '.eq("workspace_key", workspaceKey)' in action
