@@ -1163,7 +1163,7 @@ def renewed_expiry(existing_expiry: Any, days: int = 30, now: Optional[dt.dateti
     return start + dt.timedelta(days=int(days))
 
 _PLATFORM_RECORD_TYPES = {
-    "asset", "dataset", "process", "product", "material", "calculation",
+    "asset", "dataset", "dataset_version", "process", "product", "material", "calculation",
     "kpi", "scenario", "recommendation", "decision", "project", "action",
     "document", "workbook", "model", "quality", "maintenance", "energy",
     "cost", "traceability", "risk", "workflow", "artifact",
