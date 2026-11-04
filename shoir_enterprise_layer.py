@@ -134,7 +134,7 @@ def _staging_platform_list(
         return None
     actor, token = identity
     return edge_list_platform_records(
-        actor, token, workspace, record_type, max(1, min(200, int(limit))),
+        actor, token, workspace, record_type, max(1, min(10000, int(limit))),
         entity_key=entity_key,
     )
 
