@@ -1220,6 +1220,7 @@ def edge_download_dataset_version(
     token: str,
     workspace: str,
     dataset_id: str,
+    version: int | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     """Download a registered dataset from private storage and verify its SHA-256."""
     import hashlib
@@ -1235,6 +1236,7 @@ def edge_download_dataset_version(
         "token": str(token),
         "workspace": str(workspace or "default").strip(),
         "dataset_id": str(dataset_id),
+        "version": version,
     })
     signed_url = str(result.get("download_url") or "")
     parsed = urlsplit(signed_url)
