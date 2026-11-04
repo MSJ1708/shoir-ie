@@ -199,6 +199,8 @@ def renamed_node_record(node: dict[str, Any], new_name: str) -> dict[str, Any]:
     aliases = metadata.get("name_aliases", [])
     if not isinstance(aliases, list):
         aliases = []
+    else:
+        aliases = list(aliases)
     if old_name and old_name != clean_name and old_name not in aliases:
         aliases.append(old_name)
     metadata["name_aliases"] = aliases[-20:]
