@@ -92,8 +92,11 @@ def stable_id(node_type: str, name: str, source: str = "") -> str:
     identity across source-data changes.
     """
     source_key = str(source or "").strip()
-    identity = f"source|{source_key}" if source_key else f"name|{str(name).strip()}"
-    raw = f"{str(node_type).strip()}|{identity}"
+    if source_key:
+        raw = f"{str(node_type).strip()}|source|{source_key}"
+    else:
+        # Preserve the pre-change ID for source-less legacy nodes.
+        raw = f"{node_type}|{name}|{source}"
     return f"{node_type[:3].upper()}-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
 
 
