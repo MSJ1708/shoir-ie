@@ -10,6 +10,11 @@ def test_canonical_identity_survives_display_name_rename(tmp_path, monkeypatch):
     database_path = str(tmp_path / "canonical-identity.db")
     monkeypatch.setattr(layer, "DEFAULT_DB", database_path)
     monkeypatch.setattr(layer, "_remote", lambda: False)
+    monkeypatch.setattr(
+        layer,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "tester"}),
+    )
 
     layer.ensure_enterprise_schema()
     workspace_id = layer.workspace_key("tester", "site-a")
@@ -84,6 +89,11 @@ def test_failed_rename_audit_event_rolls_back_entity_update(tmp_path, monkeypatc
     database_path = str(tmp_path / "canonical-rename-rollback.db")
     monkeypatch.setattr(layer, "DEFAULT_DB", database_path)
     monkeypatch.setattr(layer, "_remote", lambda: False)
+    monkeypatch.setattr(
+        layer,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "tester"}),
+    )
     fixed_hex = "ABCDEF1234567890ABCDEF1234567890"
     monkeypatch.setattr(layer.uuid, "uuid4", lambda: SimpleNamespace(hex=fixed_hex))
 
@@ -137,3 +147,46 @@ def test_failed_rename_audit_event_rolls_back_entity_update(tmp_path, monkeypatc
     assert entities.iloc[0]["entity_id"] == entity_id
     assert entities.iloc[0]["name"] == "Press 1001"
     assert entities.iloc[0]["content_hash"] == "before-hash"
+
+
+
+def test_canonical_rename_requires_authenticated_matching_actor(monkeypatch):
+    monkeypatch.setattr(
+        layer,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "another-user"}),
+    )
+    with pytest.raises(PermissionError, match="does not match the signed-in account"):
+        layer.persist_thread_node_rename(
+            "tester",
+            "site-a",
+            {
+                "node_id": "AST-LEGACY-1001",
+                "node_type": "Asset",
+                "name": "Main Press",
+                "source": "asset:1001",
+                "status": "Observed",
+            },
+            previous_name="Press 1001",
+        )
+
+
+def test_guest_session_cannot_rename_digital_thread_node(monkeypatch):
+    monkeypatch.setattr(
+        layer,
+        "st",
+        SimpleNamespace(session_state={"authenticated": True, "current_user": "Guest Visitor"}),
+    )
+    with pytest.raises(PermissionError, match="Guest and anonymous"):
+        layer.persist_thread_node_rename(
+            "Guest Visitor",
+            "site-a",
+            {
+                "node_id": "AST-GUEST-1",
+                "node_type": "Asset",
+                "name": "Guest Asset",
+                "source": "asset:guest-1",
+                "status": "Observed",
+            },
+            previous_name="Guest Asset Old",
+        )
