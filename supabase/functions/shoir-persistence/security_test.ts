@@ -257,7 +257,6 @@ Deno.test("dataset API package gate follows the canonical tier hierarchy", () =>
   const allowed = [
     "Enterprise Tier",
     "Enterprise Plus Tier ($399)",
-    "Enterprise Tier",
     "Research Pack",
   ];
   assert(
@@ -279,13 +278,13 @@ Deno.test("dataset API package gate follows the canonical tier hierarchy", () =>
   for (const tier of allowed) {
     assert(
       platformTierAllows(tier, "Enterprise"),
-      "Professional dataset capability should be allowed for " + String(tier),
+      "Enterprise dataset capability should be allowed for " + String(tier),
     );
   }
   for (const tier of denied) {
     assert(
       !platformTierAllows(tier, "Enterprise"),
-      "Professional dataset capability must be denied for " + String(tier),
+      "Enterprise dataset capability must be denied for " + String(tier),
     );
   }
   assert(
