@@ -250,6 +250,59 @@ async function getSession(
   ) throw new Error("SUBSCRIPTION_EXPIRED");
   return row;
 }
+function normalizePlatformTier(value: unknown): string {
+  const tier = String(value || "Starter").trim().toLowerCase();
+  if (tier.includes("research")) return "Research Pack";
+  if (tier.includes("enterprise plus") || tier.includes("industrial enterprise")) {
+    return "Enterprise Plus";
+  }
+  if (tier.includes("enterprise")) return "Enterprise";
+  if (tier.includes("professional")) return "Professional";
+  if (tier.includes("pro")) return "Mid-Tier Pro";
+  return "Starter";
+}
+
+function platformTierAllows(currentValue: unknown, requiredValue: string): boolean {
+  const current = normalizePlatformTier(currentValue);
+  const required = normalizePlatformTier(requiredValue);
+  const order = [
+    "Starter",
+    "Mid-Tier Pro",
+    "Professional",
+    "Enterprise",
+    "Enterprise Plus",
+  ];
+  if (current === "Research Pack") {
+    return [
+      "Starter",
+      "Mid-Tier Pro",
+      "Professional",
+      "Enterprise",
+      "Research Pack",
+    ].includes(required);
+  }
+  if (required === "Research Pack") return current === "Research Pack";
+  return order.indexOf(current) >= order.indexOf(required);
+}
+
+function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
+  return !platformTierAllows(row.tier, "Professional");
+}
+
+function requireDatasetEntitlementResponse(
+  row: Record<string, unknown>,
+): Response | null {
+  if (!datasetEntitlementDenied(row)) return null;
+  return sendResponse(
+    {
+      error: "FEATURE_REQUIRES_PROFESSIONAL",
+      required_tier: "Professional",
+      current_tier: String(row.tier || "Starter"),
+    },
+    403,
+  );
+}
+
 async function adminSession(username: string, token: string) {
   const row = await getSession(token, username);
   if (row.username_lc !== "sho" || row.role !== "Enterprise Admin") {
@@ -945,6 +998,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
+      const entitlementResponse = requireDatasetEntitlementResponse(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return entitlementResponse;
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1023,6 +1080,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
+      const entitlementResponse = requireDatasetEntitlementResponse(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return entitlementResponse;
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1065,6 +1126,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
+      const entitlementResponse = requireDatasetEntitlementResponse(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return entitlementResponse;
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1235,6 +1300,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
+      const entitlementResponse = requireDatasetEntitlementResponse(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return entitlementResponse;
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1361,6 +1430,12 @@ Deno.serve(async (req) => {
           { error: "Platform record type is not supported." },
           400,
         );
+      }
+      if (recordType === "dataset" || recordType === "dataset_version") {
+        const entitlementResponse = requireDatasetEntitlementResponse(
+          row as unknown as Record<string, unknown>,
+        );
+        if (entitlementResponse) return entitlementResponse;
       }
       const entityKey = String(body.entity_key || "").trim();
       if (entityKey.length > 240 || /[\\x00-\\x1f\\x7f]/.test(entityKey)) {
