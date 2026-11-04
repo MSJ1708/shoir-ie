@@ -62,7 +62,7 @@ def test_canonical_identity_survives_display_name_rename(tmp_path, monkeypatch):
     assert event is not None
     assert event[0] == "digital_thread_node_renamed"
     assert event[1] == legacy_entity_id
-    assert json.loads(event[2])["canonical_id_preserved"] is True
+    assert json.loads(event[2])["thread_node_id_preserved"] is True
 
     first_id = layer.upsert_canonical_entity(
         "tester", "Asset", "Main Press", "asset:1001",
