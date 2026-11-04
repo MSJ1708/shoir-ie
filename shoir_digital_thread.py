@@ -81,9 +81,65 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value).lower()).strip("_") or "item"
 
 
-def stable_id(node_type: str, name: str, source: str = "") -> str:
-    raw = f"{node_type}|{name}|{source}"
+def stable_id(
+    node_type: str,
+    name: str,
+    source: str = "",
+    identity_key: str = "",
+) -> str:
+    """Return a stable graph ID; prefer immutable external identity over labels."""
+    immutable_key = str(identity_key or "").strip()
+    raw = (
+        f"{node_type}|identity|{immutable_key}"
+        if immutable_key
+        else f"{node_type}|{name}|{source}"
+    )
     return f"{node_type[:3].upper()}-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
+
+
+def _stable_identity_column(frame: pd.DataFrame, node_type: str) -> str:
+    """Find an explicit business-key column, without inferring from personal names."""
+    candidates = {
+        "Asset": ("asset_id", "equipment_id", "machine_id", "asset_tag", "equipment_tag", "tag_number", "tag_id"),
+        "Product": ("product_id", "sku", "part_number", "product_code"),
+        "Material": ("material_id", "material_code", "component_id", "item_code"),
+        "Order": ("order_id", "work_order_id", "purchase_order_id", "sales_order_id"),
+        "Quality": ("nonconformance_id", "nc_id", "inspection_id", "quality_record_id"),
+        "Maintenance": ("maintenance_order_id", "notification_id", "failure_id"),
+        "Energy": ("meter_id", "energy_meter_id", "measurement_point_id"),
+        "Cost": ("cost_center_id", "cost_object_id"),
+        "Scenario": ("scenario_id",),
+        "Decision": ("decision_id",),
+        "Outcome": ("outcome_id",),
+        "Model": ("model_id",),
+        "Experiment": ("study_id", "experiment_id"),
+    }
+    allowed = set(candidates.get(node_type, ()))
+    for column in frame.columns:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+        if normalized in allowed:
+            return str(column)
+    return ""
+
+
+def _display_column(frame: pd.DataFrame, node_type: str, identity_column: str) -> str:
+    tokens = {
+        "Asset": ("asset_name", "equipment_name", "machine_name", "asset_label", "equipment_label", "name", "description"),
+        "Product": ("product_name", "description", "name", "label"),
+        "Material": ("material_name", "description", "name", "label"),
+        "Order": ("order_name", "description", "name", "label"),
+        "Quality": ("description", "defect_name", "name", "label"),
+        "Maintenance": ("description", "maintenance_type", "name", "label"),
+        "Energy": ("meter_name", "measurement_point_name", "name", "label"),
+        "Cost": ("cost_center_name", "cost_object_name", "name", "label"),
+    }.get(node_type, ("name", "description", "label"))
+    for column in frame.columns:
+        if str(column) == identity_column:
+            continue
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+        if normalized in tokens:
+            return str(column)
+    return identity_column
 
 
 def _keys() -> dict[str, str]:
@@ -117,10 +173,52 @@ def ensure_thread_state(owner: str) -> dict[str, Any]:
     return keys
 
 
-def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", status: str = "Observed", metadata: dict[str, Any] | None = None) -> str:
+def _upsert_node(
+    node_type: str,
+    name: str,
+    source: str = "",
+    module: str = "",
+    status: str = "Observed",
+    metadata: dict[str, Any] | None = None,
+    identity_key: str = "",
+) -> str:
     keys = _keys()
-    node_id = stable_id(node_type, name, source)
+    node_id = stable_id(node_type, name, source, identity_key=identity_key)
     nodes = st.session_state[keys["nodes"]]
+    next_metadata = dict(metadata or {})
+    for idx, existing in enumerate(nodes):
+        if existing.get("node_id") != node_id:
+            continue
+        old_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        aliases = list(old_metadata.get("name_aliases", [])) if isinstance(old_metadata.get("name_aliases"), (list, tuple)) else []
+        incoming_aliases = next_metadata.get("name_aliases", [])
+        if isinstance(incoming_aliases, (list, tuple)):
+            aliases.extend(incoming_aliases)
+        old_name = str(existing.get("name") or "").strip()
+        new_name = str(name or "").strip()
+        if old_name and old_name != new_name:
+            aliases.append(old_name)
+        aliases = list(dict.fromkeys(
+            str(value).strip()[:180]
+            for value in aliases
+            if str(value or "").strip()
+        ))
+        if aliases:
+            next_metadata["name_aliases"] = aliases[-30:]
+        payload = {
+            "node_id": node_id,
+            "node_type": node_type,
+            "name": new_name[:180],
+            "source": str(source)[:240],
+            "module": str(module)[:180],
+            "status": str(status)[:80],
+            "metadata": next_metadata,
+            "updated_at": _now(),
+        }
+        nodes[idx] = payload
+        return node_id
+    if identity_key:
+        next_metadata.setdefault("identity_basis", "immutable_external_key")
     payload = {
         "node_id": node_id,
         "node_type": node_type,
@@ -128,13 +226,9 @@ def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", 
         "source": str(source)[:240],
         "module": str(module)[:180],
         "status": str(status)[:80],
-        "metadata": metadata or {},
+        "metadata": next_metadata,
         "updated_at": _now(),
     }
-    for idx, existing in enumerate(nodes):
-        if existing.get("node_id") == node_id:
-            nodes[idx] = payload
-            return node_id
     nodes.append(payload)
     return node_id
 
