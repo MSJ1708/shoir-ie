@@ -350,6 +350,23 @@ const PLATFORM_RECORD_TYPES = new Set([
   "monitoring_event",
   "report_provenance",
   "security_policy",
+  "twin_snapshot",
+  "connector_run",
+  "connector_schedule",
+  "collaboration_item",
+  "monitoring_rule",
+  "cost_baseline",
+  "kpi_definition",
+  "project_record",
+  "work_order",
+  "change_request",
+  "risk_record",
+  "traceability_record",
+  "laboratory_sample",
+  "procurement_record",
+  "spare_part",
+  "shutdown_package",
+  "competency_record",
 ]);
 const PLATFORM_SECRET_KEY =
   /(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\\bdob\\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)/i;
@@ -975,6 +992,10 @@ Deno.serve(async (req) => {
           400,
         );
       }
+      const entityKey = String(body.entity_key || "").trim();
+      if (entityKey.length > 240 || /[\\x00-\\x1f\\x7f]/.test(entityKey)) {
+        return sendResponse({ error: "Platform entity key is invalid." }, 400);
+      }
       const requestedLimit = Number(body.limit || 100);
       if (
         !Number.isInteger(requestedLimit) || requestedLimit < 1 ||
@@ -992,6 +1013,7 @@ Deno.serve(async (req) => {
         .order("updated_at", { ascending: false })
         .limit(requestedLimit);
       if (recordType) query = query.eq("record_type", recordType);
+      if (entityKey) query = query.eq("entity_key", entityKey);
       const { data, error } = await query;
       if (error) throw error;
       return sendResponse({ ok: true, records: data || [] });
