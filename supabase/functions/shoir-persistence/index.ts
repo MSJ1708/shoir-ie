@@ -934,14 +934,21 @@ Deno.serve(async (req) => {
 
     if (action === "dataset_download_url") {
       const username = String(body.username || "").trim();
-      const row = await getSession(String(body.token || ""), username, "workspace");
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
       );
       const datasetId = String(body.dataset_id || "").trim();
       if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId)) {
-        return sendResponse({ error: "Dataset identifier is invalid." }, 400);
+        return sendResponse(
+          { error: "Dataset identifier is invalid." },
+          400,
+        );
       }
       const { data: record, error } = await supabase
         .from("shoir_platform_records")
@@ -952,20 +959,32 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (error) throw error;
       if (!record?.payload_json) {
-        return sendResponse({ error: "Dataset was not found in this workspace." }, 404);
+        return sendResponse(
+          { error: "Dataset was not found in this workspace." },
+          404,
+        );
       }
       const payload = record.payload_json as Record<string, unknown>;
       const storageKey = String(payload.storage_key || "");
       const expectedPrefix = workspaceKey + "/" + datasetId + "/";
-      if (!storageKey.startsWith(expectedPrefix) ||
-          !/^[0-9a-f]{64}\.csv$/.test(storageKey.slice(expectedPrefix.length))) {
-        return sendResponse({ error: "Dataset storage reference is invalid." }, 409);
+      if (
+        !storageKey.startsWith(expectedPrefix) ||
+        !/^[0-9a-f]{64}\.csv$/.test(storageKey.slice(expectedPrefix.length))
+      ) {
+        return sendResponse(
+          { error: "Dataset storage reference is invalid." },
+          409,
+        );
       }
       const { data, error: signError } = await supabase.storage
         .from("shoir-industrial-datasets")
         .createSignedUrl(storageKey, 300, { download: true });
       if (signError) throw signError;
-      if (!data?.signedUrl) throw new Error("Storage provider did not return a signed download URL.");
+      if (!data?.signedUrl) {
+        throw new Error(
+          "Storage provider did not return a signed download URL.",
+        );
+      }
       return sendResponse({
         ok: true,
         download_url: data.signedUrl,
@@ -978,16 +997,25 @@ Deno.serve(async (req) => {
 
     if (action === "dataset_upload_create") {
       const username = String(body.username || "").trim();
-      const row = await getSession(String(body.token || ""), username, "workspace");
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
       );
       const datasetId = String(body.dataset_id || "").trim();
       const dataHash = String(body.data_hash || "").toLowerCase();
-      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
-          !/^[0-9a-f]{64}$/.test(dataHash)) {
-        return sendResponse({ error: "Dataset upload identity is invalid." }, 400);
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !/^[0-9a-f]{64}$/.test(dataHash)
+      ) {
+        return sendResponse(
+          { error: "Dataset upload identity is invalid." },
+          400,
+        );
       }
       const uploadPath = "tmp/" + workspaceKey + "/" + datasetId + "/" +
         crypto.randomUUID().replace(/-/g, "") + ".csv";
@@ -996,7 +1024,9 @@ Deno.serve(async (req) => {
         .createSignedUploadUrl(uploadPath, { upsert: false });
       if (error) throw error;
       if (!data?.signedUrl || !data?.token) {
-        throw new Error("Storage provider did not return a signed upload URL.");
+        throw new Error(
+          "Storage provider did not return a signed upload URL.",
+        );
       }
       return sendResponse({
         ok: true,
@@ -1009,7 +1039,11 @@ Deno.serve(async (req) => {
 
     if (action === "dataset_version_finalize") {
       const username = String(body.username || "").trim();
-      const row = await getSession(String(body.token || ""), username, "workspace");
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1024,59 +1058,107 @@ Deno.serve(async (req) => {
       const columnCount = Number(body.column_count);
       const schema = body.schema;
       const transformations = body.transformations || [];
-      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
-          !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
-          uploadPath.includes("..") || uploadPath.length > 240 ||
-          !name || name.length > 200 || sourceName.length > 500 ||
-          !/^[0-9a-f]{64}$/.test(dataHash) ||
-          !/^[0-9a-f]{64}$/.test(fingerprint) ||
-          !Number.isSafeInteger(rowCount) || rowCount < 0 || rowCount > 100000000 ||
-          !Number.isSafeInteger(columnCount) || columnCount < 0 || columnCount > 5000 ||
-          !schema || typeof schema !== "object" || Array.isArray(schema) ||
-          new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
-          !Array.isArray(transformations) || transformations.length > 50 ||
-          new TextEncoder().encode(JSON.stringify(transformations)).byteLength > 16384) {
-        return sendResponse({ error: "Dataset version metadata is invalid." }, 400);
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
+        uploadPath.includes("..") ||
+        uploadPath.length > 240 ||
+        !name ||
+        name.length > 200 ||
+        sourceName.length > 500 ||
+        !/^[0-9a-f]{64}$/.test(dataHash) ||
+        !/^[0-9a-f]{64}$/.test(fingerprint) ||
+        !Number.isSafeInteger(rowCount) ||
+        rowCount < 0 ||
+        rowCount > 100000000 ||
+        !Number.isSafeInteger(columnCount) ||
+        columnCount < 0 ||
+        columnCount > 5000 ||
+        !schema ||
+        typeof schema !== "object" ||
+        Array.isArray(schema) ||
+        new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+        !Array.isArray(transformations) ||
+        transformations.length > 50 ||
+        new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
+          16384
+      ) {
+        return sendResponse(
+          { error: "Dataset version metadata is invalid." },
+          400,
+        );
       }
       const { data: uploaded, error: downloadError } = await supabase.storage
         .from("shoir-industrial-datasets")
         .download(uploadPath);
-      if (downloadError || !uploaded) throw downloadError || new Error("Uploaded dataset file is missing.");
+      if (downloadError || !uploaded) {
+        throw downloadError ||
+          new Error("Uploaded dataset file is missing.");
+      }
       if (uploaded.size > 52428800) {
-        await supabase.storage.from("shoir-industrial-datasets").remove([uploadPath]);
-        return sendResponse({ error: "Dataset file exceeds the 50 MiB storage limit." }, 413);
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        return sendResponse(
+          { error: "Dataset file exceeds the 50 MiB storage limit." },
+          413,
+        );
       }
       const bytes = new Uint8Array(await uploaded.arrayBuffer());
       const digest = await sha256Bytes(bytes);
       if (digest !== dataHash) {
-        await supabase.storage.from("shoir-industrial-datasets").remove([uploadPath]);
-        return sendResponse({ error: "Uploaded dataset content hash does not match the registered data hash." }, 422);
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        return sendResponse(
+          {
+            error:
+              "Uploaded dataset content hash does not match the registered data hash.",
+          },
+          422,
+        );
       }
-      const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash + ".csv";
+      const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
+        ".csv";
       const bucket = supabase.storage.from("shoir-industrial-datasets");
-      const { data: existingFile, error: existingError } = await bucket.download(storageKey);
+      const { data: existingFile, error: existingError } = await bucket
+        .download(storageKey);
       if (!existingError && existingFile) {
-        const existingBytes = new Uint8Array(await existingFile.arrayBuffer());
+        const existingBytes = new Uint8Array(
+          await existingFile.arrayBuffer(),
+        );
         const existingHash = await sha256Bytes(existingBytes);
         if (existingHash !== dataHash) {
           await bucket.remove([uploadPath]);
-          throw new Error("Existing immutable dataset object does not match its content hash.");
+          throw new Error(
+            "Existing immutable dataset object does not match its content hash.",
+          );
         }
       } else {
+        const uploadBlob = new Blob(
+          [bytes.slice().buffer as ArrayBuffer],
+          { type: "text/csv" },
+        );
         const { error: storeError } = await bucket.upload(
           storageKey,
-          new Blob([bytes], { type: "text/csv" }),
+          uploadBlob,
           { contentType: "text/csv", upsert: false },
         );
         if (storeError) {
-          const { data: racedFile, error: racedError } = await bucket.download(storageKey);
+          const { data: racedFile, error: racedError } = await bucket
+            .download(storageKey);
           if (racedError || !racedFile) throw storeError;
           const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
           const racedHash = await sha256Bytes(racedBytes);
-          if (racedHash !== dataHash) throw new Error("Concurrent immutable dataset upload has a different content hash.");
+          if (racedHash !== dataHash) {
+            throw new Error(
+              "Concurrent immutable dataset upload has a different content hash.",
+            );
+          }
         }
       }
-      await bucket.remove([uploadPath]);
+      const { error: removeError } = await bucket.remove([uploadPath]);
+      if (removeError) throw removeError;
       const versionRecordId = "SPR-" +
         crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
       const headRecordId = "SPR-" +
