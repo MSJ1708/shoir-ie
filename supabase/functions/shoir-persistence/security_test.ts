@@ -247,3 +247,41 @@ Deno.test("protected administrator invariant is read-only and fails closed on dr
     );
   }
 });
+
+
+
+Deno.test("dataset API package gate follows the canonical tier hierarchy", () => {
+  const allowed = [
+    "Professional Tier",
+    "Enterprise Tier",
+    "Enterprise Plus Tier ($399)",
+    "Research Pack",
+  ];
+  const denied = [
+    "Starter Tier",
+    "Mid-Tier Pro",
+    "Pro Tier",
+    "",
+    undefined,
+  ];
+  for (const tier of allowed) {
+    assert(
+      platformTierAllows(tier, "Professional"),
+      "Professional dataset capability should be allowed for " + String(tier),
+    );
+  }
+  for (const tier of denied) {
+    assert(
+      !platformTierAllows(tier, "Professional"),
+      "Professional dataset capability must be denied for " + String(tier),
+    );
+  }
+  assert(
+    !platformTierAllows("Enterprise Plus Tier ($399)", "Research Pack"),
+    "Enterprise Plus must not be treated as the Research Pack add-on.",
+  );
+  assert(
+    platformTierAllows("Research Pack", "Professional"),
+    "Research Pack should retain its inherited base capabilities.",
+  );
+});
