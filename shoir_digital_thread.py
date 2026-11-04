@@ -1072,16 +1072,30 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         else:
             st.info("Sync the workspace first to populate nodes.")
         st.markdown("### Create a node manually")
-        n1, n2, n3 = st.columns(3)
+        n1, n2, n3, n4 = st.columns(4)
         with n1:
             node_type = st.selectbox("Type", THREAD_TYPES, key="global_thread_new_type")
         with n2:
             node_name = st.text_input("Name", key="global_thread_new_name")
         with n3:
             node_status = st.selectbox("Status", ["Observed", "Inferred", "Pending verification"], key="global_thread_new_status")
+        with n4:
+            manual_identity = st.text_input(
+                "Stable business ID (optional)",
+                key="global_thread_new_identity",
+                help="Use an immutable asset, product, order, project or decision ID. Do not enter passwords or personal identifiers.",
+            )
         if st.button("＋ Add node", use_container_width=True, key="global_thread_add_node"):
             if node_name.strip():
-                _upsert_node(node_type, node_name.strip(), f"manual:{username}", module, node_status)
+                _upsert_node(
+                    node_type,
+                    node_name.strip(),
+                    f"manual:{username}",
+                    module,
+                    node_status,
+                    metadata={"identity_key_provided": bool(manual_identity.strip())},
+                    identity_key=manual_identity.strip(),
+                )
                 st.success("Node added to the project thread.")
             else:
                 st.warning("Enter a node name first.")
