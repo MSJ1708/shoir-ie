@@ -182,7 +182,7 @@ def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatc
     calls = []
     monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(
-        durable_account_store, "edge_register_dataset_version",
+        durable_account_store, "edge_upload_and_register_dataset_version",
         lambda **kwargs: calls.append(kwargs) or {
             "ok": True,
             "registration": {
@@ -209,6 +209,7 @@ def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatc
     assert first == second
     assert len(calls) == 2
     assert calls[0]["dataset_id"] == first
+    assert calls[0]["file_bytes"] == calls[1]["file_bytes"]
     assert calls[0]["data_hash"] == calls[1]["data_hash"]
     assert calls[0]["version_fingerprint"] == calls[1]["version_fingerprint"]
     assert calls[0]["row_count"] == 2
@@ -222,7 +223,7 @@ def test_staging_dataset_registration_fails_closed_without_session(monkeypatch):
 
     monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(
-        durable_account_store, "edge_register_dataset_version",
+        durable_account_store, "edge_upload_and_register_dataset_version",
         lambda **kwargs: pytest.fail("must not call the API without an authenticated session"),
     )
     with pytest.raises(PermissionError, match="authenticated staging session"):
