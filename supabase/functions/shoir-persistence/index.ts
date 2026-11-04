@@ -932,6 +932,50 @@ Deno.serve(async (req) => {
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
 
+    if (action === "dataset_download_url") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(String(body.token || ""), username, "workspace");
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId)) {
+        return sendResponse({ error: "Dataset identifier is invalid." }, 400);
+      }
+      const { data: record, error } = await supabase
+        .from("shoir_platform_records")
+        .select("payload_json")
+        .eq("workspace_key", workspaceKey)
+        .eq("record_type", "dataset")
+        .eq("entity_key", datasetId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!record?.payload_json) {
+        return sendResponse({ error: "Dataset was not found in this workspace." }, 404);
+      }
+      const payload = record.payload_json as Record<string, unknown>;
+      const storageKey = String(payload.storage_key || "");
+      const expectedPrefix = workspaceKey + "/" + datasetId + "/";
+      if (!storageKey.startsWith(expectedPrefix) ||
+          !/^[0-9a-f]{64}\.csv$/.test(storageKey.slice(expectedPrefix.length))) {
+        return sendResponse({ error: "Dataset storage reference is invalid." }, 409);
+      }
+      const { data, error: signError } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .createSignedUrl(storageKey, 300, { download: true });
+      if (signError) throw signError;
+      if (!data?.signedUrl) throw new Error("Storage provider did not return a signed download URL.");
+      return sendResponse({
+        ok: true,
+        download_url: data.signedUrl,
+        data_hash: String(payload.data_hash || ""),
+        version: Number(payload.version || 1),
+        row_count: Number(payload.row_count || 0),
+        column_count: Number(payload.column_count || 0),
+      });
+    }
+
     if (action === "dataset_upload_create") {
       const username = String(body.username || "").trim();
       const row = await getSession(String(body.token || ""), username, "workspace");
