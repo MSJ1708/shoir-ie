@@ -263,6 +263,18 @@ def test_load_registered_dataset_activates_verified_shared_frame(monkeypatch):
     )
     state = {}
     monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    monkeypatch.setattr(
+        platform,
+        "_activate_dataset_for_shared_workspace",
+        lambda df, filename, sheet, signature: state.update({
+            "universal_active_dataset": df.copy(deep=True),
+            "data_platform_latest_df": df.copy(deep=True),
+            "shoir_data_status": "IMPORTED",
+            "shoir_data_source": f"{filename} · {sheet}",
+            "shoir_data_version": signature[:12],
+            "shoir_data_hash": signature,
+        }),
+    )
     frame = platform.load_registered_dataset(
         "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
     )
