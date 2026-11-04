@@ -1258,30 +1258,50 @@ def edge_list_platform_records(
     limit: int = 100,
     entity_key: str = "",
 ) -> list[dict[str, Any]]:
-    """List only records belonging to the authenticated user's workspace."""
+    """List workspace records using bounded server-filtered pages."""
     import re
 
     user = str(username or "").strip()
     bearer = str(token or "")
     scope = str(workspace or "default").strip()
     kind = str(record_type or "").strip().lower()
+    key = str(entity_key or "").strip()
     if not user or not bearer:
         raise PermissionError("An authenticated workspace session is required.")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", scope):
         raise ValueError("Workspace identifier is invalid.")
     if kind and kind not in _PLATFORM_RECORD_TYPES:
         raise ValueError("Platform record type is not supported.")
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
-        raise ValueError("Platform record limit must be between 1 and 200.")
-    result = _edge_call("platform_record_list", {
-        "username": user,
-        "token": bearer,
-        "workspace": scope,
-        "record_type": kind,
-        "entity_key": str(entity_key or "").strip(),
-        "limit": limit,
-    })
-    records = result.get("records", [])
-    if not isinstance(records, list):
-        raise RuntimeError("Platform persistence returned an invalid record list.")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+        raise ValueError("Platform record limit must be between 1 and 10,000.")
+    if len(key) > 240 or any(ord(ch) < 32 or ord(ch) == 127 for ch in key):
+        raise ValueError("Platform entity key is invalid.")
+
+    records: list[dict[str, Any]] = []
+    offset = 0
+    while len(records) < limit:
+        page_limit = min(200, limit - len(records))
+        result = _edge_call("platform_record_list", {
+            "username": user,
+            "token": bearer,
+            "workspace": scope,
+            "record_type": kind,
+            "entity_key": key,
+            "limit": page_limit,
+            "offset": offset,
+        })
+        page = result.get("records", [])
+        if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+            raise RuntimeError("Platform persistence returned an invalid record list.")
+        if len(page) > page_limit:
+            raise RuntimeError("Platform persistence exceeded the requested page size.")
+        records.extend(page)
+        if not bool(result.get("has_more")):
+            break
+        next_offset = result.get("next_offset")
+        if isinstance(next_offset, bool) or not isinstance(next_offset, int) or next_offset <= offset:
+            raise RuntimeError("Platform persistence returned an invalid pagination cursor.")
+        if not page:
+            raise RuntimeError("Platform persistence reported more data after an empty page.")
+        offset = next_offset
     return records
