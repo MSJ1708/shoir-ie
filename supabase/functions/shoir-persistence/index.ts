@@ -1338,6 +1338,12 @@ Deno.serve(async (req) => {
       const token = String(body.token || "");
       const row = await getSession(token, username, "workspace");
       const recordType = String(body.record_type || "").trim().toLowerCase();
+      if (recordType === "dataset" || recordType === "dataset_version") {
+        const entitlementResponse = requireDatasetEntitlementResponse(
+          row as unknown as Record<string, unknown>,
+        );
+        if (entitlementResponse) return entitlementResponse;
+      }
       const entityKey = String(body.entity_key || "").trim();
       if (!PLATFORM_RECORD_TYPES.has(recordType)) {
         return sendResponse(
