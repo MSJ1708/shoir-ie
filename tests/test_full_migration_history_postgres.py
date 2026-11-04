@@ -526,6 +526,94 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             assert dataset_version_function[3] is False
             assert dataset_version_function[4] is True
 
+            workspace_key = "a" * 32
+            dataset_id = "DS-AABBCCDDEEFF"
+            first_data_hash = "b" * 64
+            first_fingerprint = "c" * 64
+            first_registration = _fetchone(
+                target,
+                """
+                SELECT dataset_id, version, data_hash, version_fingerprint,
+                       version_record_id, created_new_version
+                FROM public.shoir_platform_register_dataset_version(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s
+                );
+                """,
+                (
+                    workspace_key, dataset_id, "Production", "synthetic.csv",
+                    first_data_hash, first_fingerprint, 100, 3,
+                    '{"asset_id":{"dtype":"object"}}', '[{"operation":"import"}]',
+                    "synthetic-test", "SPR-" + "1" * 24, "SPR-" + "2" * 24,
+                    "SPE-" + "3" * 24,
+                ),
+            )
+            assert first_registration[0:2] == (dataset_id, 1)
+            assert first_registration[2:4] == (first_data_hash, first_fingerprint)
+            assert first_registration[5] is True
+
+            retry_registration = _fetchone(
+                target,
+                """
+                SELECT dataset_id, version, version_record_id, created_new_version
+                FROM public.shoir_platform_register_dataset_version(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s
+                );
+                """,
+                (
+                    workspace_key, dataset_id, "Production", "synthetic.csv",
+                    first_data_hash, first_fingerprint, 100, 3,
+                    '{"asset_id":{"dtype":"object"}}', '[{"operation":"import"}]',
+                    "synthetic-test", "SPR-" + "4" * 24, "SPR-" + "5" * 24,
+                    "SPE-" + "6" * 24,
+                ),
+            )
+            assert retry_registration[0:2] == (dataset_id, 1)
+            assert retry_registration[2] == first_registration[4]
+            assert retry_registration[3] is False
+
+            second_data_hash = "d" * 64
+            second_fingerprint = "e" * 64
+            second_registration = _fetchone(
+                target,
+                """
+                SELECT dataset_id, version, data_hash, version_fingerprint,
+                       created_new_version
+                FROM public.shoir_platform_register_dataset_version(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s
+                );
+                """,
+                (
+                    workspace_key, dataset_id, "Production", "synthetic.csv",
+                    second_data_hash, second_fingerprint, 120, 3,
+                    '{"asset_id":{"dtype":"object"}}', '[{"operation":"clean"}]',
+                    "synthetic-test", "SPR-" + "7" * 24, "SPR-" + "8" * 24,
+                    "SPE-" + "9" * 24,
+                ),
+            )
+            assert second_registration == (
+                dataset_id, 2, second_data_hash, second_fingerprint, True
+            )
+            version_count = _fetchone(
+                target,
+                """
+                SELECT count(*) FROM public.shoir_platform_records
+                WHERE workspace_key=%s AND record_type='dataset_version'
+                  AND entity_key IN (%s, %s);
+                """,
+                (workspace_key, dataset_id + ":v1", dataset_id + ":v2"),
+            )
+            assert version_count == (2,)
+            head = _fetchone(
+                target,
+                """
+                SELECT payload_json->>'version'
+                FROM public.shoir_platform_records
+                WHERE workspace_key=%s AND record_type='dataset' AND entity_key=%s;
+                """,
+                (workspace_key, dataset_id),
+            )
+            assert head == ("2",)
+
             for signature in (
                 "public.shoir_check_login_throttle(text,text,integer,integer,integer)",
                 "public.shoir_finalize_subscription_request(bigint,text)",
