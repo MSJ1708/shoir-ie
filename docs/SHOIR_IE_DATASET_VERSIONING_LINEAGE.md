@@ -27,8 +27,8 @@ The migration `20261104191500_shoir_atomic_dataset_version_registry.sql` was app
 
 ## Important limits
 
-- The registry stores dataset metadata, hashes, schema and transformation descriptions; it does **not** archive the raw uploaded file bytes.
-- A dataset remains in the current Streamlit session unless an approved durable file-storage path is separately configured and implemented.
+- The staging upload path now stores the normalized CSV artifact in the private `shoir-industrial-datasets` bucket, using a signed upload URL, a temporary object path, server-side SHA-256 verification, and a content-addressed final object key.
+- The raw original XLSX workbook is not preserved by this particular dataset registry path; the normalized tabular CSV representation is stored. Excel Intelligence separately preserves source workbooks through its own workflow.
 - Downstream model and run records are not yet automatically invalidated or linked to every dataset version.
 - This migration has not yet passed the full clean-database replay workflow and hosted authenticated staging acceptance.
 - No production schema, Edge Function, secrets, or customer data were changed.
@@ -41,4 +41,5 @@ The migration `20261104191500_shoir_atomic_dataset_version_registry.sql` was app
 4. Concurrent requests do not create duplicate versions or skip version numbers.
 5. Cross-workspace and cross-user access is denied.
 6. A hosted disposable-account workflow registers two versions and reads both back after a fresh session.
-7. Raw file storage and model/run lineage are separately implemented and tested before claiming complete dataset lifecycle management.
+7. Hosted disposable-account acceptance verifies signed upload, server-side byte hashing, private object retrieval after a fresh session, and no cross-workspace access.
+8. Raw original-workbook retention and model/run downstream invalidation/lineage are separately implemented and tested before claiming complete dataset lifecycle management.
