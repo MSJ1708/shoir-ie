@@ -194,8 +194,9 @@ def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatc
             },
         },
     )
+    state = {}
     monkeypatch.setattr(
-        platform.st, "session_state", {}, raising=False
+        platform, "_industrial_platform_session_state", lambda: state
     )
     frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "throughput_tph": [12.5, 14.0]})
     first = platform.register_dataset(
@@ -214,7 +215,7 @@ def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatc
     assert calls[0]["version_fingerprint"] == calls[1]["version_fingerprint"]
     assert calls[0]["row_count"] == 2
     assert calls[0]["column_count"] == 2
-    assert platform.st.session_state["data_platform_latest_version"] == 3
+    assert state["data_platform_latest_version"] == 3
 
 
 def test_staging_dataset_registration_fails_closed_without_session(monkeypatch):
@@ -261,7 +262,7 @@ def test_load_registered_dataset_activates_verified_shared_frame(monkeypatch):
         }),
     )
     state = {}
-    monkeypatch.setattr(platform.st, "session_state", state, raising=False)
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
     frame = platform.load_registered_dataset(
         "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
     )
@@ -283,7 +284,8 @@ def test_load_registered_dataset_rejects_metadata_row_count_mismatch(monkeypatch
             {"data_hash": "f" * 64, "version": 1, "row_count": 2, "column_count": 1},
         ),
     )
-    monkeypatch.setattr(platform.st, "session_state", {}, raising=False)
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
     with pytest.raises(RuntimeError, match="row count"):
         platform.load_registered_dataset(
             "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
