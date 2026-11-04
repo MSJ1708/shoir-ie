@@ -1058,7 +1058,8 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                     previous_version = int(st.session_state.get(keys["version"], 1))
                     previous_project_updated = project.get("updated_at", "")
                     previous_name = str(selected_node.get("name", ""))
-                    previous_history = list(st.session_state.get("shoir_digital_thread_rename_history", []))
+                    raw_previous_history = st.session_state.get("shoir_digital_thread_rename_history", [])
+                    previous_history = list(raw_previous_history) if isinstance(raw_previous_history, list) else []
                     try:
                         renamed = rename_thread_node(rename_target_id, proposed_name)
                     except ValueError as exc:
@@ -1106,6 +1107,29 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                             )
         else:
             st.info("Sync the workspace before renaming a Digital Thread node.")
+
+        rename_history = st.session_state.get("shoir_digital_thread_rename_history", [])
+        st.markdown("### Recent rename history")
+        st.caption(
+            "This history is stored with your authenticated workspace. "
+            "It is not an append-only or tamper-proof enterprise audit log."
+        )
+        if isinstance(rename_history, list) and rename_history:
+            history_frame = pd.DataFrame(rename_history[-25:][::-1])
+            visible_columns = [
+                column for column in (
+                    "created_at", "actor", "node_type", "previous_name",
+                    "new_name", "node_id", "event_id",
+                )
+                if column in history_frame.columns
+            ]
+            st.dataframe(
+                history_frame[visible_columns],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No rename history has been saved in this workspace yet.")
 
         st.markdown("### Create a node manually")
         n1, n2, n3 = st.columns(3)
