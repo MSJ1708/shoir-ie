@@ -34,7 +34,7 @@ These results prove the CI steps above only. They do not establish authenticated
 - Deployed Edge Function source: exact byte match for branch `index.ts` and `security.ts`.
 - Migration ledger: 17 entries; latest version `20261025164602`.
 - Repository migration `20261026110000_safe_beta_legal_referrals.sql` is not recorded in the current live staging ledger.
-- The live `shoir_internal` tables have RLS disabled; anon/authenticated schema/table privileges were not found in the checked privilege paths. See the security review before changing any policies.
+- The live `shoir_internal` tables now have RLS enabled (migration `20261104183132`); verification confirms 12/12 enabled, FORCE RLS false, zero policies and zero rows. No non-owner ACLs were present at preflight. Service-role/owner paths still require operational regression testing.
 
 No database migration, Edge Function deployment or storage/auth setting change was made in this audit pass.
 
