@@ -96,3 +96,52 @@ def test_graph_node_rename_retains_old_display_name_as_alias(monkeypatch):
     assert len(nodes) == 1
     assert nodes[0]["name"] == "Main Press"
     assert "Press 1001" in nodes[0]["metadata"]["name_aliases"]
+
+
+
+def test_workspace_sync_preserves_asset_node_identity_when_display_name_changes(monkeypatch):
+    import shoir_digital_thread as thread
+    import shoir_enterprise_layer as enterprise
+
+    session_state = {}
+    monkeypatch.setattr(thread.st, "session_state", session_state, raising=False)
+    frame_holder = {
+        "frame": pd.DataFrame({
+            "asset_id": ["ASSET-1001"],
+            "asset_name": ["Press 1001"],
+            "capacity_tph": [18.5],
+        })
+    }
+    monkeypatch.setattr(
+        thread, "_safe_workspace_frames",
+        lambda: [("Manufacturing", frame_holder["frame"])],
+    )
+    monkeypatch.setattr(thread, "_discover_experience_records", lambda _owner: ([], []))
+    monkeypatch.setattr(enterprise, "upsert_canonical_entity", lambda *args, **kwargs: (
+        kwargs.get("state", {}).get("thread_node_id", "")
+    ))
+    monkeypatch.setattr(enterprise, "upsert_canonical_relationship", lambda *args, **kwargs: "CREL-TEST")
+    monkeypatch.setattr(enterprise, "record_canonical_event", lambda *args, **kwargs: "CEVT-TEST")
+
+    thread.sync_workspace_to_thread("synthetic-user")
+    asset_nodes = [
+        node for node in session_state[thread._keys()["nodes"]]
+        if node.get("node_type") == "Asset"
+    ]
+    assert len(asset_nodes) == 1
+    original_id = asset_nodes[0]["node_id"]
+
+    frame_holder["frame"] = pd.DataFrame({
+        "asset_id": ["ASSET-1001"],
+        "asset_name": ["Main Press"],
+        "capacity_tph": [19.0],
+    })
+    thread.sync_workspace_to_thread("synthetic-user")
+    asset_nodes = [
+        node for node in session_state[thread._keys()["nodes"]]
+        if node.get("node_type") == "Asset"
+    ]
+    assert len(asset_nodes) == 1
+    assert asset_nodes[0]["node_id"] == original_id
+    assert asset_nodes[0]["name"] == "Main Press"
+    assert "Press 1001" in asset_nodes[0]["metadata"]["name_aliases"]
