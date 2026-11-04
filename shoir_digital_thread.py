@@ -250,6 +250,26 @@ def rename_thread_node(node_id: str, new_name: str) -> dict[str, Any]:
     return updated
 
 
+def persist_digital_thread_workspace(username: str) -> bool:
+    """Save Digital Thread state through the authenticated managed workspace backend."""
+    actor = str(st.session_state.get("current_user") or "").strip()
+    if st.session_state.get("authenticated") is not True:
+        raise PermissionError("Sign in with an active Shoir-IE account before saving Digital Thread changes.")
+    if not actor or actor.casefold() in {"guest", "guest visitor", "anonymous"}:
+        raise PermissionError("Guest and anonymous sessions cannot save Digital Thread changes.")
+    if not str(username or "").strip() or actor.casefold() != str(username).strip().casefold():
+        raise PermissionError("The requested identity does not match the signed-in account.")
+
+    from durable_account_store import edge_backend_configured
+    from workspace_persistence import save_user_workspace
+
+    if not edge_backend_configured():
+        raise RuntimeError("Managed Supabase workspace persistence is not configured; no change was saved.")
+    if not save_user_workspace(actor, st.session_state):
+        raise RuntimeError("The managed workspace save failed; the Digital Thread change was not confirmed.")
+    return True
+
+
 def _upsert_edge(source_id: str, target_id: str, relation: str, status: str = "Linked", metadata: dict[str, Any] | None = None) -> str:
     keys = _keys()
     raw = f"{source_id}|{target_id}|{relation}"
@@ -1038,28 +1058,37 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                     previous_version = int(st.session_state.get(keys["version"], 1))
                     previous_project_updated = project.get("updated_at", "")
                     previous_name = str(selected_node.get("name", ""))
+                    previous_history = list(st.session_state.get("shoir_digital_thread_rename_history", []))
                     try:
                         renamed = rename_thread_node(rename_target_id, proposed_name)
                     except ValueError as exc:
                         st.warning(str(exc))
                     else:
                         try:
-                            from shoir_enterprise_layer import persist_thread_node_rename
                             workspace_name = str(
                                 st.session_state.get("shoir_workspace_name")
                                 or st.session_state.get("workspace")
                                 or st.session_state.get("active_workspace_name")
                                 or "default"
                             )
-                            entity_id, event_id = persist_thread_node_rename(
-                                username,
-                                workspace_name,
-                                renamed,
-                                previous_name,
-                            )
+                            history_entry = {
+                                "event_id": "DTR-" + uuid.uuid4().hex[:14].upper(),
+                                "actor": username,
+                                "workspace": workspace_name,
+                                "node_id": renamed["node_id"],
+                                "node_type": renamed["node_type"],
+                                "previous_name": previous_name,
+                                "new_name": renamed["name"],
+                                "created_at": _now(),
+                            }
+                            st.session_state["shoir_digital_thread_rename_history"] = (
+                                previous_history + [history_entry]
+                            )[-200:]
+                            persist_digital_thread_workspace(username)
                             st.success(
-                                f"Display name saved. Canonical ID remains {renamed['node_id']}. "
-                                f"Audit event: {event_id}"
+                                f"Display name saved to the managed workspace. "
+                                f"Canonical ID remains {renamed['node_id']}. "
+                                f"Change reference: {history_entry['event_id']}"
                             )
                             st.rerun()
                         except Exception:
@@ -1069,10 +1098,11 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                                     break
                             st.session_state[keys["version"]] = previous_version
                             project["updated_at"] = previous_project_updated
+                            st.session_state["shoir_digital_thread_rename_history"] = previous_history
                             st.error(
-                                "The rename could not be durably confirmed. "
+                                "The managed workspace save could not be confirmed. "
                                 "The previous label has been restored in this session. "
-                                "Check the persistence service before retrying."
+                                "Check the connection and retry."
                             )
         else:
             st.info("Sync the workspace before renaming a Digital Thread node.")
