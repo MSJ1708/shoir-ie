@@ -82,14 +82,17 @@ def test_canonical_identity_lookup_fails_closed_on_duplicate_legacy_alias(tmp_pa
     stamp = layer.now_iso()
 
     with layer._local_connect() as conn:
-        for entity_id in ("CEN-LEGACY-1", "CEN-LEGACY-2"):
+        for entity_id, legacy_name in (
+            ("CEN-LEGACY-1", "Press 1001"),
+            ("CEN-LEGACY-2", "press 1001"),
+        ):
             conn.execute(
                 """INSERT INTO shoir_ent_canonical_entities
                 (entity_id,workspace_id,entity_type,name,source,status,state_json,
                  content_hash,created_by,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    entity_id, workspace_id, "Asset", "Press 1001",
+                    entity_id, workspace_id, "Asset", legacy_name,
                     "asset:1001", "Observed", json.dumps({"legacy_record": True}),
                     entity_id, "tester", stamp, stamp,
                 ),
