@@ -172,3 +172,75 @@ def test_unique_modules_preserves_order_and_removes_duplicates():
     assert unique_modules(["MILP Solvers", "AI Copilot", "MILP Solvers", "", None, "AI Copilot"]) == [
         "MILP Solvers", "AI Copilot"
     ]
+
+
+
+def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    calls = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_register_dataset_version",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 3,
+                "data_hash": kwargs["data_hash"],
+                "version_fingerprint": kwargs["version_fingerprint"],
+                "created_new_version": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        platform.st, "session_state", {}, raising=False
+    )
+    frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "throughput_tph": [12.5, 14.0]})
+    first = platform.register_dataset(
+        "Production", "production.csv", frame,
+        username="synthetic-user", workspace="plant-a", token="session-token",
+    )
+    second = platform.register_dataset(
+        "Production", "production.csv", frame.copy(deep=True),
+        username="synthetic-user", workspace="plant-a", token="session-token",
+    )
+    assert first == second
+    assert len(calls) == 2
+    assert calls[0]["dataset_id"] == first
+    assert calls[0]["data_hash"] == calls[1]["data_hash"]
+    assert calls[0]["version_fingerprint"] == calls[1]["version_fingerprint"]
+    assert calls[0]["row_count"] == 2
+    assert calls[0]["column_count"] == 2
+    assert platform.st.session_state["data_platform_latest_version"] == 3
+
+
+def test_staging_dataset_registration_fails_closed_without_session(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_register_dataset_version",
+        lambda **kwargs: pytest.fail("must not call the API without an authenticated session"),
+    )
+    with pytest.raises(PermissionError, match="authenticated staging session"):
+        platform.register_dataset(
+            "Production", "production.csv",
+            pd.DataFrame({"units": [1, 2]}),
+            username="synthetic-user", workspace="plant-a", token="",
+        )
+
+
+def test_staging_dataset_registration_rejects_too_many_transformations(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    with pytest.raises(ValueError, match="50 entries"):
+        platform.register_dataset(
+            "Production", "production.csv",
+            pd.DataFrame({"units": [1]}),
+            transformations=[{"operation": "clean"}] * 51,
+        )
