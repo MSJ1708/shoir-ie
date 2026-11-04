@@ -122,6 +122,22 @@ def _stable_identity_column(frame: pd.DataFrame, node_type: str) -> str:
     return ""
 
 
+WORKFORCE_AGGREGATE_FIELDS = {
+    "operator_count", "operators_count", "staff_count", "headcount",
+    "workforce_count", "crew_size", "fte", "technician_count",
+}
+
+
+def _workforce_aggregate_columns(frame: pd.DataFrame) -> list[str]:
+    """Select aggregate count measures only; never employee names or personal IDs."""
+    selected = []
+    for column in frame.columns:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+        if normalized in WORKFORCE_AGGREGATE_FIELDS:
+            selected.append(str(column))
+    return selected
+
+
 def _display_column(frame: pd.DataFrame, node_type: str, identity_column: str) -> str:
     tokens = {
         "Asset": ("asset_name", "equipment_name", "machine_name", "asset_label", "equipment_label", "name", "description"),
@@ -379,10 +395,6 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
         _upsert_edge(dataset_id, process_id, "feeds process")
 
         canonical_by_type: dict[str, list[str]] = {}
-        workforce_aggregate_fields = {
-            "operator_count", "operators_count", "staff_count", "headcount",
-            "workforce_count", "crew_size", "fte", "technician_count",
-        }
         for node_type, aliases in CANONICAL_FIELD_ALIASES.items():
             if node_type == "Process":
                 values = [module]
@@ -398,11 +410,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             # general-purpose Digital Thread. Represent workforce information only
             # through explicitly aggregated count fields in this cross-domain graph.
             if node_type == "Workforce":
-                aggregate_cols = []
-                for column in df.columns:
-                    normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
-                    if normalized in workforce_aggregate_fields:
-                        aggregate_cols.append(column)
+                aggregate_cols = _workforce_aggregate_columns(df)
                 values = []
                 for column in aggregate_cols[:6]:
                     numeric = pd.to_numeric(df[column], errors="coerce").dropna()
