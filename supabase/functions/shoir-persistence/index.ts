@@ -5,6 +5,8 @@ import {
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
+  normalizePlatformTier,
+  platformTierAllows,
   publicErrorFor,
   readBoundedJsonObject,
   sessionEntitlementFields,
@@ -250,41 +252,6 @@ async function getSession(
   ) throw new Error("SUBSCRIPTION_EXPIRED");
   return row;
 }
-function normalizePlatformTier(value: unknown): string {
-  const tier = String(value || "Starter").trim().toLowerCase();
-  if (tier.includes("research")) return "Research Pack";
-  if (tier.includes("enterprise plus") || tier.includes("industrial enterprise")) {
-    return "Enterprise Plus";
-  }
-  if (tier.includes("enterprise")) return "Enterprise";
-  if (tier.includes("professional")) return "Professional";
-  if (tier.includes("pro")) return "Mid-Tier Pro";
-  return "Starter";
-}
-
-function platformTierAllows(currentValue: unknown, requiredValue: string): boolean {
-  const current = normalizePlatformTier(currentValue);
-  const required = normalizePlatformTier(requiredValue);
-  const order = [
-    "Starter",
-    "Mid-Tier Pro",
-    "Professional",
-    "Enterprise",
-    "Enterprise Plus",
-  ];
-  if (current === "Research Pack") {
-    return [
-      "Starter",
-      "Mid-Tier Pro",
-      "Professional",
-      "Enterprise",
-      "Research Pack",
-    ].includes(required);
-  }
-  if (required === "Research Pack") return current === "Research Pack";
-  return order.indexOf(current) >= order.indexOf(required);
-}
-
 function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
   return !platformTierAllows(row.tier, "Professional");
 }
