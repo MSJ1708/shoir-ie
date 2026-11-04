@@ -1366,6 +1366,8 @@ def _render_dataset_profile(
     key_prefix: str,
 ) -> None:
     """Render quality metrics and real Plotly figures for the selected dataset."""
+    import streamlit as st
+
     quality = data_quality_report(df)
     metric_columns = st.columns(4)
     metric_columns[0].metric("Data quality score", f"{quality['score']:.1f}/100")
@@ -1398,6 +1400,13 @@ def render_module(module: str, tier: str, username: str):
     if required and not tier_allows(tier,required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
+    if module == "Industrial Data Platform":
+        from shoir_tool_registry import require_tool_access
+        try:
+            require_tool_access(tier, "T020")
+        except PermissionError as exc:
+            st.warning(f"Industrial Data Platform access denied: {exc}")
+            return
 
     if module=="Excel Intelligence":
         # Enforce the configurable premium entitlement at the renderer boundary,
