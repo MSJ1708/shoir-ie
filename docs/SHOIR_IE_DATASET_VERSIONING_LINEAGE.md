@@ -26,7 +26,8 @@
 - The route caches the last processed upload fingerprint to prevent repeating a same-file upload on Streamlit reruns.
 - Staging UI path uses the authenticated session and does not query local SQLite for the dataset catalogue.
 - Authenticated signed download URLs are issued only after checking the workspace-scoped dataset head record.
-- Downloads are hash-verified client-side before CSV parsing, row/column counts are compared with metadata, and the dataset can be activated in the shared workspace.
+- Downloads are SHA-256-verified client-side before CSV parsing; the server also parses the normalized CSV structure and rejects mismatched row counts, column counts, duplicate/blank headers or schema keys before version metadata is committed.
+- The original platform catalog requires Enterprise for this workspace; the T020 registry, Streamlit route and Edge API now enforce that same Enterprise package.
 
 ## Staging migration
 
