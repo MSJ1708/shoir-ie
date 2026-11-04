@@ -32,10 +32,22 @@ import requests
 import streamlit as st
 
 try:
-    from durable_account_store import _pg_connect, database_url, postgres_backend_configured
+    from durable_account_store import (
+        APP_ENVIRONMENT,
+        _pg_connect,
+        database_url,
+        edge_list_platform_records,
+        edge_save_platform_record,
+        postgres_backend_configured,
+    )
 except Exception:  # local/unit-test safety
     _pg_connect = None
     database_url = lambda: ""
+    APP_ENVIRONMENT = "local"
+    edge_list_platform_records = lambda *args, **kwargs: []
+    edge_save_platform_record = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("Managed platform persistence is unavailable.")
+    )
     postgres_backend_configured = lambda: False
 
 
@@ -59,6 +71,92 @@ def now_iso() -> str:
 def workspace_key(username: str, workspace: str = "default") -> str:
     raw = str(username or "").strip().lower() + "::" + str(workspace or "default").strip().lower()
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+
+
+def _staging_platform_identity(username: str) -> tuple[str, str] | None:
+    """Return the current verified app-session identity for staging-only managed persistence.
+
+    The bearer token is read from Streamlit server session state and is never
+    placed in a persisted payload. Staging must fail closed rather than silently
+    treating a process-local SQLite write as durable storage.
+    """
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        return None
+    requested = str(username or "").strip()
+    try:
+        actor = str(st.session_state.get("current_user") or "").strip()
+        token = str(st.session_state.get("remote_session_token") or "")
+        authenticated = bool(st.session_state.get("authenticated"))
+    except Exception as exc:
+        raise PermissionError(
+            "An authenticated staging workspace session is required."
+        ) from exc
+    if (
+        not authenticated
+        or not actor
+        or actor.casefold() == "guest visitor"
+        or actor.casefold() != requested.casefold()
+        or not token
+    ):
+        raise PermissionError(
+            "The requested user does not match the authenticated staging workspace session."
+        )
+    return actor, token
+
+
+def _staging_platform_save(
+    username: str,
+    workspace: str,
+    record_type: str,
+    entity_key: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    identity = _staging_platform_identity(username)
+    if identity is None:
+        return None
+    actor, token = identity
+    return edge_save_platform_record(
+        actor, token, workspace, record_type, entity_key, payload
+    )
+
+
+def _staging_platform_list(
+    username: str,
+    workspace: str,
+    record_type: str,
+    limit: int = 200,
+) -> list[dict[str, Any]] | None:
+    identity = _staging_platform_identity(username)
+    if identity is None:
+        return None
+    actor, token = identity
+    return edge_list_platform_records(
+        actor, token, workspace, record_type, max(1, min(200, int(limit)))
+    )
+
+
+def _platform_records_frame(records: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
+    rows = []
+    for record in records:
+        payload = record.get("payload_json")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, Mapping):
+            payload = {}
+        rows.append({
+            **dict(payload),
+            "entity_key": record.get("entity_key", ""),
+            "content_hash": record.get("content_hash", ""),
+            "version": record.get("version", 1),
+            "created_at": record.get("created_at", ""),
+            "updated_at": record.get("updated_at", ""),
+        })
+    return pd.DataFrame(rows)
 
 
 def _remote() -> bool:
