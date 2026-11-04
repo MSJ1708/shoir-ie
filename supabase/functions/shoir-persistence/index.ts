@@ -255,18 +255,19 @@ function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
   return !platformTierAllows(row.tier, "Professional");
 }
 
-function requireDatasetEntitlementResponse(
+function datasetEntitlementDenial(
   row: Record<string, unknown>,
-): Response | null {
+): {
+  error: string;
+  required_tier: string;
+  current_tier: string;
+} | null {
   if (!datasetEntitlementDenied(row)) return null;
-  return sendResponse(
-    {
-      error: "FEATURE_REQUIRES_PROFESSIONAL",
-      required_tier: "Professional",
-      current_tier: String(row.tier || "Starter"),
-    },
-    403,
-  );
+  return {
+    error: "FEATURE_REQUIRES_PROFESSIONAL",
+    required_tier: "Professional",
+    current_tier: String(row.tier || "Starter"),
+  };
 }
 
 async function adminSession(username: string, token: string) {
@@ -964,10 +965,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = requireDatasetEntitlementResponse(
+      const entitlementResponse = datasetEntitlementDenial(
         row as unknown as Record<string, unknown>,
       );
-      if (entitlementResponse) return entitlementResponse;
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1046,10 +1047,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = requireDatasetEntitlementResponse(
+      const entitlementResponse = datasetEntitlementDenial(
         row as unknown as Record<string, unknown>,
       );
-      if (entitlementResponse) return entitlementResponse;
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1092,10 +1093,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = requireDatasetEntitlementResponse(
+      const entitlementResponse = datasetEntitlementDenial(
         row as unknown as Record<string, unknown>,
       );
-      if (entitlementResponse) return entitlementResponse;
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1266,10 +1267,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = requireDatasetEntitlementResponse(
+      const entitlementResponse = datasetEntitlementDenial(
         row as unknown as Record<string, unknown>,
       );
-      if (entitlementResponse) return entitlementResponse;
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await platformWorkspaceKey(
         row.username_lc,
         String(body.workspace || "default"),
@@ -1339,10 +1340,10 @@ Deno.serve(async (req) => {
       const row = await getSession(token, username, "workspace");
       const recordType = String(body.record_type || "").trim().toLowerCase();
       if (recordType === "dataset" || recordType === "dataset_version") {
-        const entitlementResponse = requireDatasetEntitlementResponse(
+        const entitlementResponse = datasetEntitlementDenial(
           row as unknown as Record<string, unknown>,
         );
-        if (entitlementResponse) return entitlementResponse;
+        if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       }
       const entityKey = String(body.entity_key || "").trim();
       if (!PLATFORM_RECORD_TYPES.has(recordType)) {
@@ -1404,10 +1405,10 @@ Deno.serve(async (req) => {
         );
       }
       if (recordType === "dataset" || recordType === "dataset_version") {
-        const entitlementResponse = requireDatasetEntitlementResponse(
+        const entitlementResponse = datasetEntitlementDenial(
           row as unknown as Record<string, unknown>,
         );
-        if (entitlementResponse) return entitlementResponse;
+        if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       }
       const entityKey = String(body.entity_key || "").trim();
       if (entityKey.length > 240 || /[\\x00-\\x1f\\x7f]/.test(entityKey)) {
