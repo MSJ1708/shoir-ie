@@ -367,32 +367,111 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             source_key,
             module,
             metadata={"rows": int(len(df)), "columns": int(len(df.columns)), "column_names": [str(c) for c in df.columns[:80]]},
+            identity_key=f"dataset:{module}",
         )
         dataset_ids.append(dataset_id)
 
-        process_id = process_by_module.get(module) or _upsert_node("Process", module, f"module:{module}", module)
+        process_id = process_by_module.get(module) or _upsert_node(
+            "Process", module, f"module:{module}", module,
+            identity_key=f"process:{module}",
+        )
         process_by_module[module] = process_id
         _upsert_edge(dataset_id, process_id, "feeds process")
 
         canonical_by_type: dict[str, list[str]] = {}
+        workforce_aggregate_fields = {
+            "operator_count", "operators_count", "staff_count", "headcount",
+            "workforce_count", "crew_size", "fte", "technician_count",
+        }
         for node_type, aliases in CANONICAL_FIELD_ALIASES.items():
             if node_type == "Process":
                 values = [module]
                 matched_cols = []
-            else:
-                matched_cols = [
-                    col for col in df.columns
-                    if any(alias in str(col).lower().replace("-", "_").replace(" ", "_") for alias in aliases)
-                ]
+                canonical_by_type[node_type] = values
+                continue
+            matched_cols = [
+                col for col in df.columns
+                if any(alias in str(col).lower().replace("-", "_").replace(" ", "_") for alias in aliases)
+            ]
+
+            # Do not copy employee names, operator names or employee IDs into the
+            # general-purpose Digital Thread. Represent workforce information only
+            # through explicitly aggregated count fields in this cross-domain graph.
+            if node_type == "Workforce":
+                aggregate_cols = []
+                for column in df.columns:
+                    normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+                    if normalized in workforce_aggregate_fields:
+                        aggregate_cols.append(column)
                 values = []
-                for col in matched_cols[:4]:
-                    try:
-                        for value in df[col].dropna().astype(str).drop_duplicates().head(40):
-                            clean_value = value.strip()
-                            if clean_value and clean_value not in values:
-                                values.append(clean_value)
-                    except Exception:
+                for column in aggregate_cols[:6]:
+                    numeric = pd.to_numeric(df[column], errors="coerce").dropna()
+                    if numeric.empty:
                         continue
+                    cohort_name = f"{module} workforce cohort"
+                    node_id = _upsert_node(
+                        "Workforce",
+                        cohort_name,
+                        f"{module}|workforce|aggregate|{column}",
+                        module,
+                        status="Observed",
+                        metadata={
+                            "aggregate_only": True,
+                            "aggregate_field": str(column),
+                            "observations": int(len(numeric)),
+                            "mean_count": float(numeric.mean()),
+                        },
+                        identity_key=f"workforce-cohort:{module}:{column}",
+                    )
+                    values.append(cohort_name)
+                    _upsert_edge(dataset_id, node_id, "contains aggregated workforce measures")
+                    _upsert_edge(process_id, node_id, "uses aggregated workforce")
+                canonical_by_type[node_type] = values
+                continue
+
+            # If a trusted business key column is available, pair it with a
+            # display column and use the business key—not the display label—to
+            # generate the stable identity. This makes rename refreshes update the
+            # same node instead of creating a second asset/product/order.
+            identity_column = _stable_identity_column(df, node_type)
+            if identity_column:
+                display_column = _display_column(df, node_type, identity_column)
+                values = []
+                pairs = df[[identity_column, display_column]].dropna(subset=[identity_column]).drop_duplicates().head(40)
+                for _, row in pairs.iterrows():
+                    identity_value = str(row[identity_column]).strip()
+                    display_value = str(row[display_column]).strip() if pd.notna(row[display_column]) else identity_value
+                    if not identity_value or not display_value:
+                        continue
+                    identity_key = f"{module}|{node_type}|{identity_column}|{identity_value}"
+                    node_id = _upsert_node(
+                        node_type,
+                        display_value,
+                        f"{module}|canonical|{node_type}|{identity_column}",
+                        module,
+                        status="Observed",
+                        metadata={
+                            "canonical": True,
+                            "fields": [str(identity_column), str(display_column)],
+                            "identity_field": str(identity_column),
+                        },
+                        identity_key=identity_key,
+                    )
+                    values.append(display_value)
+                    _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
+                    _upsert_edge(process_id, node_id, f"uses {node_type.lower()}")
+                canonical_by_type[node_type] = values
+                continue
+
+            values = []
+            for col in matched_cols[:4]:
+                try:
+                    for value in df[col].dropna().astype(str).drop_duplicates().head(40):
+                        clean_value = value.strip()
+                        if clean_value and clean_value not in values:
+                            values.append(clean_value)
+                except Exception:
+                    continue
             canonical_by_type[node_type] = values
             for value in values[:40]:
                 node_id = _upsert_node(
@@ -403,18 +482,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
                     status="Observed",
                     metadata={"canonical": True, "fields": matched_cols[:4]},
                 )
-                if node_type != "Process":
-                    _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
+                _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
                 _upsert_edge(process_id, node_id, f"uses {node_type.lower()}")
-
-        lowered = {str(c).lower(): c for c in df.columns}
-        asset_cols = [c for c in df.columns if any(k in str(c).lower() for k in ("asset", "machine", "facility", "workcenter", "equipment", "node"))]
-        for col in asset_cols[:3]:
-            vals = df[col].dropna().astype(str).drop_duplicates().head(40)
-            for value in vals:
-                asset_id = _upsert_node("Asset", value, f"{module}|{col}|{value}", module, metadata={"field": str(col)})
-                _upsert_edge(dataset_id, asset_id, f"identifies {col}")
-                _upsert_edge(asset_id, process_id, "participates in")
 
         numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         for col in numeric_cols[:12]:
@@ -424,6 +493,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
                 f"{module}|kpi|{col}",
                 module,
                 metadata={"dtype": str(df[col].dtype)},
+                identity_key=f"kpi:{module}:{col}",
             )
             _upsert_edge(process_id, kpi_id, "produces KPI")
             _upsert_edge(dataset_id, kpi_id, "measures")
@@ -438,7 +508,10 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
         if module_result_keys or numeric_cols:
             source = module_result_keys[0] if module_result_keys else f"module:{module}"
             model_status = "Observed" if module_result_keys else "Inferred"
-            model_id = _upsert_node("Model", f"{module} analytical model", source, module, status=model_status)
+            model_id = _upsert_node(
+                "Model", f"{module} analytical model", source, module,
+                status=model_status, identity_key=f"model:{module}",
+            )
             model_count += 1
             for col in numeric_cols[:4]:
                 _upsert_edge(_stable_kpi_for(module, col), model_id, "supports model")
@@ -454,6 +527,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             study.get("module", "") or "Experiment Lab",
             status="Observed",
             metadata={"research_id": study["research_id"], "methodology": study["methodology"]},
+            identity_key=f"experiment:{study['study_id']}",
         )
         experiment_ids.append(experiment_id)
 
@@ -466,6 +540,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             decision.get("module", ""),
             status=decision["status"],
             metadata={"decision_id": decision["decision_id"]},
+            identity_key=f"decision:{decision['decision_id']}",
         )
         decision_ids.append(decision_id)
 
@@ -478,6 +553,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             decision.get("module", ""),
             status="Pending verification",
             metadata={"decision_id": decision["decision_id"]},
+            identity_key=f"outcome:{decision['decision_id']}",
         )
         _upsert_edge(decision_id, outcome_id, "has outcome")
 
