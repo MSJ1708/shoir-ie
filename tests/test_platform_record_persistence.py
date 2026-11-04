@@ -513,3 +513,39 @@ def test_dataset_finalize_recomputes_version_fingerprint_server_side():
     assert "schema," in action
     assert "transformations," in action
     assert "expectedFingerprint !== fingerprint" in action
+
+
+
+def test_every_dataset_edge_action_enforces_server_side_professional_entitlement():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    actions = (
+        "dataset_upload_create",
+        "dataset_version_finalize",
+        "dataset_version_register",
+        "dataset_download_url",
+    )
+    for action_name in actions:
+        action = source.split(
+            f'if (action === "{action_name}") {{', 1
+        )[1]
+        next_action = action.find('if (action === "')
+        action = action[:next_action] if next_action >= 0 else action
+        assert "getSession(" in action, action_name
+        assert "requireDatasetEntitlementResponse(" in action, action_name
+
+    save = source.split('if (action === "platform_record_save") {', 1)[1].split(
+        'if (action === "platform_record_list") {', 1
+    )[0]
+    assert 'recordType === "dataset"' in save
+    assert 'recordType === "dataset_version"' in save
+    assert "requireDatasetEntitlementResponse(" in save
+
+    listing = source.split('if (action === "platform_record_list") {', 1)[1].split(
+        'if (action === "workspace_load") {', 1
+    )[0]
+    assert 'recordType === "dataset"' in listing
+    assert 'recordType === "dataset_version"' in listing
+    assert "requireDatasetEntitlementResponse(" in listing
