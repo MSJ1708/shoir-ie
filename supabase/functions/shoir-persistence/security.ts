@@ -296,6 +296,110 @@ export function platformTierAllows(
   return order.indexOf(current) >= order.indexOf(required);
 }
 
+export interface CsvShape {
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+}
+
+/**
+ * Inspect an already size-bounded UTF-8 CSV without materializing a DataFrame.
+ * Counts logical records (quoted newlines are not row separators) and rejects
+ * malformed quoting, duplicate/blank headers and invalid UTF-8.
+ */
+export function inspectCsvShape(bytes: Uint8Array): CsvShape {
+  let source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  if (source.startsWith("\uFEFF")) source = source.slice(1);
+  if (!source.length) {
+    throw new PublicRequestError("Dataset CSV is empty.", 400);
+  }
+
+  const headers: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  let firstRecord = true;
+  let rowCount = 0;
+  let recordHasContent = false;
+  let columnCount = 0;
+
+  const finishHeader = () => {
+    headers.push(field);
+    if (headers.some((header) => !header.trim())) {
+      throw new PublicRequestError("Dataset CSV contains a blank column header.", 400);
+    }
+    if (new Set(headers).size !== headers.length) {
+      throw new PublicRequestError("Dataset CSV contains duplicate column headers.", 400);
+    }
+    columnCount = headers.length;
+    firstRecord = false;
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (inQuotes) {
+      if (character === '"') {
+        if (source[index + 1] === '"') {
+          if (firstRecord) field += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else if (firstRecord) {
+        field += character;
+      }
+      recordHasContent = true;
+      continue;
+    }
+
+    if (character === '"') {
+      if (field.length !== 0) {
+        throw new PublicRequestError("Dataset CSV contains an invalid quote.", 400);
+      }
+      inQuotes = true;
+      recordHasContent = true;
+      continue;
+    }
+    if (character === ",") {
+      if (firstRecord) headers.push(field);
+      field = "";
+      recordHasContent = true;
+      continue;
+    }
+    if (character === "\n" || character === "\r") {
+      if (firstRecord) {
+        finishHeader();
+      } else if (recordHasContent) {
+        rowCount += 1;
+      }
+      field = "";
+      recordHasContent = false;
+      if (
+        character === "\r" &&
+        source[index + 1] === "\n"
+      ) {
+        index += 1;
+      }
+      continue;
+    }
+    if (firstRecord) field += character;
+    recordHasContent = true;
+  }
+
+  if (inQuotes) {
+    throw new PublicRequestError("Dataset CSV contains an unterminated quoted field.", 400);
+  }
+  if (firstRecord) {
+    finishHeader();
+  } else if (recordHasContent) {
+    rowCount += 1;
+  }
+
+  if (columnCount < 1) {
+    throw new PublicRequestError("Dataset CSV must contain at least one column.", 400);
+  }
+  return { rowCount, columnCount, headers };
+}
+
 export function publicErrorFor(
   error: unknown,
 ): { status: number; message: string } {
