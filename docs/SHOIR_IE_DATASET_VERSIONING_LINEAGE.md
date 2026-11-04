@@ -20,6 +20,8 @@
 - New version number when content, schema or transformation fingerprint changes.
 - Bounded metadata validation and server-side advisory transaction lock for concurrent writes.
 - Staging UI path uses the authenticated session and does not query local SQLite for the dataset catalogue.
+- Authenticated signed download URLs are issued only after checking the workspace-scoped dataset head record.
+- Downloads are hash-verified client-side before CSV parsing, row/column counts are compared with metadata, and the dataset can be activated in the shared workspace.
 
 ## Staging migration
 
@@ -40,6 +42,6 @@ The migration `20261104191500_shoir_atomic_dataset_version_registry.sql` was app
 3. Unit tests verify same fingerprint is idempotent and changed fingerprint increments version.
 4. Concurrent requests do not create duplicate versions or skip version numbers.
 5. Cross-workspace and cross-user access is denied.
-6. A hosted disposable-account workflow registers two versions and reads both back after a fresh session.
+6. A hosted disposable-account workflow registers two versions, loads a version after a fresh session, and verifies private object access.
 7. Hosted disposable-account acceptance verifies signed upload, server-side byte hashing, private object retrieval after a fresh session, and no cross-workspace access.
 8. Raw original-workbook retention and model/run downstream invalidation/lineage are separately implemented and tested before claiming complete dataset lifecycle management.
