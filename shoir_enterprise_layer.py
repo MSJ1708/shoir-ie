@@ -428,13 +428,30 @@ def record_artifact(
     workspace: str = "default",
     artifact_id: Optional[str] = None,
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     aid = artifact_id or "ART-" + uuid.uuid4().hex[:14].upper()
     body = payload if isinstance(payload, (dict, list, tuple, str)) else {"value": payload}
     payload_json = _json(body)
     stamp = now_iso()
     content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "artifact",
+        aid,
+        {
+            "artifact_type": str(artifact_type)[:100],
+            "name": str(name)[:240],
+            "payload": body,
+            "content_hash": content_hash,
+            "owner": username,
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return aid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -526,7 +543,6 @@ def upsert_canonical_entity(
     workspace: str = "default",
     secret_ref: str = "",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     safe_secret_ref = str(secret_ref or "")[:300]
     eid = canonical_entity_id(username, workspace, entity_type, name, source)
@@ -534,6 +550,27 @@ def upsert_canonical_entity(
     stamp = now_iso()
     values = (eid, wid, str(entity_type)[:100], str(name)[:240], str(source)[:300],
               str(status)[:80] or "Observed", payload_json, content_hash, username, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "canonical_entity",
+        eid,
+        {
+            "entity_type": str(entity_type)[:100],
+            "name": str(name)[:240],
+            "source": str(source)[:300],
+            "status": str(status)[:80] or "Observed",
+            "state_json": json.loads(payload_json),
+            "content_hash": content_hash,
+            "created_by": username,
+            "secret_ref_configured": bool(safe_secret_ref),
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return eid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -577,13 +614,30 @@ def upsert_canonical_relationship(
     metadata: Any = None,
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     rid = canonical_relationship_id(username, workspace, source_entity_id, target_entity_id, relation)
     metadata_json, _ = _canonical_json(metadata or {})
     stamp = now_iso()
     values = (rid, wid, str(source_entity_id), str(target_entity_id), str(relation)[:180],
               str(status)[:80] or "Linked", metadata_json, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "canonical_relationship",
+        rid,
+        {
+            "source_entity_id": str(source_entity_id),
+            "target_entity_id": str(target_entity_id),
+            "relation": str(relation)[:180],
+            "status": str(status)[:80] or "Linked",
+            "metadata_json": json.loads(metadata_json),
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return rid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -617,13 +671,29 @@ def record_canonical_event(
     relationship_id: str = "",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     event_id = "CEVT-" + uuid.uuid4().hex[:14].upper()
     payload_json, _ = _canonical_json(payload or {})
     stamp = now_iso()
     values = (event_id, wid, str(event_type)[:120], str(entity_id or "")[:80] or None,
               str(relationship_id or "")[:80] or None, payload_json, username, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "canonical_event",
+        event_id,
+        {
+            "event_type": str(event_type)[:120],
+            "entity_id": str(entity_id or "")[:80],
+            "relationship_id": str(relationship_id or "")[:80],
+            "payload_json": json.loads(payload_json),
+            "actor": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return event_id
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -647,6 +717,12 @@ def record_canonical_event(
 
 
 def canonical_entities_frame(username: str, workspace: str = "default", entity_type: str = "", limit: int = 2000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "canonical_entity", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if not frame.empty and entity_type:
+            frame = frame[frame["entity_type"].astype(str).str.casefold() == str(entity_type).casefold()]
+        return frame.head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_entities" if _remote() else "shoir_ent_canonical_entities"
@@ -662,6 +738,9 @@ def canonical_entities_frame(username: str, workspace: str = "default", entity_t
 
 
 def canonical_relationships_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "canonical_relationship", limit)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records).head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_relationships" if _remote() else "shoir_ent_canonical_relationships"
@@ -671,6 +750,9 @@ def canonical_relationships_frame(username: str, workspace: str = "default", lim
 
 
 def canonical_events_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "canonical_event", limit)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records).head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_events" if _remote() else "shoir_ent_canonical_events"
