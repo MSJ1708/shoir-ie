@@ -349,7 +349,7 @@ def _show_fig(fig: go.Figure, height: int = 320, title: str = "") -> None:
         fig.update_layout(title=dict(text=html.escape(title), x=0.0, xanchor="left"))
     st.plotly_chart(
         _style_fig(fig, height),
-        use_container_width=True,
+        width="stretch",
         config={"displaylogo": False, "responsive": True},
     )
 
@@ -515,7 +515,7 @@ def _render_overview(owner: str) -> None:
         actions.append({"Record": str(row.get("Record", "")), "Next action": str(row.get("NextAction", ""))})
     if actions:
         st.markdown("#### Next-action queue")
-        st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(actions), width="stretch", hide_index=True)
     else:
         st.info("No next actions are recorded yet. Add a customer or pilot follow-up to make the operating queue actionable.")
 
@@ -525,7 +525,7 @@ def _render_customer(owner: str) -> None:
     st.caption("Customer records capture the problem, workaround, process burden, buying path, objections, requested features, pilot status and source metadata.")
     df = _customer_df(owner)
     if not df.empty:
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         c1, c2 = st.columns(2)
         pain_plot = df[["target_customer", "pain_severity"]].copy()
         pain_plot["target_customer"] = pain_plot["target_customer"].fillna("Unnamed").astype(str)
@@ -568,7 +568,7 @@ def _render_customer(owner: str) -> None:
         q4, q5 = st.columns(2)
         source_ref = q4.text_input("Source / interview reference", value=str(existing.get("source_ref", "")))
         source_date = q5.text_input("Source date", value=str(existing.get("source_date", "")))
-        submitted = st.form_submit_button("💾 Save customer evidence", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save customer evidence", type="primary", width="stretch")
     if submitted:
         stamp, customer_id = _now(), str(existing.get("customer_id") or _id("CUS"))
         with _db() as conn:
@@ -598,7 +598,7 @@ def _render_pilots(owner: str) -> None:
     st.caption("Discovery → Baseline → Pilot Setup → Deployment → Measurement → Customer Feedback → Decision")
     df = _pilot_df(owner)
     if not df.empty:
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         stage_counts = df["stage"].value_counts().reindex(PILOT_STAGES).fillna(0).reset_index()
         stage_counts.columns = ["Stage", "Pilots"]
         _show_fig(px.bar(stage_counts, x="Stage", y="Pilots", text="Pilots"), 300, "Pilot funnel by stage")
@@ -632,7 +632,7 @@ def _render_pilots(owner: str) -> None:
         start = d1.text_input("Start date", value=str(existing.get("start_date", "")))
         target = d2.text_input("Target date", value=str(existing.get("target_date", "")))
         next_action = d3.text_input("Next action", value=str(existing.get("next_action", "")))
-        submitted = st.form_submit_button("💾 Save pilot", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save pilot", type="primary", width="stretch")
     if submitted:
         customer_id = "" if customer_label.startswith("➕") else customer_label.split(" · ", 1)[0]
         stamp, pilot_id = _now(), str(existing.get("pilot_id") or _id("PIL"))
@@ -670,7 +670,7 @@ def _render_hypothesis_evidence(owner: str) -> None:
     hyp = _query("SELECT hypothesis_id,statement,metric,baseline,experiment,result,decision,status,confidence,source_ref,updated_at FROM venture_hypotheses WHERE owner=? ORDER BY updated_at DESC", (owner,))
     ev = _query("SELECT evidence_id,title,evidence_type,source,source_date,confidence,linked_object_type,linked_object_id,artifact_url,checksum,created_at FROM venture_evidence WHERE owner=? ORDER BY created_at DESC", (owner,))
     if not hyp.empty:
-        st.dataframe(hyp, use_container_width=True, hide_index=True)
+        st.dataframe(hyp, width="stretch", hide_index=True)
         status_counts = hyp["status"].value_counts().reset_index()
         status_counts.columns = ["Status", "Hypotheses"]
         _show_fig(px.bar(status_counts, x="Status", y="Hypotheses", text="Hypotheses"), 280, "Hypothesis status")
@@ -690,7 +690,7 @@ def _render_hypothesis_evidence(owner: str) -> None:
             status=st.selectbox("Status",["Proposed","Testing","Supported","Rejected","Inconclusive"])
             confidence=st.selectbox("Confidence",CONFIDENCE,index=1)
             source_ref=st.text_input("Source reference")
-            submit_h=st.form_submit_button("💾 Save hypothesis",type="primary",use_container_width=True)
+            submit_h=st.form_submit_button("💾 Save hypothesis",type="primary",width="stretch")
         if submit_h:
             if not statement.strip() or not metric.strip():
                 st.error("Hypothesis and metric are required.")
@@ -715,7 +715,7 @@ def _render_hypothesis_evidence(owner: str) -> None:
             link_id=st.text_input("Linked object ID")
             artifact_url=st.text_input("Artifact / URL")
             content=st.text_area("Evidence note / excerpt",height=90)
-            submit_e=st.form_submit_button("🔐 Preserve evidence record",type="primary",use_container_width=True)
+            submit_e=st.form_submit_button("🔐 Preserve evidence record",type="primary",width="stretch")
         if submit_e:
             if not title.strip() or not source.strip():
                 st.error("Evidence title and source are required.")
@@ -732,7 +732,7 @@ def _render_hypothesis_evidence(owner: str) -> None:
         claimed=int((hyp["source_ref"].fillna("").astype(str).str.strip()!="").sum())
         st.metric("Hypotheses with a source reference",f"{claimed}/{len(hyp)}")
     if not ev.empty:
-        st.dataframe(ev,use_container_width=True,hide_index=True)
+        st.dataframe(ev,width="stretch",hide_index=True)
 
 
 def _default_value_table() -> pd.DataFrame:
@@ -771,7 +771,7 @@ def _render_value_evidence(owner: str) -> None:
                   post_value AS Post,frequency_per_year AS 'Frequency / year',unit_value AS 'Unit value',
                   currency AS Currency,source_ref AS 'Source ref',source_date AS 'Source date',confidence AS Confidence,notes AS Notes
            FROM venture_value_measurements WHERE owner=? AND pilot_id=? ORDER BY rowid""",(owner,pilot_id))
-    edited=st.data_editor(existing if not existing.empty else _default_value_table(),num_rows="dynamic",use_container_width=True,hide_index=True,key="venture_value_editor_" + (pilot_id or "workspace"))
+    edited=st.data_editor(existing if not existing.empty else _default_value_table(),num_rows="dynamic",width="stretch",hide_index=True,key="venture_value_editor_" + (pilot_id or "workspace"))
     implementation_cost=st.number_input("Implementation cost for this value set",min_value=0.0,value=0.0,step=100.0,key="venture_value_implementation_cost_" + (pilot_id or "workspace"))
     preview=[]
     for _,row in edited.iterrows():
@@ -780,7 +780,7 @@ def _render_value_evidence(owner: str) -> None:
     preview_df = pd.DataFrame(preview)
     if not preview_df.empty:
         st.markdown("#### Calculated impact")
-        st.dataframe(preview_df,use_container_width=True,hide_index=True)
+        st.dataframe(preview_df,width="stretch",hide_index=True)
         chartable = preview_df[preview_df["Metric"].astype(str).str.strip()!=""].copy()
         if not chartable.empty:
             _show_fig(px.bar(chartable, x="Economic value", y="Metric", orientation="h", text_auto=".2f"), 340, "Annualized economic value by metric")
@@ -811,7 +811,7 @@ def _render_value_evidence(owner: str) -> None:
         if s["implementation_cost"] > 0:
             wf=go.Figure(go.Waterfall(orientation="h",measure=["relative","total"],y=["Measured annualized benefit","Net value"],x=[s["annualized_benefit"],s["net_value"]],text=[f"{s['annualized_benefit']:,.0f}",f"{s['net_value']:,.0f}"],textposition="outside"))
             _show_fig(wf,300,"Value bridge")
-    if st.button("💾 Save value evidence set",type="primary",use_container_width=True,key="venture_value_save"):
+    if st.button("💾 Save value evidence set",type="primary",width="stretch",key="venture_value_save"):
         with _db() as conn:
             conn.execute("DELETE FROM venture_value_measurements WHERE owner=? AND pilot_id=?",(owner,pilot_id))
             skipped=0
@@ -865,7 +865,7 @@ def _render_value_evidence(owner: str) -> None:
         q_date=qdate.text_input("Quality evidence source date",value=str(quality.iloc[0]['source_date']) if not quality.empty else "")
         q_conf=qconf.selectbox("Quality evidence confidence",CONFIDENCE,index=CONFIDENCE.index(str(quality.iloc[0]['confidence'])) if not quality.empty and str(quality.iloc[0]['confidence']) in CONFIDENCE else 1)
         q_notes=st.text_area("Quality evidence notes",value=str(quality.iloc[0]['notes']) if not quality.empty else "",height=60)
-        qsave=st.form_submit_button("💾 Save quality evidence",type="primary",use_container_width=True)
+        qsave=st.form_submit_button("💾 Save quality evidence",type="primary",width="stretch")
     if qsave:
         if not q_source.strip(): st.error("A source reference is required for quality evidence.")
         else:
@@ -979,7 +979,7 @@ def _render_evidence_vault(owner: str) -> None:
     if filtered.empty:
         st.warning("No evidence matches the current filters.")
         return
-    st.dataframe(filtered,use_container_width=True,hide_index=True)
+    st.dataframe(filtered,width="stretch",hide_index=True)
 
     counts = filtered["evidence_type"].value_counts().reset_index()
     counts.columns = ["Evidence type","Records"]
@@ -999,7 +999,7 @@ def _render_data_room(owner:str)->None:
     st.markdown("### 🗄️ Investor Data Room")
     st.caption("Product → Problem → Market → Customer Evidence → Pilots → ROI → Traction → Roadmap → Security → Financial Model")
     artifacts=_artifact_df(owner)
-    if not artifacts.empty: st.dataframe(artifacts,use_container_width=True,hide_index=True)
+    if not artifacts.empty: st.dataframe(artifacts,width="stretch",hide_index=True)
     a,b=st.columns([1.2,2])
     with a:
         with st.form("venture_artifact_form"):
@@ -1009,11 +1009,11 @@ def _render_data_room(owner:str)->None:
             source_url=st.text_input("Source URL / evidence link")
             source_date=st.text_input("Source date")
             confidence=st.selectbox("Confidence",CONFIDENCE,index=1)
-            submit=st.form_submit_button("💾 Save controlled artifact",type="primary",use_container_width=True)
+            submit=st.form_submit_button("💾 Save controlled artifact",type="primary",width="stretch")
     with b:
         st.markdown("#### Room completeness")
         room=pd.DataFrame([{"Category":cat,"Artifacts":int((artifacts["category"]==cat).sum()) if not artifacts.empty else 0,"Status":"Recorded" if not artifacts.empty and (artifacts["category"]==cat).any() else "Missing"} for cat in ARTIFACT_CATEGORIES])
-        st.dataframe(room,use_container_width=True,hide_index=True)
+        st.dataframe(room,width="stretch",hide_index=True)
         room_plot=room.copy()
         room_plot["RecordedFlag"]=room_plot["Status"].map({"Recorded":1,"Missing":0})
         _show_fig(px.bar(room_plot,x="Category",y="RecordedFlag",text="Status"),320,"Investor room completeness")
@@ -1032,8 +1032,8 @@ def _render_data_room(owner:str)->None:
         if selected_artifact!="None":
             versions=artifact_version_history(owner, selected_artifact)
             if versions.empty: st.caption("Version 1 · initial artifact, or no history visible for this account")
-            else: st.dataframe(versions,use_container_width=True,hide_index=True)
-    st.download_button("📦 Download Investor Data Room package",_room_export(owner),file_name="shoir_ie_investor_data_room.zip",mime="application/zip",type="primary",use_container_width=True,key="venture_room_export")
+            else: st.dataframe(versions,width="stretch",hide_index=True)
+    st.download_button("📦 Download Investor Data Room package",_room_export(owner),file_name="shoir_ie_investor_data_room.zip",mime="application/zip",type="primary",width="stretch",key="venture_room_export")
 
 
 def _render_pilot_comparison(owner: str) -> None:
@@ -1065,7 +1065,7 @@ def _render_pilot_comparison(owner: str) -> None:
             "Rework avoided h":qcalc["rework_avoided_hours"] if not qdf.empty else np.nan,
         })
     frame=pd.DataFrame(rows)
-    st.dataframe(frame,use_container_width=True,hide_index=True)
+    st.dataframe(frame,width="stretch",hide_index=True)
     c1,c2=st.columns(2)
     priced=frame[frame["Annualized benefit"]!=0].copy()
     with c1:
@@ -1121,7 +1121,7 @@ def _render_readiness(owner:str)->None:
     c1.metric("Readiness areas supported",f"{int(frame['Supported'].sum())}/{len(frame)}")
     c2.metric("Evidence coverage",f"{support_pct:.0f}%")
     c3.metric("Repeatable pilots",f"{int(pilots['status'].isin(['Complete','Converted']).sum()) if not pilots.empty else 0}")
-    st.dataframe(frame[["Readiness area","Status","Evidence condition"]],use_container_width=True,hide_index=True)
+    st.dataframe(frame[["Readiness area","Status","Evidence condition"]],width="stretch",hide_index=True)
     plot=frame.copy(); plot["Coverage"]=plot["Supported"].astype(int)*100
     _show_fig(px.bar(plot.sort_values("Coverage"),x="Coverage",y="Readiness area",orientation="h",text="Status",range_x=[0,100]),430,"Evidence-based readiness coverage")
     gaps=frame.loc[~frame["Supported"],"Readiness area"].tolist()
@@ -1206,7 +1206,7 @@ def _render_demo(owner:str)->None:
     timebox, title, narrative = DEMO_STORY[step_index]
     st.progress((step_index + 1) / len(DEMO_STORY))
     st.info(f"**{timebox} · {title}**\n\n{narrative}")
-    if st.button("🚀 Load deterministic demo into Shoir-IE", type="primary", use_container_width=True, key="venture_demo_load"):
+    if st.button("🚀 Load deterministic demo into Shoir-IE", type="primary", width="stretch", key="venture_demo_load"):
         st.session_state["universal_active_dataset"] = data["clean"].copy()
         st.session_state["industrial_workbook_current_df"] = data["clean"].copy()
         st.session_state["copilot_workbook"] = {
@@ -1221,23 +1221,23 @@ def _render_demo(owner:str)->None:
         track_event(owner, "demo_loaded", "End-to-End Demo Mode", details={"seed": 2026, "rows": int(len(data["clean"]))})
         st.success("Deterministic demo is loaded into the shared Shoir-IE workspace. Open Industrial Workbook next to continue the story.")
     tabs=st.tabs(["Raw Excel","Data Quality","Industrial Workbook","Facility / Flow","Engineering","Scenario","ROI / Report"])
-    with tabs[0]: st.dataframe(data["raw"],use_container_width=True,hide_index=True)
+    with tabs[0]: st.dataframe(data["raw"],width="stretch",hide_index=True)
     with tabs[1]:
         q=data["quality"]; c=st.columns(3); c[0].metric("Rows",q["rows"]); c[1].metric("Missing cells",q["missing_cells"]); c[2].metric("Duplicate rows",q["duplicate_rows"])
-        st.dataframe(data["clean"],use_container_width=True,hide_index=True); st.success("Synthetic clean/activated dataset prepared.")
+        st.dataframe(data["clean"],width="stretch",hide_index=True); st.success("Synthetic clean/activated dataset prepared.")
     with tabs[2]:
         st.markdown("**Inputs | Data | Calculations | KPIs | Simulation | Optimization | Scenarios | Decisions | Dashboard**")
-        st.dataframe(data["clean"].head(12),use_container_width=True,hide_index=True)
+        st.dataframe(data["clean"].head(12),width="stretch",hide_index=True)
     with tabs[3]:
-        st.dataframe(data["flow"],use_container_width=True,hide_index=True)
+        st.dataframe(data["flow"],width="stretch",hide_index=True)
         sankey=go.Figure(go.Sankey(node=dict(label=["Receiving","Machining","Assembly","Pack"]),link=dict(source=[0,1,2],target=[1,2,3],value=data["flow"]["Flow units / day"].tolist())))
         _show_fig(sankey,330,"Synthetic material-flow path")
         st.caption("DEMO flow only · this is not a customer facility map.")
     with tabs[4]:
         st.write("Focused question: how does a facility/flow alternative change throughput, travel distance and planning effort?")
-        st.dataframe(data["scenarios"].iloc[[0,2]],use_container_width=True,hide_index=True)
+        st.dataframe(data["scenarios"].iloc[[0,2]],width="stretch",hide_index=True)
     with tabs[5]:
-        st.dataframe(data["scenarios"],use_container_width=True,hide_index=True)
+        st.dataframe(data["scenarios"],width="stretch",hide_index=True)
         melted=data["scenarios"].melt(id_vars="Scenario",var_name="KPI",value_name="Value")
         _show_fig(px.bar(melted,x="Scenario",y="Value",color="KPI",barmode="group"),360,"Scenario stress test")
         deltas=data["scenarios"].copy()
@@ -1253,7 +1253,7 @@ def _render_demo(owner:str)->None:
         c[1].metric("Capacity released",f"{r['Capacity released / year']:.0f} h/year")
         c[2].metric("Illustrative value",f"USD {r['Illustrative capacity value / year']:,.0f}/yr")
         c[3].metric("Mode","DEMO")
-        if st.download_button("📄 Export deterministic executive demo report",_demo_report(data),file_name="shoir_ie_executive_demo_report.md",mime="text/markdown",type="primary",use_container_width=True,key="venture_demo_report"):
+        if st.download_button("📄 Export deterministic executive demo report",_demo_report(data),file_name="shoir_ie_executive_demo_report.md",mime="text/markdown",type="primary",width="stretch",key="venture_demo_report"):
             track_event(owner,"report_exported","End-to-End Demo Mode")
 
 
@@ -1261,13 +1261,13 @@ def _render_market(owner:str)->None:
     st.markdown("### 🌐 Market & Competitive Intelligence")
     st.caption("Build a sourced map of competitors, substitutes, spreadsheet alternatives, build-vs-buy choices and pricing signals.")
     df=_query("SELECT claim_id,competitor_or_alternative,claim_type,claim,source_url,source_date,confidence,notes,updated_at FROM venture_market_claims WHERE owner=? ORDER BY updated_at DESC",(owner,))
-    if not df.empty: st.dataframe(df,use_container_width=True,hide_index=True)
+    if not df.empty: st.dataframe(df,width="stretch",hide_index=True)
     with st.form("venture_market_form"):
         competitor=st.text_input("Competitor / alternative")
         claim_type=st.selectbox("Type",["Competitor","Substitute workflow","Spreadsheet","Build vs Buy","Pricing signal","Market evidence","Customer alternative"])
         claim=st.text_area("Documented claim"); source_url=st.text_input("Source URL"); source_date=st.text_input("Source date")
         confidence=st.selectbox("Confidence",CONFIDENCE,index=1); notes=st.text_area("Notes / caveat")
-        submitted=st.form_submit_button("💾 Save market evidence",type="primary",use_container_width=True)
+        submitted=st.form_submit_button("💾 Save market evidence",type="primary",width="stretch")
     if submitted:
         if not claim.strip(): st.error("A documented claim is required.")
         else:
@@ -1294,7 +1294,7 @@ def _render_case_study(owner:str)->None:
         ("Measured value present",summary["measured_rows"] > 0),
         ("Economic value basis present",summary["priced_rows"] > 0),
     ]
-    check_df=pd.DataFrame(checks,columns=["Requirement","Pass"]); check_df["Pass"]=check_df["Pass"].map(lambda x:"✓ PASS" if x else "⚠ MISSING"); st.dataframe(check_df,use_container_width=True,hide_index=True)
+    check_df=pd.DataFrame(checks,columns=["Requirement","Pass"]); check_df["Pass"]=check_df["Pass"].map(lambda x:"✓ PASS" if x else "⚠ MISSING"); st.dataframe(check_df,width="stretch",hide_index=True)
     evidence_conf=evidence["confidence"].value_counts().reset_index() if not evidence.empty else pd.DataFrame()
     if not evidence_conf.empty:
         evidence_conf.columns=["Confidence","Evidence"]
@@ -1345,7 +1345,7 @@ def _render_case_study(owner:str)->None:
 ## Evidence rule
 Generated only after baseline, evidence and measured value records are preserved in Shoir-IE.
 """
-    if st.button("✅ Generate proof package",type="primary",use_container_width=True,key="venture_case_generate"):
+    if st.button("✅ Generate proof package",type="primary",width="stretch",key="venture_case_generate"):
         cid=_id("CASE")
         with _db() as conn:
             conn.execute("INSERT INTO venture_case_studies VALUES(?,?,?,?,?,?,?)",(cid,owner,selected,title[:180],content,0,_now())); conn.commit()
@@ -1353,7 +1353,7 @@ Generated only after baseline, evidence and measured value records are preserved
         track_event(owner,"case_study_generated","Case Study Studio",details={"case_id":cid,"artifact_id":artifact_id,"pilot_id":selected})
         _maybe_first_result(owner)
         st.success(f"Case study package prepared · {cid} · Investor Room artifact {artifact_id}")
-    st.download_button("📄 Download case study draft",content.encode("utf-8"),file_name="shoir_ie_case_study.md",mime="text/markdown",use_container_width=True,key="venture_case_download")
+    st.download_button("📄 Download case study draft",content.encode("utf-8"),file_name="shoir_ie_case_study.md",mime="text/markdown",width="stretch",key="venture_case_download")
 
 
 def _render_business_model(owner:str)->None:
@@ -1361,7 +1361,7 @@ def _render_business_model(owner:str)->None:
     st.caption("Pricing is stored as a hypothesis with evidence requirements; it is not treated as willingness-to-pay proof.")
     df=_query("SELECT offering,target_segment,billing_model,price,currency,sales_motion,evidence_required,notes,updated_at FROM venture_business_model WHERE owner=? ORDER BY offering",(owner,))
     if not df.empty:
-        st.dataframe(df,use_container_width=True,hide_index=True)
+        st.dataframe(df,width="stretch",hide_index=True)
         price_plot=df[["offering","price","currency"]].copy()
         price_plot["price"]=pd.to_numeric(price_plot["price"],errors="coerce").fillna(0)
         _show_fig(px.bar(price_plot,x="offering",y="price",text="price",facet_col="currency"),320,"Pricing hypotheses")
@@ -1370,7 +1370,7 @@ def _render_business_model(owner:str)->None:
         billing=st.selectbox("Billing model",["Pilot","Monthly SaaS","Annual SaaS","Enterprise","Professional Services","University / Research"])
         price=st.number_input("Price hypothesis",min_value=0.0,value=0.0,step=100.0); currency=st.selectbox("Currency",["SAR","USD","EUR"])
         motion=st.text_input("Sales motion",value="Pilot → Platform"); evidence_required=st.text_input("Evidence needed to validate pricing"); notes=st.text_area("Notes")
-        submit=st.form_submit_button("💾 Save pricing hypothesis",type="primary",use_container_width=True)
+        submit=st.form_submit_button("💾 Save pricing hypothesis",type="primary",width="stretch")
     if submit:
         if not offering.strip(): st.error("Offering is required.")
         else:

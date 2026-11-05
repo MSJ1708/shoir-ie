@@ -1006,7 +1006,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
     c3.metric("Experiments + Decisions", f'{counts["Experiment"] + counts["Decision"]:,}')
     c4.metric("Last sync", st.session_state.get(keys["sync"]) or "Never")
 
-    if st.button("🔄 Sync Entire Workspace into Digital Thread", type="primary", use_container_width=True, key="global_thread_sync"):
+    if st.button("🔄 Sync Entire Workspace into Digital Thread", type="primary", width="stretch", key="global_thread_sync"):
         with st.spinner("Harvesting datasets, assets, KPIs, models, experiments and decisions..."):
             stats = sync_workspace_to_thread(username)
         st.success("Digital Thread synchronized: " + ", ".join(f"{k}={v}" for k, v in stats.items()))
@@ -1033,7 +1033,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             st.success(f"✅ All {len(THREAD_TYPES)} canonical entity layers are represented in this project.")
 
         if raw_nodes:
-            st.dataframe(nodes.head(300), use_container_width=True, hide_index=True)
+            st.dataframe(nodes.head(300), width="stretch", hide_index=True)
 
     with tabs[1]:
         node_type_filter = st.multiselect("Thread layers", THREAD_TYPES, default=THREAD_TYPES, key="global_thread_layers")
@@ -1042,12 +1042,12 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         filtered_edges = [e for e in raw_edges if e["source_id"] in selected_ids and e["target_id"] in selected_ids]
         fig = network_figure(filtered_nodes, filtered_edges)
         if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No traceability graph yet. Sync the workspace to create the graph.")
         sankey = sankey_figure(filtered_nodes, filtered_edges)
         if sankey is not None:
-            st.plotly_chart(sankey, use_container_width=True)
+            st.plotly_chart(sankey, width="stretch")
 
     with tabs[2]:
         if not raw_nodes:
@@ -1058,7 +1058,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             traced = trace_from(selected_id)
             st.metric("Reachable trace items", len(traced))
             if traced:
-                st.dataframe(pd.DataFrame(traced), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(traced), width="stretch", hide_index=True)
 
     with tabs[3]:
         st.markdown("### Add explicit traceability link")
@@ -1070,7 +1070,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             with right:
                 target_id = st.selectbox("Target node", list(labels.keys()), format_func=labels.get, key="global_thread_target")
             relation = st.text_input("Relationship", value="depends on", key="global_thread_relation")
-            if st.button("🔗 Create traceability link", use_container_width=True, key="global_thread_link"):
+            if st.button("🔗 Create traceability link", width="stretch", key="global_thread_link"):
                 if source_id == target_id:
                     st.warning("A node cannot link to itself.")
                 else:
@@ -1093,7 +1093,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                 key="global_thread_new_identity",
                 help="Use an immutable asset, product, order, project or decision ID. Do not enter passwords or personal identifiers.",
             )
-        if st.button("＋ Add node", use_container_width=True, key="global_thread_add_node"):
+        if st.button("＋ Add node", width="stretch", key="global_thread_add_node"):
             if node_name.strip():
                 _upsert_node(
                     node_type,
@@ -1120,7 +1120,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                 excel,
                 f"shoir_ie_{_slug(project.get('name','global_thread'))}_digital_thread.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+                width="stretch",
             )
         except Exception as exc:
             st.warning(f"Excel export unavailable: {exc}")
@@ -1131,11 +1131,11 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             bundle,
             f"shoir_ie_{_slug(project.get('name','global_thread'))}_digital_thread.zip",
             "application/zip",
-            use_container_width=True,
+            width="stretch",
         )
 
         st.markdown("### Traceability coverage")
         coverage = pd.DataFrame([{"Layer": kind, "Nodes": counts[kind], "Present": counts[kind] > 0} for kind in THREAD_TYPES])
-        st.dataframe(coverage, use_container_width=True, hide_index=True)
+        st.dataframe(coverage, width="stretch", hide_index=True)
 
     st.caption("Persistence: project metadata and Digital Thread nodes/links live in the user workspace state and are captured by the existing autosave/durable persistence path.")

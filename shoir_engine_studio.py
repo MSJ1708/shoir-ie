@@ -721,7 +721,7 @@ def _df_download(df: pd.DataFrame, filename: str) -> None:
         data=df.to_csv(index=False).encode("utf-8"),
         file_name=filename,
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -731,7 +731,7 @@ def _json_download(payload: Any, filename: str) -> None:
         data=json.dumps(payload, default=str, indent=2).encode("utf-8"),
         file_name=filename,
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -746,13 +746,13 @@ def render_experiment_engine(tier: str, username: str) -> None:
                 "experiment_engine_factors",
                 pd.DataFrame({"Factor": ["Temperature", "Speed", "Pressure"], "Low": [180, 800, 1.2], "High": [220, 1200, 1.8]}),
             ),
-            num_rows="dynamic", use_container_width=True, key="experiment_engine_factor_editor",
+            num_rows="dynamic", width="stretch", key="experiment_engine_factor_editor",
         )
         c1, c2, c3 = st.columns(3)
         center = c1.number_input("Center points", min_value=0, max_value=64, value=2, key="experiment_engine_center")
         reps = c2.number_input("Replications", min_value=1, max_value=50, value=2, key="experiment_engine_reps")
         seed = c3.number_input("Random seed", min_value=0, max_value=999999, value=42, key="experiment_engine_seed")
-        if st.button("🧪 Generate randomized factorial design", type="primary", use_container_width=True, key="experiment_engine_generate"):
+        if st.button("🧪 Generate randomized factorial design", type="primary", width="stretch", key="experiment_engine_generate"):
             try:
                 design = build_factorial_design(factors, int(center), int(reps), int(seed))
                 st.session_state["experiment_engine_design_df"] = design
@@ -769,13 +769,13 @@ def render_experiment_engine(tier: str, username: str) -> None:
             response = st.data_editor(
                 response_view,
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 disabled=factor_names + ["Replication", "Run"],
                 key="experiment_engine_response_editor",
             )
             design.loc[response.index, "Response"] = pd.to_numeric(response["Response"], errors="coerce")
             st.session_state["experiment_engine_design_df"] = design
-            if st.button("📐 Analyze factorial effects", type="primary", use_container_width=True, key="experiment_engine_analyze"):
+            if st.button("📐 Analyze factorial effects", type="primary", width="stretch", key="experiment_engine_analyze"):
                 try:
                     effects, fitted, summary = analyze_factorial(design, "Response", factor_names)
                     st.session_state["experiment_engine_effects_df"] = effects
@@ -792,7 +792,7 @@ def render_experiment_engine(tier: str, username: str) -> None:
                 except Exception as exc:
                     st.error(f"Factorial analysis failed safely: {exc}")
         if isinstance(st.session_state.get("experiment_engine_effects_df"), pd.DataFrame):
-            st.dataframe(st.session_state["experiment_engine_effects_df"], use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["experiment_engine_effects_df"], width="stretch", hide_index=True)
             st.json(st.session_state.get("experiment_engine_summary", {}))
             _df_download(st.session_state["experiment_engine_effects_df"], "shoir_ie_factorial_effects.csv")
 
@@ -810,12 +810,12 @@ def render_experiment_engine(tier: str, username: str) -> None:
                     "Coefficient": [1.0, -25.0],
                 }),
             ),
-            num_rows="dynamic", use_container_width=True, key="experiment_engine_mc_editor",
+            num_rows="dynamic", width="stretch", key="experiment_engine_mc_editor",
         )
         c1, c2 = st.columns(2)
         sims = c1.number_input("Simulations", 500, 100000, 10000, 500, key="experiment_engine_mc_sims")
         intercept = c2.number_input("Output intercept", -1e9, 1e9, 0.0, key="experiment_engine_mc_intercept")
-        if st.button("🎲 Propagate uncertainty", type="primary", use_container_width=True, key="experiment_engine_mc_run"):
+        if st.button("🎲 Propagate uncertainty", type="primary", width="stretch", key="experiment_engine_mc_run"):
             try:
                 samples, summary = monte_carlo_uncertainty(specs, int(sims), 42, float(intercept))
                 st.session_state["experiment_engine_mc_samples"] = samples
@@ -833,14 +833,14 @@ def render_experiment_engine(tier: str, username: str) -> None:
         if st.session_state.get("experiment_engine_mc_summary"):
             st.json(st.session_state["experiment_engine_mc_summary"])
         if isinstance(st.session_state.get("experiment_engine_mc_samples"), pd.DataFrame):
-            st.dataframe(st.session_state["experiment_engine_mc_samples"].head(200), use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["experiment_engine_mc_samples"].head(200), width="stretch", hide_index=True)
             _df_download(st.session_state["experiment_engine_mc_samples"], "shoir_ie_monte_carlo_samples.csv")
 
     with tabs[2]:
-        a = st.data_editor(st.session_state.setdefault("experiment_engine_group_a", pd.DataFrame({"Group A": [10, 11, 9, 12, 10, 13]})), num_rows="dynamic", use_container_width=True, key="experiment_engine_a_editor")
-        b = st.data_editor(st.session_state.setdefault("experiment_engine_group_b", pd.DataFrame({"Group B": [8, 9, 10, 8, 7, 9]})), num_rows="dynamic", use_container_width=True, key="experiment_engine_b_editor")
+        a = st.data_editor(st.session_state.setdefault("experiment_engine_group_a", pd.DataFrame({"Group A": [10, 11, 9, 12, 10, 13]})), num_rows="dynamic", width="stretch", key="experiment_engine_a_editor")
+        b = st.data_editor(st.session_state.setdefault("experiment_engine_group_b", pd.DataFrame({"Group B": [8, 9, 10, 8, 7, 9]})), num_rows="dynamic", width="stretch", key="experiment_engine_b_editor")
         iterations = st.number_input("Bootstrap iterations", 500, 50000, 4000, 500, key="experiment_engine_boot_iters")
-        if st.button("📊 Bootstrap difference + effect size", type="primary", use_container_width=True, key="experiment_engine_boot_run"):
+        if st.button("📊 Bootstrap difference + effect size", type="primary", width="stretch", key="experiment_engine_boot_run"):
             try:
                 boot, boot_summary = bootstrap_difference(a.iloc[:, 0], b.iloc[:, 0], int(iterations))
                 boot_summary.update(effect_size(a.iloc[:, 0], b.iloc[:, 0]))
@@ -859,7 +859,7 @@ def render_experiment_engine(tier: str, username: str) -> None:
         if st.session_state.get("experiment_engine_bootstrap_summary"):
             st.json(st.session_state["experiment_engine_bootstrap_summary"])
         if isinstance(st.session_state.get("experiment_engine_bootstrap_df"), pd.DataFrame):
-            st.dataframe(st.session_state["experiment_engine_bootstrap_df"].head(250), use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["experiment_engine_bootstrap_df"].head(250), width="stretch", hide_index=True)
             _df_download(st.session_state["experiment_engine_bootstrap_df"], "shoir_ie_bootstrap_distribution.csv")
 
     with tabs[3]:
@@ -871,7 +871,7 @@ def render_experiment_engine(tier: str, username: str) -> None:
             if len(numeric) >= 2:
                 outcome = st.selectbox("Outcome", numeric, key="experiment_engine_sens_outcome")
                 drivers = st.multiselect("Input drivers", [c for c in numeric if c != outcome], default=[c for c in numeric if c != outcome][:4], key="experiment_engine_sens_drivers")
-                if st.button("🔎 Screen sensitivity", use_container_width=True, key="experiment_engine_sens_run"):
+                if st.button("🔎 Screen sensitivity", width="stretch", key="experiment_engine_sens_run"):
                     try:
                         sens = sensitivity_screen(source, outcome, drivers)
                         st.session_state["experiment_engine_sensitivity_df"] = sens
@@ -882,7 +882,7 @@ def render_experiment_engine(tier: str, username: str) -> None:
                             username,
                         )
                         st.session_state["experiment_engine_run_id"] = run_id
-                        st.dataframe(sens, use_container_width=True, hide_index=True)
+                        st.dataframe(sens, width="stretch", hide_index=True)
                     except Exception as exc:
                         st.error(f"Sensitivity screening failed safely: {exc}")
             if isinstance(st.session_state.get("experiment_engine_sensitivity_df"), pd.DataFrame):
@@ -902,12 +902,12 @@ def render_experiment_engine(tier: str, username: str) -> None:
             nums = [c for c in src.columns if pd.api.types.is_numeric_dtype(src[c])]
             metric = st.selectbox("Metric", nums, key="experiment_engine_rep_metric")
             rep_col = "Replication" if "Replication" in src.columns else st.selectbox("Replication column", ["(none)"] + nums, key="experiment_engine_rep_col")
-            if st.button("📏 Summarize replications", use_container_width=True, key="experiment_engine_rep_run"):
+            if st.button("📏 Summarize replications", width="stretch", key="experiment_engine_rep_run"):
                 try:
                     summary_df, summary = summarize_replications(src, metric, "Replication" if rep_col == "Replication" else rep_col)
                     st.session_state["experiment_engine_replication_df"] = summary_df
                     st.session_state["experiment_engine_replication_summary"] = summary
-                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                    st.dataframe(summary_df, width="stretch", hide_index=True)
                     st.json(summary)
                 except Exception as exc:
                     st.error(f"Replication summary failed safely: {exc}")
@@ -933,7 +933,7 @@ def render_forecasting_studio(tier: str, username: str) -> None:
                 "Promotion": [0, 0, 1, 0] * 6,
             }),
         ),
-        num_rows="dynamic", use_container_width=True, key="forecast_universal_editor",
+        num_rows="dynamic", width="stretch", key="forecast_universal_editor",
     )
     numeric = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     date_cols = [c for c in df.columns if str(c).lower().find("date") >= 0]
@@ -941,7 +941,7 @@ def render_forecasting_studio(tier: str, username: str) -> None:
     target_col = st.selectbox("Forecast KPI", numeric or list(df.columns), key="forecast_universal_target")
     drivers = st.multiselect("Known/assumed external drivers", [c for c in numeric if c != target_col], key="forecast_universal_drivers")
     horizon = st.number_input("Forecast horizon", 1, 104, 12, key="forecast_universal_horizon")
-    if st.button("🔮 Generate forecast", type="primary", use_container_width=True, key="forecast_universal_run"):
+    if st.button("🔮 Generate forecast", type="primary", width="stretch", key="forecast_universal_run"):
         try:
             result, metrics = forecast_series(df, date_col, target_col, drivers, int(horizon))
             st.session_state["forecast_universal_result"] = result
@@ -950,7 +950,7 @@ def render_forecasting_studio(tier: str, username: str) -> None:
         except Exception as exc:
             st.error(f"Forecast failed safely: {exc}")
     if isinstance(st.session_state.get("forecast_universal_result"), pd.DataFrame):
-        st.dataframe(st.session_state["forecast_universal_result"], use_container_width=True, hide_index=True)
+        st.dataframe(st.session_state["forecast_universal_result"], width="stretch", hide_index=True)
         st.json(st.session_state.get("forecast_universal_metrics", {}))
         _df_download(st.session_state["forecast_universal_result"], "shoir_ie_forecast_evidence.csv")
 
@@ -973,19 +973,19 @@ def render_optimization_studio(tier: str, username: str) -> None:
                     "Binary": [False, False],
                 }),
             ),
-            num_rows="dynamic", use_container_width=True, key="optimization_variables_editor",
+            num_rows="dynamic", width="stretch", key="optimization_variables_editor",
         )
         constraints = st.data_editor(
             st.session_state.setdefault(
                 "optimization_solver_constraints",
                 pd.DataFrame({"Constraint": ["Capacity"], "Sense": ["<="], "RHS": [100.0], "x": [1.0], "y": [1.0]}),
             ),
-            num_rows="dynamic", use_container_width=True, key="optimization_constraints_editor",
+            num_rows="dynamic", width="stretch", key="optimization_constraints_editor",
         )
         c1, c2 = st.columns(2)
         sense = c1.selectbox("Objective", ["min", "max"], key="optimization_objective_sense")
         method = c2.selectbox("Solver class", ["LP", "MILP"], key="optimization_method")
-        if st.button("⚙️ Solve model", type="primary", use_container_width=True, key="optimization_solver_run"):
+        if st.button("⚙️ Solve model", type="primary", width="stretch", key="optimization_solver_run"):
             try:
                 sol, summary = solve_lp_or_milp(variables, constraints, sense, method)
                 st.session_state["optimization_solution_df"] = sol
@@ -994,7 +994,7 @@ def render_optimization_studio(tier: str, username: str) -> None:
             except Exception as exc:
                 st.error(f"Optimization failed safely: {exc}")
         if isinstance(st.session_state.get("optimization_solution_df"), pd.DataFrame):
-            st.dataframe(st.session_state["optimization_solution_df"], use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["optimization_solution_df"], width="stretch", hide_index=True)
             st.json(st.session_state.get("optimization_solution_summary", {}))
             _df_download(st.session_state["optimization_solution_df"], "shoir_ie_optimization_solution.csv")
 
@@ -1010,17 +1010,17 @@ def render_optimization_studio(tier: str, username: str) -> None:
                     "Upper": [100.0, 100.0],
                 }),
             ),
-            num_rows="dynamic", use_container_width=True, key="optimization_nl_variables_editor",
+            num_rows="dynamic", width="stretch", key="optimization_nl_variables_editor",
         )
         nl_cons = st.data_editor(
             st.session_state.setdefault(
                 "optimization_nonlinear_constraints",
                 pd.DataFrame({"Constraint": ["Minimum Output"], "Sense": [">="], "RHS": [60.0], "x": [1.0], "y": [1.0]}),
             ),
-            num_rows="dynamic", use_container_width=True, key="optimization_nl_constraints_editor",
+            num_rows="dynamic", width="stretch", key="optimization_nl_constraints_editor",
         )
         nl_sense = st.selectbox("Objective", ["min", "max"], key="optimization_nl_sense")
-        if st.button("∿ Solve nonlinear model", type="primary", use_container_width=True, key="optimization_nl_run"):
+        if st.button("∿ Solve nonlinear model", type="primary", width="stretch", key="optimization_nl_run"):
             try:
                 sol, summary = solve_nonlinear_quadratic(nl_vars, nl_cons, nl_sense)
                 st.session_state["optimization_nonlinear_solution_df"] = sol
@@ -1029,7 +1029,7 @@ def render_optimization_studio(tier: str, username: str) -> None:
             except Exception as exc:
                 st.error(f"Nonlinear optimization failed safely: {exc}")
         if isinstance(st.session_state.get("optimization_nonlinear_solution_df"), pd.DataFrame):
-            st.dataframe(st.session_state["optimization_nonlinear_solution_df"], use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["optimization_nonlinear_solution_df"], width="stretch", hide_index=True)
             st.json(st.session_state.get("optimization_nonlinear_summary", {}))
 
     with tabs[2]:
@@ -1044,7 +1044,7 @@ def render_optimization_studio(tier: str, username: str) -> None:
                     "Risk": [12, 20, 8, 15],
                 }),
             ),
-            num_rows="dynamic", use_container_width=True, key="optimization_candidates_editor",
+            num_rows="dynamic", width="stretch", key="optimization_candidates_editor",
         )
         objectives = st.multiselect("Pareto objectives", [c for c in candidates.columns if c != "Scenario" and pd.api.types.is_numeric_dtype(candidates[c])],
                                     default=[c for c in ["Cost", "Carbon", "Service"] if c in candidates.columns], key="optimization_pareto_objectives")
@@ -1052,7 +1052,7 @@ def render_optimization_studio(tier: str, username: str) -> None:
             minimize_flags = {}
             for col in objectives:
                 minimize_flags[col] = st.checkbox(f"Minimize {col}", value=col not in {"Service"}, key=f"optimization_min_{col}")
-            if st.button("📈 Build Pareto frontier", type="primary", use_container_width=True, key="optimization_pareto_run"):
+            if st.button("📈 Build Pareto frontier", type="primary", width="stretch", key="optimization_pareto_run"):
                 try:
                     pareto = pareto_candidates(candidates, minimize_flags)
                     st.session_state["optimization_pareto_df"] = pareto
@@ -1060,7 +1060,7 @@ def render_optimization_studio(tier: str, username: str) -> None:
                 except Exception as exc:
                     st.error(f"Pareto analysis failed safely: {exc}")
             if isinstance(st.session_state.get("optimization_pareto_df"), pd.DataFrame):
-                st.dataframe(st.session_state["optimization_pareto_df"], use_container_width=True, hide_index=True)
+                st.dataframe(st.session_state["optimization_pareto_df"], width="stretch", hide_index=True)
 
     with tabs[3]:
         scenario = st.data_editor(
@@ -1075,11 +1075,11 @@ def render_optimization_studio(tier: str, username: str) -> None:
                     "Risk": [10, 35, 20, 42, 8, 20],
                 }),
             ),
-            num_rows="dynamic", use_container_width=True, key="optimization_scenario_editor",
+            num_rows="dynamic", width="stretch", key="optimization_scenario_editor",
         )
         metric_cols = [c for c in scenario.columns if c not in {"Decision", "State", "Probability"} and pd.api.types.is_numeric_dtype(scenario[c])]
         metrics = st.multiselect("Scenario KPIs", metric_cols, default=[c for c in ["Cost", "Service", "Risk"] if c in metric_cols], key="optimization_scenario_metrics")
-        if metrics and st.button("🛡️ Run robust + stochastic scenario optimization", type="primary", use_container_width=True, key="optimization_robust_run"):
+        if metrics and st.button("🛡️ Run robust + stochastic scenario optimization", type="primary", width="stretch", key="optimization_robust_run"):
             try:
                 minimize_flags = {m: m not in {"Service"} for m in metrics}
                 summary, scored = robust_stochastic_scenario_analysis(scenario, "Decision", "State", metrics, minimize_flags, "Probability")
@@ -1089,9 +1089,9 @@ def render_optimization_studio(tier: str, username: str) -> None:
             except Exception as exc:
                 st.error(f"Robust/stochastic analysis failed safely: {exc}")
         if isinstance(st.session_state.get("optimization_stochastic_summary_df"), pd.DataFrame):
-            st.dataframe(st.session_state["optimization_stochastic_summary_df"], use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["optimization_stochastic_summary_df"], width="stretch", hide_index=True)
         if isinstance(st.session_state.get("optimization_robust_scored_df"), pd.DataFrame):
-            st.dataframe(st.session_state["optimization_robust_scored_df"], use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["optimization_robust_scored_df"], width="stretch", hide_index=True)
 
 
 def render_decision_center_studio(tier: str, username: str) -> None:
@@ -1106,39 +1106,39 @@ def render_decision_center_studio(tier: str, username: str) -> None:
             "decision_alternatives_df",
             pd.DataFrame({"Alternative": ["Baseline", "Network Redesign"], "Cost": [100000, 91800], "Service": [95, 97], "Risk": [10, 12]}),
         ),
-        num_rows="dynamic", use_container_width=True, key="decision_alternatives_editor",
+        num_rows="dynamic", width="stretch", key="decision_alternatives_editor",
     )
     constraints = st.data_editor(
         st.session_state.setdefault(
             "decision_constraints_df",
             pd.DataFrame({"Constraint": ["Service minimum", "Budget"], "Rule": [">= 95", "<= 100000"], "Status": ["Pass", "Pass"]}),
         ),
-        num_rows="dynamic", use_container_width=True, key="decision_constraints_editor",
+        num_rows="dynamic", width="stretch", key="decision_constraints_editor",
     )
     evidence = st.data_editor(
         st.session_state.setdefault(
             "decision_evidence_df",
             pd.DataFrame({"Source": ["Forecast run", "Optimization run"], "Reference": ["forecast_universal_result", "optimization_solution_df"], "Note": ["Time-aware validation", "Solver output"]}),
         ),
-        num_rows="dynamic", use_container_width=True, key="decision_evidence_editor",
+        num_rows="dynamic", width="stretch", key="decision_evidence_editor",
     )
     approvals = st.data_editor(
         st.session_state.setdefault(
             "decision_approvals_df",
             pd.DataFrame({"Role": ["Engineering Owner", "Manager"], "Approver": [username, ""], "Status": ["Prepared", "Pending"]}),
         ),
-        num_rows="dynamic", use_container_width=True, key="decision_approvals_editor",
+        num_rows="dynamic", width="stretch", key="decision_approvals_editor",
     )
     verification = st.data_editor(
         st.session_state.setdefault(
             "decision_verification_df",
             pd.DataFrame({"KPI": ["Service"], "Target": [95.0], "Due Date": ["2026-12-31"], "Owner": [username], "Observed": [np.nan], "Status": ["Pending"]}),
         ),
-        num_rows="dynamic", use_container_width=True, key="decision_verification_editor",
+        num_rows="dynamic", width="stretch", key="decision_verification_editor",
     )
     status = st.selectbox("Decision status", ["Draft", "Proposed", "Under Review", "Approved", "Implemented", "Verified"], key="decision_governance_status")
     selected = st.text_input("Selected alternative", "Network Redesign", key="decision_selected_alt")
-    if st.button("🎯 Save governed decision card", type="primary", use_container_width=True, key="decision_governance_save"):
+    if st.button("🎯 Save governed decision card", type="primary", width="stretch", key="decision_governance_save"):
         try:
             from industrial_platform import create_decision_card, save_decision_card
             card = create_decision_card(
@@ -1181,7 +1181,7 @@ def render_decision_center_studio(tier: str, username: str) -> None:
             pd.DataFrame(
                 [{"Section": k, "Complete": "✅" if v else "⚠️"} for k, v in card.get("readiness_checks", {}).items()]
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.json(card)
@@ -1223,7 +1223,7 @@ def render_decision_center_studio(tier: str, username: str) -> None:
             if st.button(
                 "📊 Record actual outcome & calculate variance",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="decision_value_record",
             ):
                 try:
@@ -1256,7 +1256,7 @@ def render_decision_center_studio(tier: str, username: str) -> None:
         value_frame = decision_to_value_frame(owner=username, decision_id=decision_id)
         if not value_frame.empty:
             st.markdown("#### Decision-to-Value Evidence")
-            st.dataframe(value_frame, use_container_width=True, hide_index=True)
+            st.dataframe(value_frame, width="stretch", hide_index=True)
         else:
             st.info("No actual outcome has been recorded yet. Verification remains evidence-driven.")
 

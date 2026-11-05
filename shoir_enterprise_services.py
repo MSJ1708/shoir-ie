@@ -491,7 +491,7 @@ def render_knowledge_layer(username: str) -> None:
             st.error(f"Knowledge import failed safely: {exc}")
     docs = st.session_state.get("knowledge_documents", [])
     if docs:
-        st.dataframe(pd.DataFrame([{k:d.get(k) for k in ["title","extension","bytes","sha256","captured_at","linked_modules"]} for d in docs]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([{k:d.get(k) for k in ["title","extension","bytes","sha256","captured_at","linked_modules"]} for d in docs]), width="stretch", hide_index=True)
         st.text_area("Copilot knowledge context preview", knowledge_context(), height=160, disabled=True)
 
 
@@ -528,23 +528,23 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 st.dataframe(pd.DataFrame([{
                     "Field": f,
                     "Role": "ID" if f in profile["id_like_columns"] else ("Date/Time" if f in profile["date_like_columns"] else "Measure" if f in profile["numeric_columns"] else "Attribute"),
-                } for f in frames[0][1].columns]), use_container_width=True, hide_index=True)
+                } for f in frames[0][1].columns]), width="stretch", hide_index=True)
             st.markdown("**Durability:** " + ("Managed cloud backend configured" if _durable_ready() else "Local/ephemeral backend — configure the managed database for restart-safe cloud persistence."))
         with tabs[1]:
             if frames:
                 table = data_intelligence_profile(frames[0][1])
-                st.dataframe(pd.DataFrame([{"Metric":"Missing %","Value":table["missing_pct"]},{"Metric":"Duplicate %","Value":table["duplicate_pct"]},{"Metric":"Quality Score","Value":table["quality_score"]}]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame([{"Metric":"Missing %","Value":table["missing_pct"]},{"Metric":"Duplicate %","Value":table["duplicate_pct"]},{"Metric":"Quality Score","Value":table["quality_score"]}]), width="stretch", hide_index=True)
                 if table["unit_hints"]:
-                    st.dataframe(pd.DataFrame(table["unit_hints"]), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(table["unit_hints"]), width="stretch", hide_index=True)
                 if table["outlier_counts"]:
-                    st.dataframe(pd.DataFrame([{"Field":k,"Outliers":v} for k,v in table["outlier_counts"].items() if v]), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame([{"Field":k,"Outliers":v} for k,v in table["outlier_counts"].items() if v]), width="stretch", hide_index=True)
         with tabs[2]:
             if module in {"IoT Digital Twin","Live Industrial Digital Twin"}:
                 twin = replay_twin_frame()
                 if twin.empty:
                     st.info("No telemetry state is currently available for replay.")
                 else:
-                    st.dataframe(twin.head(100), use_container_width=True, hide_index=True)
+                    st.dataframe(twin.head(100), width="stretch", hide_index=True)
                     z_threshold = st.number_input("Anomaly alert z-score threshold", 1.0, 6.0, 3.0, 0.1, key=f"twin_z_threshold_{hash(module)&0xffff:04x}")
                     anomalies = detect_twin_anomalies(twin, z_threshold)
                     st.session_state["enterprise_twin_anomalies_df"] = anomalies.copy(deep=True)
@@ -552,7 +552,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         flagged = anomalies[anomalies["Alert"] == "Investigate"]
                         st.metric("Telemetry observations flagged", f"{len(flagged):,}")
                         if not flagged.empty:
-                            st.dataframe(flagged.head(100), use_container_width=True, hide_index=True)
+                            st.dataframe(flagged.head(100), width="stretch", hide_index=True)
                     metrics = sorted(twin["Metric"].dropna().astype(str).unique()) if "Metric" in twin.columns else []
                     if metrics:
                         metric = st.selectbox("Replay metric", metrics, key=f"twin_replay_metric_{hash(module)&0xffff:04x}")
@@ -560,34 +560,34 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         if "Timestamp" in metric_df.columns:
                             x = pd.to_datetime(metric_df["Timestamp"], errors="coerce")
                             fig = px.line(metric_df.assign(_time=x), x="_time", y="Value", markers=True, title=f"{metric} · Scenario Replay")
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width="stretch")
                         delta = st.slider("What-if delta (%)", -50.0, 50.0, 0.0, 0.5, key=f"twin_whatif_delta_{hash(module)&0xffff:04x}")
-                        if st.button("🔄 Replay what-if scenario", use_container_width=True, key=f"twin_whatif_{hash(module)&0xffff:04x}"):
+                        if st.button("🔄 Replay what-if scenario", width="stretch", key=f"twin_whatif_{hash(module)&0xffff:04x}"):
                             scenario = replay_twin_what_if(twin, metric, delta)
                             st.session_state["twin_whatif_result"] = scenario
                             record_workspace_artifact("simulation", f"Twin what-if · {metric}", username, {"delta_pct": delta, "rows": len(scenario)})
                     if isinstance(st.session_state.get("twin_whatif_result"), pd.DataFrame):
-                        st.dataframe(st.session_state["twin_whatif_result"], use_container_width=True, hide_index=True)
+                        st.dataframe(st.session_state["twin_whatif_result"], width="stretch", hide_index=True)
             elif module in {"Control Tower","Industrial Control Center"}:
                 health = build_control_tower_health()
                 st.session_state["enterprise_control_tower_health_df"] = health.copy(deep=True)
-                st.dataframe(health, use_container_width=True, hide_index=True)
+                st.dataframe(health, width="stretch", hide_index=True)
                 if not health.empty:
                     fig = px.imshow(health[["Records","Quality Score"]].fillna(0).T, text_auto=True, aspect="auto", title="Unified Operations Health Map")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
             elif module == "Industrial Connectivity Hub" or module == "Enterprise Integration & Collaboration":
                 health = connector_health_frame()
                 st.session_state["enterprise_connector_health_df"] = health.copy(deep=True)
-                st.dataframe(health, use_container_width=True, hide_index=True)
+                st.dataframe(health, width="stretch", hide_index=True)
                 if not health.empty:
-                    st.plotly_chart(px.bar(health, x="Protocol", color="Status", title="Connector Health & Coverage"), use_container_width=True)
+                    st.plotly_chart(px.bar(health, x="Protocol", color="Status", title="Connector Health & Coverage"), width="stretch")
             elif "Jobs" in module or module in {"Industrial Simulation Lab","Experiment Engine","Multi-Objective Optimization","Robust & Resilient Optimization"}:
                 jobs = job_history_frame()
                 if jobs.empty:
                     st.info("No queued/running job history is currently stored.")
                 else:
                     st.session_state["enterprise_job_history_df"] = jobs.copy(deep=True)
-                    st.dataframe(jobs, use_container_width=True, hide_index=True)
+                    st.dataframe(jobs, width="stretch", hide_index=True)
                     st.caption("Job controls change the persisted orchestration state; they do not falsely claim to interrupt a solver already executing outside this process.")
                     for _, row in jobs.head(10).iterrows():
                         c1,c2,c3,c4 = st.columns(4)
@@ -618,7 +618,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     st.markdown("##### 🌱 Sustainability / economics evidence linked to decision")
                     for key, frame in linked:
                         st.caption(f"Source: {key}")
-                        st.dataframe(frame.head(100), use_container_width=True, hide_index=True)
+                        st.dataframe(frame.head(100), width="stretch", hide_index=True)
 
             if module in {"Team Workspaces & RBAC","Enterprise Integration & Collaboration","Engineering Decision Center"}:
                 st.markdown("##### 👥 Comments, mentions and assignments")
@@ -631,7 +631,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     reviewer_role = st.selectbox("Reviewer role", ["Engineer","Manager","Approver","Viewer"], key=f"enterprise_reviewer_{hash(module)&0xffff:04x}")
                 with ac3:
                     assignment = st.text_input("Assignment", placeholder="Verify Service KPI by Friday", key=f"enterprise_assignment_{hash(module)&0xffff:04x}")
-                if st.button("💬 Save collaboration update", use_container_width=True, key=f"enterprise_collab_save_{hash(module)&0xffff:04x}"):
+                if st.button("💬 Save collaboration update", width="stretch", key=f"enterprise_collab_save_{hash(module)&0xffff:04x}"):
                     from industrial_experience import add_comment
                     combined = comment.strip()
                     if mention_targets.strip():
@@ -659,11 +659,11 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     st.success("Collaboration update saved.")
                 assignments = st.session_state.get("enterprise_collaboration_assignments", [])
                 if assignments:
-                    st.dataframe(pd.DataFrame(assignments), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(assignments), width="stretch", hide_index=True)
                 approval_history = st.session_state.get("enterprise_decision_approval_history_df")
                 if module == "Engineering Decision Center" and isinstance(approval_history, pd.DataFrame) and not approval_history.empty:
                     st.markdown("##### ✅ Approval history")
-                    st.dataframe(approval_history, use_container_width=True, hide_index=True)
+                    st.dataframe(approval_history, width="stretch", hide_index=True)
 
                 if module == "Engineering Decision Center":
                     st.markdown("##### 🔁 Decision-to-Value Verification")
@@ -675,13 +675,13 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     if value_frame.empty:
                         st.info("No implemented or verified decision outcomes are recorded yet.")
                     else:
-                        st.dataframe(value_frame, use_container_width=True, hide_index=True)
+                        st.dataframe(value_frame, width="stretch", hide_index=True)
                         plot = value_frame.dropna(subset=["Predicted","Actual"]).copy()
                         if not plot.empty:
                             st.plotly_chart(
                                 px.bar(plot, x="KPI", y=["Predicted","Actual"], barmode="group",
                                        title="Predicted vs Actual KPI Outcomes"),
-                                use_container_width=True,
+                                width="stretch",
                             )
                         st.caption("Variance is calculated from recorded implementation outcomes; it is not a forecast.")
 
@@ -702,7 +702,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     except Exception as exc:
                         st.warning(f"Workspace membership list could not be verified: {type(exc).__name__}: {exc}")
                     else:
-                        st.dataframe(members, use_container_width=True, hide_index=True)
+                        st.dataframe(members, width="stretch", hide_index=True)
                 else:
                     st.info("Choose a workspace in Team Workspaces & RBAC to view its membership list.")
                 st.markdown("**Security configuration status**")
@@ -716,7 +716,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     "Security scanning": "CI security/quality workflow exists; passing it is not a certification",
                 })
                 audit_note = st.text_input("Audit event note", key=f"enterprise_audit_note_{hash(module)&0xffff:04x}")
-                if st.button("🔐 Record audit event", use_container_width=True, key=f"enterprise_audit_save_{hash(module)&0xffff:04x}"):
+                if st.button("🔐 Record audit event", width="stretch", key=f"enterprise_audit_save_{hash(module)&0xffff:04x}"):
                     with sqlite3.connect("enterprise_full_workspace.db") as conn:
                         conn.execute("INSERT INTO security_events(username,event_type,details,created_at) VALUES(?,?,?,?)",
                                      (username, "Enterprise Capability Audit", audit_note[:500], utc_now()))
@@ -744,8 +744,8 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         {"Field":"Methodology","Value":protocol.get("methodology")},
                         {"Field":"Primary endpoint","Value":protocol.get("primary_endpoint")},
                         {"Field":"Runs captured","Value":len(runs)},
-                    ]), use_container_width=True, hide_index=True)
-                    if st.button("📝 Generate manuscript draft", use_container_width=True, key=f"research_manuscript_{hash(module)&0xffff:04x}"):
+                    ]), width="stretch", hide_index=True)
+                    if st.button("📝 Generate manuscript draft", width="stretch", key=f"research_manuscript_{hash(module)&0xffff:04x}"):
                         summary = protocol.get("protocol_notes", "")
                         manuscript = (
                             f"# {protocol.get('title','Research Study')}\n\n"
@@ -772,7 +772,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         with cc2:
                             cit_year = st.text_input("Year")
                             cit_identifier = st.text_input("DOI / URL / identifier")
-                            cit_submit = st.form_submit_button("➕ Add citation", use_container_width=True)
+                            cit_submit = st.form_submit_button("➕ Add citation", width="stretch")
                         if cit_submit:
                             if cit_title.strip() and cit_authors.strip():
                                 add_research_citation(cit_title, cit_authors, cit_year, cit_source, cit_identifier, username, protocol.get("research_id",""))
@@ -781,11 +781,11 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                                 st.warning("Citation title and authors are required.")
                     visible_citations = [x for x in citations if not x.get("research_id") or x.get("research_id") == protocol.get("research_id")]
                     if visible_citations:
-                        st.dataframe(pd.DataFrame(visible_citations), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(visible_citations), width="stretch", hide_index=True)
 
                     if st.session_state.get("research_manuscript_draft"):
                         st.text_area("Manuscript draft", st.session_state["research_manuscript_draft"], height=320)
-                        st.download_button("📥 Download manuscript Markdown", data=st.session_state["research_manuscript_draft"].encode("utf-8"), file_name=f"{_safe_key(protocol.get('study_id','study'))}_manuscript.md", mime="text/markdown", use_container_width=True)
+                        st.download_button("📥 Download manuscript Markdown", data=st.session_state["research_manuscript_draft"].encode("utf-8"), file_name=f"{_safe_key(protocol.get('study_id','study'))}_manuscript.md", mime="text/markdown", width="stretch")
                 else:
                     st.info("Open or create a research study in Experiment Lab to enable manuscript drafting and reproducibility evidence.")
                 supplemental = st.file_uploader("Add supplementary research file metadata", type=["csv","xlsx","pdf","zip"], key=f"research_supp_{hash(module)&0xffff:04x}")
@@ -807,12 +807,12 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         "Year 1 Cost": [150000.0, 0.0, 0.0, 0.0, 0.0],
                     }),
                 ),
-                num_rows="dynamic", use_container_width=True, key=f"enterprise_tco_editor_{hash(module)&0xffff:04x}",
+                num_rows="dynamic", width="stretch", key=f"enterprise_tco_editor_{hash(module)&0xffff:04x}",
             )
             tc1, tc2 = st.columns(2)
             years = tc1.number_input("TCO horizon (years)", 1, 30, 5, key=f"enterprise_tco_years_{hash(module)&0xffff:04x}")
             rate = tc2.number_input("TCO discount rate", -0.5, 0.5, 0.08, 0.01, key=f"enterprise_tco_rate_{hash(module)&0xffff:04x}")
-            if st.button("💰 Calculate TCO", use_container_width=True, key=f"enterprise_tco_run_{hash(module)&0xffff:04x}"):
+            if st.button("💰 Calculate TCO", width="stretch", key=f"enterprise_tco_run_{hash(module)&0xffff:04x}"):
                 try:
                     schedule, summary = calculate_tco(drivers, years, rate)
                     st.session_state["enterprise_tco_schedule_df"] = schedule
@@ -828,10 +828,10 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 a3.metric("Recurring / year", f"{ts['Annual Recurring Cost']:,.2f}")
                 tco_df = st.session_state.get("enterprise_tco_schedule_df", pd.DataFrame())
                 if isinstance(tco_df, pd.DataFrame) and not tco_df.empty:
-                    st.dataframe(tco_df, use_container_width=True, hide_index=True)
+                    st.dataframe(tco_df, width="stretch", hide_index=True)
                     st.plotly_chart(
                         px.line(tco_df, x="Year", y=["Nominal Cost", "Present Value"], markers=True, title="TCO Lifecycle Curve"),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
         with tabs[5]:
@@ -841,7 +841,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 docs = st.session_state.get("knowledge_documents", [])
                 st.caption(f"Linked knowledge documents available to this workspace: {len(docs)}")
                 if docs:
-                    st.dataframe(pd.DataFrame([{"Title":d.get("title"),"Modules":d.get("linked_modules",[]),"Hash":d.get("sha256")} for d in docs]), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame([{"Title":d.get("title"),"Modules":d.get("linked_modules",[]),"Hash":d.get("sha256")} for d in docs]), width="stretch", hide_index=True)
 
 
 def _durable_ready() -> bool:

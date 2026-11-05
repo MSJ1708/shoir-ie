@@ -379,14 +379,14 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         with right:
             variables=st.text_area("Variables JSON",'{"Availability":92,"Performance":89,"Quality":98}',key="os_kpi_variables")
             formula=st.text_input("Formula",row["Formula"],key="os_kpi_formula")
-            if st.button("Calculate KPI",type="primary",use_container_width=True,key="os_kpi_run"):
+            if st.button("Calculate KPI",type="primary",width="stretch",key="os_kpi_run"):
                 try:
                     val=safe_formula(formula,{k:float(v) for k,v in json.loads(variables).items()})
                     st.metric(kpi,f"{val:,.4g}",row["Unit"])
                     st.caption("Calculated with the restricted Shoir-IE formula evaluator.")
                 except Exception as exc:
                     st.error(f"KPI could not be calculated safely: {exc}")
-        st.dataframe(lib,use_container_width=True,hide_index=True)
+        st.dataframe(lib,width="stretch",hide_index=True)
 
     with tabs[1]:
         st.subheader("Engineering Methods & Equation Library")
@@ -395,26 +395,26 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         cat=st.selectbox("Category",["All"]+sorted(mdf["Category"].unique()),key="os_methods_cat")
         if q: mdf=mdf[mdf.astype(str).apply(lambda s:s.str.contains(q,case=False,regex=False)).any(axis=1)]
         if cat!="All": mdf=mdf[mdf["Category"]==cat]
-        st.dataframe(mdf,use_container_width=True,hide_index=True)
+        st.dataframe(mdf,width="stretch",hide_index=True)
         if not mdf.empty:
             chosen=st.selectbox("Open method",mdf["Method"].tolist(),key="os_method_choice")
             st.json(next(x for x in METHOD_LIBRARY if x["Method"]==chosen))
 
     with tabs[2]:
         st.subheader("Compare Anything")
-        a=st.data_editor(st.session_state.setdefault("os_compare_a",pd.DataFrame({"ID":["A","B","C"],"Cost":[100,120,110],"Service":[92,95,94]})),num_rows="dynamic",use_container_width=True,key="os_compare_a_editor")
-        b=st.data_editor(st.session_state.setdefault("os_compare_b",pd.DataFrame({"ID":["A","B","C"],"Cost":[90,130,108],"Service":[94,96,97]})),num_rows="dynamic",use_container_width=True,key="os_compare_b_editor")
+        a=st.data_editor(st.session_state.setdefault("os_compare_a",pd.DataFrame({"ID":["A","B","C"],"Cost":[100,120,110],"Service":[92,95,94]})),num_rows="dynamic",width="stretch",key="os_compare_a_editor")
+        b=st.data_editor(st.session_state.setdefault("os_compare_b",pd.DataFrame({"ID":["A","B","C"],"Cost":[90,130,108],"Service":[94,96,97]})),num_rows="dynamic",width="stretch",key="os_compare_b_editor")
         match=st.selectbox("Matching",["Row"]+sorted(set(a.columns)&set(b.columns)),key="os_compare_match")
-        if st.button("Compare",type="primary",use_container_width=True,key="os_compare_run"):
+        if st.button("Compare",type="primary",width="stretch",key="os_compare_run"):
             try: st.session_state["os_compare_result"]=compare_frames(a,b,None if match=="Row" else match)
             except Exception as exc: st.error(f"Comparison failed safely: {exc}")
         r=st.session_state.get("os_compare_result")
         if isinstance(r,pd.DataFrame) and not r.empty:
-            st.dataframe(r,use_container_width=True,hide_index=True)
+            st.dataframe(r,width="stretch",hide_index=True)
             delta=[c for c in r.columns if c.endswith("— Δ%")]
             if delta:
                 melt=r.melt(id_vars=[r.columns[0]],value_vars=delta,var_name="Metric",value_name="Delta %")
-                st.plotly_chart(px.bar(melt,x="Metric",y="Delta %",title="Relative change by metric"),use_container_width=True)
+                st.plotly_chart(px.bar(melt,x="Metric",y="Delta %",title="Relative change by metric"),width="stretch")
             render_exports("Compare Anything",[("Comparison",r)],[],tier,username)
 
     with tabs[3]:
@@ -427,19 +427,19 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         with b:
             params=st.text_area("Parameters JSON",'{"Capacity":1000,"Demand":900,"LeadTimeDays":7}',key="os_sc_params")
             kpis=st.text_area("KPIs JSON",'{"Cost":100000,"Service":96,"Carbon":120}',key="os_sc_kpis")
-        if st.button("Save Scenario Version",type="primary",use_container_width=True,key="os_scenario_save"):
+        if st.button("Save Scenario Version",type="primary",width="stretch",key="os_scenario_save"):
             try: st.success(f"Saved {scenario_save(name,json.loads(params),json.loads(kpis),username,parent or None,desc)}")
             except Exception as exc: st.error(f"Scenario could not be saved safely: {exc}")
-        st.dataframe(scenario_list(),use_container_width=True,hide_index=True)
+        st.dataframe(scenario_list(),width="stretch",hide_index=True)
         scs=scenario_list()
         if len(scs)>=2:
             names=scs["name"].tolist()
             x,y=st.columns(2); sa=x.selectbox("Scenario A",names,key="os_sa"); sb=y.selectbox("Scenario B",names,index=min(1,len(names)-1),key="os_sb")
-            if sa!=sb and st.button("Compare Scenarios",use_container_width=True,key="os_scenario_compare"):
+            if sa!=sb and st.button("Compare Scenarios",width="stretch",key="os_scenario_compare"):
                 try:
-                    comp=scenario_compare(sa,sb); st.dataframe(comp,use_container_width=True,hide_index=True)
+                    comp=scenario_compare(sa,sb); st.dataframe(comp,width="stretch",hide_index=True)
                     numeric=comp.dropna(subset=["Delta"])
-                    if not numeric.empty: st.plotly_chart(px.bar(numeric,x="KPI",y="Delta",title="Scenario KPI Delta"),use_container_width=True)
+                    if not numeric.empty: st.plotly_chart(px.bar(numeric,x="KPI",y="Delta",title="Scenario KPI Delta"),width="stretch")
                     render_exports("Scenario Git",[("Scenario Comparison",comp)],[],tier,username)
                 except Exception as exc: st.error(f"Scenario comparison failed safely: {exc}")
 
@@ -448,33 +448,33 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         ev=st.data_editor(st.session_state.setdefault("os_event_log",pd.DataFrame({
             "Case ID":["O1","O1","O1","O2","O2","O2"],"Activity":["Create","Pick","Ship","Create","Pick","Ship"],
             "Timestamp":["2026-09-01 08:00","2026-09-01 09:00","2026-09-01 11:00","2026-09-02 08:30","2026-09-02 10:00","2026-09-02 12:30"]
-        })),num_rows="dynamic",use_container_width=True,key="os_event_log_editor")
+        })),num_rows="dynamic",width="stretch",key="os_event_log_editor")
         expected=st.text_input("Expected sequence","Create,Pick,Ship",key="os_expected_sequence")
-        if st.button("Discover Process",type="primary",use_container_width=True,key="os_process_run"):
+        if st.button("Discover Process",type="primary",width="stretch",key="os_process_run"):
             try: st.session_state["os_process_result"]=process_mining_discovery(ev,expected_sequence=[x.strip() for x in expected.split(",") if x.strip()])
             except Exception as exc: st.error(f"Process mining failed safely: {exc}")
         r=st.session_state.get("os_process_result")
         if isinstance(r,dict):
             q1,q2,q3,q4=st.columns(4); q1.metric("Cases",r["cases"]); q2.metric("Events",r["event_count"]); q3.metric("Variants",r["variant_count"]); q4.metric("Conformance",f'{r["conformance"]:.1f}%')
-            st.dataframe(r["variants"],use_container_width=True,hide_index=True)
+            st.dataframe(r["variants"],width="stretch",hide_index=True)
             left,right=st.columns(2)
             with left:
-                st.plotly_chart(px.bar(r["variants"].head(12),x="Cases",y="Variant",orientation="h",title="Top Process Variants"),use_container_width=True)
+                st.plotly_chart(px.bar(r["variants"].head(12),x="Cases",y="Variant",orientation="h",title="Top Process Variants"),width="stretch")
             with right:
                 if not r["cycle_times"].empty:
-                    st.plotly_chart(px.histogram(r["cycle_times"],x="Case Cycle Minutes",nbins=12,title="Cycle-Time Distribution"),use_container_width=True)
+                    st.plotly_chart(px.histogram(r["cycle_times"],x="Case Cycle Minutes",nbins=12,title="Cycle-Time Distribution"),width="stretch")
             if not r["transitions"].empty:
                 tr=r["transitions"].sort_values("Cases",ascending=False).head(20)
-                st.plotly_chart(px.bar(tr,x="From",y="Cases",color="To",title="Observed Process Transitions"),use_container_width=True)
-                st.dataframe(r["transitions"],use_container_width=True,hide_index=True)
-            if not r["mismatches"].empty: st.warning(f"{len(r['mismatches'])} case(s) differ from the expected sequence."); st.dataframe(r["mismatches"],use_container_width=True,hide_index=True)
+                st.plotly_chart(px.bar(tr,x="From",y="Cases",color="To",title="Observed Process Transitions"),width="stretch")
+                st.dataframe(r["transitions"],width="stretch",hide_index=True)
+            if not r["mismatches"].empty: st.warning(f"{len(r['mismatches'])} case(s) differ from the expected sequence."); st.dataframe(r["mismatches"],width="stretch",hide_index=True)
             render_exports("Process Mining",[("Variants",r["variants"]),("Transitions",r["transitions"]),("Cycle Times",r["cycle_times"]),("Conformance Exceptions",r["mismatches"])],[],tier,username)
 
     with tabs[5]:
         st.subheader("🧠 Model & Data Drift Monitor")
-        ref=st.data_editor(st.session_state.setdefault("os_drift_ref",pd.DataFrame({"FeatureA":np.random.default_rng(20).normal(100,10,100),"FeatureB":["A","B","A","A","C"]*20})),num_rows="dynamic",use_container_width=True,key="os_drift_ref_editor")
-        cur=st.data_editor(st.session_state.setdefault("os_drift_cur",pd.DataFrame({"FeatureA":np.random.default_rng(21).normal(108,15,100),"FeatureB":["A","B","C","C","C"]*20})),num_rows="dynamic",use_container_width=True,key="os_drift_cur_editor")
-        if st.button("Run Drift Analysis",type="primary",use_container_width=True,key="os_drift_run"):
+        ref=st.data_editor(st.session_state.setdefault("os_drift_ref",pd.DataFrame({"FeatureA":np.random.default_rng(20).normal(100,10,100),"FeatureB":["A","B","A","A","C"]*20})),num_rows="dynamic",width="stretch",key="os_drift_ref_editor")
+        cur=st.data_editor(st.session_state.setdefault("os_drift_cur",pd.DataFrame({"FeatureA":np.random.default_rng(21).normal(108,15,100),"FeatureB":["A","B","C","C","C"]*20})),num_rows="dynamic",width="stretch",key="os_drift_cur_editor")
+        if st.button("Run Drift Analysis",type="primary",width="stretch",key="os_drift_run"):
             try: st.session_state["os_drift_result"]=drift_report(ref,cur)
             except Exception as exc: st.error(f"Drift analysis failed safely: {exc}")
         dr=st.session_state.get("os_drift_result")
@@ -482,24 +482,24 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
             flagged=int(dr["Flagged"].sum())
             c1,c2,c3=st.columns(3)
             c1.metric("Features checked",len(dr)); c2.metric("Flagged",flagged); c3.metric("Highest drift",f'{dr["Drift Score"].max():.3f}')
-            st.dataframe(dr,use_container_width=True,hide_index=True)
-            st.plotly_chart(px.bar(dr,x="Feature",y="Drift Score",color="Type",title="Drift by Feature"),use_container_width=True)
+            st.dataframe(dr,width="stretch",hide_index=True)
+            st.plotly_chart(px.bar(dr,x="Feature",y="Drift Score",color="Type",title="Drift by Feature"),width="stretch")
             st.caption("Thresholds are governance defaults, not universal pass/fail standards. Configure them to your model policy.")
             render_exports("Model Health",[("Drift Report",dr)],[],tier,username)
 
     with tabs[6]:
         st.subheader("✅ Decision Verification")
         did=st.text_input("Decision ID","DEC-EXAMPLE",key="os_verify_decision_id")
-        pred=st.data_editor(st.session_state.setdefault("os_predicted",pd.DataFrame({"Metric":["Cost","Service","Carbon"],"Value":[100,95,80]})),num_rows="dynamic",use_container_width=True,key="os_pred_editor")
-        act=st.data_editor(st.session_state.setdefault("os_actual",pd.DataFrame({"Metric":["Cost","Service","Carbon"],"Value":[108,94,83]})),num_rows="dynamic",use_container_width=True,key="os_actual_editor")
-        if st.button("Verify Decision",type="primary",use_container_width=True,key="os_verify_run"):
+        pred=st.data_editor(st.session_state.setdefault("os_predicted",pd.DataFrame({"Metric":["Cost","Service","Carbon"],"Value":[100,95,80]})),num_rows="dynamic",width="stretch",key="os_pred_editor")
+        act=st.data_editor(st.session_state.setdefault("os_actual",pd.DataFrame({"Metric":["Cost","Service","Carbon"],"Value":[108,94,83]})),num_rows="dynamic",width="stretch",key="os_actual_editor")
+        if st.button("Verify Decision",type="primary",width="stretch",key="os_verify_run"):
             try: st.session_state["os_verify_result"]=decision_verify(did,pred,act,verified_by=username)
             except Exception as exc: st.error(f"Decision verification failed safely: {exc}")
         vr=st.session_state.get("os_verify_result")
         if isinstance(vr,pd.DataFrame) and not vr.empty:
-            st.dataframe(vr,use_container_width=True,hide_index=True)
+            st.dataframe(vr,width="stretch",hide_index=True)
             nums=vr.dropna(subset=["Percent Error"])
-            if not nums.empty: st.plotly_chart(px.bar(nums,x="Metric",y="Percent Error",title="Prediction Error"),use_container_width=True)
+            if not nums.empty: st.plotly_chart(px.bar(nums,x="Metric",y="Percent Error",title="Prediction Error"),width="stretch")
             render_exports("Decision Verification",[("Verification",vr)],[],tier,username)
 
     with tabs[7]:
@@ -514,11 +514,11 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         with c2:
             baseline=st.text_area("Baseline JSON",'{"CycleTime":19.2,"OEE":79.5}',key="os_imp_baseline")
             target=st.text_area("Target JSON",'{"CycleTime":17.0,"OEE":85.0}',key="os_imp_target")
-        if st.button("Create Improvement Project",type="primary",use_container_width=True,key="os_imp_create"):
+        if st.button("Create Improvement Project",type="primary",width="stretch",key="os_imp_create"):
             try: st.success(f"Created {improvement_create(title,framework,owner,json.loads(baseline),json.loads(target),phase)}")
             except Exception as exc: st.error(f"Improvement project could not be created safely: {exc}")
         projects=improvement_list()
-        st.dataframe(projects,use_container_width=True,hide_index=True)
+        st.dataframe(projects,width="stretch",hide_index=True)
         if not projects.empty:
             st.info("Use Quality, Lean, Simulation, APS and Economics outputs as evidence for each improvement phase.")
 
@@ -528,7 +528,7 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         selected_template=TEMPLATE_LIBRARY[choice]
         st.info(selected_template["description"])
         for label,df in selected_template["tables"].items():
-            st.markdown(f"**{label}**"); st.dataframe(df,use_container_width=True,hide_index=True)
+            st.markdown(f"**{label}**"); st.dataframe(df,width="stretch",hide_index=True)
         render_exports("Industrial Template — "+choice,[(label,df) for label,df in selected_template["tables"].items()],[],tier,username)
 
     with tabs[9]:
@@ -536,6 +536,6 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         health=platform_health()
         ready=int((health["Status"]=="Ready").sum()); total=len(health)
         st.metric("Runtime readiness",f"{ready}/{total}")
-        st.dataframe(health,use_container_width=True,hide_index=True)
+        st.dataframe(health,width="stretch",hide_index=True)
         st.caption("These checks verify runtime/database readiness. They do not claim external PLC/ERP connectivity unless that connector has actually been tested.")
-        st.plotly_chart(px.bar(health,x="Component",y=health["Status"].eq("Ready").astype(int),title="Component Readiness"),use_container_width=True)
+        st.plotly_chart(px.bar(health,x="Component",y=health["Status"].eq("Ready").astype(int),title="Component Readiness"),width="stretch")

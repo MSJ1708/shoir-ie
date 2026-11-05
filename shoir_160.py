@@ -987,9 +987,9 @@ def render_160_command_center(username: str,tier: str) -> None:
         if not cmd_results.empty or not capability_hits.empty:
             st.markdown("**Command results**")
             if not cmd_results.empty:
-                st.dataframe(cmd_results,use_container_width=True,hide_index=True,height=180)
+                st.dataframe(cmd_results,width="stretch",hide_index=True,height=180)
             if not capability_hits.empty:
-                st.dataframe(capability_hits[["id","name","area","coverage","state"]],use_container_width=True,hide_index=True,height=180)
+                st.dataframe(capability_hits[["id","name","area","coverage","state"]],width="stretch",hide_index=True,height=180)
         else:
             st.info("No command or capability match.")
     st.markdown("<div style='height:6px'></div>",unsafe_allow_html=True)
@@ -1022,7 +1022,7 @@ def render_160_command_center(username: str,tier: str) -> None:
         readiness=feature_readiness_by_area()
         fig=px.bar(readiness,x="area",y="Features",color="state",barmode="stack",title="160-capability readiness by engineering area")
         fig.update_layout(height=350,margin=dict(l=8,r=8,t=55,b=8),xaxis_tickangle=-35)
-        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+        st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
 
     with tabs[1]:
         st.markdown("<div class='os160-section'>Excel → validated engineering dataset</div>",unsafe_allow_html=True)
@@ -1044,10 +1044,10 @@ def render_160_command_center(username: str,tier: str) -> None:
             prof=profile_dataset(df); contract=dataset_contract(df,source_label)
             p1,p2,p3,p4=st.columns(4)
             p1.metric("Rows",f"{prof['rows']:,}"); p2.metric("Columns",f"{prof['columns']:,}"); p3.metric("Quality",f"{prof['quality_score']:.1f}%"); p4.metric("Duplicates",f"{prof['duplicate_pct']:.1f}%")
-            st.dataframe(smart_map_columns(df),use_container_width=True,hide_index=True)
+            st.dataframe(smart_map_columns(df),width="stretch",hide_index=True)
             with st.expander("🔍 Contract & verification",expanded=True):
                 checks=verification_snapshot(df)
-                st.dataframe(pd.DataFrame([{"Check":k.replace("_"," ").title(),"Status":"Pass" if v else "Review"} for k,v in checks["checks"].items()]),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame([{"Check":k.replace("_"," ").title(),"Status":"Pass" if v else "Review"} for k,v in checks["checks"].items()]),width="stretch",hide_index=True)
                 st.caption(f"Contract status: {contract['contract_status']} · Fingerprint: {prof['fingerprint'][:16]}…")
             x,y,z=st.columns(3)
             with x:
@@ -1060,8 +1060,8 @@ def render_160_command_center(username: str,tier: str) -> None:
             with z:
                 st.download_button("📥 Download CSV",data=df.to_csv(index=False).encode("utf-8"),file_name="shoir_ie_dataset.csv",mime="text/csv",key="os160_dataset_dl")
             if "os160_cleaned_df" in st.session_state:
-                st.markdown("**Cleaned preview**"); st.dataframe(st.session_state["os160_cleaned_df"],use_container_width=True,hide_index=True)
-                if st.session_state.get("os160_clean_audit"): st.dataframe(pd.DataFrame(st.session_state["os160_clean_audit"]),use_container_width=True,hide_index=True)
+                st.markdown("**Cleaned preview**"); st.dataframe(st.session_state["os160_cleaned_df"],width="stretch",hide_index=True)
+                if st.session_state.get("os160_clean_audit"): st.dataframe(pd.DataFrame(st.session_state["os160_clean_audit"]),width="stretch",hide_index=True)
 
     with tabs[2]:
         st.markdown("<div class='os160-section'>Canonical entities → relationships → impact trace</div>",unsafe_allow_html=True)
@@ -1071,7 +1071,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             st.info("No entities yet. Use “Seed demo graph”; the graph is additive.")
         else:
             e1,e2=st.columns([1.2,1])
-            with e1: st.dataframe(entities,use_container_width=True,hide_index=True)
+            with e1: st.dataframe(entities,width="stretch",hide_index=True)
             with e2:
                 types=["All"]+sorted(entities["entity_type"].dropna().unique().tolist())
                 typ=st.selectbox("Entity type",types,key="os160_entity_type")
@@ -1080,12 +1080,12 @@ def render_160_command_center(username: str,tier: str) -> None:
                 hops=st.slider("Impact hops",1,6,3,key="os160_hops")
                 if selected:
                     impact=impact_trace(selected,hops)
-                    st.dataframe(impact,use_container_width=True,hide_index=True)
+                    st.dataframe(impact,width="stretch",hide_index=True)
                     if not impact.empty:
                         node_labels=[selected]+impact["Entity"].tolist()
                         fig=go.Figure(go.Sankey(node=dict(label=node_labels),link=dict(source=[0]*len(impact),target=list(range(1,len(impact)+1)),value=[1]*len(impact))))
                         fig.update_layout(height=300,margin=dict(l=5,r=5,t=20,b=5),title="Impact path")
-                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+                        st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
 
     with tabs[3]:
         st.markdown("<div class='os160-section'>Baseline → fork → compare → explain delta</div>",unsafe_allow_html=True)
@@ -1105,15 +1105,15 @@ def render_160_command_center(username: str,tier: str) -> None:
                 rows=[]
                 for _,r in scenarios.iterrows():
                     k=json.loads(r["kpis_json"]); rows.append({"Scenario":r["name"],**{str(a):float(b) for a,b in k.items()}})
-                scdf=pd.DataFrame(rows); st.dataframe(scdf,use_container_width=True,hide_index=True)
+                scdf=pd.DataFrame(rows); st.dataframe(scdf,width="stretch",hide_index=True)
                 if not scdf.empty:
                     fig=px.bar(scdf,x="Scenario",y=[c for c in ("Throughput","Service") if c in scdf.columns],barmode="group",title="Scenario comparison")
-                    fig.update_layout(height=300,margin=dict(l=8,r=8,t=50,b=8),xaxis_tickangle=-25); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+                    fig.update_layout(height=300,margin=dict(l=8,r=8,t=50,b=8),xaxis_tickangle=-25); st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
                     imp=[]
                     for metric in [c for c in scdf.columns if c!="Scenario"]:
                         s=scdf[metric].astype(float); imp.append({"Metric":metric,"Range":float(s.max()-s.min())})
                     fig2=px.bar(pd.DataFrame(imp),x="Range",y="Metric",orientation="h",title="Why-changed sensitivity")
-                    fig2.update_layout(height=260,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig2,use_container_width=True,config={"displayModeBar":False})
+                    fig2.update_layout(height=260,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig2,width="stretch",config={"displayModeBar":False})
 
     with tabs[4]:
         st.markdown("<div class='os160-section'>Engineering Copilot — evidence-first, approval-gated</div>",unsafe_allow_html=True)
@@ -1145,7 +1145,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             st.markdown("🟢 Verified · 🔵 Implemented · 🟡 Foundation · ⚪ Integration-ready")
             if not focus_mode:
                 with st.expander("AI knowledge base preview",expanded=False):
-                    st.dataframe(pd.DataFrame(platform_context["capabilities"])[["id","name","area","coverage","state"]],use_container_width=True,hide_index=True,height=360)
+                    st.dataframe(pd.DataFrame(platform_context["capabilities"])[["id","name","area","coverage","state"]],width="stretch",hide_index=True,height=360)
 
         if not focus_mode:
             st.markdown("**Deterministic execution preview**")
@@ -1162,7 +1162,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             for key,value in preview.get("outputs",{}).items():
                 st.markdown(f"**{key.replace('_',' ').title()}**")
                 if isinstance(value,pd.DataFrame):
-                    st.dataframe(value,use_container_width=True,hide_index=True)
+                    st.dataframe(value,width="stretch",hide_index=True)
                 elif isinstance(value,dict):
                     st.json(value)
                 else:
@@ -1191,9 +1191,9 @@ def render_160_command_center(username: str,tier: str) -> None:
             with _db() as conn: decisions=pd.read_sql_query("SELECT decision_id,title,module,status,metrics_json,owner,updated_at FROM os160_decisions ORDER BY updated_at DESC LIMIT 50",conn)
             if decisions.empty: st.info("No decision records yet.")
             else:
-                st.dataframe(decisions,use_container_width=True,hide_index=True)
+                st.dataframe(decisions,width="stretch",hide_index=True)
                 sc=decisions["status"].value_counts().rename_axis("Status").reset_index(name="Decisions")
-                fig=px.bar(sc,x="Status",y="Decisions",title="Decision lifecycle"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+                fig=px.bar(sc,x="Status",y="Decisions",title="Decision lifecycle"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
 
     with tabs[6]:
         st.markdown("<div class='os160-section'>Jobs & runs — durable state, progress, diagnostics</div>",unsafe_allow_html=True)
@@ -1202,7 +1202,7 @@ def render_160_command_center(username: str,tier: str) -> None:
         with _db() as conn: runs=pd.read_sql_query("SELECT run_id,module,job_type,status,progress,message,duration_ms,owner,created_at FROM os160_runs ORDER BY created_at DESC LIMIT 100",conn)
         if runs.empty: st.info("No run history yet.")
         else:
-            st.dataframe(runs,use_container_width=True,hide_index=True)
+            st.dataframe(runs,width="stretch",hide_index=True)
             selected_run=st.selectbox("Run control target",runs["run_id"].tolist(),key="os160_run_control_target")
             rc1,rc2,rc3=st.columns(3)
             with rc1:
@@ -1214,7 +1214,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             with rc3:
                 if st.button("⛔ Cancel",key="os160_cancel_run"):
                     request_run_control(selected_run,"cancel"); st.rerun()
-            fig=px.line(runs.sort_values("created_at"),x="created_at",y="duration_ms",markers=True,title="Run duration trend"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            fig=px.line(runs.sort_values("created_at"),x="created_at",y="duration_ms",markers=True,title="Run duration trend"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
 
     with tabs[7]:
         st.markdown("<div class='os160-section'>Connectivity — validate adapters, monitor health, never persist secrets</div>",unsafe_allow_html=True)
@@ -1231,8 +1231,8 @@ def render_160_command_center(username: str,tier: str) -> None:
             with _db() as conn: cons=pd.read_sql_query("SELECT name,system_type,endpoint,status,latency_ms,error_rate,data_freshness_sec,last_checked FROM os160_connectors ORDER BY last_checked DESC",conn)
             if cons.empty: st.info("No connector profiles saved.")
             else:
-                st.dataframe(cons,use_container_width=True,hide_index=True)
-                fig=px.bar(cons,x="name",y=["latency_ms","error_rate"],barmode="group",title="Connector diagnostics"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+                st.dataframe(cons,width="stretch",hide_index=True)
+                fig=px.bar(cons,x="name",y=["latency_ms","error_rate"],barmode="group",title="Connector diagnostics"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
         st.caption("External credentials, certificates and network permissions remain deployment-owned; this layer stores only safe references.")
 
     with tabs[8]:
@@ -1240,14 +1240,14 @@ def render_160_command_center(username: str,tier: str) -> None:
         l,r=st.columns(2)
         with l:
             fig=px.bar(pd.DataFrame({"Area":["Assembly","Machining","QC","Warehouse","Shipping"],"Utilization":[82,94,76,68,71]}),x="Area",y="Utilization",text="Utilization",title="Utilization")
-            fig.update_yaxes(range=[0,100]); fig.update_layout(height=300,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            fig.update_yaxes(range=[0,100]); fig.update_layout(height=300,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
         with r:
             polar=go.Figure(go.Scatterpolar(r=[78,91,64,72,86,88],theta=["Cost","Service","Carbon","Risk","Capacity","Quality"],fill="toself",name="Scenario profile"))
-            polar.update_layout(height=300,margin=dict(l=8,r=8,t=50,b=8),polar=dict(radialaxis=dict(range=[0,100])),showlegend=False,title="Scenario radar"); st.plotly_chart(polar,use_container_width=True,config={"displayModeBar":False})
+            polar.update_layout(height=300,margin=dict(l=8,r=8,t=50,b=8),polar=dict(radialaxis=dict(range=[0,100])),showlegend=False,title="Scenario radar"); st.plotly_chart(polar,width="stretch",config={"displayModeBar":False})
         flow=go.Figure(go.Sankey(node=dict(label=["Supplier","Materials","Plant","Warehouse","Customer"]),link=dict(source=[0,1,2,2],target=[1,2,3,4],value=[80,80,65,55])))
-        flow.update_layout(height=320,margin=dict(l=8,r=8,t=30,b=8),title="Industrial flow view"); st.plotly_chart(flow,use_container_width=True,config={"displayModeBar":False})
+        flow.update_layout(height=320,margin=dict(l=8,r=8,t=30,b=8),title="Industrial flow view"); st.plotly_chart(flow,width="stretch",config={"displayModeBar":False})
         grid=pd.DataFrame(np.array([[92,88,76,81],[85,91,73,78],[79,87,84,89]]),index=["Line A","Line B","Line C"],columns=["Quality","Delivery","Cost","Energy"])
-        heat=px.imshow(grid,text_auto=True,aspect="auto",title="Operational health heatmap"); heat.update_layout(height=260,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(heat,use_container_width=True,config={"displayModeBar":False})
+        heat=px.imshow(grid,text_auto=True,aspect="auto",title="Operational health heatmap"); heat.update_layout(height=260,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(heat,width="stretch",config={"displayModeBar":False})
         st.markdown("<div class='os160-section'>Live-state inspection tools</div>",unsafe_allow_html=True)
         i1,i2=st.columns(2)
         with i1:
@@ -1255,7 +1255,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             if tdf.empty:
                 st.info("No telemetry captured yet. Telemetry records are only created from explicit writes or connected deployments.")
             else:
-                st.dataframe(tdf,use_container_width=True,hide_index=True)
+                st.dataframe(tdf,width="stretch",hide_index=True)
         with i2:
             st.caption("Model drift uses aligned actual-vs-baseline observations; it is deterministic and does not invent a live feed.")
             actual_text=st.text_input("Actual values (comma-separated)",value="100,101,99,104",key="os160_actual")
@@ -1281,5 +1281,5 @@ def render_160_command_center(username: str,tier: str) -> None:
         m2.metric("Implemented",stats["implemented"])
         m3.metric("Foundation",stats["foundation"])
         m4.metric("Integration-ready",stats["coverage_integration_ready"])
-        st.dataframe(matrix.assign(Status=matrix["state"].map({"Operational":"✅ Operational","Integration-ready":"🔌 Adapter / deployment ready"})).drop(columns=["state"]),use_container_width=True,hide_index=True,height=520)
+        st.dataframe(matrix.assign(Status=matrix["state"].map({"Operational":"✅ Operational","Integration-ready":"🔌 Adapter / deployment ready"})).drop(columns=["state"]),width="stretch",hide_index=True,height=520)
         st.caption("Availability and implementation coverage are intentionally separate. Verified = regression-tested; Implemented = working surface with verification still expanding; Foundation = architecture/UI hook; Integration-ready = requires external deployment/infrastructure.")

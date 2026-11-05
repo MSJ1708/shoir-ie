@@ -1090,7 +1090,7 @@ def render_module_run_history(module: str, owner: str, key_suffix: str | None = 
         if history.empty:
             st.info("No saved runs are available for this module yet.")
             return
-        st.dataframe(history.drop(columns=["Input SHA-256"]), use_container_width=True, hide_index=True)
+        st.dataframe(history.drop(columns=["Input SHA-256"]), width="stretch", hide_index=True)
         run_ids = history["Run ID"].astype(str).tolist()
         selector_key = f"module_run_history_selector_{token}"
         if selector_key in st.session_state and str(st.session_state[selector_key]) not in run_ids:
@@ -1128,12 +1128,12 @@ def render_module_run_history(module: str, owner: str, key_suffix: str | None = 
         if record["input_df"].empty and record["input_rows"]:
             st.info("The input snapshot was omitted or could not be decoded; the schema and hash remain available.")
         elif not record["input_df"].empty:
-            st.dataframe(apply_display_labels(record["input_df"], record["profile"]).head(300), use_container_width=True, hide_index=True)
+            st.dataframe(apply_display_labels(record["input_df"], record["profile"]).head(300), width="stretch", hide_index=True)
         st.markdown("**Saved calculated results**")
         if record["result_df"].empty:
             st.info("This record has no tabular result snapshot.")
         else:
-            st.dataframe(apply_display_labels(record["result_df"], record["profile"]).head(500), use_container_width=True, hide_index=True)
+            st.dataframe(apply_display_labels(record["result_df"], record["profile"]).head(500), width="stretch", hide_index=True)
         if record["metrics"]:
             with st.expander("Saved KPI summary", expanded=False):
                 st.json(record["metrics"])
@@ -1144,7 +1144,7 @@ def render_module_run_history(module: str, owner: str, key_suffix: str | None = 
                     "📥 Download saved inputs",
                     record["input_df"].to_csv(index=False).encode("utf-8"),
                     file_name=f"shoir_ie_{token}_{record['run_id'].lower()}_inputs.csv",
-                    mime="text/csv", use_container_width=True,
+                    mime="text/csv", width="stretch",
                     key=f"module_run_inputs_download_{token}_{record['run_id']}",
                 )
         with dl2:
@@ -1153,7 +1153,7 @@ def render_module_run_history(module: str, owner: str, key_suffix: str | None = 
                     "📥 Download saved results",
                     record["result_df"].to_csv(index=False).encode("utf-8"),
                     file_name=f"shoir_ie_{token}_{record['run_id'].lower()}_results.csv",
-                    mime="text/csv", use_container_width=True,
+                    mime="text/csv", width="stretch",
                     key=f"module_run_results_download_{token}_{record['run_id']}",
                 )
 
@@ -2030,7 +2030,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             if st.button(
                 "↩️ Restore Decision-Readiness Boundary — Experiment 001",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="research_restore_decision_readiness",
             ):
                 study_id, research_id = restore_decision_readiness_study(username)
@@ -2044,23 +2044,23 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             active_index = ids.index(str(active_id)) if active_id in ids else 0
             choice = st.selectbox("Select a saved study", labels, index=active_index, key="research_saved_study_selector")
             selected_id = ids[labels.index(choice)]
-            if st.button("📂 Open selected study", type="primary", use_container_width=True, key="research_open_saved_study"):
+            if st.button("📂 Open selected study", type="primary", width="stretch", key="research_open_saved_study"):
                 st.session_state["sx_research_study_id"] = selected_id
                 st.rerun()
-            st.dataframe(studies, use_container_width=True, hide_index=True)
+            st.dataframe(studies, width="stretch", hide_index=True)
 
         st.markdown("### Legacy recovery")
         st.caption("Older Shoir-IE versions stored the full protocol inside the project record. Recovery rebuilds the research index from those persisted project payloads.")
-        if st.button("♻️ Recover legacy research protocols", use_container_width=True, key="research_recover_legacy"):
+        if st.button("♻️ Recover legacy research protocols", width="stretch", key="research_recover_legacy"):
             recovered = recover_legacy_research_studies(username)
             if recovered.empty:
                 st.info("No unrecovered legacy research protocols were found.")
             else:
                 st.success(f"Recovered {len(recovered)} research protocol record(s).")
-                st.dataframe(recovered, use_container_width=True, hide_index=True)
+                st.dataframe(recovered, width="stretch", hide_index=True)
                 st.rerun()
 
-        if st.button("➕ Start a new research study", use_container_width=True, key="research_new_study"):
+        if st.button("➕ Start a new research study", width="stretch", key="research_new_study"):
             st.session_state.pop("sx_research_study_id", None)
             st.rerun()
 
@@ -2138,7 +2138,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 exclusion=st.text_area("Exclusion criteria",value=str(protocol["exclusion_criteria"]),height=90,disabled=locked,key=form_key+"_exclude")
             notes=st.text_area("Protocol notes / limitations",value=str(protocol["protocol_notes"]),height=120,disabled=locked,key=form_key+"_notes")
             lock_request=st.checkbox("Lock protocol after saving (local integrity lock)",value=locked,disabled=locked,key=form_key+"_lock")
-            save=st.form_submit_button("💾 Update Research Study & Protocol" if active_protocol else "💾 Save Research Study & Protocol",type="primary",use_container_width=True,disabled=locked)
+            save=st.form_submit_button("💾 Update Research Study & Protocol" if active_protocol else "💾 Save Research Study & Protocol",type="primary",width="stretch",disabled=locked)
         if save:
             errors=[]
             if not title.strip(): errors.append("Study title is required.")
@@ -2189,7 +2189,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             if runs.empty:
                 st.info("No persisted experiment runs exist for this study yet.")
             else:
-                st.dataframe(runs, use_container_width=True, hide_index=True)
+                st.dataframe(runs, width="stretch", hide_index=True)
 
             st.markdown("#### ♻️ Recover a previously completed Lab run")
             st.caption(
@@ -2216,7 +2216,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 recover_clicked = st.button(
                     "📥 Import & Persist Run",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     disabled=recovery_file is None,
                     key="research_run_recovery_button",
                 )
@@ -2247,7 +2247,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         if decisions.empty:
             st.info("No persisted decision records exist for this workspace.")
         else:
-            st.dataframe(decisions, use_container_width=True, hide_index=True)
+            st.dataframe(decisions, width="stretch", hide_index=True)
 
     with tabs[5]:
         st.markdown("### Evidence & export")
@@ -2262,7 +2262,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                     {"Field":"Runs captured","Value":len(runs)},
                     {"Field":"Decision records visible","Value":len(decisions)},
                 ]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
             st.download_button(
@@ -2271,7 +2271,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 file_name="shoir_ie_" + _safe_key(active_protocol["study_id"]) + "_research_workspace.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="research_workspace_export",
             )
             st.caption("The export contains persisted protocol, study index, run history and decision records. It is an evidence archive, not a scientific conclusion.")
@@ -2311,7 +2311,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         scenarios = st.data_editor(
             st.session_state[scenario_editor_key],
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             key="research_scenario_lab_editor",
             column_config={
@@ -2362,7 +2362,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             save_clicked = st.button(
                 "🧪 Analyze & Save",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=len(scenarios) < 2 or analysis_df.empty,
                 key="research_scenario_lab_save",
             )
@@ -2433,7 +2433,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                             fig.update_layout(height=380, legend_title_text="Selected baseline")
                             st.plotly_chart(
                                 fig,
-                                use_container_width=True,
+                                width="stretch",
                                 config={"displayModeBar": True, "responsive": True},
                             )
                             figure_exports.append((f"{metric_name} comparison", fig))
@@ -2452,13 +2452,13 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                     tradeoff.update_layout(height=420)
                     st.plotly_chart(
                         tradeoff,
-                        use_container_width=True,
+                        width="stretch",
                         config={"displayModeBar": True, "responsive": True},
                     )
                     figure_exports.append(("Cost versus service trade-off", tradeoff))
 
                 st.markdown("#### Calculated results")
-                st.dataframe(analysis_df, use_container_width=True, hide_index=True)
+                st.dataframe(analysis_df, width="stretch", hide_index=True)
                 tables = [
                     ("Scenario Inputs", scenarios),
                     ("Live Scenario Analysis", analysis_df),
@@ -2482,7 +2482,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             if scenario_history.empty:
                 st.info("No scenario experiments are saved yet.")
             else:
-                st.dataframe(scenario_history, use_container_width=True, hide_index=True)
+                st.dataframe(scenario_history, width="stretch", hide_index=True)
                 history_labels = {
                     str(row["Experiment ID"]): f"{row['Name']} · {row['Created At']} · {row['Experiment ID']}"
                     for _, row in scenario_history.iterrows()
@@ -2523,12 +2523,12 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                             st.caption(f"Saved at {stored[2]} · {selected_experiment_id}")
                             detail_tabs = st.tabs(["Inputs", "Calculated results", "Trade-off chart"])
                             with detail_tabs[0]:
-                                st.dataframe(stored_inputs, use_container_width=True, hide_index=True)
+                                st.dataframe(stored_inputs, width="stretch", hide_index=True)
                             with detail_tabs[1]:
                                 if stored_results.empty:
                                     st.info("No calculated results were found in this saved record.")
                                 else:
-                                    st.dataframe(stored_results, use_container_width=True, hide_index=True)
+                                    st.dataframe(stored_results, width="stretch", hide_index=True)
                             with detail_tabs[2]:
                                 if {"Cost", "Service"}.issubset(stored_results.columns) and not stored_results.empty:
                                     saved_tradeoff = px.scatter(
@@ -2538,7 +2538,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                                         color="Scenario",
                                         title="Saved cost versus service trade-off",
                                     )
-                                    st.plotly_chart(saved_tradeoff, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                                    st.plotly_chart(saved_tradeoff, width="stretch", config={"displayModeBar": True, "responsive": True})
                                 else:
                                     st.info("This saved result does not contain both Cost and Service for a trade-off chart.")
                     except Exception as exc:
@@ -3384,20 +3384,20 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 
     action_cols = st.columns(4)
     with action_cols[0]:
-        if st.button("💾 Save study", use_container_width=True, key="mx_save_" + key):
+        if st.button("💾 Save study", width="stretch", key="mx_save_" + key):
             project_title = str(profile.get("project_name") or (profile.get("display_name", module) + " Study"))
             pid = save_project(project_title, module, username, {"module": module, "display_name": profile.get("display_name", module), "tier": tier, "profile": profile})
             st.session_state["sx_project_id"] = pid
             st.success("Study saved: " + pid)
     with action_cols[1]:
-        if st.button("▶ Record run", use_container_width=True, key="mx_run_" + key):
+        if st.button("▶ Record run", width="stretch", key="mx_run_" + key):
             jid = create_job(module, "interactive-analysis", username, {"module": module})
             update_job(jid, "Running", 20, "Run initialized")
             update_job(jid, "Completed", 100, "Run metadata recorded")
             st.session_state["shoir_latest_run_id"] = jid
             st.success("Run recorded: " + jid)
     with action_cols[2]:
-        if st.button("📝 Decision card", use_container_width=True, key="mx_decision_" + key):
+        if st.button("📝 Decision card", width="stretch", key="mx_decision_" + key):
             did = create_decision(
                 str(profile.get("display_name") or module) + " decision", module,
                 {"rows": result["rows"], "quality": result["quality"]},
@@ -3408,7 +3408,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
             st.session_state["sx_decision_id_" + key] = did
             st.success("Decision created: " + did)
     with action_cols[3]:
-        if st.button("📦 Evidence pack", use_container_width=True, key="mx_export_" + key):
+        if st.button("📦 Evidence pack", width="stretch", key="mx_export_" + key):
             st.session_state["mx_show_export_" + key] = True
 
     if st.session_state.pop("mx_show_export_" + key, False):
@@ -3417,7 +3417,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
             data=_evidence_bundle(module, sample, username),
             file_name="shoir_ie_" + key + "_evidence.zip",
             mime="application/zip",
-            use_container_width=True,
+            width="stretch",
             key="mx_dl_" + key,
         )
 
@@ -3429,7 +3429,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
             st.caption("Imported text is treated as data. State-changing operations remain approval-gated.")
             try:
                 tools = pd.DataFrame(COPILOT_TOOLS, columns=["Tool","Scope","Approval"])
-                st.dataframe(tools, use_container_width=True, hide_index=True)
+                st.dataframe(tools, width="stretch", hide_index=True)
             except Exception:
                 st.info("Copilot tool registry is temporarily unavailable.")
 
@@ -3453,7 +3453,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     df = st.data_editor(
         st.session_state[data_key],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         key="sx_blank_editor_" + key,
     )
@@ -3505,7 +3505,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             if not plot.empty:
                 st.plotly_chart(
                     px.bar(plot, x=plot.columns[0], y=plot.columns[1], title=profile["display_name"] + " · " + plot.columns[1]),
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": True, "responsive": True},
                 )
 
@@ -3520,7 +3520,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         if st.button(
             "▶ Run module-specific review",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="sx_domain_run_" + key,
         ):
             run_started_ns = time.perf_counter_ns()
@@ -3580,7 +3580,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                             display_value = str(metric_value)
                         metric_cols[metric_index % len(metric_cols)].metric(str(metric_name), display_value)
                 if isinstance(analyzed_df, pd.DataFrame) and not analyzed_df.empty:
-                    st.dataframe(apply_display_labels(analyzed_df, profile), use_container_width=True, hide_index=True)
+                    st.dataframe(apply_display_labels(analyzed_df, profile), width="stretch", hide_index=True)
                     x_column = analysis.get("chart_x")
                     y_column = analysis.get("chart_y")
                     numeric_columns = [
@@ -3597,7 +3597,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                         st.info(chart_notice)
                     if chart is not None:
                         st.caption(f"Visualization: {actual_chart} · configured for this module profile.")
-                        st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                        st.plotly_chart(chart, width="stretch", config={"displayModeBar": True, "responsive": True})
                     if saved_domain_result.get("run_id"):
                         st.caption(
                             f"Saved run: {saved_domain_result['run_id']} · Input SHA-256: {saved_domain_result.get('input_hash', 'unavailable')}"
@@ -3622,7 +3622,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             )
             delta_column = profile["scenario_label"] + " − " + profile["baseline_label"]
             pct_column = profile["scenario_label"] + " vs " + profile["baseline_label"] + " (%)"
-            if st.button("▶ Run Analysis", type="primary", use_container_width=True, key="sx_run_" + key):
+            if st.button("▶ Run Analysis", type="primary", width="stretch", key="sx_run_" + key):
                 started = time.perf_counter_ns()
                 output = df.copy()
                 base_values = pd.to_numeric(output[baseline], errors="coerce")
@@ -3633,11 +3633,11 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 st.session_state["sx_run_id_" + key] = benchmark_duration(module, started, username, len(output), "generic_analysis")
             output = st.session_state.get("sx_result_" + key, pd.DataFrame())
             if isinstance(output, pd.DataFrame) and not output.empty:
-                st.dataframe(output, use_container_width=True, hide_index=True)
+                st.dataframe(output, width="stretch", hide_index=True)
                 output_display = apply_display_labels(output, profile)
                 st.plotly_chart(
                     px.bar(output_display, x=output_display.columns[0], y=pct_column, title=profile["scenario_label"] + " vs " + profile["baseline_label"] + " (%)"),
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": True, "responsive": True},
                 )
 
@@ -3654,10 +3654,10 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 for name, ok in check["checks"].items()
             ]
         )
-        st.dataframe(verification_table, use_container_width=True, hide_index=True)
+        st.dataframe(verification_table, width="stretch", hide_index=True)
 
     with tabs[3]:
-        if st.button("📝 Create decision from current study", type="primary", use_container_width=True, key="sx_decision_blank_" + key):
+        if st.button("📝 Create decision from current study", type="primary", width="stretch", key="sx_decision_blank_" + key):
             result = generic_result(df)
             did = create_decision(
                 str(profile.get("display_name") or module) + " working decision",
@@ -3679,10 +3679,10 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             if row:
                 st.dataframe(
                     pd.DataFrame([dict(zip(["ID", "Title", "Status", "Owner", "Created"], row))]),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
-                if st.button("➡️ Move to Validated", use_container_width=True, key="sx_validate_" + key):
+                if st.button("➡️ Move to Validated", width="stretch", key="sx_validate_" + key):
                     transition_decision(did, username, "Validated", "Validation evidence captured from module canvas.")
                     st.success("Decision moved to Validated.")
             with st.expander("📈 Decision-to-Value Verification", expanded=False):
@@ -3691,7 +3691,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 actual_text = st.text_area("Actual KPIs (JSON)", value='{"Throughput": 0, "Cost": 0}', key="sx_actual_json_" + key, height=110)
                 outcome_status = st.selectbox("Implementation status", ["Planned", "Implemented", "Verified"], key="sx_outcome_status_" + key)
                 lesson = st.text_area("Lesson / explanation", key="sx_outcome_lesson_" + key, height=90)
-                if st.button("🧾 Record actual outcome", use_container_width=True, key="sx_record_outcome_" + key):
+                if st.button("🧾 Record actual outcome", width="stretch", key="sx_record_outcome_" + key):
                     try:
                         predicted = json.loads(predicted_text)
                         actual = json.loads(actual_text)
@@ -3722,15 +3722,15 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                     except Exception:
                         variance_df = pd.DataFrame()
                     if not variance_df.empty:
-                        st.dataframe(variance_df, use_container_width=True, hide_index=True)
+                        st.dataframe(variance_df, width="stretch", hide_index=True)
                         try:
                             from shoir_live_visuals import build_visualization_suite
                             suite = build_visualization_suite(variance_df, context="Decision-to-Value", max_figures=3)
                             for title, fig in suite:
-                                st.plotly_chart(fig, use_container_width=True)
+                                st.plotly_chart(fig, width="stretch")
                         except Exception:
                             pass
-                    st.dataframe(outcome_df[["outcome_id","implementation_status","lesson","verified_at","created_at"]].head(20), use_container_width=True, hide_index=True)
+                    st.dataframe(outcome_df[["outcome_id","implementation_status","lesson","verified_at","created_at"]].head(20), width="stretch", hide_index=True)
 
     with tabs[4]:
         st.download_button(
@@ -3739,6 +3739,6 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             file_name="shoir_ie_" + key + "_bundle.zip",
             mime="application/zip",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="sx_export_download_" + key,
         )

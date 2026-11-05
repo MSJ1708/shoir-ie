@@ -260,14 +260,14 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
                 c1.metric("Contract",contract["status"])
                 c2.metric("Quality",f'{contract["verification"]["score"]:.0f}%')
                 c3.metric("Mapped",f'{len(frame.columns)-len(contract["missing_required"])} cols')
-                st.dataframe(pd.DataFrame(contract["columns"]),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame(contract["columns"]),width="stretch",hide_index=True)
                 if contract["missing_required"]:
                     st.warning("Missing canonical fields: " + ", ".join(contract["missing_required"]))
         with tabs[1]:
             akey="ce_assumptions_"+slug
             if akey not in st.session_state:
                 st.session_state[akey]=pd.DataFrame(DEFAULT_ASSUMPTIONS)
-            assumptions=st.data_editor(st.session_state[akey],num_rows="dynamic",use_container_width=True,hide_index=True,key="ce_assumptions_editor_"+slug)
+            assumptions=st.data_editor(st.session_state[akey],num_rows="dynamic",width="stretch",hide_index=True,key="ce_assumptions_editor_"+slug)
             st.session_state[akey]=assumptions
             st.markdown("**Unit compatibility check**")
             unit = st.selectbox("Select displayed unit", list(UNIT_MAP.keys()), key="ce_unit_"+slug)
@@ -283,20 +283,20 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
                 s1=a.slider("Scenario A (%)",-50.0,100.0,10.0,1.0,key="ce_s1_"+slug)
                 s2=b.slider("Scenario B (%)",-50.0,100.0,20.0,1.0,key="ce_s2_"+slug)
                 use=c.multiselect("Metrics",numeric,default=numeric[:min(4,len(numeric))],key="ce_metrics_"+slug)
-                if st.button("🧪 Fork & compare scenarios",type="primary",use_container_width=True,key="ce_run_scen_"+slug):
+                if st.button("🧪 Fork & compare scenarios",type="primary",width="stretch",key="ce_run_scen_"+slug):
                     frames=[scenario_frame(frame,base_name,0,numeric),scenario_frame(frame,"Scenario A",s1,numeric),scenario_frame(frame,"Scenario B",s2,numeric)]
                     st.session_state["ce_summary_"+slug]=scenario_summary(frames,use or numeric[:1])
                     st.success("Scenarios recalculated from current module data.")
                 summary=st.session_state.get("ce_summary_"+slug,pd.DataFrame())
                 if isinstance(summary,pd.DataFrame) and not summary.empty:
-                    st.dataframe(summary,use_container_width=True,hide_index=True)
+                    st.dataframe(summary,width="stretch",hide_index=True)
                     c1,c2=st.columns(2)
                     with c1:
                         radar=_radar(summary,use[:4] if use else list(summary.columns[1:4]))
-                        if radar: st.plotly_chart(radar,use_container_width=True,config={"displayModeBar":False})
+                        if radar: st.plotly_chart(radar,width="stretch",config={"displayModeBar":False})
                     with c2:
                         tor=_tornado(summary,base_name,use or list(summary.columns[1:]))
-                        if tor: st.plotly_chart(tor,use_container_width=True,config={"displayModeBar":False})
+                        if tor: st.plotly_chart(tor,width="stretch",config={"displayModeBar":False})
         with tabs[3]:
             if frame.empty:
                 st.info("Import or create data to activate the visual studio.")
@@ -328,7 +328,7 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
                         else:
                             fig=px.bar(frame,x=x,y=y,title=f"{module} · {y}") if x else px.bar(frame,y=y,title=f"{module} · {y}")
                         fig.update_layout(height=360,margin=dict(l=10,r=10,t=50,b=10))
-                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+                        st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
                     except Exception as exc:
                         st.error(f"Chart could not be rendered safely: {exc}")
         with tabs[4]:
@@ -338,31 +338,31 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
             lifecycle=c2.selectbox("Lifecycle",LIFECYCLE,index=0,key="ce_lifecycle_"+slug)
             c3.metric("Verification",f'{contract["verification"]["score"]:.0f}%')
             b1,b2,b3,b4=st.columns(4)
-            if b1.button("💾 Save study",use_container_width=True,key="ce_save_"+slug):
+            if b1.button("💾 Save study",width="stretch",key="ce_save_"+slug):
                 pid=save_project(name,module,username,{"lifecycle":lifecycle,"contract":contract,"rows":len(frame)})
                 st.session_state[study_key]=pid
                 st.success("Study saved · "+pid)
-            if b2.button("♻️ Autosave snapshot",use_container_width=True,key="ce_auto_"+slug):
+            if b2.button("♻️ Autosave snapshot",width="stretch",key="ce_auto_"+slug):
                 pid=st.session_state.get(study_key)
                 if pid:
                     n=autosave_project(pid,{"lifecycle":lifecycle,"rows":len(frame),"contract":contract})
                     st.success(f"Snapshot {n} saved.")
                 else:
                     st.info("Save the study once to enable snapshots.")
-            if b3.button("▶ Queue run",use_container_width=True,key="ce_job_"+slug):
+            if b3.button("▶ Queue run",width="stretch",key="ce_job_"+slug):
                 jid=create_job(module,"commercial-workspace-run",username,{"rows":len(frame),"lifecycle":lifecycle})
                 update_job(jid,"Running",15,"Prepared")
                 update_job(jid,"Completed",100,"Recorded")
                 st.success("Run recorded · "+jid)
-            if b4.button("📝 Create decision",use_container_width=True,key="ce_dec_"+slug):
+            if b4.button("📝 Create decision",width="stretch",key="ce_dec_"+slug):
                 did=create_decision(f"{name} decision",module,{"verification":contract["verification"]["score"],"rows":len(frame)},{"lifecycle":lifecycle},{"data_contract":contract["status"]},username)
                 st.success("Decision created · "+did)
             with _db() as conn:
                 recent=pd.read_sql("SELECT job_id,module,job_type,status,progress,message,finished_at FROM experience_jobs ORDER BY rowid DESC LIMIT 8",conn)
-            st.dataframe(recent,use_container_width=True,hide_index=True)
+            st.dataframe(recent,width="stretch",hide_index=True)
             qcol,qcol2=st.columns(2)
             with qcol:
-                if st.button("🔄 Refresh run list",use_container_width=True,key="ce_refresh_"+slug): st.rerun()
+                if st.button("🔄 Refresh run list",width="stretch",key="ce_refresh_"+slug): st.rerun()
             with qcol2:
                 st.caption("Background queue integration is represented by durable run records; long-running workers can attach to the same job IDs.")
         with tabs[5]:
@@ -371,7 +371,7 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
             if study_id:
                 with _db() as conn:
                     tasks=pd.read_sql("SELECT task_id,task,owner,status,due_date FROM commercial_tasks WHERE study_id=? ORDER BY created_at DESC",(conn),params=(study_id,))
-                st.dataframe(tasks,use_container_width=True,hide_index=True)
+                st.dataframe(tasks,width="stretch",hide_index=True)
                 with st.form("ce_task_form_"+slug):
                     task=st.text_input("Implementation task")
                     owner=st.text_input("Owner",value=username)
@@ -389,4 +389,4 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
             assumptions=st.session_state.get("ce_assumptions_"+slug,pd.DataFrame(DEFAULT_ASSUMPTIONS))
             summary=st.session_state.get("ce_summary_"+slug,pd.DataFrame())
             bundle=_download_bundle(module,frame,contract,assumptions,summary)
-            st.download_button("📦 Download complete study evidence bundle",bundle,file_name=f"shoir_ie_{slug}_study_bundle.zip",mime="application/zip",type="primary",use_container_width=True)
+            st.download_button("📦 Download complete study evidence bundle",bundle,file_name=f"shoir_ie_{slug}_study_bundle.zip",mime="application/zip",type="primary",width="stretch")

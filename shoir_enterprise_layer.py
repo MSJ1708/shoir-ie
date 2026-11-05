@@ -2895,7 +2895,7 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
             st.info("No live Digital Twin state is currently connected to this workspace. Import telemetry or synchronize a real source to activate the twin view.")
         t1,t2,t3,t4 = st.tabs(["Live State","What-if","Scenario Replay","Scenarios"])
         with t1:
-            st.dataframe(twin, use_container_width=True, hide_index=True)
+            st.dataframe(twin, width="stretch", hide_index=True)
             if st.button("🔄 Synchronize current state", key="ent_twin_sync"):
                 sid=save_twin_snapshot(username,twin.to_dict("records"),source="module_state",scenario_name="Live",workspace=workspace)
                 st.success(f"Twin snapshot synchronized: {sid}")
@@ -2909,12 +2909,12 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
                         changes[c]=st.number_input(f"Δ {c}",value=0.0,key=f"ent_twin_delta_{i}")
                 if st.button("🧪 Run what-if",key="ent_twin_whatif"):
                     scenario,audit=twin_what_if(twin,changes)
-                    st.dataframe(scenario,use_container_width=True,hide_index=True)
-                    if not audit.empty: st.dataframe(audit,use_container_width=True,hide_index=True)
+                    st.dataframe(scenario,width="stretch",hide_index=True)
+                    if not audit.empty: st.dataframe(audit,width="stretch",hide_index=True)
                     record_artifact(username,"digital_twin_what_if",module,{"changes":changes,"audit":audit.to_dict("records")},workspace)
         with t3:
             replay=twin_replay(username,workspace=workspace)
-            st.dataframe(replay,use_container_width=True,hide_index=True)
+            st.dataframe(replay,width="stretch",hide_index=True)
         with t4:
             scenario_name=st.text_input("Scenario name","Capacity Shock",key="ent_twin_scenario_name")
             params=st.text_area("Scenario parameters JSON",'{"capacity_delta":-10}',key="ent_twin_scenario_params")
@@ -2923,7 +2923,7 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
                     save_twin_scenario(username,scenario_name,json.loads(params),parent_name="Live",workspace=workspace)
                     st.success("Scenario saved.")
                 except Exception as exc: st.error(f"Scenario could not be saved: {exc}")
-            st.dataframe(list_twin_scenarios(username,workspace),use_container_width=True,hide_index=True)
+            st.dataframe(list_twin_scenarios(username,workspace),width="stretch",hide_index=True)
 
     # Control Tower: consume existing module/session state instead of duplicating it.
     if module in {"Industrial Control Center","Control Tower","Industrial Operating System"}:
@@ -2940,14 +2940,14 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
             "Carbon":{"records":len(st.session_state.get("sustain_df",[])) if isinstance(st.session_state.get("sustain_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Carbon"},
         }
         health=build_control_tower_health(state)
-        st.dataframe(health,use_container_width=True,hide_index=True)
-        st.plotly_chart(px.bar(health,x="Area",y="Records",color="Health",title="Unified industrial health map"),use_container_width=True)
+        st.dataframe(health,width="stretch",hide_index=True)
+        st.plotly_chart(px.bar(health,x="Area",y="Records",color="Health",title="Unified industrial health map"),width="stretch")
 
     # Connectivity: replace simulated success with explicit health state.
     if module == "Industrial Connectivity Hub":
         st.markdown("### 🔌 Connector Health & Governance")
         ch=connector_health_frame(username,workspace)
-        st.dataframe(ch,use_container_width=True,hide_index=True)
+        st.dataframe(ch,width="stretch",hide_index=True)
         st.caption("Credentials are never persisted by this surface.")
         record_artifact(username,"connector_catalog",module,{"supported_systems":["SAP","Oracle","WMS","MES","ERP","SQL","REST","MQTT","OPC-UA"]},workspace)
 
@@ -2978,14 +2978,14 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
                     add_collaboration_item(username,"comment",body,subject,assignee,reviewer,workspace=workspace)
                     st.success("Collaboration item saved.")
         with c2:
-            st.dataframe(collaboration_frame(username,workspace),use_container_width=True,hide_index=True)
+            st.dataframe(collaboration_frame(username,workspace),width="stretch",hide_index=True)
 
     # Knowledge layer: organizational context for Copilot and engineering modules.
     if module in {"AI Copilot","Advanced Engineering Copilot","Engineering Decision Center","Global Project & Digital Thread"}:
         st.markdown("### 📚 Engineering Knowledge Layer")
         query=st.text_input("Search SOPs, standards, manuals and engineering notes",key="ent_knowledge_query")
         if query.strip():
-            st.dataframe(search_knowledge(username,query,workspace),use_container_width=True,hide_index=True)
+            st.dataframe(search_knowledge(username,query,workspace),width="stretch",hide_index=True)
         with st.expander("Add knowledge source"):
             name=st.text_input("Document name",key="ent_knowledge_name")
             content=st.text_area("Text / extracted content",key="ent_knowledge_content")
@@ -3014,7 +3014,7 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
         jobs=list_jobs(username,workspace)
         if not jobs.empty:
             with st.expander("🕐 Background Jobs & History",expanded=False):
-                st.dataframe(jobs,use_container_width=True,hide_index=True)
+                st.dataframe(jobs,width="stretch",hide_index=True)
 
     # Research Studio: preserve the existing Research Workspace and add reproducible paper packaging.
     if module in {"Experiment Lab","Statistical Hypothesis Testing","Literature & Citation Matrix","LaTeX Document Formatter"}:
@@ -3520,7 +3520,7 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
                 continue
             st.markdown(f"#### {label}")
             for title, fig in suite:
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False, "responsive": True})
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": True, "displaylogo": False, "responsive": True})
                 try:
                     fp = figure_hash(fig)
                     record_artifact(

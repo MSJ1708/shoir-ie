@@ -339,7 +339,7 @@ def render_showcase(module: str, title: str, scenarios: pd.DataFrame, study_id: 
         if not chart.empty:
             fig = px.line(chart, x="Scenario", y="Value", color="Metric", markers=True, title="Decision landscape")
             fig.update_layout(height=360, margin=dict(l=10, r=10, t=55, b=10))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     st.markdown("### What happens next")
     st.markdown("✓ Validate the evidence  ·  ✓ Review assumptions  ·  ✓ Approve the decision  ·  ✓ Track actual KPI")
     if study_id:
@@ -398,7 +398,7 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         with a:
             title = st.text_input("Study title", value=st.session_state.get("unified_title", module + " Improvement Study"), key="ui_study_title")
             objective = st.text_area("Engineering objective", value=st.session_state.get("unified_objective", "Define the problem, evidence and target outcome before changing the operation."), key="ui_study_objective", height=90)
-            if st.button("✨ Create / Save Study", type="primary", use_container_width=True, key="ui_save_study"):
+            if st.button("✨ Create / Save Study", type="primary", width="stretch", key="ui_save_study"):
                 pid = create_unified_study(title, module, username, objective)
                 st.session_state["unified_study_id"] = pid
                 st.session_state["unified_title"] = title
@@ -413,14 +413,14 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         st.markdown("#### Before / After")
         before_after = st.data_editor(
             pd.DataFrame({"KPI": ["Cost index", "Service %", "Carbon index", "Risk index"], "Before": [100, 95, 100, 10], "After": [92, 97, 86, 8]}),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             key="ui_before_after",
         )
         ba = before_after.melt(id_vars="KPI", var_name="State", value_name="Value")
         fig = px.bar(ba, x="KPI", y="Value", color="State", barmode="group", title="Before / After impact view")
         fig.update_layout(height=340, margin=dict(l=10, r=10, t=55, b=10))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
         readiness_score = float(st.session_state.get("unified_readiness_score", 0))
         scenario_count = int(st.session_state.get("unified_scenario_count", 1))
@@ -444,7 +444,7 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
                 st.error("The dataset could not be read safely. Check that the file is a valid Excel/CSV workbook.")
                 st.caption("Technical detail: " + str(exc)[:180])
         if "unified_data" not in st.session_state:
-            if st.button("🧪 Load module starter dataset", use_container_width=True, key="ui_load_starter"):
+            if st.button("🧪 Load module starter dataset", width="stretch", key="ui_load_starter"):
                 st.session_state["unified_data"] = _starter_for_module(module)
                 st.session_state["unified_source"] = "Shoir-IE starter dataset"
         data = st.session_state.get("unified_data", _starter_for_module(module))
@@ -462,24 +462,24 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         d3.metric("Rows", f'{len(data):,}')
         checks_df = pd.DataFrame(ready["checks"])
         checks_df["Status"] = checks_df["status"].map(lambda x: "✓ PASS" if x else "⚠ REVIEW")
-        st.dataframe(checks_df[["name", "Status", "detail"]].rename(columns={"name":"Check","detail":"Details"}), use_container_width=True, hide_index=True)
+        st.dataframe(checks_df[["name", "Status", "detail"]].rename(columns={"name":"Check","detail":"Details"}), width="stretch", hide_index=True)
         nums = [c for c in data.columns if pd.api.types.is_numeric_dtype(data[c])]
         if nums:
             metric = st.selectbox("Readiness metric preview", nums, key="ui_readiness_metric")
             chart = px.histogram(data, x=metric, nbins=20, title=f"Data distribution · {metric}")
             chart.update_layout(height=300, margin=dict(l=10, r=10, t=55, b=10))
-            st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": False})
-        st.dataframe(data.head(1000), use_container_width=True, hide_index=True)
+            st.plotly_chart(chart, width="stretch", config={"displayModeBar": False})
+        st.dataframe(data.head(1000), width="stretch", hide_index=True)
 
     with tabs[2]:
         st.markdown("#### Scenario Laboratory")
         study_id = st.session_state.get("unified_study_id") or "SESSION"
         if "unified_scenarios" not in st.session_state:
             st.session_state["unified_scenarios"] = pd.DataFrame(STARTER_SCENARIOS)
-        scenarios = st.data_editor(st.session_state["unified_scenarios"], num_rows="dynamic", use_container_width=True, hide_index=True, key="ui_scenarios")
+        scenarios = st.data_editor(st.session_state["unified_scenarios"], num_rows="dynamic", width="stretch", hide_index=True, key="ui_scenarios")
         st.session_state["unified_scenarios"] = scenarios
         st.session_state["unified_scenario_count"] = int(scenarios["Scenario"].nunique()) if "Scenario" in scenarios.columns else 0
-        if st.button("💾 Save Scenario Set", type="primary", use_container_width=True, key="ui_save_scenarios"):
+        if st.button("💾 Save Scenario Set", type="primary", width="stretch", key="ui_save_scenarios"):
             if st.session_state.get("unified_study_id"):
                 save_scenario_table(st.session_state["unified_study_id"], scenarios)
                 register_lineage("study", st.session_state["unified_study_id"], "scenario_set", st.session_state["unified_study_id"], "contains", username)
@@ -493,7 +493,7 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
                 fig = px.bar(scenarios, x="Scenario", y=metric, text=metric, title=f"Scenario comparison · {metric}")
                 fig.update_layout(height=340, margin=dict(l=10, r=10, t=55, b=10))
                 fig.update_traces(textposition="outside")
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
                 st.markdown("#### Explain my result")
                 sel = st.selectbox("Scenario", list(scenarios["Scenario"]), key="ui_explain_scenario")
                 row = scenarios[scenarios["Scenario"] == sel].iloc[0].to_dict()
@@ -509,7 +509,7 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         metrics_payload = {"scenario": chosen or "Not selected", "readiness": st.session_state.get("unified_readiness_score", 0)}
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("📝 Create Decision Card", type="primary", use_container_width=True, key="ui_create_decision"):
+            if st.button("📝 Create Decision Card", type="primary", width="stretch", key="ui_create_decision"):
                 did = create_decision(decision_title, module, metrics_payload, {"objective": st.session_state.get("unified_objective", "")}, {"scenario": chosen, "readiness": st.session_state.get("unified_readiness_score", 0)}, username)
                 st.session_state["unified_decision_id"] = did
                 st.session_state["unified_decision_status"] = "Draft"
@@ -519,7 +519,7 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         with c2:
             if did:
                 next_status = st.selectbox("Move decision to", ["Validated", "Proposed", "Review", "Approved", "Implemented", "Verified"], key="ui_decision_next")
-                if st.button("➡️ Transition Decision", use_container_width=True, key="ui_transition_decision"):
+                if st.button("➡️ Transition Decision", width="stretch", key="ui_transition_decision"):
                     try:
                         transition_decision(did, username, next_status, rationale)
                         st.session_state["unified_decision_status"] = next_status
@@ -534,7 +534,7 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
                 st.dataframe(pd.DataFrame([{
                     "ID": row[0], "Title": row[1], "Status": row[2], "Owner": row[6], "Updated": row[7],
                     "Metrics": row[3], "Assumptions": row[4], "Uncertainty": row[5]
-                }]), use_container_width=True, hide_index=True)
+                }]), width="stretch", hide_index=True)
                 st.markdown("✓ Evidence captured  ·  ✓ Approval state tracked  ·  ✓ Reproducible record")
 
     with tabs[4]:
@@ -543,8 +543,8 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         tracker = _implementation_df(study_id)
         if tracker.empty:
             tracker = pd.DataFrame([{"Action":"Measure agreed KPI after implementation","Owner":"","Due":"","Status":"Planned","KPI":"Primary KPI","Baseline":0.0,"Target":0.0,"Actual":0.0,"Notes":""}])
-        edited = st.data_editor(tracker.drop(columns=["action_id"], errors="ignore"), num_rows="dynamic", use_container_width=True, hide_index=True, key="ui_implementation")
-        if study_id and st.button("💾 Save Implementation Plan", type="primary", use_container_width=True, key="ui_save_implementation"):
+        edited = st.data_editor(tracker.drop(columns=["action_id"], errors="ignore"), num_rows="dynamic", width="stretch", hide_index=True, key="ui_implementation")
+        if study_id and st.button("💾 Save Implementation Plan", type="primary", width="stretch", key="ui_save_implementation"):
             _save_implementation(study_id, edited)
             st.success("Implementation plan saved.")
         if not edited.empty:
@@ -552,11 +552,11 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
             status_counts.columns = ["Status", "Actions"]
             fig = px.bar(status_counts, x="Status", y="Actions", title="Implementation status")
             fig.update_layout(height=280, margin=dict(l=10, r=10, t=55, b=10), showlegend=False)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
             kpi_cols = [c for c in ["Baseline","Target","Actual"] if c in edited.columns]
             if kpi_cols:
                 kpi_plot = edited[["Action"] + kpi_cols].melt(id_vars="Action", var_name="Stage", value_name="Value")
-                st.plotly_chart(px.bar(kpi_plot, x="Action", y="Value", color="Stage", barmode="group", title="KPI tracking"), use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(px.bar(kpi_plot, x="Action", y="Value", color="Stage", barmode="group", title="KPI tracking"), width="stretch", config={"displayModeBar": False})
 
     with tabs[5]:
         st.markdown("#### Industrial Decision Memory")
@@ -575,14 +575,14 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         if mem.empty:
             st.info("No decision memories yet. Capture the first lesson learned below.")
         else:
-            st.dataframe(mem, use_container_width=True, hide_index=True)
+            st.dataframe(mem, width="stretch", hide_index=True)
         p1, p2 = st.columns(2)
         with p1:
             problem = st.text_area("Problem", key="ui_mem_problem")
             lesson = st.text_area("Lesson learned", key="ui_mem_lesson")
         with p2:
             actual = st.text_area("Actual result", key="ui_mem_actual")
-            if st.button("🧠 Save to Industrial Memory", type="primary", use_container_width=True, key="ui_save_memory"):
+            if st.button("🧠 Save to Industrial Memory", type="primary", width="stretch", key="ui_save_memory"):
                 memory_id = "MEM-" + uuid.uuid4().hex[:12].upper()
                 with _db() as conn:
                     conn.execute(
@@ -599,8 +599,8 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         ready = int((health["Status"] == "Ready").sum()) if total else 0
         st.metric("Services healthy", f"{ready}/{total}")
         st.progress(ready / max(1, total), text=f"{ready}/{total} checks ready")
-        st.dataframe(health, use_container_width=True, hide_index=True)
-        if st.button("🔄 Refresh Health", use_container_width=True, key="ui_health_refresh"):
+        st.dataframe(health, width="stretch", hide_index=True)
+        if st.button("🔄 Refresh Health", width="stretch", key="ui_health_refresh"):
             st.rerun()
 
     with tabs[7]:
@@ -620,11 +620,11 @@ def render_unified_workspace(module: str, tier: str, username: str) -> None:
         }
         st.markdown("### Evidence Export Center")
         st.caption("A single package for the engineering trail — inputs, scenarios, implementation and validation evidence.")
-        st.download_button("📦 Download Complete Evidence Pack", evidence_bundle(study, data, scenarios, implementation, ready, username), file_name="shoir_ie_unified_evidence.zip", mime="application/zip", type="primary", use_container_width=True)
+        st.download_button("📦 Download Complete Evidence Pack", evidence_bundle(study, data, scenarios, implementation, ready, username), file_name="shoir_ie_unified_evidence.zip", mime="application/zip", type="primary", width="stretch")
         e1,e2,e3 = st.columns(3)
-        e1.download_button("📄 Download Study Manifest", json.dumps(study, indent=2).encode(), file_name="study_manifest.json", mime="application/json", use_container_width=True)
-        e2.download_button("📊 Download Scenario CSV", scenarios.to_csv(index=False).encode(), file_name="scenario_comparison.csv", mime="text/csv", use_container_width=True)
-        e3.download_button("🛠 Download Implementation CSV", implementation.to_csv(index=False).encode(), file_name="implementation_tracker.csv", mime="text/csv", use_container_width=True)
+        e1.download_button("📄 Download Study Manifest", json.dumps(study, indent=2).encode(), file_name="study_manifest.json", mime="application/json", width="stretch")
+        e2.download_button("📊 Download Scenario CSV", scenarios.to_csv(index=False).encode(), file_name="scenario_comparison.csv", mime="text/csv", width="stretch")
+        e3.download_button("🛠 Download Implementation CSV", implementation.to_csv(index=False).encode(), file_name="implementation_tracker.csv", mime="text/csv", width="stretch")
 
 
 def render_global_product_dock(module: str, tier: str, username: str) -> None:
@@ -649,7 +649,7 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
     with d3:
         st.metric("Data", f"{readiness:.0f}%")
     with d4:
-        if st.button("▶ Open", type="primary", use_container_width=True, key="global_command_open_" + key):
+        if st.button("▶ Open", type="primary", width="stretch", key="global_command_open_" + key):
             mapping = {
                 "Open Industrial Home": "adoption_home",
                 "Open Industrial Workbook": "workbook",
@@ -698,7 +698,7 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
                 st.metric("Data readiness", f'{ready["score"]:.1f}%')
                 tbl = pd.DataFrame(ready["checks"])
                 tbl["Status"] = tbl["status"].map(lambda x: "✓ PASS" if x else "⚠ REVIEW")
-                st.dataframe(tbl[["name","Status","detail"]].rename(columns={"name":"Check","detail":"Details"}), use_container_width=True, hide_index=True)
+                st.dataframe(tbl[["name","Status","detail"]].rename(columns={"name":"Check","detail":"Details"}), width="stretch", hide_index=True)
             elif action == "decision":
                 st.info("Open the Unified Study & Decision Center → Decision tab to create the governed Decision Card.")
                 st.session_state["force_unified_workspace"] = True
@@ -713,7 +713,7 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
                 st.rerun()
             elif action == "health":
                 health = platform_health_snapshot()
-                st.dataframe(health, use_container_width=True, hide_index=True)
+                st.dataframe(health, width="stretch", hide_index=True)
             elif action == "showcase":
                 st.session_state["showcase_inline"] = True
             elif action == "export":
@@ -732,7 +732,7 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
             evidence_bundle(study, data, scenarios, implementation, ready, username),
             file_name="shoir_ie_quick_evidence.zip",
             mime="application/zip",
-            use_container_width=True,
+            width="stretch",
             key="global_quick_evidence_" + key,
         )
 

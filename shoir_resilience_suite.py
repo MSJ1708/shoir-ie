@@ -654,7 +654,7 @@ def _get_editor(st: Any, module: str, name: str, frame: pd.DataFrame) -> pd.Data
     if not isinstance(existing, pd.DataFrame):
         existing = frame.copy(deep=True)
         st.session_state[state_key] = existing
-    edited = st.data_editor(existing, key=widget_key, num_rows="dynamic", hide_index=True, use_container_width=True)
+    edited = st.data_editor(existing, key=widget_key, num_rows="dynamic", hide_index=True, width="stretch")
     st.session_state[state_key] = edited.copy(deep=True)
     return edited.copy(deep=True)
 
@@ -704,7 +704,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             ("Telemetry coverage", f"{health['metrics']['telemetry_coverage_pct']:.1f}%"),
         ])
         st.caption("Edge mode here is a simulated buffering assumption only. No physical asset, network or controller is connected.")
-        st.plotly_chart(px.bar(asset_results, x="Asset", y=["Modeled health index %", "Modeled risk index %"], barmode="group", title="Synthetic asset health and risk", template="plotly_white"), use_container_width=True)
+        st.plotly_chart(px.bar(asset_results, x="Asset", y=["Modeled health index %", "Modeled risk index %"], barmode="group", title="Synthetic asset health and risk", template="plotly_white"), width="stretch")
         st.markdown("### 2. Alternate-source allocation")
         supplier_defaults = defaults["suppliers"].copy()
         demand_defaults = defaults["demands"].copy()
@@ -727,11 +727,11 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         c1, c2 = st.columns(2)
         with c1:
             chart = pd.DataFrame({"Case": ["Baseline", "Disrupted"], "Service (%)": [baseline_model["metrics"].get("service_level_pct", 0.0), model["metrics"].get("service_level_pct", 0.0)]})
-            st.plotly_chart(px.bar(chart, x="Case", y="Service (%)", title="Modeled service retention", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(chart, x="Case", y="Service (%)", title="Modeled service retention", template="plotly_white"), width="stretch")
         with c2:
             chart = pd.DataFrame({"Case": ["Baseline", "Disrupted"], "Unmet units": [baseline_model["metrics"].get("unmet_demand", 0.0), model["metrics"].get("unmet_demand", 0.0)]})
-            st.plotly_chart(px.bar(chart, x="Case", y="Unmet units", title="Visible unmet industrial demand", template="plotly_white"), use_container_width=True)
-        st.dataframe(comparison, use_container_width=True, hide_index=True)
+            st.plotly_chart(px.bar(chart, x="Case", y="Unmet units", title="Visible unmet industrial demand", template="plotly_white"), width="stretch")
+        st.dataframe(comparison, width="stretch", hide_index=True)
         _render_transport_results(st, px, go, module, model, prefix="AKDT")
         _render_snapshot_actions(st, module, username, {"assets": assets, "suppliers": suppliers, "demands": demands}, {"asset_results": asset_results, "routes": model["routes"], "shortages": model["shortages"], "baseline_comparison": comparison})
         with st.expander("Method, limits and integration readiness"):
@@ -803,8 +803,8 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         })
         with target:
             import plotly.express as px
-            st.plotly_chart(px.bar(chart_df, x="Case", y="Value", title=title, labels={"Value": y_title}, template="plotly_white"), use_container_width=True)
-    st.dataframe(scenario_comparison, use_container_width=True, hide_index=True)
+            st.plotly_chart(px.bar(chart_df, x="Case", y="Value", title=title, labels={"Value": y_title}, template="plotly_white"), width="stretch")
+    st.dataframe(scenario_comparison, width="stretch", hide_index=True)
     if humanitarian:
         st.session_state["humanitarian_allocations_df"] = model["routes"].copy(deep=True)
         st.session_state["humanitarian_gaps_df"] = model["shortages"].copy(deep=True)
@@ -830,7 +830,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             if isinstance(sim, pd.DataFrame) and not sim.empty:
                 st.metric("Median modeled service", f"{sim['Service %'].median():.1f}%")
                 st.metric("10th percentile service", f"{sim['Service %'].quantile(0.10):.1f}%")
-                st.plotly_chart(px.histogram(sim, x="Service %", nbins=20, title="Modeled service under random shocks", template="plotly_white"), use_container_width=True)
+                st.plotly_chart(px.histogram(sim, x="Service %", nbins=20, title="Modeled service under random shocks", template="plotly_white"), width="stretch")
                 st.download_button("Download stress-test CSV", sim.to_csv(index=False).encode("utf-8"), file_name="resilience_stress_test.csv", mime="text/csv", key=_state_key(module, "mc_csv"))
             else:
                 st.caption("Run the stress test to create a reproducible uncertainty distribution.")
@@ -860,7 +860,7 @@ def _render_transport_results(st: Any, px: Any, go: Any, module: str, model: Map
             st.warning("No positive allocations were returned. Check capacity, demand and table values.")
         else:
             fig = px.bar(routes, x="Destination", y="Allocated units", color="Supplier", barmode="group", title=f"{prefix}: allocation by destination", template="plotly_white")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             labels = list(dict.fromkeys(routes["Supplier"].astype(str).tolist() + routes["Destination"].astype(str).tolist()))
             index = {name: i for i, name in enumerate(labels)}
             fig_sankey = go.Figure(data=[go.Sankey(
@@ -873,21 +873,21 @@ def _render_transport_results(st: Any, px: Any, go: Any, module: str, model: Map
                 },
             )])
             fig_sankey.update_layout(title="Abstract supplier-to-destination flow (not a geographic map)", font_size=11)
-            st.plotly_chart(fig_sankey, use_container_width=True)
+            st.plotly_chart(fig_sankey, width="stretch")
     with tab_b:
         if not utilization.empty:
             c1, c2 = st.columns(2)
             with c1:
-                st.plotly_chart(px.bar(utilization, x="Supplier", y="Utilization %", color="Status" if "Status" in utilization else None, title="Supplier utilization", template="plotly_white"), use_container_width=True)
+                st.plotly_chart(px.bar(utilization, x="Supplier", y="Utilization %", color="Status" if "Status" in utilization else None, title="Supplier utilization", template="plotly_white"), width="stretch")
             with c2:
                 if not shortages.empty:
-                    st.plotly_chart(px.bar(shortages, x="Destination", y=["Fulfilled", "Shortage"], barmode="stack", title="Demand fulfilment and visible shortfall", template="plotly_white"), use_container_width=True)
-            st.dataframe(utilization, use_container_width=True, hide_index=True)
+                    st.plotly_chart(px.bar(shortages, x="Destination", y=["Fulfilled", "Shortage"], barmode="stack", title="Demand fulfilment and visible shortfall", template="plotly_white"), width="stretch")
+            st.dataframe(utilization, width="stretch", hide_index=True)
         if not shortages.empty:
-            st.dataframe(shortages, use_container_width=True, hide_index=True)
+            st.dataframe(shortages, width="stretch", hide_index=True)
     with tab_c:
         st.markdown("**Allocated route ledger**")
-        st.dataframe(routes, use_container_width=True, hide_index=True)
+        st.dataframe(routes, width="stretch", hide_index=True)
         st.download_button("Download allocation CSV", routes.to_csv(index=False).encode("utf-8"), file_name="resilience_allocations.csv", mime="text/csv", key=_state_key(module, "allocation_csv"))
         st.download_button("Download demand / shortage CSV", shortages.to_csv(index=False).encode("utf-8"), file_name="resilience_demand_status.csv", mime="text/csv", key=_state_key(module, "shortage_csv"))
         st.download_button("Download supplier summary CSV", utilization.to_csv(index=False).encode("utf-8"), file_name="resilience_supplier_summary.csv", mime="text/csv", key=_state_key(module, "capacity_csv"))
@@ -926,10 +926,10 @@ def _render_closed_loop(module: str, username: str) -> None:
     with tabs[0]:
         cols = st.columns(2)
         with cols[0]:
-            st.plotly_chart(px.bar(analysis["results"], x="Process", y=["Reused material kg", "Residual material kg"], barmode="stack", title="Recoverable material: reuse vs residual", template="plotly_white"), use_container_width=True)
-            st.plotly_chart(px.bar(analysis["results"], x="Process", y="Recovered heat kWh", title="Heat recovery potential", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(analysis["results"], x="Process", y=["Reused material kg", "Residual material kg"], barmode="stack", title="Recoverable material: reuse vs residual", template="plotly_white"), width="stretch")
+            st.plotly_chart(px.bar(analysis["results"], x="Process", y="Recovered heat kWh", title="Heat recovery potential", template="plotly_white"), width="stretch")
         with cols[1]:
-            st.plotly_chart(px.bar(analysis["results"], x="Process", y=["Reused water m3", "Residual water m3"], barmode="stack", title="Water recovery: reuse vs residual", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(analysis["results"], x="Process", y=["Reused water m3", "Residual water m3"], barmode="stack", title="Water recovery: reuse vs residual", template="plotly_white"), width="stretch")
             labels = ["Recoverable material (kg)", "Material reused (kg)", "Residual material (kg)"]
             fig = go.Figure(go.Sankey(
                 node={"label": labels},
@@ -938,9 +938,9 @@ def _render_closed_loop(module: str, username: str) -> None:
                 ]},
             ))
             fig.update_layout(title="Material circularity flow (kg only); heat and water are charted separately")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
     with tabs[1]:
-        st.dataframe(analysis["results"], use_container_width=True, hide_index=True)
+        st.dataframe(analysis["results"], width="stretch", hide_index=True)
         st.download_button("Download circularity ledger", analysis["results"].to_csv(index=False).encode("utf-8"), file_name="industrial_symbiosis_ledger.csv", mime="text/csv", key=_state_key(module, "ledger_csv"))
     with tabs[2]:
         st.write("Per process, reusable material is the smaller of waste multiplied by capture efficiency and downstream reuse demand. Captured heat and water are scenario estimates, not measured energy or water balances.")
@@ -976,17 +976,17 @@ def _render_urban_mobility(module: str, username: str) -> None:
     with tabs[0]:
         c1, c2 = st.columns(2)
         with c1:
-            st.plotly_chart(px.bar(result, x="Junction", y=["Road utilization %", "Transit utilization %"], barmode="group", title="Road and transit capacity utilization", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(result, x="Junction", y=["Road utilization %", "Transit utilization %"], barmode="group", title="Road and transit capacity utilization", template="plotly_white"), width="stretch")
         with c2:
-            st.plotly_chart(px.bar(result, x="Junction", y=["Baseline delay min", "Modeled delay min"], barmode="group", title="Baseline vs modeled delay", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(result, x="Junction", y=["Baseline delay min", "Modeled delay min"], barmode="group", title="Baseline vs modeled delay", template="plotly_white"), width="stretch")
     with tabs[1]:
         c1, c2 = st.columns(2)
         with c1:
-            st.plotly_chart(px.bar(result, x="Junction", y="Modeled queue excess/hr", title="Modeled excess demand proxy", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(result, x="Junction", y="Modeled queue excess/hr", title="Modeled excess demand proxy", template="plotly_white"), width="stretch")
         with c2:
-            st.plotly_chart(px.bar(result, x="Junction", y="Modeled emissions kg/hr", title="Modeled emissions proxy by corridor", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(result, x="Junction", y="Modeled emissions kg/hr", title="Modeled emissions proxy by corridor", template="plotly_white"), width="stretch")
     with tabs[2]:
-        st.dataframe(result, use_container_width=True, hide_index=True)
+        st.dataframe(result, width="stretch", hide_index=True)
         st.download_button("Download mobility scenario CSV", result.to_csv(index=False).encode("utf-8"), file_name="urban_mobility_scenario.csv", mime="text/csv", key=_state_key(module, "mobility_csv"))
         st.write("The model splits observed synthetic passenger demand using the chosen mode share, estimates road and transit utilization, and applies simple capacity-sensitive delay and emissions proxies. Calibration against local traffic, signal timing and transit data is required before policy decisions.")
     _render_snapshot_actions(st, module, username, {"junctions": junctions}, {"results": result, "metrics": m})
@@ -1036,29 +1036,29 @@ def _render_l_sims(module: str, username: str) -> None:
     tabs = st.tabs(["Capability allocation", "Baseline comparison", "Supplier confidence & capacity", "Data & assumptions"])
     with tabs[0]:
         if not analysis["routes"].empty:
-            st.plotly_chart(px.bar(analysis["routes"], x="Destination", y="Allocated units", color="Supplier", barmode="group", title="Modeled local allocation by plant / depot", template="plotly_white"), use_container_width=True)
-            st.dataframe(analysis["routes"], use_container_width=True, hide_index=True)
+            st.plotly_chart(px.bar(analysis["routes"], x="Destination", y="Allocated units", color="Supplier", barmode="group", title="Modeled local allocation by plant / depot", template="plotly_white"), width="stretch")
+            st.dataframe(analysis["routes"], width="stretch", hide_index=True)
         else:
             st.info("No allocations were produced. Check part-family labels and available domestic capacity.")
         if not analysis["shortages"].empty:
-            st.plotly_chart(px.bar(analysis["shortages"], x="Destination", y="Shortage", color="Part family", title="Industrial part-family capability gaps", template="plotly_white"), use_container_width=True)
-            st.dataframe(analysis["shortages"], use_container_width=True, hide_index=True)
+            st.plotly_chart(px.bar(analysis["shortages"], x="Destination", y="Shortage", color="Part family", title="Industrial part-family capability gaps", template="plotly_white"), width="stretch")
+            st.dataframe(analysis["shortages"], width="stretch", hide_index=True)
     with tabs[1]:
         comparison_cols = st.columns(2)
         with comparison_cols[0]:
             chart = pd.DataFrame({"Case": ["Baseline", "Current scenario"], "Demand fulfilled (%)": [base_m["demand_fulfilled_pct"], m["demand_fulfilled_pct"]]})
-            st.plotly_chart(px.bar(chart, x="Case", y="Demand fulfilled (%)", title="Local industrial demand coverage", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(chart, x="Case", y="Demand fulfilled (%)", title="Local industrial demand coverage", template="plotly_white"), width="stretch")
         with comparison_cols[1]:
             chart = pd.DataFrame({"Case": ["Baseline", "Current scenario"], "Unmet demand": [base_m["monthly_unmet_demand"], m["monthly_unmet_demand"]]})
-            st.plotly_chart(px.bar(chart, x="Case", y="Unmet demand", title="Industrial capability gap", template="plotly_white"), use_container_width=True)
-        st.dataframe(local_comparison, use_container_width=True, hide_index=True)
+            st.plotly_chart(px.bar(chart, x="Case", y="Unmet demand", title="Industrial capability gap", template="plotly_white"), width="stretch")
+        st.dataframe(local_comparison, width="stretch", hide_index=True)
     with tabs[2]:
-        st.plotly_chart(px.bar(suppliers, x="Supplier", y=["Monthly capacity", "Repair capacity/month"], barmode="group", color_discrete_sequence=None, title="Domestic production and repair capacity", template="plotly_white"), use_container_width=True)
+        st.plotly_chart(px.bar(suppliers, x="Supplier", y=["Monthly capacity", "Repair capacity/month"], barmode="group", color_discrete_sequence=None, title="Domestic production and repair capacity", template="plotly_white"), width="stretch")
         if "Qualification confidence %" in suppliers:
-            st.plotly_chart(px.bar(suppliers, x="Supplier", y="Qualification confidence %", title="User-entered qualification confidence", template="plotly_white"), use_container_width=True)
+            st.plotly_chart(px.bar(suppliers, x="Supplier", y="Qualification confidence %", title="User-entered qualification confidence", template="plotly_white"), width="stretch")
     with tabs[3]:
         st.write("Demand is matched by the editable, generic industrial spare-part family. A supplier from a different family cannot fill that demand in this model. Capacity, cost, confidence and local-content values are user inputs and require evidence.")
-        st.dataframe(analysis["supplier_summary"], use_container_width=True, hide_index=True)
+        st.dataframe(analysis["supplier_summary"], width="stretch", hide_index=True)
         st.download_button("Download local capability allocation CSV", analysis["routes"].to_csv(index=False).encode("utf-8"), file_name="lsims_local_capability.csv", mime="text/csv", key=_state_key(module, "lsims_routes_csv"))
         st.download_button("Download capability gap CSV", analysis["shortages"].to_csv(index=False).encode("utf-8"), file_name="lsims_capability_gaps.csv", mime="text/csv", key=_state_key(module, "lsims_gaps_csv"))
     _render_snapshot_actions(st, module, username, {"suppliers": suppliers, "demands": demands}, {"routes": analysis["routes"], "shortages": analysis["shortages"], "supplier_summary": analysis["supplier_summary"], "scenario_comparison": local_comparison})
@@ -1097,7 +1097,7 @@ def _render_snapshot_actions(st: Any, module: str, username: str, inputs: Mappin
             if history.empty:
                 st.info("No saved snapshots for this module and user yet.")
             else:
-                st.dataframe(history, use_container_width=True, hide_index=True)
+                st.dataframe(history, width="stretch", hide_index=True)
                 st.download_button("Download saved-run index", history.to_csv(index=False).encode("utf-8"), file_name="resilience_saved_runs.csv", mime="text/csv", key=_state_key(module, "history_csv"))
                 selected_run = st.selectbox("Snapshot to inspect", history["run_id"].astype(str).tolist(), format_func=lambda value: value[:12], key=_state_key(module, "inspect_run_id"))
                 if st.button("Inspect selected snapshot", key=_state_key(module, "inspect_run_button")):
