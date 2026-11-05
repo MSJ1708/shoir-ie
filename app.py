@@ -2320,7 +2320,7 @@ if not st.session_state.get("current_user"):
                             if st.button(
                                 "Open this target in Workbench",
                                 key=f"explore_open_target_{_target_tool_id}",
-                                use_container_width=True,
+                                width="stretch",
                             ):
                                 st.session_state["shoir_100_tool_query"] = ""
                                 st.session_state["shoir_100_tool_workbench"] = "All workbenches"
@@ -2648,18 +2648,18 @@ def _render_pretty_result(value, title="Result", key_prefix="result"):
                 cols[i%len(cols)].metric(str(k).replace("_"," ").title(),display)
         for name,df in frames.items():
             st.markdown(f"**{str(name).replace('_',' ').title()}**")
-            st.dataframe(df,use_container_width=True,hide_index=True)
+            st.dataframe(df,width="stretch",hide_index=True)
             _render_result_chart(df,str(name).replace("_"," ").title(),f"{key_prefix}_{name}")
         if nested:
             with st.expander("🔎 Detailed diagnostics",expanded=False):
                 for name,val in nested.items():
                     st.markdown(f"**{str(name).replace('_',' ').title()}**")
                     if isinstance(val,dict):
-                        st.dataframe(pd.json_normalize(val),use_container_width=True,hide_index=True)
+                        st.dataframe(pd.json_normalize(val),width="stretch",hide_index=True)
                     else:
-                        st.dataframe(pd.DataFrame(val) if isinstance(val,list) else pd.DataFrame([val]),use_container_width=True,hide_index=True)
+                        st.dataframe(pd.DataFrame(val) if isinstance(val,list) else pd.DataFrame([val]),width="stretch",hide_index=True)
     elif isinstance(value,pd.DataFrame):
-        st.dataframe(value,use_container_width=True,hide_index=True)
+        st.dataframe(value,width="stretch",hide_index=True)
         _render_result_chart(value,title,key_prefix)
     else:
         st.write(value)
@@ -2677,7 +2677,7 @@ def _render_result_chart(df,title,key_prefix):
     nums=[x for x in df.columns if pd.api.types.is_numeric_dtype(df[x])]
     if not nums:
         if auto_suite:
-            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+            st.plotly_chart(auto_suite[0][1],width="stretch",config={"displayModeBar":False,"responsive":True})
         return
     y=st.selectbox("Metric",nums,key=f"{key_prefix}_metric")
     xs=[x for x in df.columns if x!=y]
@@ -2685,16 +2685,16 @@ def _render_result_chart(df,title,key_prefix):
     kind=st.selectbox("Chart",["Auto","Bar","Line","Scatter"],key=f"{key_prefix}_chart")
     if kind=="Auto":
         if auto_suite:
-            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+            st.plotly_chart(auto_suite[0][1],width="stretch",config={"displayModeBar":False,"responsive":True})
         return
     plot=df[[x,y]].dropna() if x else df[[y]].dropna()
     if plot.empty:
         if auto_suite:
-            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+            st.plotly_chart(auto_suite[0][1],width="stretch",config={"displayModeBar":False,"responsive":True})
         return
     fig=px.line(plot,x=x,y=y,markers=True,title=title) if kind=="Line" and x else px.scatter(plot,x=x,y=y,title=title) if kind=="Scatter" and x else px.bar(plot,x=x,y=y,title=title) if x else px.bar(plot,y=y,title=title)
     fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
-    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False,"responsive":True})
+    st.plotly_chart(fig,width="stretch",config={"displayModeBar":False,"responsive":True})
 
 # =====================================================================
 # UNIVERSAL MODULE PARITY — PREPARE
@@ -2952,7 +2952,7 @@ elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh 
         edited_zkm_nodes = st.data_editor(
             st.session_state['zkm_nodes'],
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="zkm_nodes_editor"
         )
         st.session_state['zkm_nodes'] = edited_zkm_nodes
@@ -2963,7 +2963,7 @@ elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh 
         with col_z2:
             st.metric("ZKP Soundness Level", "256-bit Secure", delta="Zero Information Leakage")
 
-        if st.button("🔐 Execute Zero-Knowledge Validation Circuit", type="primary", use_container_width=True):
+        if st.button("🔐 Execute Zero-Knowledge Validation Circuit", type="primary", width="stretch"):
             with st.spinner("Generating Groth16 cryptographic proofs across decentralized enterprise nodes..."):
                 time.sleep(1.2)
             st.success("ZKP validation successful! All competing enterprise IP bounds remain fully encrypted and mathematically secure.")
@@ -2980,7 +2980,7 @@ elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh 
             st.metric("Equilibrium Convergence Speed", "8.4 ms", delta="Global Optimum")
             st.metric("Pareto Efficiency Surplus", "+38.2%", delta="Maximized")
 
-        if st.button("⚖️ Solve Nash Equilibrium Matrix", type="primary", use_container_width=True):
+        if st.button("⚖️ Solve Nash Equilibrium Matrix", type="primary", width="stretch"):
             with st.spinner("Executing iterative non-cooperative game matrix optimization..."):
                 time.sleep(1.4)
             st.success("Nash equilibrium reached! Optimal inter-plant trading allocations established.")
@@ -2997,7 +2997,7 @@ elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh 
             st.metric("Live Edge Polling Rate", "1,000 Hz Sub-ms", delta="Stable")
             st.metric("Empirical Drift Deviation", "0.018%", delta="Zero Drift Target")
 
-        if st.button("🔄 Trigger Autonomous Self-Correction Loop", type="primary", use_container_width=True):
+        if st.button("🔄 Trigger Autonomous Self-Correction Loop", type="primary", width="stretch"):
             with st.spinner("Executing symbolic regression and refactoring governing differential equations..."):
                 time.sleep(1.5)
             st.session_state['zkm_telemetry_stream'].append(round(random.uniform(99.0, 100.0), 2))
@@ -3035,7 +3035,7 @@ The ACO-ZKMS engine successfully validated multi-enterprise circular exchanges u
             file_name="shoir_ie_acozkms_master_bundle.zip",
             mime="application/zip",
             type="primary",
-            use_container_width=True
+            width="stretch"
         )
 elif selected_module in ["Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)", "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)"]:
     import streamlit as st
@@ -3103,7 +3103,7 @@ Real-world IoT telemetry indicated minor thermal jitter deviations. AE-FRESM aut
         edited_fresm = st.data_editor(
             st.session_state['fresm_experiments'],
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="fresm_experiment_editor"
         )
         st.session_state['fresm_experiments'] = edited_fresm
@@ -3117,7 +3117,7 @@ Real-world IoT telemetry indicated minor thermal jitter deviations. AE-FRESM aut
             with col_e2:
                 custom_status = st.selectbox("Initial Status", ["Pending", "Verified", "Optimized", "Under Falsification"])
             
-            submitted_exp = st.form_submit_button("Add Experiment to Registry", use_container_width=True)
+            submitted_exp = st.form_submit_button("Add Experiment to Registry", width="stretch")
             if submitted_exp and custom_iso:
                 new_id = f"EXP_{len(st.session_state['fresm_experiments'])+1:03d}"
                 new_row = {"Experiment ID": new_id, "Isomorphism Pair": custom_iso, "Stress Intensity": custom_intensity, "Drift Status": "Monitoring", "Status": custom_status}
@@ -3133,12 +3133,12 @@ Real-world IoT telemetry indicated minor thermal jitter deviations. AE-FRESM aut
         edited_nodes = st.data_editor(
             st.session_state['fresm_telemetry_nodes'],
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="fresm_nodes_editor"
         )
         st.session_state['fresm_telemetry_nodes'] = edited_nodes
 
-        if st.button("🚀 Run Batch Falsification Across All Active Nodes", type="primary", use_container_width=True):
+        if st.button("🚀 Run Batch Falsification Across All Active Nodes", type="primary", width="stretch"):
             with st.spinner("Executing parallel adversarial shocks across configured edge nodes..."):
                 time.sleep(1.2)
             log_fresm_event("Executed batch falsification across active IoT nodes")
@@ -3156,7 +3156,7 @@ Real-world IoT telemetry indicated minor thermal jitter deviations. AE-FRESM aut
             st.markdown("**LaTeX Manuscript Segment (Editable)**")
             updated_latex = st.text_area("Edit LaTeX Source", value=st.session_state['fresm_artifacts']['latex'], height=250)
 
-        if st.button("💾 Save & Commit Customizations", type="primary", use_container_width=True):
+        if st.button("💾 Save & Commit Customizations", type="primary", width="stretch"):
             st.session_state['fresm_artifacts']['code'] = updated_code
             st.session_state['fresm_artifacts']['latex'] = updated_latex
             log_fresm_event("Saved manual edits to AE-FRESM artifacts")
@@ -3190,7 +3190,7 @@ Real-world IoT telemetry indicated minor thermal jitter deviations. AE-FRESM aut
             file_name="shoir_ie_custom_fresm_bundle.zip",
             mime="application/zip",
             type="primary",
-            use_container_width=True
+            width="stretch"
         )
 elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)", "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)"]:
     import streamlit as st
@@ -3248,7 +3248,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
         st.markdown("Ingest global academic literature across disparate fields, stripping away domain-specific terminology to expose pure differential operators and matrix topologies.")
 
         domain_df = st.session_state['ucmie_domains_registry']
-        edited_domains = st.data_editor(domain_df, num_rows="dynamic", use_container_width=True, key="ucmie_domain_editor_v10")
+        edited_domains = st.data_editor(domain_df, num_rows="dynamic", width="stretch", key="ucmie_domain_editor_v10")
         st.session_state['ucmie_domains_registry'] = edited_domains
 
         with st.form("inject_domain_form_v10"):
@@ -3261,7 +3261,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             with col_d3:
                 new_dom_sig = st.text_input("Mathematical Signature", placeholder="e.g., Non-linear ODE Matrix")
             
-            submitted_domain = st.form_submit_button("Register Field to Global Topology Mesh", use_container_width=True)
+            submitted_domain = st.form_submit_button("Register Field to Global Topology Mesh", width="stretch")
             if submitted_domain and new_dom_name:
                 new_row = {"Domain": new_dom_name, "Core Topology": new_dom_topo, "Math Signature": new_dom_sig, "Weight": 0.90, "Active": True}
                 st.session_state['ucmie_domains_registry'] = pd.concat([st.session_state['ucmie_domains_registry'], pd.DataFrame([new_row])], ignore_index=True)
@@ -3288,7 +3288,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             st.metric("Global Preprint Database Index", "8.4 Million Papers", delta="+28,100 today")
             st.metric("Isomorphism Accuracy Index", "99.4%", delta="State-of-the-Art")
 
-        if st.button("🔍 Execute Deep Isomorphism Tensor Scan", type="primary", use_container_width=True):
+        if st.button("🔍 Execute Deep Isomorphism Tensor Scan", type="primary", width="stretch"):
             with st.spinner("Executing multi-core tensor contractions across 8.4M preprints..."):
                 time.sleep(1.2)
             log_ucmie_event(f"Executed deep tensor scan for: {selected_target_ie}")
@@ -3296,7 +3296,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
 
         st.markdown("**Active Isomorphism Registry**")
         iso_df = pd.DataFrame(st.session_state['ucmie_isomorphism_pairs'])
-        st.dataframe(iso_df, use_container_width=True)
+        st.dataframe(iso_df, width="stretch")
 
         with st.form("custom_iso_form_v10"):
             st.markdown("**Add Custom Cross-Disciplinary Mapping**")
@@ -3307,7 +3307,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             with col_i2:
                 custom_conf = st.text_input("Confidence Score", value="98.5%")
             
-            submitted_iso = st.form_submit_button("Commit Isomorphism Mapping", use_container_width=True)
+            submitted_iso = st.form_submit_button("Commit Isomorphism Mapping", width="stretch")
             if submitted_iso and custom_source:
                 new_id = f"ISO_{len(st.session_state['ucmie_isomorphism_pairs'])+1:02d}"
                 st.session_state['ucmie_isomorphism_pairs'].append({
@@ -3329,7 +3329,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             st.metric("Quantum Speedup Factor", f"{qubit_count * 14.2}x", delta="Polynomial Acceleration")
             st.metric("Ground State Energy Convergence", "-482.91 Hartree", delta="Optimal")
 
-        if st.button("⚡ Run Quantum-Classical Hybrid Solver", type="primary", use_container_width=True):
+        if st.button("⚡ Run Quantum-Classical Hybrid Solver", type="primary", width="stretch"):
             with st.spinner(f"Simulating {qubit_count} superconducting qubits across isomorphic energy landscapes..."):
                 time.sleep(1.5)
             log_ucmie_event("Executed Quantum-Classical Hybrid Solver")
@@ -3386,7 +3386,7 @@ print("Paradigm successfully translated and verified for industrial deployment."
         with col_g2:
             include_bibtex = st.checkbox("Include Automated Cross-Disciplinary BibTeX Citations", value=True)
 
-        if st.button("🚀 Compile LaTeX Paper & Executable Code Bundle", type="primary", use_container_width=True):
+        if st.button("🚀 Compile LaTeX Paper & Executable Code Bundle", type="primary", width="stretch"):
             with st.spinner("Compiling LaTeX document source, generating BibTeX entries, and building Python simulation..."):
                 time.sleep(1.8)
             
@@ -3480,7 +3480,7 @@ if __name__ == "__main__":
                 file_name="shoir_ie_ucmie_world_class_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Compile the LaTeX paper in **Tab 5** to unlock the master export bundle.")
@@ -3570,7 +3570,7 @@ elif selected_module in ["Edge-Connected IoT Digital Twin Bridge", "🔌 Edge-Co
                     st.success(f"Successfully registered protocol: **{new_p_name}**!")
                     st.rerun()
 
-        if st.button("🔌 Initialize Live IoT Telemetry Stream", type="primary", use_container_width=True):
+        if st.button("🔌 Initialize Live IoT Telemetry Stream", type="primary", width="stretch"):
             with st.spinner(f"Establishing secure connection to {broker_endpoint} via {selected_protocol}..."):
                 time.sleep(1.0)
             st.session_state['iot_stream_active'] = True
@@ -3583,17 +3583,17 @@ elif selected_module in ["Edge-Connected IoT Digital Twin Bridge", "🔌 Edge-Co
 
         st.markdown("**Current Active Sensor Tags**")
         tag_df = st.session_state['iot_sensor_tags']
-        edited_tags = st.data_editor(tag_df, num_rows="dynamic", use_container_width=True, key="sensor_tag_editor")
+        edited_tags = st.data_editor(tag_df, num_rows="dynamic", width="stretch", key="sensor_tag_editor")
         st.session_state['iot_sensor_tags'] = edited_tags
 
         col_t1, col_t2 = st.columns(2)
         with col_t1:
-            if st.button("➕ Add Standard Telemetry Batch", use_container_width=True):
+            if st.button("➕ Add Standard Telemetry Batch", width="stretch"):
                 new_row = {"Tag ID": f"TAG_GEN_{len(edited_tags)+1:02d}", "Name": "Auxiliary Flow Sensor", "Unit": "L/min", "Target Min": 10.0, "Target Max": 50.0, "Active": True}
                 st.session_state['iot_sensor_tags'] = pd.concat([st.session_state['iot_sensor_tags'], pd.DataFrame([new_row])], ignore_index=True)
                 st.rerun()
         with col_t2:
-            if st.button("🗑️ Reset Tag Registry to Default", use_container_width=True):
+            if st.button("🗑️ Reset Tag Registry to Default", width="stretch"):
                 st.session_state['iot_sensor_tags'] = pd.DataFrame([
                     {"Tag ID": "TAG_TEMP_01", "Name": "Reactor Core Temp", "Unit": "°C", "Target Min": 80.0, "Target Max": 120.0, "Active": True},
                     {"Tag ID": "TAG_PRESS_02", "Name": "Hydraulic Pressure", "Unit": "PSI", "Target Min": 1500.0, "Target Max": 2200.0, "Active": True}
@@ -3630,7 +3630,7 @@ elif selected_module in ["Edge-Connected IoT Digital Twin Bridge", "🔌 Edge-Co
             
             live_df = pd.DataFrame(live_records)
             st.markdown("**Real-Time Sensor-to-Twin Synchronization Feed**")
-            st.dataframe(live_df, use_container_width=True)
+            st.dataframe(live_df, width="stretch")
             st.session_state['iot_live_df'] = live_df
         else:
             st.warning("⚠️ Initialize the live telemetry stream in **Tab 1** to activate adaptive state synchronization.")
@@ -3641,7 +3641,7 @@ elif selected_module in ["Edge-Connected IoT Digital Twin Bridge", "🔌 Edge-Co
 
         st.markdown("**Active Closed-Loop Automation Rules**")
         rules_df = pd.DataFrame(st.session_state['iot_control_rules'])
-        st.dataframe(rules_df, use_container_width=True)
+        st.dataframe(rules_df, width="stretch")
 
         with st.form("new_rule_form"):
             st.markdown("**Add Custom Closed-Loop Trigger Rule**")
@@ -3713,7 +3713,7 @@ if __name__ == "__main__":
                 file_name="shoir_ie_custom_iot_digital_twin_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Initialize the IoT stream in **Tab 1** to unlock the frictionless export bundle.")
@@ -3768,7 +3768,7 @@ elif selected_module == "Autonomous Parametric Surrogate Swarm":
             sampling_strategy = st.selectbox("Design of Experiments (DoE)", ["Latin Hypercube Sampling (LHS)", "Sobol Low-Discrepancy Sequence", "Adaptive Active Learning", "Monte Carlo Random Grid"])
             disruption_scenario = st.selectbox("Disruption Stress Test", ["Multi-Echelon Port Bottleneck", "Stochastic Lead-Time Surge", "Raw Material Cost Shock", "Demand Spike & Capacity Crunch"])
 
-        if st.button("🚀 Spawn Stochastic Simulation Swarm", type="primary", use_container_width=True):
+        if st.button("🚀 Spawn Stochastic Simulation Swarm", type="primary", width="stretch"):
             with st.spinner(f"Spawning {simulation_threads} concurrent stochastic threads via {sampling_strategy}..."):
                 time.sleep(1.1)
             st.session_state['swarm_executed'] = True
@@ -3809,7 +3809,7 @@ elif selected_module == "Autonomous Parametric Surrogate Swarm":
                 "Pareto Optimality": ["Optimal", "Optimal", "Dominated", "Optimal", "Dominated"]
             })
             st.markdown("**Pareto-Optimal Operating Frontier**")
-            st.dataframe(pareto_data, use_container_width=True)
+            st.dataframe(pareto_data, width="stretch")
             st.session_state['surrogate_pareto_df'] = pareto_data
         else:
             st.info("Execute simulation swarm to compute Pareto-optimal frontiers and risk bounds.")
@@ -3854,7 +3854,7 @@ if __name__ == "__main__":
                 file_name="shoir_ie_surrogate_swarm_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Run the simulation swarm and risk quantifier to unlock the export bundle.")
@@ -4017,7 +4017,7 @@ if __name__ == "__main__":
                 file_name="shoir_ie_reproducibility_vault_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Generate the vault ledger in **Tab 1** to unlock the frictionless export bundle.")
@@ -4110,7 +4110,7 @@ elif selected_module == "Automated Code-to-Formal-Proof Verifier":
                 "Violated Constraint": ["Non-Negativity ($x \\ge 0$)", "Conservation of Mass", "Capacity Limit", "Conservation of Mass"],
                 "Severity": ["Critical", "High", "Medium", "Critical"]
             })
-            st.dataframe(counterexample_data, use_container_width=True)
+            st.dataframe(counterexample_data, width="stretch")
             st.session_state['counterexample_df'] = counterexample_data
         else:
             st.info("Complete AST parsing and invariant checks to inspect generated counterexamples.")
@@ -4166,7 +4166,7 @@ CMD ["pytest"]
                 file_name="shoir_ie_formal_proof_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Run the symbolic execution pipeline in **Tab 1 & Tab 3** to unlock the frictionless export bundle.")
@@ -4244,7 +4244,7 @@ elif selected_module == "Real-Time Quantum-Classical Hybrid Optimization Router"
         st.markdown("#### Classical vs. Quantum Speedup Benchmarker")
         st.markdown("Run side-by-side performance stress tests evaluating quantum-hybrid subroutines against traditional branch-and-bound and Benders decomposition solvers.")
 
-        if st.button("🚀 Execute Hybrid Quantum-Classical Benchmark", type="primary", use_container_width=True):
+        if st.button("🚀 Execute Hybrid Quantum-Classical Benchmark", type="primary", width="stretch"):
             with st.spinner(f"Running quantum circuit optimization across {selected_backend} and benchmarking vs classical solvers..."):
                 time.sleep(1.2)
             st.session_state['quantum_benchmark_run'] = True
@@ -4267,7 +4267,7 @@ elif selected_module == "Real-Time Quantum-Classical Hybrid Optimization Router"
             m3.metric("Solver Convergence", "14 iterations", delta="Accelerated")
 
             st.markdown("**Comparative Performance & Runtime Benchmark**")
-            st.dataframe(bench_df, use_container_width=True)
+            st.dataframe(bench_df, width="stretch")
             st.session_state['quantum_bench_df'] = bench_df
 
     with tab_export:
@@ -4303,7 +4303,7 @@ elif selected_module == "Real-Time Quantum-Classical Hybrid Optimization Router"
                 file_name="shoir_ie_quantum_router_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Run the hybrid benchmark in **Tab 3 (Classical-Quantum Benchmarker)** to unlock the frictionless export bundle.")
@@ -4465,7 +4465,7 @@ status = solver.Solve()
             index=[f"Cons_{i}" for i in range(matrix_size)]
         )
         st.markdown("**Constraint Jacobian Sparsity Matrix ($J_{ij}$)**")
-        st.dataframe(sparsity_data, use_container_width=True)
+        st.dataframe(sparsity_data, width="stretch")
 
         st.info("📏 **Dimensional Consistency Check**: All constraint components verify successfully to units of `[Currency ($) / Period]`.")
 
@@ -4473,7 +4473,7 @@ status = solver.Solve()
         st.markdown("#### Containerized One-Click Deployment Hub")
         st.markdown("Package your formalized research model into an exhaustive production `.zip` bundle.")
 
-        if st.button("📦 Package Complete Deployment Bundle (.zip)", type="primary", use_container_width=True):
+        if st.button("📦 Package Complete Deployment Bundle (.zip)", type="primary", width="stretch"):
             model_data = {
                 "sets": "[1, 2, 3, 4, 5]",
                 "params": "{1: 12.5, 2: 18.2, 3: 14.1, 4: 22.0, 5: 9.8}",
@@ -4546,7 +4546,7 @@ CMD ["pytest"]
                 file_name="shoir_ie_theory_to_code_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
 elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
     import streamlit as st
@@ -4643,7 +4643,7 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
     with tab_canvas:
         st.markdown("#### Live Adversarial Simulation & Stress Control Panel")
         
-        if st.button("🚀 Run Stressed Synthetic Twin Simulation", type="primary", use_container_width=True):
+        if st.button("🚀 Run Stressed Synthetic Twin Simulation", type="primary", width="stretch"):
             with st.spinner("Synthesizing multi-tier operational telemetry under adversarial shock conditions..."):
                 time.sleep(1.2)
             st.session_state['synthetic_sim_run'] = True
@@ -4708,7 +4708,7 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
                     "Warehouse Queue": warehouse_queue,
                     "Sanitized Inventory (DP Active)": inventory_level
                 })
-                st.dataframe(raw_log, use_container_width=True)
+                st.dataframe(raw_log, width="stretch")
                 st.session_state['synthetic_raw_log'] = raw_log
 
     with tab_export:
@@ -4758,7 +4758,7 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
                 file_name="shoir_ie_synthetic_twin_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Execute a simulation run in **Tab 4 (Live Stress Canvas)** to unlock the frictionless export bundle.")
@@ -4868,7 +4868,7 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
             ["Decision", decision_type, ""],
             ["Baseline", baseline_policy, ""]
         ], columns=["Factor", "Value", "Unit"])
-        st.dataframe(design_summary, use_container_width=True, hide_index=True)
+        st.dataframe(design_summary, width="stretch", hide_index=True)
 
     with tab_run:
         st.markdown("#### Controlled experiment")
@@ -4891,7 +4891,7 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
         if st.button(
             "🚀 Run Controlled Evidence Experiment",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="edrb_run"
         ):
             rng = np.random.default_rng(int(seed))
@@ -5044,7 +5044,7 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
             st.line_chart(curve.set_index("readiness_score")[["mean_regret"]])
 
             st.markdown("#### Experimental observations")
-            st.dataframe(holdout.head(100), use_container_width=True, hide_index=True)
+            st.dataframe(holdout.head(100), width="stretch", hide_index=True)
             st.caption(
                 "This visualization describes the observed relationship. It does not declare a scientifically valid threshold until the planned statistical analysis and robustness checks are complete."
             )
@@ -5080,7 +5080,7 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
                 file_name="shoir_ie_decision_readiness_experiment.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="edrb_export"
             )
         else:
@@ -5142,7 +5142,7 @@ elif selected_module == "Adversarial Chaos & Shock Injector":
         epsilon = st.slider("Privacy Budget ($\\epsilon$)", 0.1, 10.0, 1.5, 0.1, help="Lower epsilon increases privacy protection.")
         delta = st.selectbox("Failure Probability ($\\delta$)", [1e-5, 1e-6, 1e-7], index=1)
 
-        run_chaos_sim = st.button("🚀 Deploy Chaos Simulation & Stress Test", type="primary", use_container_width=True)
+        run_chaos_sim = st.button("🚀 Deploy Chaos Simulation & Stress Test", type="primary", width="stretch")
 
     with col_dash:
         st.markdown("#### 📊 4. Real-Time Resilience & Shock Analytics")
@@ -5207,7 +5207,7 @@ elif selected_module == "Adversarial Chaos & Shock Injector":
                     "Chaos Multiplier": chaos_multiplier,
                     "Inventory Level": inventory_stressed
                 })
-                st.dataframe(telemetry_log, use_container_width=True)
+                st.dataframe(telemetry_log, width="stretch")
 
             st.markdown("---")
             st.markdown("#### 📦 5. Frictionless Export Bundle (.zip)")
@@ -5250,7 +5250,7 @@ elif selected_module == "Adversarial Chaos & Shock Injector":
                 file_name="shoir_ie_adversarial_chaos_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Configure your chaos parameters, select a stochastic distribution, and click **'Deploy Chaos Simulation & Stress Test'** to run the digital twin.")
@@ -5365,7 +5365,7 @@ CMD ["streamlit", "run", "app.py", "--server.port=8501"]
             file_name="shoir_ie_live_paper_bundle.zip",
             mime="application/zip",
             type="primary",
-            use_container_width=True
+            width="stretch"
         )
 elif selected_module == "Adversarial AI Peer-Review Swarm":
     import streamlit as st
@@ -5422,7 +5422,7 @@ elif selected_module == "Adversarial AI Peer-Review Swarm":
         manuscript_input = st.text_area("Paste Abstract, Key Equations, or Methodology Summary", 
             value="We propose a stochastic multi-echelon inventory model optimized via non-linear programming under demand uncertainty, achieving 14% holding cost reduction.", height=120)
 
-        run_swarm = st.button("🚀 Convene Editorial Swarm & Audit", type="primary", use_container_width=True)
+        run_swarm = st.button("🚀 Convene Editorial Swarm & Audit", type="primary", width="stretch")
 
     with col_analysis:
         st.markdown("#### 📊 3. Swarm Consensus & Risk Analytics")
@@ -5518,7 +5518,7 @@ We sincerely thank the editorial panel and the adversarial reviewers for their r
                 file_name="shoir_ie_journal_simulator_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Configure your target venue, active agent personas, and strictness levels on the left, then click **'Convene Editorial Swarm & Audit'** to initialize the simulation.")
@@ -5594,7 +5594,7 @@ elif selected_module == "Paper-to-Simulation Auto-Engine":
             "Target Service Level ($\alpha$)", 0.80, 0.99, float(st.session_state['sim_config']["service_level"])
         )
 
-        run_exec = st.button("🚀 Execute Optimized Simulation Suite", type="primary", use_container_width=True)
+        run_exec = st.button("🚀 Execute Optimized Simulation Suite", type="primary", width="stretch")
 
     with col_viz:
         st.markdown("#### 📊 3. Execution Analytics & Digital Twin Canvas")
@@ -5645,7 +5645,7 @@ elif selected_module == "Paper-to-Simulation Auto-Engine":
             st.line_chart(res_df.set_index("Period")[["Inventory Position", "Safety Stock Threshold"]])
             
             with st.expander("🔍 View Raw Execution Logs & Parameter Audit Matrix"):
-                st.dataframe(res_df, use_container_width=True)
+                st.dataframe(res_df, width="stretch")
                 
             st.markdown("---")
             st.markdown("#### 📦 4. Frictionless Export Suite")
@@ -5692,7 +5692,7 @@ Optimal safety stock and multi-echelon inventory policies validated via stochast
                 file_name="shoir_ie_research_bundle.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("Configure parameters on the left and click **'Execute Optimized Simulation Suite'** to initialize the digital twin sandbox.")
@@ -5756,7 +5756,7 @@ elif selected_module == "Advanced Regression Analysis":
         st.session_state.reg_dataset = st.data_editor(
             st.session_state.reg_dataset,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="reg_data_editor"
         )
 
@@ -5849,7 +5849,7 @@ elif selected_module == "Advanced Regression Analysis":
                 "Variable": res.model.exog_names,
                 "VIF": [variance_inflation_factor(exog_data, i) for i in range(exog_data.shape[1])]
             })
-            st.dataframe(vif_df, use_container_width=True)
+            st.dataframe(vif_df, width="stretch")
         else:
             st.info("Fit an OLS model in the Model Specification tab to view automated econometric diagnostics.")
 
@@ -5866,12 +5866,12 @@ elif selected_module == "Advanced Regression Analysis":
                 parity_df = pd.DataFrame({"Actual": actual_y, "Predicted": pred_y})
                 fig_parity = px.scatter(parity_df, x="Actual", y="Predicted", title="Actual vs. Predicted Parity Plot", template="plotly_white")
                 fig_parity.add_shape(type="line", x0=actual_y.min(), y0=actual_y.min(), x1=actual_y.max(), y1=actual_y.max(), line=dict(color="Red", dash="dash"))
-                st.plotly_chart(fig_parity, use_container_width=True)
+                st.plotly_chart(fig_parity, width="stretch")
             with col_v2:
                 resid_df = pd.DataFrame({"Fitted": pred_y, "Residuals": residuals})
                 fig_resid = px.scatter(resid_df, x="Fitted", y="Residuals", title="Residuals vs. Fitted Values Plot", template="plotly_white")
                 fig_resid.add_hline(y=0, line_dash="dash", line_color="Red")
-                st.plotly_chart(fig_resid, use_container_width=True)
+                st.plotly_chart(fig_resid, width="stretch")
         else:
             st.info("Fit an OLS model to render Plotly visualizations.")
 
@@ -5999,7 +5999,7 @@ elif selected_module == "Literature & Citation Matrix":
         st.session_state.lit_matrix_df = st.data_editor(
             st.session_state.lit_matrix_df, 
             num_rows="dynamic", 
-            use_container_width=True,
+            width="stretch",
             key="literature_data_editor"
         )
 
@@ -6097,7 +6097,7 @@ elif selected_module == "Literature & Citation Matrix":
                     template="plotly_white"
                 )
                 fig_gap.update_traces(textposition='top center')
-                st.plotly_chart(fig_gap, use_container_width=True)
+                st.plotly_chart(fig_gap, width="stretch")
             
             st.markdown("#### 🔬 Extracted Research Gaps Summary Matrix")
             for idx, row in df_matrix.iterrows():
@@ -6432,7 +6432,7 @@ if selected_module == "Statistical Hypothesis Testing":
                 "Shift": ["Morning", "Evening", "Night", "Morning", "Evening", "Night", "Morning", "Evening"],
             }),
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
         )
     else:
         np.random.seed(42)
@@ -6469,7 +6469,7 @@ if selected_module == "Statistical Hypothesis Testing":
             )
 
         with st.expander("Preview cleaned data", expanded=False):
-            st.dataframe(df.head(25), use_container_width=True)
+            st.dataframe(df.head(25), width="stretch")
 
         st.markdown("---")
         st.subheader("⚙️ Test Configuration & Parameters")
@@ -6724,7 +6724,7 @@ if selected_module == "Statistical Hypothesis Testing":
         # 4. EXECUTION
         # ---------------------------------------------------------------
         st.markdown("---")
-        if st.button("🚀 Run Rigorous Statistical Analysis", type="primary", use_container_width=True, key="stats_run"):
+        if st.button("🚀 Run Rigorous Statistical Analysis", type="primary", width="stretch", key="stats_run"):
             stat_value = np.nan
             p_value = np.nan
             df_value = np.nan
@@ -6894,11 +6894,11 @@ if selected_module == "Statistical Hypothesis Testing":
 
                 if detail_rows:
                     st.markdown("#### Group / Condition Summary")
-                    st.dataframe(pd.DataFrame(detail_rows), use_container_width=True)
+                    st.dataframe(pd.DataFrame(detail_rows), width="stretch")
 
                 if test_type == "One-Way ANOVA" and not posthoc_df.empty:
                     st.markdown("#### 🔬 Tukey HSD Post-Hoc Comparisons")
-                    st.dataframe(posthoc_df, use_container_width=True)
+                    st.dataframe(posthoc_df, width="stretch")
                     st.caption("Tukey HSD is automatically generated after a significant one-way ANOVA.")
 
                 payload = _analysis_excel(
@@ -6962,10 +6962,10 @@ if selected_module == "Statistical Hypothesis Testing":
                     )
                     st.dataframe(
                         scan_df.sort_values("Holm adjusted p-value").reset_index(drop=True),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
-        if st.button("↩️ Reset Statistical Analysis", use_container_width=True, key="stats_reset"):
+        if st.button("↩️ Reset Statistical Analysis", width="stretch", key="stats_reset"):
             for key in list(st.session_state.keys()):
                 if str(key).startswith("stats_"):
                     del st.session_state[key]
@@ -7069,7 +7069,7 @@ if selected_module == "AGV Fleet Dispatcher":
         c_sim1, c_sim2 = st.columns([1, 3])
         with c_sim1:
             st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
-            if st.button("🔄 Step Simulation Tick", use_container_width=True, type="primary"):
+            if st.button("🔄 Step Simulation Tick", width="stretch", type="primary"):
                 for r in st.session_state.agv_fleet:
                     if r.get("status") == "NAVIGATING":
                         r["battery"] = max(5, r.get("battery", 100) - 2)
@@ -7143,7 +7143,7 @@ if selected_module == "AGV Fleet Dispatcher":
             yaxis=dict(showgrid=True, gridcolor="#1f2937", range=[-0.5, my + 0.5], title="Facility Y-Axis (meters)"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)")
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # TAB 2: Facility & Fleet Setup
     with tab_setup:
@@ -7157,7 +7157,7 @@ if selected_module == "AGV Fleet Dispatcher":
                 new_fn = st.text_input("Facility Name", value=st.session_state.facility_name)
                 gx = st.number_input("Grid Max X (meters)", 5, 50, st.session_state.grid_size_x)
                 gy = st.number_input("Grid Max Y (meters)", 5, 50, st.session_state.grid_size_y)
-                if st.form_submit_button("💾 Save Facility Layout", use_container_width=True):
+                if st.form_submit_button("💾 Save Facility Layout", width="stretch"):
                     st.session_state.facility_name = new_fn
                     st.session_state.grid_size_x = int(gx)
                     st.session_state.grid_size_y = int(gy)
@@ -7170,7 +7170,7 @@ if selected_module == "AGV Fleet Dispatcher":
                 sx = st.number_input("X Coordinate", 0, 50, 3)
                 sy = st.number_input("Y Coordinate", 0, 50, 3)
                 stype = st.selectbox("Station Type", ["Pickup", "Dropoff", "Charging", "Buffer"])
-                if st.form_submit_button("➕ Add Station", use_container_width=True):
+                if st.form_submit_button("➕ Add Station", width="stretch"):
                     st.session_state.facility_stations.append({"name": sn, "x": int(sx), "y": int(sy), "type": stype})
                     st.success(f"Workstation **{sn}** added!")
                     st.rerun()
@@ -7183,7 +7183,7 @@ if selected_module == "AGV Fleet Dispatcher":
                 amr_y = st.number_input("Initial Y Coord", 0, 50, 0)
                 amr_batt = st.slider("Starting Battery %", 10, 100, 95)
                 amr_payload = st.text_input("Initial Payload / SKU", value="Pallet-Standard")
-                if st.form_submit_button("🚀 Deploy New AMR Unit", use_container_width=True):
+                if st.form_submit_button("🚀 Deploy New AMR Unit", width="stretch"):
                     st.session_state.agv_fleet.append({
                         "id": amr_id, "x": int(amr_x), "y": int(amr_y), "status": "IDLE", 
                         "battery": int(amr_batt), "payload": amr_payload, "destination": "Home Dock", "dist_traveled": 0.0
@@ -7193,7 +7193,7 @@ if selected_module == "AGV Fleet Dispatcher":
 
         st.markdown("---")
         st.markdown("##### Currently Active Fleet Registry")
-        st.dataframe(df_fleet, use_container_width=True, hide_index=True)
+        st.dataframe(df_fleet, width="stretch", hide_index=True)
 
     # TAB 3: Smart Task Queue & Priority Dispatcher
     with tab_dispatch:
@@ -7212,7 +7212,7 @@ if selected_module == "AGV Fleet Dispatcher":
             with col_t3:
                 assign_agv = st.selectbox("Assign AMR Unit", [r["id"] for r in fleet] if fleet else ["None"])
                 st.markdown("<div style='margin-top: 22px;'></div>", unsafe_allow_html=True)
-                submit_task = st.form_submit_button("⚡ Inject Task to Queue", use_container_width=True, type="primary")
+                submit_task = st.form_submit_button("⚡ Inject Task to Queue", width="stretch", type="primary")
             
             if submit_task:
                 st.session_state.task_queue.insert(0, {
@@ -7222,7 +7222,7 @@ if selected_module == "AGV Fleet Dispatcher":
                 st.rerun()
 
         st.markdown("##### Current Active Task Queue Matrix")
-        st.dataframe(df_tasks, use_container_width=True, hide_index=True)
+        st.dataframe(df_tasks, width="stretch", hide_index=True)
 
     # TAB 4: Battery & Power Intelligence
     with tab_battery:
@@ -7241,14 +7241,14 @@ if selected_module == "AGV Fleet Dispatcher":
                     plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340,
                     margin=dict(l=10, r=10, t=35, b=10)
                 )
-                st.plotly_chart(bat_fig, use_container_width=True)
+                st.plotly_chart(bat_fig, width="stretch")
         
         with col_b2:
             st.markdown("##### 🔌 Power Parameters")
             st.metric("Critical Threshold", "20% Battery", "Auto-Reroute Trigger")
             st.metric("Charging Bays", f"{sum(1 for s in st.session_state.facility_stations if s['type']=='Charging')} Active", "100% Operational")
             st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-            if st.button("⚡ Force All Units Recharge", use_container_width=True):
+            if st.button("⚡ Force All Units Recharge", width="stretch"):
                 for r in st.session_state.agv_fleet:
                     r["status"] = "CHARGING"
                     r["destination"] = "Charging Bay"
@@ -7265,13 +7265,13 @@ if selected_module == "AGV Fleet Dispatcher":
             obs_y = st.number_input("Hazard Grid Y", 0, st.session_state.grid_size_y-1, 3)
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("🚧 Block Node", use_container_width=True):
+                if st.button("🚧 Block Node", width="stretch"):
                     if {"x": obs_x, "y": obs_y} not in st.session_state.restricted_nodes:
                         st.session_state.restricted_nodes.append({"x": obs_x, "y": obs_y})
                         st.success(f"Blocked node ({obs_x}, {obs_y}).")
                         st.rerun()
             with col_btn2:
-                if st.button("🧹 Clear All", use_container_width=True):
+                if st.button("🧹 Clear All", width="stretch"):
                     st.session_state.restricted_nodes = []
                     st.success("Cleared obstacles.")
                     st.rerun()
@@ -7283,7 +7283,7 @@ if selected_module == "AGV Fleet Dispatcher":
                 <b>Safety Override:</b> Triggering E-STOP instantly halts all active mobile units in their current grid coordinates.
             </div>
             """, unsafe_allow_html=True)
-            if st.button("🚨 EMERGENCY FLEET HALT (E-STOP)", type="primary", use_container_width=True):
+            if st.button("🚨 EMERGENCY FLEET HALT (E-STOP)", type="primary", width="stretch"):
                 for r in st.session_state.agv_fleet:
                     r["status"] = "IDLE"
                 st.error("E-STOP TRIGGERED: All autonomous mobile units safely halted.")
@@ -7301,7 +7301,7 @@ if selected_module == "AGV Fleet Dispatcher":
                     color_discrete_sequence=px.colors.qualitative.Pastel
                 )
                 dist_fig.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
-                st.plotly_chart(dist_fig, use_container_width=True)
+                st.plotly_chart(dist_fig, width="stretch")
             
         with col_a2:
             st.markdown("##### 📈 Overall Equipment Effectiveness (OEE)")
@@ -7462,7 +7462,7 @@ if selected_module == "Geospatial Network Designer":
             fig_map.update_layout(mapbox=dict(style=map_style,center=dict(lat=24.0,lon=44.0),zoom=4.8),**_layout_common)
         else:
             fig_map.update_layout(geo=dict(scope="world",projection_type="equirectangular",center=dict(lat=24.0,lon=44.0),lataxis=dict(range=[16,32]),lonaxis=dict(range=[34,56]),showland=True,showcountries=True),**_layout_common)
-        st.plotly_chart(fig_map, use_container_width=True)
+        st.plotly_chart(fig_map, width="stretch")
 
     # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
     with tab_cog:
@@ -7479,7 +7479,7 @@ if selected_module == "Geospatial Network Designer":
             st.markdown("##### ⚙️ Optimization Parameters")
             include_tier2 = st.checkbox("Include Tier-2 Markets in Calculation", value=True)
             
-            if st.button("🚀 Calculate Optimal CoG Coordinates", type="primary", use_container_width=True):
+            if st.button("🚀 Calculate Optimal CoG Coordinates", type="primary", width="stretch"):
                 filtered_mkt = df_markets if include_tier2 else df_markets[df_markets["priority"] == "Tier 1"]
                 
                 sum_vol = filtered_mkt["demand_tons_yr"].sum()
@@ -7519,7 +7519,7 @@ if selected_module == "Geospatial Network Designer":
                 nh_lon = st.number_input("Longitude", 34.0, 56.0, 43.9750, format="%.4f")
                 nh_cap = st.number_input("Annual Capacity (Tons)", 500, 20000, 4000, step=500)
                 
-                if st.form_submit_button("➕ Register Facility Hub", use_container_width=True):
+                if st.form_submit_button("➕ Register Facility Hub", width="stretch"):
                     st.session_state.supply_nodes.append({
                         "id": nh_id, "name": nh_name, "type": nh_type, 
                         "lat": float(nh_lat), "lon": float(nh_lon), 
@@ -7530,7 +7530,7 @@ if selected_module == "Geospatial Network Designer":
 
         with c_n2:
             st.markdown("##### Active Facility Hub Registry")
-            st.dataframe(df_nodes, use_container_width=True, hide_index=True)
+            st.dataframe(df_nodes, width="stretch", hide_index=True)
 
     # TAB 4: Freight & Transport Matrix
     with tab_freight:
@@ -7555,7 +7555,7 @@ if selected_module == "Geospatial Network Designer":
                         "Est. Annual Freight Cost ($)": round(cost, 2)
                     })
             df_routes = pd.DataFrame(route_data)
-            st.dataframe(df_routes.head(10), use_container_width=True, hide_index=True)
+            st.dataframe(df_routes.head(10), width="stretch", hide_index=True)
 
         with col_f2:
             st.markdown("##### 💡 Logistics Insights")
@@ -7581,7 +7581,7 @@ if selected_module == "Geospatial Network Designer":
                     color_discrete_sequence=px.colors.qualitative.Pastel
                 )
                 pie_mkt.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
-                st.plotly_chart(pie_mkt, use_container_width=True)
+                st.plotly_chart(pie_mkt, width="stretch")
 
         with col_a2:
             if not df_nodes.empty:
@@ -7595,7 +7595,7 @@ if selected_module == "Geospatial Network Designer":
                     plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340,
                     margin=dict(l=10, r=10, t=35, b=10)
                 )
-                st.plotly_chart(bar_cap, use_container_width=True)
+                st.plotly_chart(bar_cap, width="stretch")
 
     _render_post_module_layers("Geospatial Network Designer")
     _shoir_module_stop()
@@ -7680,7 +7680,7 @@ if selected_module == "Predictive Maintenance Hub":
         with col_d1:
             st.dataframe(
                 assets_df[["asset_id", "name", "type", "health", "status", "vibration_mm_s", "temp_c", "rul_hours"]], 
-                use_container_width=True, 
+                width="stretch", 
                 hide_index=True
             )
         with col_d2:
@@ -7690,7 +7690,7 @@ if selected_module == "Predictive Maintenance Hub":
                 title="Asset Health Index (%)"
             )
             fig_health.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290, margin=dict(l=10, r=10, t=30, b=10))
-            st.plotly_chart(fig_health, use_container_width=True)
+            st.plotly_chart(fig_health, width="stretch")
 
     # TAB 2: Real-Time Sensor Telemetry & Anomaly Detection
     with tab_telemetry:
@@ -7724,7 +7724,7 @@ if selected_module == "Predictive Maintenance Hub":
             plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=360,
             margin=dict(l=20, r=20, t=40, b=20)
         )
-        st.plotly_chart(fig_tele, use_container_width=True)
+        st.plotly_chart(fig_tele, width="stretch")
 
     # TAB 3: Prognostic RUL & Degradation Analysis
     with tab_rul:
@@ -7742,7 +7742,7 @@ if selected_module == "Predictive Maintenance Hub":
                 title="Remaining Useful Life (Hours) vs Health Index (%)"
             )
             fig_rul.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=380)
-            st.plotly_chart(fig_rul, use_container_width=True)
+            st.plotly_chart(fig_rul, width="stretch")
 
     # TAB 4: Maintenance Work Orders
     with tab_scheduler:
@@ -7757,7 +7757,7 @@ if selected_module == "Predictive Maintenance Hub":
                 wo_priority = st.selectbox("Priority Ranking", ["Emergency (P1)", "High (P2)", "Medium (P3)", "Routine (P4)"])
                 wo_notes = st.text_area("Technician Instructions", value="Inspect bearing housing for thermal fatigue and verify backlash tolerances.")
                 
-                if st.form_submit_button("🚀 Dispatch Maintenance Order", use_container_width=True):
+                if st.form_submit_button("🚀 Dispatch Maintenance Order", width="stretch"):
                     new_wo = {
                         "wo_id": f"WO-{np.random.randint(1010, 9999)}",
                         "asset": wo_asset,
@@ -7772,7 +7772,7 @@ if selected_module == "Predictive Maintenance Hub":
         with col_w2:
             st.markdown("##### Active Work Order Dispatch Log")
             if not wo_df.empty:
-                st.dataframe(wo_df, use_container_width=True, hide_index=True)
+                st.dataframe(wo_df, width="stretch", hide_index=True)
             else:
                 st.info("No active work orders currently logged.")
 
@@ -7794,7 +7794,7 @@ if selected_module == "Predictive Maintenance Hub":
                 
                 status_calc = "Critical" if new_health < 50 else ("Warning" if new_health < 70 else ("Optimal" if new_health > 90 else "Healthy"))
                 
-                if st.form_submit_button("➕ Register Asset to Fleet", use_container_width=True):
+                if st.form_submit_button("➕ Register Asset to Fleet", width="stretch"):
                     st.session_state.maintenance_assets.append({
                         "asset_id": new_id, "name": new_name, "type": new_type,
                         "health": int(new_health), "status": status_calc,
@@ -7910,7 +7910,7 @@ if selected_module == "Production Planning & Control (PPC)":
                 "period": "Period", "forecast": "Forecast Demand", 
                 "orders": "Customer Orders", "beginning_inv": "Beginning Inv.", 
                 "mps_production": "Scheduled MPS"
-            }), use_container_width=True, hide_index=True)
+            }), width="stretch", hide_index=True)
             
         with col_m2:
             st.markdown("##### ⚙️ Adjust Period Production")
@@ -7918,7 +7918,7 @@ if selected_module == "Production Planning & Control (PPC)":
                 target_period = st.selectbox("Select Period", df_mps["period"].tolist())
                 new_mps_val = st.number_input("New Scheduled Production", 50, 500, 150, 10)
                 
-                if st.form_submit_button("💾 Update MPS Allocation", use_container_width=True):
+                if st.form_submit_button("💾 Update MPS Allocation", width="stretch"):
                     for row in st.session_state.mps_data:
                         if row["period"] == target_period:
                             row["mps_production"] = int(new_mps_val)
@@ -7931,7 +7931,7 @@ if selected_module == "Production Planning & Control (PPC)":
             barmode="group", title="Demand Forecast vs Customer Orders vs MPS Production"
         )
         fig_mps.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_mps, use_container_width=True)
+        st.plotly_chart(fig_mps, width="stretch")
 
     # TAB 2: MRP & Bill of Materials Studio
     with tab_mrp:
@@ -7946,7 +7946,7 @@ if selected_module == "Production Planning & Control (PPC)":
             st.dataframe(df_mrp.rename(columns={
                 "component_id": "Part ID", "description": "Description", "level": "BOM Level",
                 "gross_req": "Gross Req.", "on_hand": "On-Hand Stock", "net_req": "Net Req.", "lead_time_wks": "Lead Time (wks)"
-            }), use_container_width=True, hide_index=True)
+            }), width="stretch", hide_index=True)
             
         with col_r2:
             st.markdown("##### ➕ Register New BOM Component")
@@ -7958,7 +7958,7 @@ if selected_module == "Production Planning & Control (PPC)":
                 b_stock = st.number_input("On-Hand Inventory", 0, 500, 50, 10)
                 b_lt = st.number_input("Lead Time (Weeks)", 1, 5, 2)
                 
-                if st.form_submit_button("➕ Add Component to MRP", use_container_width=True):
+                if st.form_submit_button("➕ Add Component to MRP", width="stretch"):
                     st.session_state.mrp_bom.append({
                         "component_id": b_id, "description": b_desc, "level": int(b_lvl),
                         "gross_req": int(b_gross), "on_hand": int(b_stock), "lead_time_wks": int(b_lt)
@@ -7971,7 +7971,7 @@ if selected_module == "Production Planning & Control (PPC)":
             barmode="stack", title="BOM Component Gross-to-Net Inventory Stock Analysis"
         )
         fig_mrp.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_mrp, use_container_width=True)
+        st.plotly_chart(fig_mrp, width="stretch")
 
     # TAB 3: Job Shop Scheduling & Gantt
     with tab_shop:
@@ -7985,7 +7985,7 @@ if selected_module == "Production Planning & Control (PPC)":
                     title="Shop Floor Workstation Scheduling Timeline"
                 )
                 fig_gantt.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=350)
-                st.plotly_chart(fig_gantt, use_container_width=True)
+                st.plotly_chart(fig_gantt, width="stretch")
                 
         with col_s2:
             st.markdown("##### ➕ Schedule New Machine Task")
@@ -7995,7 +7995,7 @@ if selected_module == "Production Planning & Control (PPC)":
                 g_start = st.text_input("Start Timestamp", value="2026-08-25 08:00")
                 g_finish = st.text_input("Finish Timestamp", value="2026-08-25 14:00")
                 
-                if st.form_submit_button("🚀 Assign Task to Schedule", use_container_width=True):
+                if st.form_submit_button("🚀 Assign Task to Schedule", width="stretch"):
                     st.session_state.job_shop_tasks.append({
                         "task": g_task, "start": g_start, "finish": g_finish, "machine": g_machine
                     })
@@ -8039,7 +8039,7 @@ if selected_module == "Production Planning & Control (PPC)":
                 markers=True, title="Production Strategy Output Trajectory Across 6-Month Horizon"
             )
             fig_agg.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
-            st.plotly_chart(fig_agg, use_container_width=True)
+            st.plotly_chart(fig_agg, width="stretch")
 
     _shoir_module_stop()
 
@@ -8128,7 +8128,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
             if not df_elements.empty:
                 st.dataframe(df_elements.rename(columns={
                     "element": "Work Element", "time_sec": "Time (Seconds)", "station": "Assigned Station"
-                }), use_container_width=True, hide_index=True)
+                }), width="stretch", hide_index=True)
             else:
                 st.info("No work elements registered. Line is currently empty.")
             
@@ -8141,7 +8141,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
                     el_time = st.number_input("Element Time (Sec)", 5, 120, 40, 5)
                     el_station = st.selectbox("Assign Workstation", ["Station 1", "Station 2", "Station 3", "Station 4", "Station 5"])
                     
-                    if st.form_submit_button("🚀 Add Element", use_container_width=True):
+                    if st.form_submit_button("🚀 Add Element", width="stretch"):
                         st.session_state.lean_elements.append({
                             "element": el_name, "time_sec": int(el_time), "station": el_station
                         })
@@ -8153,7 +8153,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
                     element_options = [item["element"] for item in st.session_state.lean_elements] if st.session_state.lean_elements else []
                     target_to_delete = st.selectbox("Select Element", element_options if element_options else ["None Available"])
                     
-                    if st.form_submit_button("🗑️ Remove Task", use_container_width=True):
+                    if st.form_submit_button("🗑️ Remove Task", width="stretch"):
                         if element_options and target_to_delete != "None Available":
                             st.session_state.lean_elements = [
                                 item for item in st.session_state.lean_elements if item["element"] != target_to_delete
@@ -8168,7 +8168,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
                     active_stations = df_elements["station"].unique().tolist() if not df_elements.empty else []
                     target_station = st.selectbox("Select Station to Decommission", active_stations if active_stations else ["No Active Stations"])
                     
-                    if st.form_submit_button("🚫 Decommission Station", use_container_width=True):
+                    if st.form_submit_button("🚫 Decommission Station", width="stretch"):
                         if active_stations and target_station != "No Active Stations":
                             # Remove all elements assigned to this station
                             st.session_state.lean_elements = [
@@ -8187,7 +8187,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
                 title="Workstation Total Cycle Time vs Bottleneck Pace"
             )
             fig_line.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-            st.plotly_chart(fig_line, use_container_width=True)
+            st.plotly_chart(fig_line, width="stretch")
 
     # TAB 2: Kanban Pull-System Calculator
     with tab_kanban:
@@ -8234,7 +8234,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
         
         col_v1, col_v2 = st.columns([2, 1])
         with col_v1:
-            st.dataframe(vsm_data, use_container_width=True, hide_index=True)
+            st.dataframe(vsm_data, width="stretch", hide_index=True)
         with col_v2:
             total_processing_mins = vsm_data["Process Time (Sec)"].sum() / 60
             total_lead_days = vsm_data["Lead Time (Days)"].sum()
@@ -8247,7 +8247,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
             title="Value-Add Processing Time per Production Step"
         )
         fig_vsm.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=300)
-        st.plotly_chart(fig_vsm, use_container_width=True)
+        st.plotly_chart(fig_vsm, width="stretch")
 
     # TAB 4: OEE & Six Big Losses
     with tab_oee:
@@ -8283,14 +8283,14 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
             "Compliance Status": ["Compliant", "Needs Action", "Excellent", "Review Required", "Compliant"]
         })
         
-        st.dataframe(audit_data, use_container_width=True, hide_index=True)
+        st.dataframe(audit_data, width="stretch", hide_index=True)
         
         fig_5s = px.bar(
             audit_data, x="5S Pillar", y=["Target Score", "Actual Audit Score"],
             barmode="group", title="5S Pillar Audit Compliance Scores (Max 5.0)"
         )
         fig_5s.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_5s, use_container_width=True)
+        st.plotly_chart(fig_5s, width="stretch")
 
     _shoir_module_stop()
 # ==============================================================================
@@ -8380,7 +8380,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
         fig_xbar.add_hline(y=grand_mean, line_dash="solid", line_color="#34d399", annotation_text="Center Line (Mean)")
         fig_xbar.add_hline(y=lcl_mean, line_dash="dash", line_color="#ef4444", annotation_text="LCL")
         fig_xbar.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=350)
-        st.plotly_chart(fig_xbar, use_container_width=True)
+        st.plotly_chart(fig_xbar, width="stretch")
 
     # TAB 2: Six Sigma & Process Capability
     with tab_six:
@@ -8435,7 +8435,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
                 st.dataframe(df_fmea.rename(columns={
                     "process_step": "Process Step", "failure_mode": "Potential Failure Mode",
                     "cause": "Potential Cause", "sev": "Severity (S)", "occ": "Occur (O)", "det": "Detect (D)", "RPN": "Calculated RPN"
-                }), use_container_width=True, hide_index=True)
+                }), width="stretch", hide_index=True)
             else:
                 st.info("No FMEA records currently registered.")
                 
@@ -8451,7 +8451,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
                     f_occ = st.slider("Occurrence (O, 1-10)", 1, 10, 3)
                     f_det = st.slider("Detection (D, 1-10)", 1, 10, 4)
                     
-                    if st.form_submit_button("🚀 Register FMEA Risk", use_container_width=True):
+                    if st.form_submit_button("🚀 Register FMEA Risk", width="stretch"):
                         st.session_state.fmea_records.append({
                             "process_step": f_step, "failure_mode": f_mode, "cause": f_cause,
                             "sev": int(f_sev), "occ": int(f_occ), "det": int(f_det)
@@ -8464,7 +8464,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
                     fmea_options = [item["failure_mode"] for item in st.session_state.fmea_records] if st.session_state.fmea_records else []
                     target_fmea = st.selectbox("Select Failure Mode to Resolve", fmea_options if fmea_options else ["None Available"])
                     
-                    if st.form_submit_button("🗑️ Remove Resolved Risk", use_container_width=True):
+                    if st.form_submit_button("🗑️ Remove Resolved Risk", width="stretch"):
                         if fmea_options and target_fmea != "None Available":
                             st.session_state.fmea_records = [
                                 item for item in st.session_state.fmea_records if item["failure_mode"] != target_fmea
@@ -8500,7 +8500,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
             title="System Survival Probability Curve Over Time"
         )
         fig_surv.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_surv, use_container_width=True)
+        st.plotly_chart(fig_surv, width="stretch")
 
     # TAB 5: Pareto Defect Triage Analysis
     with tab_pareto:
@@ -8518,7 +8518,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
             title="Defect Frequency Pareto Analysis (80/20 Rule)"
         )
         fig_pareto.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_pareto, use_container_width=True)
+        st.plotly_chart(fig_pareto, width="stretch")
 
     _shoir_module_stop()
 # ==============================================================================
@@ -8622,7 +8622,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
                 selected_motion = st.selectbox("Select Motion from Library", list(motion_options.keys()))
                 motion_qty = st.number_input("Quantity / Repetitions", min_value=1, max_value=50, value=1)
                 
-                if st.form_submit_button("📥 Add Slot to Sequence", use_container_width=True):
+                if st.form_submit_button("📥 Add Slot to Sequence", width="stretch"):
                     motion_data = motion_options[selected_motion]
                     slot_id = f"SLOT-{str(uuid.uuid4())[:6].upper()}"
                     
@@ -8640,7 +8640,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             with st.form("remove_slot_form"):
                 slot_ids = [s["slot_id"] for s in st.session_state.mtm_slots]
                 slot_to_remove = st.selectbox("Select Slot to Remove", slot_ids if slot_ids else ["No slots available"])
-                if st.form_submit_button("🗑️ Delete Selected Slot", use_container_width=True):
+                if st.form_submit_button("🗑️ Delete Selected Slot", width="stretch"):
                     if slot_ids:
                         st.session_state.mtm_slots = [s for s in st.session_state.mtm_slots if s["slot_id"] != slot_to_remove]
                         st.rerun()
@@ -8653,7 +8653,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
                 st.dataframe(df_slots.rename(columns={
                     "slot_id": "Slot ID", "motion_name": "Motion", "qty": "Qty", 
                     "base_tmu": "Base TMU", "total_tmu": "Total TMU", "total_sec": "Total Sec"
-                }), use_container_width=True, hide_index=True)
+                }), width="stretch", hide_index=True)
                 
                 total_seq_tmu = df_slots["total_tmu"].sum()
                 total_seq_sec = df_slots["total_sec"].sum()
@@ -8680,7 +8680,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
                 rating_factor = st.slider("Rating Factor (%)", 70, 150, 110, 5)
                 allowance_pct = st.slider("Allowance Factor (%)", 5, 30, 15)
 
-                if st.form_submit_button("📐 Compute & Log Standard Time", use_container_width=True):
+                if st.form_submit_button("📐 Compute & Log Standard Time", width="stretch"):
                     normal_time = observed_time * (rating_factor / 100.0)
                     standard_time = normal_time * (1.0 + (allowance_pct / 100.0))
                     new_id = f"TS-{str(uuid.uuid4())[:4].upper()}"
@@ -8694,7 +8694,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             with st.form("delete_ts_form"):
                 ts_ids = [t["study_id"] for t in st.session_state.time_studies]
                 del_ts = st.selectbox("Select Study to Delete", ts_ids if ts_ids else ["None"])
-                if st.form_submit_button("Delete Study", use_container_width=True):
+                if st.form_submit_button("Delete Study", width="stretch"):
                     if ts_ids:
                         st.session_state.time_studies = [t for t in st.session_state.time_studies if t["study_id"] != del_ts]
                         st.rerun()
@@ -8706,7 +8706,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
                 st.dataframe(df_ts.rename(columns={
                     "study_id": "ID", "element": "Work Element", "observed_time_s": "OT (s)",
                     "rating_pct": "Rating (%)", "allowance_pct": "Allow (%)", "standard_time_s": "Std Time (s)"
-                }), use_container_width=True, hide_index=True)
+                }), width="stretch", hide_index=True)
             else:
                 st.info("No time studies logged.")
 
@@ -8723,7 +8723,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
                 st.dataframe(df_erg.rename(columns={
                     "task_id": "Task ID", "station": "Workstation", "load_kg": "Load (kg)",
                     "rwl_kg": "RWL (kg)", "li": "Lifting Index", "risk": "Risk Status"
-                }), use_container_width=True, hide_index=True)
+                }), width="stretch", hide_index=True)
             else:
                 st.info("No ergonomic tasks registered.")
                 
@@ -8732,7 +8732,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             with st.form("remove_erg_form"):
                 task_ids = [t["task_id"] for t in st.session_state.ergonomic_tasks]
                 del_task = st.selectbox("Select Task to Remove", task_ids if task_ids else ["None"])
-                if st.form_submit_button("Delete Task Record", use_container_width=True):
+                if st.form_submit_button("Delete Task Record", width="stretch"):
                     if task_ids:
                         st.session_state.ergonomic_tasks = [t for t in st.session_state.ergonomic_tasks if t["task_id"] != del_task]
                         st.rerun()
@@ -8768,7 +8768,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Recommended Weight Limit (RWL)", f"{rwl:.2f} kg")
             st.metric("Lifting Index (LI)", f"{li:.2f}")
 
-            if st.button("📌 Log Assessment to Risk Register", use_container_width=True):
+            if st.button("📌 Log Assessment to Risk Register", width="stretch"):
                 new_id = f"T-{str(uuid.uuid4())[:4].upper()}"
                 st.session_state.ergonomic_tasks.append({
                     "task_id": new_id, "station": f"Station (H:{h_dist} V:{v_height})", "load_kg": float(load_weight),
@@ -8901,7 +8901,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
             with st.form("add_cf_form"):
                 new_year = st.number_input("Year Number", min_value=0, max_value=30, value=len(st.session_state.fin_cash_flows))
                 new_cf = st.number_input("Cash Flow Amount ($)", value=15000.0, step=1000.0)
-                if st.form_submit_button("📥 Add / Update Cash Flow", use_container_width=True):
+                if st.form_submit_button("📥 Add / Update Cash Flow", width="stretch"):
                     existing = next((item for item in st.session_state.fin_cash_flows if item["year"] == new_year), None)
                     if existing:
                         existing["cash_flow"] = new_cf
@@ -8914,7 +8914,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
             with st.form("remove_cf_form"):
                 cf_years = [item["year"] for item in st.session_state.fin_cash_flows if item["year"] > 0]
                 rem_year = st.selectbox("Select Year to Remove", cf_years if cf_years else ["No removable years"])
-                if st.form_submit_button("🗑️ Delete Year", use_container_width=True):
+                if st.form_submit_button("🗑️ Delete Year", width="stretch"):
                     if cf_years and rem_year != "No removable years":
                         st.session_state.fin_cash_flows = [item for item in st.session_state.fin_cash_flows if item["year"] != rem_year]
                         st.rerun()
@@ -8922,7 +8922,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
         with col_c2:
             st.markdown("##### 📊 Cash Flow Register & Metrics")
             df_cf = pd.DataFrame(st.session_state.fin_cash_flows)
-            st.dataframe(df_cf.rename(columns={"year": "Project Year", "cash_flow": "Net Cash Flow ($)"}), use_container_width=True, hide_index=True)
+            st.dataframe(df_cf.rename(columns={"year": "Project Year", "cash_flow": "Net Cash Flow ($)"}), width="stretch", hide_index=True)
 
             cfs = [(item["year"], item["cash_flow"]) for item in st.session_state.fin_cash_flows]
             npv_val = calculate_npv(discount_rate, cfs)
@@ -8948,7 +8948,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
 
             fig_cf = px.bar(df_cf, x="year", y="cash_flow", title="Project Net Cash Flow Timeline")
             fig_cf.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260)
-            st.plotly_chart(fig_cf, use_container_width=True)
+            st.plotly_chart(fig_cf, width="stretch")
 
     # ----------------------------------------------------
     # TAB 2: MACHINE REPLACEMENT (EUAW)
@@ -8982,7 +8982,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
             
             fig_eua = px.line(df_eua, x="Year", y="Total EUAW", markers=True, title="EUAW Economic Life Curve")
             fig_eua.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260)
-            st.plotly_chart(fig_eua, use_container_width=True)
+            st.plotly_chart(fig_eua, width="stretch")
 
     # ----------------------------------------------------
     # TAB 3: TAX DEPRECIATION
@@ -9013,7 +9013,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 dep_rows.append({"Year": yr, "Straight-Line": sl_dep, "Declining Balance": db_dep, "MACRS": macrs_dep})
 
             df_dep = pd.DataFrame(dep_rows)
-            st.dataframe(df_dep.style.format("${:,.2f}"), use_container_width=True, hide_index=True)
+            st.dataframe(df_dep.style.format("${:,.2f}"), width="stretch", hide_index=True)
 
     # ----------------------------------------------------
     # TAB 4: MULTI-PRODUCT CVP
@@ -9028,7 +9028,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 p_price = st.number_input("Selling Price ($)", 10.0, 5000.0, 450.0, 10.0)
                 p_vc = st.number_input("Unit Variable Cost ($)", 5.0, 4000.0, 180.0, 10.0)
                 p_mix = st.slider("Sales Mix Share (%)", 5.0, 100.0, 25.0, 5.0)
-                if st.form_submit_button("📥 Add Product", use_container_width=True):
+                if st.form_submit_button("📥 Add Product", width="stretch"):
                     st.session_state.cvp_products.append({"id": f"P-{str(uuid.uuid4())[:4].upper()}", "name": p_name, "price": float(p_price), "vc": float(p_vc), "mix_pct": float(p_mix)})
                     st.rerun()
         with col_v2:
@@ -9040,7 +9040,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 weighted_cm = (df_cvp["unit_cm"] * df_cvp["normalized_mix"]).sum()
                 break_even_units = total_fixed_costs / weighted_cm if weighted_cm > 0 else 0
                 st.metric("Total Break-Even Sales Volume", f"{break_even_units:,.0f} Units")
-                st.dataframe(df_cvp[["name", "price", "vc", "mix_pct", "unit_cm"]].rename(columns={"name": "Product", "price": "Price", "vc": "VC", "mix_pct": "Mix", "unit_cm": "CM"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_cvp[["name", "price", "vc", "mix_pct", "unit_cm"]].rename(columns={"name": "Product", "price": "Price", "vc": "VC", "mix_pct": "Mix", "unit_cm": "CM"}), width="stretch", hide_index=True)
 
     # ----------------------------------------------------
     # TAB 5: MONTE CARLO RISK SIMULATION (NEW IN V3.3)
@@ -9057,7 +9057,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
         with mc_col1:
             sim_runs = st.slider("Simulation Iterations", 500, 5000, 1000, 500)
             volatility = st.slider("Cash Flow Volatility / Uncertainty (%)", 5.0, 40.0, 15.0, 2.5) / 100.0
-            run_sim_btn = st.button("🚀 Run Monte Carlo Simulation", use_container_width=True)
+            run_sim_btn = st.button("🚀 Run Monte Carlo Simulation", width="stretch")
 
         with mc_col2:
             if run_sim_btn or "mc_results" in st.session_state:
@@ -9088,7 +9088,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
 
                 fig_mc = px.histogram(df_mc, x="NPV", nbins=40, title="Monte Carlo NPV Distribution Curve", color_discrete_sequence=["#f43f5e"])
                 fig_mc.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
-                st.plotly_chart(fig_mc, use_container_width=True)
+                st.plotly_chart(fig_mc, width="stretch")
             else:
                 st.info("Click **Run Monte Carlo Simulation** to generate probabilistic risk profiles.")
 
@@ -9132,7 +9132,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
             st.dataframe(df_amort.style.format({
                 "Payment": "${:,.2f}", "Principal": "${:,.2f}", "Interest": "${:,.2f}",
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
-            }), use_container_width=True, hide_index=True)
+            }), width="stretch", hide_index=True)
 
     _render_post_module_layers("Engineering Economics & Finance")
     _shoir_module_stop()
@@ -9261,7 +9261,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 pos_x = st.slider("X Position (%)", 5, 90, 30)
                 pos_y = st.slider("Y Position (%)", 5, 90, 50)
 
-                if st.form_submit_button("📥 Deploy Workstation", use_container_width=True):
+                if st.form_submit_button("📥 Deploy Workstation", width="stretch"):
                     new_id = f"WS-{str(uuid.uuid4())[:4].upper()}"
                     st.session_state.dt_workstations.append({
                         "id": new_id, "name": ws_name, "type": ws_type, "status": ws_status, "x": pos_x, "y": pos_y
@@ -9272,7 +9272,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             if st.session_state.dt_workstations:
                 with st.form("del_ws_form"):
                     ws_to_del = st.selectbox("🗑️ Remove Workstation by ID", [w["id"] for w in st.session_state.dt_workstations])
-                    if st.form_submit_button("Delete Workstation", use_container_width=True):
+                    if st.form_submit_button("Delete Workstation", width="stretch"):
                         st.session_state.dt_workstations = [w for w in st.session_state.dt_workstations if w["id"] != ws_to_del]
                         st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Factory Floor", "message": f"Removed workstation {ws_to_del}."})
                         st.rerun()
@@ -9282,7 +9282,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 agv_name = st.text_input("AGV Identifier", value="AGV-03")
                 agv_task = st.text_input("Current Mission", value="Staging Raw Materials")
                 agv_batt = st.slider("Battery Level (%)", 10.0, 100.0, 95.0, 5.0)
-                if st.form_submit_button("📥 Dispatch AGV", use_container_width=True):
+                if st.form_submit_button("📥 Dispatch AGV", width="stretch"):
                     st.session_state.agv_fleet.append({"agv_id": agv_name, "task": agv_task, "battery": float(agv_batt), "status": "Active", "x": 50, "y": 45})
                     st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "AGV Fleet", "message": f"Dispatched {agv_name} for mission: {agv_task}."})
                     st.rerun()
@@ -9290,7 +9290,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             if st.session_state.agv_fleet:
                 with st.form("del_agv_form"):
                     agv_to_del = st.selectbox("🗑️ Remove AGV by ID", [a["agv_id"] for a in st.session_state.agv_fleet])
-                    if st.form_submit_button("Delete AGV Unit", use_container_width=True):
+                    if st.form_submit_button("Delete AGV Unit", width="stretch"):
                         st.session_state.agv_fleet = [a for a in st.session_state.agv_fleet if a["agv_id"] != agv_to_del]
                         st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "AGV Fleet", "message": f"Removed AGV {agv_to_del}."})
                         st.rerun()
@@ -9329,7 +9329,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             svg_content += "</svg>"
             st.markdown(svg_content, unsafe_allow_html=True)
             df_agv = pd.DataFrame(st.session_state.agv_fleet)
-            st.dataframe(df_agv.rename(columns={"agv_id": "AGV Unit", "task": "Current Mission", "battery": "Battery (%)", "status": "Status"}), use_container_width=True, hide_index=True)
+            st.dataframe(df_agv.rename(columns={"agv_id": "AGV Unit", "task": "Current Mission", "battery": "Battery (%)", "status": "Status"}), width="stretch", hide_index=True)
 
     # ----------------------------------------------------
     # TAB 2: DISCRETE-EVENT SIMULATION (DES) ENGINE
@@ -9345,7 +9345,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 srv_rate = st.number_input("Service Rate ($\\mu$ parts/hr)", 1.0, 60.0, 18.0, 0.5)
                 q_cap = st.number_input("Max Queue Buffer Capacity", 5, 100, 30)
 
-                if st.form_submit_button("📥 Add Queue Slot", use_container_width=True):
+                if st.form_submit_button("📥 Add Queue Slot", width="stretch"):
                     st.session_state.des_queues.append({
                         "queue_id": q_id, "station": q_station, "arrival_rate": float(arr_rate),
                         "service_rate": float(srv_rate), "capacity": int(q_cap)
@@ -9355,7 +9355,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             if st.session_state.des_queues:
                 with st.form("del_queue_form"):
                     q_to_del = st.selectbox("🗑️ Remove Queue by ID", [q["queue_id"] for q in st.session_state.des_queues])
-                    if st.form_submit_button("Delete Queue Slot", use_container_width=True):
+                    if st.form_submit_button("Delete Queue Slot", width="stretch"):
                         st.session_state.des_queues = [q for q in st.session_state.des_queues if q["queue_id"] != q_to_del]
                         st.rerun()
 
@@ -9363,10 +9363,10 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             df_q = pd.DataFrame(st.session_state.des_queues)
             if not df_q.empty:
                 df_q["Utilization (%)"] = (df_q["arrival_rate"] / df_q["service_rate"]) * 100
-                st.dataframe(df_q.rename(columns={"queue_id": "ID", "station": "Workstation", "arrival_rate": "Arrival", "service_rate": "Service", "Utilization (%)": "Util (%)"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_q.rename(columns={"queue_id": "ID", "station": "Workstation", "arrival_rate": "Arrival", "service_rate": "Service", "Utilization (%)": "Util (%)"}), width="stretch", hide_index=True)
                 fig_des = px.bar(df_q, x="station", y=["Utilization (%)"], title="Workstation Server Utilization (%)")
                 fig_des.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260)
-                st.plotly_chart(fig_des, use_container_width=True)
+                st.plotly_chart(fig_des, width="stretch")
 
     # ----------------------------------------------------
     # TAB 3: IOT TELEMETRY WEBHOOK HUB
@@ -9381,7 +9381,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 s_val = st.number_input("Initial Live Reading", 0.0, 5000.0, 1450.0, 10.0)
                 s_thresh = st.number_input("Critical Alarm Threshold", 0.0, 5000.0, 1800.0, 10.0)
 
-                if st.form_submit_button("📥 Register IoT Sensor", use_container_width=True):
+                if st.form_submit_button("📥 Register IoT Sensor", width="stretch"):
                     new_sid = f"SNS-{str(uuid.uuid4())[:4].upper()}"
                     status_lbl = "Normal" if s_val < s_thresh else "Warning"
                     st.session_state.iot_sensors.append({"sensor_id": new_sid, "name": s_name, "type": s_type, "reading": float(s_val), "threshold": float(s_thresh), "status": status_lbl})
@@ -9390,17 +9390,17 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             if st.session_state.iot_sensors:
                 with st.form("del_sensor_form"):
                     sns_to_del = st.selectbox("🗑️ Remove Sensor by ID", [s["sensor_id"] for s in st.session_state.iot_sensors])
-                    if st.form_submit_button("Delete IoT Sensor", use_container_width=True):
+                    if st.form_submit_button("Delete IoT Sensor", width="stretch"):
                         st.session_state.iot_sensors = [s for s in st.session_state.iot_sensors if s["sensor_id"] != sns_to_del]
                         st.rerun()
 
         with col_i2:
             df_iot = pd.DataFrame(st.session_state.iot_sensors)
             if not df_iot.empty:
-                st.dataframe(df_iot.rename(columns={"sensor_id": "ID", "name": "Sensor", "type": "Metric", "reading": "Reading", "status": "Status"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_iot.rename(columns={"sensor_id": "ID", "name": "Sensor", "type": "Metric", "reading": "Reading", "status": "Status"}), width="stretch", hide_index=True)
                 fig_iot = px.bar(df_iot, x="name", y="reading", color="status", color_discrete_map={"Normal": "#34d399", "Warning": "#f59e0b"}, title="Live Sensor Telemetry vs Thresholds")
                 fig_iot.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
-                st.plotly_chart(fig_iot, use_container_width=True)
+                st.plotly_chart(fig_iot, width="stretch")
 
     # ----------------------------------------------------
     # TAB 4: KANBAN WIP & BUFFERS
@@ -9422,7 +9422,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 wip_qty = st.number_input("Current WIP Units", 0, 100, 12)
                 max_cap = st.number_input("Max Buffer Capacity", 5, 150, 30)
 
-                if st.form_submit_button("📥 Add Kanban Buffer", use_container_width=True):
+                if st.form_submit_button("📥 Add Kanban Buffer", width="stretch"):
                     util_ratio = wip_qty / max_cap
                     state_lbl = "Balanced" if 0.3 <= util_ratio <= 0.8 else ("Starved" if util_ratio < 0.3 else "Near Capacity")
                     st.session_state.kanban_buffers.append({
@@ -9434,7 +9434,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             if st.session_state.kanban_buffers:
                 with st.form("del_kanban_form"):
                     buf_to_del = st.selectbox("🗑️ Remove Buffer by ID", [b["buffer_id"] for b in st.session_state.kanban_buffers])
-                    if st.form_submit_button("Delete Kanban Buffer", use_container_width=True):
+                    if st.form_submit_button("Delete Kanban Buffer", width="stretch"):
                         st.session_state.kanban_buffers = [b for b in st.session_state.kanban_buffers if b["buffer_id"] != buf_to_del]
                         st.rerun()
 
@@ -9442,10 +9442,10 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             df_kb = pd.DataFrame(st.session_state.kanban_buffers)
             if not df_kb.empty:
                 df_kb["Fill Rate (%)"] = (df_kb["current_wip"] / df_kb["max_capacity"]) * 100
-                st.dataframe(df_kb.rename(columns={"buffer_id": "Buffer ID", "from_ws": "From", "to_ws": "To", "current_wip": "WIP", "max_capacity": "Capacity", "state": "Status"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_kb.rename(columns={"buffer_id": "Buffer ID", "from_ws": "From", "to_ws": "To", "current_wip": "WIP", "max_capacity": "Capacity", "state": "Status"}), width="stretch", hide_index=True)
                 fig_kb = px.bar(df_kb, x="buffer_id", y="Fill Rate (%)", color="state", color_discrete_map={"Balanced": "#34d399", "Starved": "#f43f5e", "Near Capacity": "#f59e0b"}, title="Kanban Buffer Fill Rates (%)")
                 fig_kb.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
-                st.plotly_chart(fig_kb, use_container_width=True)
+                st.plotly_chart(fig_kb, width="stretch")
 
     # ----------------------------------------------------
     # TAB 5: RELIABILITY & MTBF ENGINE
@@ -9465,7 +9465,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 mtbf_val = st.number_input("MTBF (Hours)", 10.0, 2000.0, 200.0, 10.0)
                 mttr_val = st.number_input("MTTR (Hours)", 0.5, 48.0, 3.0, 0.5)
 
-                if st.form_submit_button("📥 Calculate & Add Asset", use_container_width=True):
+                if st.form_submit_button("📥 Calculate & Add Asset", width="stretch"):
                     avail = (mtbf_val / (mtbf_val + mttr_val)) * 100.0
                     risk = "Low" if avail >= 98.0 else ("Moderate" if avail >= 95.0 else "High")
                     st.session_state.reliability_data.append({
@@ -9477,17 +9477,17 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             if st.session_state.reliability_data:
                 with st.form("del_rel_form"):
                     rel_to_del = st.selectbox("🗑️ Remove Asset by ID", [r["machine_id"] for r in st.session_state.reliability_data])
-                    if st.form_submit_button("Delete Reliability Record", use_container_width=True):
+                    if st.form_submit_button("Delete Reliability Record", width="stretch"):
                         st.session_state.reliability_data = [r for r in st.session_state.reliability_data if r["machine_id"] != rel_to_del]
                         st.rerun()
 
         with r_col2:
             df_rel = pd.DataFrame(st.session_state.reliability_data)
             if not df_rel.empty:
-                st.dataframe(df_rel.rename(columns={"machine_id": "Asset ID", "mtbf_hrs": "MTBF (hrs)", "mttr_hrs": "MTTR (hrs)", "availability_pct": "Availability (%)", "failure_risk": "Risk Level"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_rel.rename(columns={"machine_id": "Asset ID", "mtbf_hrs": "MTBF (hrs)", "mttr_hrs": "MTTR (hrs)", "availability_pct": "Availability (%)", "failure_risk": "Risk Level"}), width="stretch", hide_index=True)
                 fig_rel = px.bar(df_rel, x="machine_id", y="availability_pct", color="failure_risk", color_discrete_map={"Low": "#34d399", "Moderate": "#f59e0b", "High": "#f43f5e"}, title="Asset Availability (%) vs Failure Risk")
                 fig_rel.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
-                st.plotly_chart(fig_rel, use_container_width=True)
+                st.plotly_chart(fig_rel, width="stretch")
 
     # ----------------------------------------------------
     # TAB 6: LIVE EVENT STREAM & AUDIT LOG
@@ -9495,7 +9495,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
     with tab_logs:
         st.markdown("#### 📜 Live Plant Floor Event Stream & Audit Log")
         df_logs = pd.DataFrame(st.session_state.event_logs)
-        st.dataframe(df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), use_container_width=True, hide_index=True)
+        st.dataframe(df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), width="stretch", hide_index=True)
 
         if st.button("🗑️ Clear Event Log"):
             st.session_state.event_logs = []
@@ -9579,7 +9579,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 s2 = st.number_input("Scope 2 Indirect Energy (tCO2e)", 0.0, 2000.0, 160.0, 5.0)
                 s3 = st.number_input("Scope 3 Value Chain (tCO2e)", 0.0, 2000.0, 50.0, 5.0)
 
-                if st.form_submit_button("📥 Add Carbon Audit Record", use_container_width=True):
+                if st.form_submit_button("📥 Add Carbon Audit Record", width="stretch"):
                     new_cid = f"CARB-{str(uuid.uuid4())[:4].upper()}"
                     st.session_state.carbon_sources.append({
                         "source_id": new_cid, "facility": fac_name, "scope_1_tco2": float(s1), "scope_2_tco2": float(s2), "scope_3_tco2": float(s3)
@@ -9590,7 +9590,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
             if st.session_state.carbon_sources:
                 with st.form("del_carbon_form"):
                     carb_to_del = st.selectbox("🗑️ Remove Record by ID", [c["source_id"] for c in st.session_state.carbon_sources])
-                    if st.form_submit_button("Delete Emission Source", use_container_width=True):
+                    if st.form_submit_button("Delete Emission Source", width="stretch"):
                         st.session_state.carbon_sources = [c for c in st.session_state.carbon_sources if c["source_id"] != carb_to_del]
                         st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Green IE", "message": f"Removed carbon record {carb_to_del}."})
                         st.rerun()
@@ -9599,14 +9599,14 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
             df_carb = pd.DataFrame(st.session_state.carbon_sources)
             if not df_carb.empty:
                 df_carb["Total tCO2e"] = df_carb["scope_1_tco2"] + df_carb["scope_2_tco2"] + df_carb["scope_3_tco2"]
-                st.dataframe(df_carb.rename(columns={"source_id": "ID", "facility": "Facility / Line", "scope_1_tco2": "Scope 1", "scope_2_tco2": "Scope 2", "scope_3_tco2": "Scope 3"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_carb.rename(columns={"source_id": "ID", "facility": "Facility / Line", "scope_1_tco2": "Scope 1", "scope_2_tco2": "Scope 2", "scope_3_tco2": "Scope 3"}), width="stretch", hide_index=True)
                 
                 # Plotly stacked bar chart
                 fig_carb = px.bar(df_carb, x="facility", y=["scope_1_tco2", "scope_2_tco2", "scope_3_tco2"], 
                                   title="Carbon Emissions Breakdown by Scope (tCO2e)",
                                   color_discrete_map={"scope_1_tco2": "#f43f5e", "scope_2_tco2": "#f59e0b", "scope_3_tco2": "#38bdf8"})
                 fig_carb.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290, legend_title="GHG Scopes")
-                st.plotly_chart(fig_carb, use_container_width=True)
+                st.plotly_chart(fig_carb, width="stretch")
 
     # ----------------------------------------------------
     # TAB 2: ENERGY MANAGEMENT & ISO 50001 TRACKER
@@ -9623,7 +9623,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 iso_status = st.selectbox("ISO 50001 Status", ["Compliant", "Review Required", "Non-Compliant"])
                 load_factor = st.slider("Daily Load Factor", 0.1, 1.0, 0.85, 0.05)
 
-                if st.form_submit_button("📥 Register Energy Profile", use_container_width=True):
+                if st.form_submit_button("📥 Register Energy Profile", width="stretch"):
                     new_eid = f"ENG-{str(uuid.uuid4())[:4].upper()}"
                     st.session_state.energy_units.append({
                         "unit_id": new_eid, "machine": mach_name, "kwh_per_hr": float(kwh_rate),
@@ -9635,7 +9635,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
             if st.session_state.energy_units:
                 with st.form("del_energy_form"):
                     eng_to_del = st.selectbox("🗑️ Remove Unit by ID", [e["unit_id"] for e in st.session_state.energy_units])
-                    if st.form_submit_button("Delete Energy Unit", use_container_width=True):
+                    if st.form_submit_button("Delete Energy Unit", width="stretch"):
                         st.session_state.energy_units = [e for e in st.session_state.energy_units if e["unit_id"] != eng_to_del]
                         st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Energy Management", "message": f"Removed energy unit {eng_to_del}."})
                         st.rerun()
@@ -9644,13 +9644,13 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
             df_eng = pd.DataFrame(st.session_state.energy_units)
             if not df_eng.empty:
                 df_eng["Daily kWh (24h)"] = df_eng["kwh_per_hr"] * 24 * df_eng["daily_load_factor"]
-                st.dataframe(df_eng.rename(columns={"unit_id": "ID", "machine": "Machine Unit", "kwh_per_hr": "kWh/hr", "iso_50001_compliant": "ISO 50001", "daily_load_factor": "Load Factor"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_eng.rename(columns={"unit_id": "ID", "machine": "Machine Unit", "kwh_per_hr": "kWh/hr", "iso_50001_compliant": "ISO 50001", "daily_load_factor": "Load Factor"}), width="stretch", hide_index=True)
                 
                 fig_eng = px.bar(df_eng, x="machine", y="Daily kWh (24h)", color="iso_50001_compliant",
                                  color_discrete_map={"Compliant": "#34d399", "Review Required": "#f59e0b", "Non-Compliant": "#f43f5e"},
                                  title="Projected Daily Power Consumption (kWh) & ISO Compliance")
                 fig_eng.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
-                st.plotly_chart(fig_eng, use_container_width=True)
+                st.plotly_chart(fig_eng, width="stretch")
 
     # ----------------------------------------------------
     # TAB 3: LIFE CYCLE ASSESSMENT (LCA) TOOL
@@ -9667,7 +9667,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 rec_rate = st.slider("Recycling Rate (%)", 0.0, 100.0, 88.0, 1.0)
                 eol_impact = st.selectbox("End-of-Life Environmental Impact", ["Negligible", "Low", "Moderate", "High"])
 
-                if st.form_submit_button("📥 Register LCA Component", use_container_width=True):
+                if st.form_submit_button("📥 Register LCA Component", width="stretch"):
                     new_lid = f"LCA-{str(uuid.uuid4())[:4].upper()}"
                     st.session_state.lca_materials.append({
                         "mat_id": new_lid, "component": comp_name, "circularity_score": float(circ_score),
@@ -9679,7 +9679,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
             if st.session_state.lca_materials:
                 with st.form("del_lca_form"):
                     lca_to_del = st.selectbox("🗑️ Remove Component by ID", [l["mat_id"] for l in st.session_state.lca_materials])
-                    if st.form_submit_button("Delete LCA Record", use_container_width=True):
+                    if st.form_submit_button("Delete LCA Record", width="stretch"):
                         st.session_state.lca_materials = [l for l in st.session_state.lca_materials if l["mat_id"] != lca_to_del]
                         st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "LCA Tool", "message": f"Removed LCA record {lca_to_del}."})
                         st.rerun()
@@ -9687,7 +9687,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
         with col_l2:
             df_lca = pd.DataFrame(st.session_state.lca_materials)
             if not df_lca.empty:
-                st.dataframe(df_lca.rename(columns={"mat_id": "ID", "component": "Component", "circularity_score": "Circularity (%)", "recycling_rate": "Recycling (%)", "eol_impact": "EoL Impact"}), use_container_width=True, hide_index=True)
+                st.dataframe(df_lca.rename(columns={"mat_id": "ID", "component": "Component", "circularity_score": "Circularity (%)", "recycling_rate": "Recycling (%)", "eol_impact": "EoL Impact"}), width="stretch", hide_index=True)
                 
                 fig_lca = px.scatter(df_lca, x="circularity_score", y="recycling_rate", size="circularity_score", color="eol_impact",
                                      hover_name="component", text="component",
@@ -9695,7 +9695,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                                      title="Circularity Score vs Recycling Rate (%) Matrix")
                 fig_lca.update_traces(textposition='top center')
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
-                st.plotly_chart(fig_lca, use_container_width=True)
+                st.plotly_chart(fig_lca, width="stretch")
 
     _render_post_module_layers("Green IE & Sustainability")
     _shoir_module_stop()
@@ -9718,11 +9718,11 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
-        return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
+        return st.data_editor(df, num_rows="dynamic", width="stretch", key=key_name)
     elif hasattr(st, "experimental_data_editor"):
-        return st.experimental_data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
+        return st.experimental_data_editor(df, num_rows="dynamic", width="stretch", key=key_name)
     else:
-        return st.dataframe(df, use_container_width=True)
+        return st.dataframe(df, width="stretch")
 
 # =====================================================================
 # SOLVER & SIMULATION HELPER FUNCTIONS
@@ -10040,7 +10040,7 @@ else:
                 {"Step": item["step"], "Status": item["status"], "What Copilot will do": item["detail"]}
                 for item in plan["steps"]
             ])
-            st.dataframe(plan_df, use_container_width=True, hide_index=True)
+            st.dataframe(plan_df, width="stretch", hide_index=True)
 
             p1, p2, p3, p4 = st.columns(4)
             p1.metric("Rows inspected", f'{plan["inspection"]["rows"]:,}')
@@ -10055,7 +10055,7 @@ else:
             run_workflow = st.button(
                 "🚀 Execute Engineering Workflow",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not approve,
                 key="copilot_orchestrator_run",
             )
@@ -10122,7 +10122,7 @@ else:
 
             result_df = saved_run.get("result", pd.DataFrame())
             if isinstance(result_df, pd.DataFrame) and not result_df.empty:
-                st.dataframe(result_df.head(500), use_container_width=True, hide_index=True)
+                st.dataframe(result_df.head(500), width="stretch", hide_index=True)
             explanation = str(saved_run.get("explanation", ""))
             if explanation:
                 st.markdown("### 🧩 Explanation")
@@ -10132,14 +10132,14 @@ else:
             comparison_meta = saved_run.get("comparison_meta", {}) or {}
             if isinstance(comparison, pd.DataFrame) and not comparison.empty and comparison_meta.get("mode") != "unavailable":
                 st.markdown("### 🔄 Scenario comparison")
-                st.dataframe(comparison.head(500), use_container_width=True, hide_index=True)
+                st.dataframe(comparison.head(500), width="stretch", hide_index=True)
 
             figure_json = st.session_state.get("copilot_orchestrator_figure_json")
             if isinstance(figure_json, str) and figure_json:
                 try:
                     st.markdown("### 📈 Primary analysis graph")
                     orchestrator_fig = go.Figure(json.loads(figure_json))
-                    st.plotly_chart(orchestrator_fig, use_container_width=True)
+                    st.plotly_chart(orchestrator_fig, width="stretch")
                 except Exception:
                     st.info("The primary graph was generated but could not be reconstructed in this view.")
 
@@ -10151,7 +10151,7 @@ else:
                         label, payload = item
                         fig = payload if isinstance(payload, go.Figure) else go.Figure(payload)
                         st.markdown(f"**{idx}. {label}**")
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
                     except Exception:
                         continue
 
@@ -10180,7 +10180,7 @@ else:
             if st.button(
                 "📝 Stage Proposed Decision Card",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not approve_stage,
                 key=stage_key + "_button",
             ):
@@ -10213,7 +10213,7 @@ else:
                     file_name=f"shoir_ie_copilot_{saved_run.get('run_id','workflow').lower()}.zip",
                     mime="application/zip",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     key="copilot_orchestrator_export_download",
                 )
 
@@ -10259,14 +10259,14 @@ else:
     
                 a,b,d=st.columns(3)
                 with a:
-                    if st.button("✨ Auto Clean 12 checks", type="primary", use_container_width=True, key="copilot_auto_clean"):
+                    if st.button("✨ Auto Clean 12 checks", type="primary", width="stretch", key="copilot_auto_clean"):
                         cleaned,audit=clean_dataframe(df)
                         workbook[selected_sheet]=cleaned
                         st.session_state.copilot_clean_audit.extend(audit)
                         st.success("Automatic cleaning completed.")
                         st.rerun()
                 with b:
-                    if st.button("▶ Apply Function", use_container_width=True, key="copilot_apply_function"):
+                    if st.button("▶ Apply Function", width="stretch", key="copilot_apply_function"):
                         try:
                             kwargs={"columns":cols}
                             if function=="TEXTSPLIT": kwargs.update(column=split_col,delimiter=delimiter)
@@ -10281,36 +10281,36 @@ else:
                         except Exception as exc:
                             st.error(f"{function} could not be applied: {exc}")
                 with d:
-                    if st.button("↩️ Reset Workbook", use_container_width=True, key="copilot_reset_workbook"):
+                    if st.button("↩️ Reset Workbook", width="stretch", key="copilot_reset_workbook"):
                         st.session_state.copilot_workbook={k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook_original.items()}
                         st.session_state.copilot_clean_audit=[]
                         st.rerun()
     
-                st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
+                st.dataframe(workbook[selected_sheet], width="stretch", hide_index=True)
                 numeric=[x for x in workbook[selected_sheet].columns if pd.api.types.is_numeric_dtype(workbook[selected_sheet][x])]
                 if numeric and len(workbook[selected_sheet])>0:
                     chart_col=st.selectbox("📊 Preview chart",numeric,key="copilot_chart_column")
                     chart_df=workbook[selected_sheet]
                     x_col=next((x for x in chart_df.columns if x != chart_col and not pd.api.types.is_numeric_dtype(chart_df[x])), chart_df.columns[0])
                     fig=px.bar(chart_df,x=x_col,y=chart_col,title=f"{selected_sheet}: {chart_col}")
-                    st.plotly_chart(fig,use_container_width=True)
+                    st.plotly_chart(fig,width="stretch")
                 else:
                     fig=None
     
                 export_tables=[(name,data) for name,data in workbook.items()]
                 excel_bytes=build_excel_report("Shoir-IE Copilot Cleaned Workbook",export_tables,audit=st.session_state.get("copilot_clean_audit",[]))
-                st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+                st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",width="stretch")
                 bundle=build_workbook_bundle("Shoir-IE Copilot Cleaned Workbook",export_tables,figures=[(selected_sheet,fig)] if fig is not None else [],audit=st.session_state.get("copilot_clean_audit",[]))
-                st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",use_container_width=True)
+                st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",width="stretch")
     
                 with st.expander("🔎 Cleaning audit"):
                     audit_df=pd.DataFrame(st.session_state.get("copilot_clean_audit",[]))
-                    st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),use_container_width=True,hide_index=True)
+                    st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),width="stretch",hide_index=True)
     
             with cp2:
                 st.markdown("### 🧭 Ask what to use")
                 recommendation_prompt=st.text_area("What result do you want?", placeholder="e.g. I need to forecast SKU demand using weather and promotions", key="copilot_recommendation_prompt")
-                if st.button("Recommend Module", use_container_width=True, key="copilot_recommend"):
+                if st.button("Recommend Module", width="stretch", key="copilot_recommend"):
                     recommendation=copilot_module_recommendation(recommendation_prompt)
                     st.info(recommendation)
                     current_tier=str(st.session_state.get("user_tier","Starter Tier"))
@@ -10421,7 +10421,7 @@ if mod == "Carbon Accounting":
                 template="plotly_white"
             )
             fig_carbon.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=380)
-            st.plotly_chart(fig_carbon, use_container_width=True)
+            st.plotly_chart(fig_carbon, width="stretch")
 
         with col_g2:
             st.subheader("🎯 Net-Zero Targets")
@@ -10456,7 +10456,7 @@ if mod == "Carbon Accounting":
         m_res2.metric("Estimated Carbon Tax Savings", f"${saved_carbon * 75:,.0f}", delta="At $75/MT fee")
         m_res3.metric("SBTi Alignment Status", "On Track", delta="Verified")
 
-        if st.button("💾 Save Decarbonization Simulation Policy", type="primary", use_container_width=True):
+        if st.button("💾 Save Decarbonization Simulation Policy", type="primary", width="stretch"):
             st.toast("Decarbonization strategy successfully committed to SQLite persistence engine!", icon="🌱")
 
     with carb_tab3:
@@ -10470,9 +10470,9 @@ if mod == "Carbon Accounting":
             "Compliance Status": ["Verified", "Verified", "Pending Review", "Passed"],
             "Last Updated": ["2026-08-01", "2026-08-05", "2026-08-10", "2026-08-12"]
         })
-        st.dataframe(audit_df, use_container_width=True)
+        st.dataframe(audit_df, width="stretch")
 
-        if st.button("📥 Export GHG Protocol Full Disclosure Report", use_container_width=True):
+        if st.button("📥 Export GHG Protocol Full Disclosure Report", width="stretch"):
             st.toast("GHG Disclosure Report successfully generated and downloaded.", icon="📄")
 
     # =========================================================
@@ -10506,7 +10506,7 @@ elif mod == "IoT Digital Twin":
             "Status": ["🟢 Optimal", "🟢 Optimal", "🟢 Optimal", "🟡 Warning", "🟢 Optimal"],
             "Battery / Signal": ["98% / -52 dBm", "92% / -64 dBm", "100% (Mains)", "84% / -71 dBm", "95% / -49 dBm"]
         })
-        st.dataframe(node_mesh_df, use_container_width=True)
+        st.dataframe(node_mesh_df, width="stretch")
 
     with iot_tab2:
         st.subheader("⚡ Live Sensor Telemetry Stream Simulation")
@@ -10514,7 +10514,7 @@ elif mod == "IoT Digital Twin":
 
         col_b1, col_b2 = st.columns([1, 3])
         with col_b1:
-            poll_clicked = st.button("📡 Poll Live IoT Stream", type="primary", use_container_width=True)
+            poll_clicked = st.button("📡 Poll Live IoT Stream", type="primary", width="stretch")
             auto_refresh = st.checkbox("Enable Continuous Polling (1s)")
 
         if poll_clicked or auto_refresh:
@@ -10526,7 +10526,7 @@ elif mod == "IoT Digital Twin":
                 "Timestamp": ["17:38:02", "17:38:02", "17:38:02", "17:38:02", "17:38:02", "17:38:02", "17:38:02"]
             })
             st.success("Telemetry pipeline synchronized with MQTT Broker successfully.")
-            st.dataframe(sensor_stream, use_container_width=True)
+            st.dataframe(sensor_stream, width="stretch")
 
             # Quick Telemetry Chart
             chart_data = pd.DataFrame({
@@ -10534,7 +10534,7 @@ elif mod == "IoT Digital Twin":
                 "Load/Power": [14.2, 12.8, 16.5, 11.0, 15.4]
             })
             fig_iot = px.bar(chart_data, x="Sensor", y="Load/Power", title="Active Power Draw Telemetry (kW)", template="plotly_white")
-            st.plotly_chart(fig_iot, use_container_width=True)
+            st.plotly_chart(fig_iot, width="stretch")
         else:
             st.info("Click the button above to capture real-time telemetry packets from the sensor mesh.")
 
@@ -10545,7 +10545,7 @@ elif mod == "IoT Digital Twin":
         target_node = st.selectbox("Select Target Node for Command", ["IOT-NODE-001 (WH Alpha)", "IOT-NODE-002 (WH Alpha)", "IOT-NODE-003 (WH Beta)", "IOT-NODE-004 (WH Cold Storage)"])
         cmd_action = st.selectbox("Select Action / Command", ["Reboot Edge Firmware", "Calibrate Sensor Offset", "Increase Sampling Frequency (10Hz)", "Put into Low-Power Sleep Mode"])
 
-        if st.button("🚀 Dispatch Command to Edge Node", type="primary", use_container_width=True):
+        if st.button("🚀 Dispatch Command to Edge Node", type="primary", width="stretch"):
             st.toast(f"Command '{cmd_action}' successfully transmitted to {target_node} via secure TLS tunnel!", icon="🛰️")
 
     # =========================================================
@@ -10571,10 +10571,10 @@ elif mod == "MILP Solvers":
         with col_m2:
             st.markdown("##### **Candidate Warehouses Database**")
             wh_display_df = pd.DataFrame(st.session_state.warehouses_list)
-            st.dataframe(wh_display_df, use_container_width=True)
+            st.dataframe(wh_display_df, width="stretch")
         
         st.markdown("---")
-        run_solver = st.button("🚀 Execute High-Precision MILP Solver", type="primary", use_container_width=True, key="run_milp_solver_btn_tab1")
+        run_solver = st.button("🚀 Execute High-Precision MILP Solver", type="primary", width="stretch", key="run_milp_solver_btn_tab1")
         if run_solver:
             st.toast("MILP Solver dispatched successfully! Check Tab 3 for results.", icon="🚀")
 
@@ -10646,7 +10646,7 @@ elif mod == "MILP Solvers":
                         res_df = res_df[res_df["Quantity"] > 0]  # Filter out zero allocations for clean charts
                         st.session_state["milp_allocation_flow_df"] = res_df.copy(deep=True)
 
-                        st.dataframe(raw_res_df, use_container_width=True)
+                        st.dataframe(raw_res_df, width="stretch")
                         
                         st.markdown("---")
                         st.markdown("##### **📊 Interactive Allocation & Flow Visualization**")
@@ -10668,7 +10668,7 @@ elif mod == "MILP Solvers":
                                 title_font=dict(size=18, family="sans-serif", color="#1E3ABA"),
                                 legend_title="Fulfillment Facility"
                             )
-                            st.plotly_chart(fig_milp, use_container_width=True)
+                            st.plotly_chart(fig_milp, width="stretch")
                             
                             fig_pie = px.pie(
                                 res_df, 
@@ -10680,7 +10680,7 @@ elif mod == "MILP Solvers":
                                 color_discrete_sequence=px.colors.qualitative.Pastel
                             )
                             fig_pie.update_layout(title_font=dict(size=18, family="sans-serif", color="#1E3ABA"))
-                            st.plotly_chart(fig_pie, use_container_width=True)
+                            st.plotly_chart(fig_pie, width="stretch")
                         else:
                             st.info("No active non-zero flow volumes found to plot.")
                     else:
@@ -10696,11 +10696,11 @@ elif mod == "MILP Solvers":
                             data=csv_data,
                             file_name="milp_optimization_report.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
                             key="download_csv_cost_breakdown"
                         )
                     with col_exp2:
-                        if st.button("📄 Generate Executive PDF Summary", use_container_width=True, key="generate_pdf_summary_btn"):
+                        if st.button("📄 Generate Executive PDF Summary", width="stretch", key="generate_pdf_summary_btn"):
                             st.toast("Executive PDF Report compiled successfully!", icon="🖨️")
                 else:
                     st.warning(f"Solver terminated with status: {status}. Please review network constraints or demand feasibility in Tab 1.")
@@ -10826,12 +10826,12 @@ if mod == "Inventory Playback":
         yaxis_title="Stock Level (Units)",
         title_font=dict(size=18, family="sans-serif", color="#1E3ABA")
     )
-    st.plotly_chart(fig_inv, use_container_width=True)
+    st.plotly_chart(fig_inv, width="stretch")
 
     # Simulation Daily Log Table & Export
     st.markdown("---")
     st.markdown("##### **📋 Daily Simulation Audit Log & Data Export**")
-    st.dataframe(sim_df[["Day", "Inventory Level", "Daily Demand", "Replenishment Arrived"]], use_container_width=True)
+    st.dataframe(sim_df[["Day", "Inventory Level", "Daily Demand", "Replenishment Arrived"]], width="stretch")
 
     csv_inv_data = sim_df.to_csv(index=False).encode('utf-8')
     st.download_button(
@@ -10839,7 +10839,7 @@ if mod == "Inventory Playback":
         data=csv_inv_data,
         file_name="inventory_simulation_playback.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
         key="download_inventory_csv_btn"
     )
 
@@ -10871,7 +10871,7 @@ if mod == "MEIO Matrix":
 
     edited_meio = st.data_editor(
         df_input,
-        use_container_width=True,
+        width="stretch",
         num_rows="dynamic",
         key="meio_interactive_editor"
     )
@@ -10932,7 +10932,7 @@ if mod == "MEIO Matrix":
         m2.metric("Total System Safety Stock", f"{total_safety_stock:,} units", delta="Inventory Buffer")
         m3.metric("Optimization Status", "Converged", delta="Optimal State", delta_color="normal")
 
-        st.dataframe(res_df, use_container_width=True)
+        st.dataframe(res_df, width="stretch")
 
         # Plotly Bar Chart with guaranteed column mapping
         fig_meio = px.bar(
@@ -10956,7 +10956,7 @@ if mod == "MEIO Matrix":
             hovermode="x unified"
         )
 
-        st.plotly_chart(fig_meio, use_container_width=True)
+        st.plotly_chart(fig_meio, width="stretch")
 
         csv_meio = res_df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -10997,7 +10997,7 @@ elif mod == "Slotting & Gantt":
         slot_df_input = pd.DataFrame(st.session_state.slotting_data)
         slot_df = st.data_editor(
             slot_df_input,
-            use_container_width=True,
+            width="stretch",
             num_rows="dynamic",
             key="native_slotting_data_editor"
         )
@@ -11050,7 +11050,7 @@ elif mod == "Slotting & Gantt":
                     font=dict(family="sans-serif", size=12),
                     margin=dict(t=50, b=40, l=40, r=40)
                 )
-                st.plotly_chart(fig_slot, use_container_width=True)
+                st.plotly_chart(fig_slot, width="stretch")
 
         # CSV Export for Slotting Report
         csv_slot = slot_df.to_csv(index=False).encode('utf-8')
@@ -11080,7 +11080,7 @@ elif mod == "Slotting & Gantt":
         gantt_input_df = pd.DataFrame(st.session_state.gantt_data)
         edited_gantt = st.data_editor(
             gantt_input_df,
-            use_container_width=True,
+            width="stretch",
             num_rows="dynamic",
             key="gantt_tasks_editor"
         )
@@ -11109,7 +11109,7 @@ elif mod == "Slotting & Gantt":
                 font=dict(family="sans-serif", size=12),
                 margin=dict(t=50, b=40, l=40, r=40)
             )
-            st.plotly_chart(fig_gantt, use_container_width=True)
+            st.plotly_chart(fig_gantt, width="stretch")
 
 
     # =========================================================
@@ -11163,7 +11163,7 @@ elif mod == "Fleet Routing":
 
     with col_f1:
         st.subheader("📋 Active Fleet Status & Quick Dispatch")
-        st.dataframe(fleet_df, use_container_width=True)
+        st.dataframe(fleet_df, width="stretch")
 
         if not fleet_df.empty:
             selected_truck = st.selectbox("Select Vehicle ID for Status Update", fleet_df["id"].tolist(), key="select_truck_status")
@@ -11330,7 +11330,7 @@ if mod == "Monte Carlo Sim":
             hovermode="x unified"
         )
 
-        st.plotly_chart(fig_mc, use_container_width=True)
+        st.plotly_chart(fig_mc, width="stretch")
 
         # Download option for the simulation dataset
         sim_df = pd.DataFrame({"Simulated_Demand_Units": simulated_demands})
@@ -11407,7 +11407,7 @@ elif mod == "Warehouse Heatmap":
         coloraxis_colorbar=dict(title="Pick Volume")
     )
 
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width="stretch")
 
     st.success("Analysis complete: **Aisle 3, Rack 7-9** exhibits peak pick congestion. Recommended action: Move fast-moving SKUs closer to dispatch staging bays.")
 
@@ -11474,10 +11474,10 @@ if mod == "Sensitivity Analysis":
         hover_data=["Category"]
     )
     fig_tornado.update_layout(height=480, margin=dict(l=20, r=20, t=40, b=20))
-    st.plotly_chart(fig_tornado, use_container_width=True)
+    st.plotly_chart(fig_tornado, width="stretch")
     
     with st.expander("📋 View Underlying Sensitivity Dataset & Parameter Categories"):
-        st.dataframe(tornado_df, use_container_width=True)
+        st.dataframe(tornado_df, width="stretch")
 # =========================================================
 # MODULE: WEBHOOK & SLACK/TEAMS ALERT INTEGRATION
 # =========================================================
@@ -11563,7 +11563,7 @@ elif mod == "Supplier Risk Matrix":
     edited_supp_df = st.data_editor(
         base_supp_df,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key="supplier_data_editor"
     )
     
@@ -11624,7 +11624,7 @@ elif mod == "Supplier Risk Matrix":
             uniformtext_mode='hide',
             title_font=dict(size=18, family="sans-serif", color="#1E3ABA")
         )
-        st.plotly_chart(fig_sup, use_container_width=True)
+        st.plotly_chart(fig_sup, width="stretch")
 
         # Secondary Advanced Analytics Chart (Cost vs Carbon with Sizing)
         fig_scatter = px.scatter(
@@ -11637,7 +11637,7 @@ elif mod == "Supplier Risk Matrix":
             title="Strategic Trade-off: Unit Cost vs. Carbon Footprint (Bubble size = Overall Weighted Score)",
             template="plotly_white"
         )
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width="stretch")
     else:
         st.warning("Please add at least one supplier entry in the data editor above.")
 
@@ -11776,7 +11776,7 @@ if mod == "Scenarios":
         barmode="group", title="Baseline vs. Simulated Scenario Performance Comparison",
         color_discrete_sequence=["#6c757d", "#1f77b4"]
     )
-    st.plotly_chart(fig_scen, use_container_width=True)
+    st.plotly_chart(fig_scen, width="stretch")
 
     # =========================================================
 # CORE INDUSTRIAL ENGINEERING SUITE (Stunning & Enhanced)
@@ -11826,7 +11826,7 @@ if mod == "Core IE Tools":
       calc_eoq = st.button(
           "🚀 Calculate Optimal Batch Size",
           type="primary",
-          use_container_width=True,
+          width="stretch",
       )
 
     with col2:
@@ -11893,7 +11893,7 @@ if mod == "Core IE Tools":
           paper_bgcolor="rgba(0,0,0,0)",
           margin=dict(t=40, b=20, l=20, r=20),
       )
-      st.plotly_chart(fig_eoq, use_container_width=True)
+      st.plotly_chart(fig_eoq, width="stretch")
 
   with ie_sub2:
     st.subheader("⚡ OEE Real-Time Plant Performance Engine")
@@ -11970,7 +11970,7 @@ if mod == "Core IE Tools":
           margin=dict(t=30, b=10, l=20, r=20),
           paper_bgcolor="rgba(0,0,0,0)",
       )
-      st.plotly_chart(fig_gauge, use_container_width=True)
+      st.plotly_chart(fig_gauge, width="stretch")
 
 # =========================================================
 # ENTERPRISE STATE & DATA PERSISTENCE SUITE
@@ -12012,7 +12012,7 @@ elif mod == "Persistence":
                 "Status": ["Synchronized", "Synchronized", "Pending Sync"],
                 "Last_Modified": ["2026-08-13 14:00", "2026-08-13 14:15", "2026-08-13 15:20"]
             })
-        st.dataframe(inspect_df, use_container_width=True)
+        st.dataframe(inspect_df, width="stretch")
 
     with p_tab2:
         st.subheader("📦 Session Checkpoint & Backup Management")
@@ -12022,7 +12022,7 @@ elif mod == "Persistence":
             st.markdown("##### **Create Workspace Snapshot**")
             snapshot_name = st.text_input("Snapshot Label", value="AEGIS_Production_State_v1.2")
             include_logs = st.checkbox("Include Historical Audit Logs", value=True)
-            if st.button("🚀 Generate & Save Checkpoint", type="primary", use_container_width=True):
+            if st.button("🚀 Generate & Save Checkpoint", type="primary", width="stretch"):
                 st.success(f"✨ Checkpoint **{snapshot_name}** successfully committed to storage!")
                 
         with col_b:
@@ -12031,7 +12031,7 @@ elif mod == "Persistence":
                 "Available Checkpoint Snapshots", 
                 ["Snapshot_20260813_1500.json", "Snapshot_20260812_0930.json", "Baseline_Config_v1.json"]
             )
-            if st.button("🔄 Restore Selected State", use_container_width=True):
+            if st.button("🔄 Restore Selected State", width="stretch"):
                 st.warning(f"⚠️ Workspace state restored from **{restore_file}**.")
 
         st.markdown("---")
@@ -12053,7 +12053,7 @@ elif mod == "Persistence":
         if audit_filter != "All Levels":
             audit_df = audit_df[audit_df["Severity"] == audit_filter]
             
-        st.dataframe(audit_df, use_container_width=True)
+        st.dataframe(audit_df, width="stretch")
         
         csv_data = audit_df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -12109,7 +12109,7 @@ elif mod == "Agentic Workflows":
                 default=["Inventory Optimization Agent", "Lead Time Analytics Agent", "SQLite Persistence Agent"]
             )
 
-            launch_mission = st.button("🚀 Initialize & Launch Agent Swarm", type="primary", use_container_width=True)
+            launch_mission = st.button("🚀 Initialize & Launch Agent Swarm", type="primary", width="stretch")
 
         with col_c2:
             st.markdown("##### **Swarm Health & Readiness**")
@@ -12158,7 +12158,7 @@ elif mod == "Agentic Workflows":
                 "Execution Status": ["Success", "Success", "Success", "Verified"],
                 "Latency (ms)": [310, 245, 120, 85]
             })
-            st.dataframe(mission_log_df, use_container_width=True)
+            st.dataframe(mission_log_df, width="stretch")
         else:
             st.info("💡 Configure your mission parameters in the **Swarm Command Center** tab and click **Initialize & Launch Agent Swarm** to start execution.")
 
@@ -12179,7 +12179,7 @@ elif mod == "Agentic Workflows":
             "Status": ["Completed", "Completed", "Completed", "Completed"],
             "Timestamp": ["2026-08-13 15:20", "2026-08-13 13:45", "2026-08-13 11:10", "2026-08-13 09:30"]
         })
-        st.dataframe(history_table, use_container_width=True)
+        st.dataframe(history_table, width="stretch")
 
     with aw_tab4:
         st.subheader("🛠️ Agentic Tool Registry & Capabilities")
@@ -12191,7 +12191,7 @@ elif mod == "Agentic Workflows":
             "Status": ["Active", "Active", "Active", "Active", "Active"],
             "Description": ["Direct database querying and persistence checkpointing", "Computes probabilistic multi-echelon inventory safety stock", "Optimizes warehouse zone pallet allocations", "Manages project milestone timelines", "Records immutable system audit logs"]
         })
-        st.dataframe(tool_df, use_container_width=True)
+        st.dataframe(tool_df, width="stretch")
 
 # =========================================================
 # ADMIN PANEL MODULE (Inside main workspace, after authentication)
@@ -12601,11 +12601,11 @@ if mod == "Admin Panel":
         else:
             u1,u2=st.columns(2)
             with u1:
-                st.plotly_chart(px.line(usage_df.groupby("Day",as_index=False)["Events"].sum(),x="Day",y="Events",title="Activity Over Time"),use_container_width=True)
+                st.plotly_chart(px.line(usage_df.groupby("Day",as_index=False)["Events"].sum(),x="Day",y="Events",title="Activity Over Time"),width="stretch")
             with u2:
                 top_actions=usage_df.groupby("Action",as_index=False)["Events"].sum().sort_values("Events",ascending=False).head(15)
-                st.plotly_chart(px.bar(top_actions,x="Action",y="Events",title="Most Used Actions"),use_container_width=True)
-            st.dataframe(usage_df,use_container_width=True,hide_index=True)
+                st.plotly_chart(px.bar(top_actions,x="Action",y="Events",title="Most Used Actions"),width="stretch")
+            st.dataframe(usage_df,width="stretch",hide_index=True)
 
         st.markdown("---")
         # FIX: everything from here down through the license-codes table
@@ -12682,14 +12682,14 @@ if mod == "Admin Panel":
             conn = sqlite3.connect("enterprise_full_workspace.db")
             users_df = pd.read_sql("SELECT username, role, tier, email FROM enterprise_users", conn)
             conn.close()
-            st.dataframe(users_df, use_container_width=True)
+            st.dataframe(users_df, width="stretch")
 
         with col_m2:
             st.subheader("📊 Security Audit Log")
             conn = sqlite3.connect("enterprise_full_workspace.db")
             audit_df = pd.read_sql("SELECT * FROM audit_trail ORDER BY id DESC LIMIT 20", conn)
             conn.close()
-            st.dataframe(audit_df, use_container_width=True)
+            st.dataframe(audit_df, width="stretch")
 
         st.markdown("---")
 
@@ -12734,7 +12734,7 @@ if mod == "Admin Panel":
         conn = sqlite3.connect("enterprise_full_workspace.db")
         codes_df = pd.read_sql("SELECT id, code, tier, duration_days, is_used, created_at FROM license_codes ORDER BY id DESC", conn)
         conn.close()
-        st.dataframe(codes_df, use_container_width=True)
+        st.dataframe(codes_df, width="stretch")
 
 # FIX: this whole "Enterprise Copilot AI Assistant" block used to sit here
 # unindented, meaning it rendered a full second chat widget underneath
@@ -12848,7 +12848,7 @@ if mod == "Cryptographic Ledger":
         st.info("Configure your batch parameters above and click **'Generate Cryptographic Proof Block'** to record a new immutable entry.")
 
     st.markdown("#### Recent Provenance Blocks")
-    st.dataframe(pd.DataFrame(st.session_state.ledger_history), use_container_width=True)
+    st.dataframe(pd.DataFrame(st.session_state.ledger_history), width="stretch")
 
     # =====================================================================
     # VALUE BOOSTER 5: TRANSPARENT FEATURE GATING WITH PREVIEW MODE
@@ -12870,7 +12870,7 @@ if mod == "Cryptographic Ledger":
         )
     with col_prev2:
         st.write("")
-        if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
+        if st.button("Unlock Enterprise Tier", type="primary", width="stretch"):
             st.info("Redirecting to secure subscription portal...")
 
 # =====================================================================
