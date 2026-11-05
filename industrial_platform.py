@@ -251,6 +251,7 @@ def register_dataset(
     workspace: str = "default",
     token: str = "",
     transformations: Optional[Sequence[Mapping[str, Any]]] = None,
+    dataset_id: Optional[str] = None,
 ) -> str:
     """Register a dataset; staging uses immutable managed versions, local uses SQLite."""
     if not isinstance(df, pd.DataFrame):
@@ -261,7 +262,12 @@ def register_dataset(
         {"name": str(name).strip(), "source": str(source_name).strip()},
         sort_keys=True, separators=(",", ":"),
     )
-    dataset_id = "DS-" + hashlib.sha256(logical_key.encode("utf-8")).hexdigest()[:12].upper()
+    resolved_dataset_id = str(dataset_id or "").strip().upper()
+    if resolved_dataset_id:
+        if not re.fullmatch(r"DS-[A-F0-9]{12,32}", resolved_dataset_id):
+            raise ValueError("Existing dataset ID must use the canonical DS- identifier format.")
+    else:
+        resolved_dataset_id = "DS-" + hashlib.sha256(logical_key.encode("utf-8")).hexdigest()[:12].upper()
     schema = {
         str(column): {
             "dtype": str(df[column].dtype),
@@ -273,7 +279,7 @@ def register_dataset(
     if len(transform_log) > 50:
         raise ValueError("Dataset transformation history is limited to 50 entries.")
     fingerprint_payload = {
-        "dataset_id": dataset_id,
+        "dataset_id": resolved_dataset_id,
         "data_hash": data_hash,
         "schema": schema,
         "transformations": transform_log,
@@ -297,7 +303,7 @@ def register_dataset(
             username=username,
             token=token,
             workspace=workspace,
-            dataset_id=dataset_id,
+            dataset_id=resolved_dataset_id,
             name=str(name),
             source_name=str(source_name),
             file_bytes=raw,
@@ -310,14 +316,14 @@ def register_dataset(
         )
         registration = result.get("registration") or {}
         _industrial_platform_session_state()["data_platform_latest_registration"] = dict(registration)
-        _industrial_platform_session_state()["data_platform_latest_dataset_id"] = dataset_id
+        _industrial_platform_session_state()["data_platform_latest_dataset_id"] = resolved_dataset_id
         _industrial_platform_session_state()["data_platform_latest_version"] = int(registration.get("version") or 1)
-        return dataset_id
+        return resolved_dataset_id
 
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",
-            (dataset_id, name, source_name, len(df), len(df.columns), data_hash, _now(), json.dumps(schema)),
+            (resolved_dataset_id, name, source_name, len(df), len(df.columns), data_hash, _now(), json.dumps(schema)),
         )
         conn.commit()
     return dataset_id
@@ -2183,6 +2189,18 @@ def render_module(module: str, tier: str, username: str):
                             "sheet_name": str(sheet_name)[:160],
                             "status": "completed",
                         }]
+                        existing_dataset_id = st.text_input(
+                            f"Existing dataset ID for \"{sheet_name}\" (optional)",
+                            key=(
+                                "data_platform_existing_dataset_"
+                                + hashlib.sha1(str(sheet_name).encode()).hexdigest()[:12]
+                            ),
+                            help=(
+                                "Leave blank to create a new dataset. Enter an ID copied from "
+                                "the registered catalogue to append a new immutable version "
+                                "to that dataset."
+                            ),
+                        ).strip()
                         dataset_id = register_dataset(
                             str(sheet_name),
                             up.name,
@@ -2191,6 +2209,7 @@ def render_module(module: str, tier: str, username: str):
                             workspace=current_workspace,
                             token=staging_token,
                             transformations=transform_log,
+                            dataset_id=existing_dataset_id or None,
                         )
                         registration = state.get("data_platform_latest_registration", {})
                         version = registration.get("version")
