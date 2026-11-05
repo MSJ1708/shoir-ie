@@ -496,3 +496,23 @@ def test_dataset_registration_rejects_malformed_existing_dataset_id_before_netwo
             token="session-token",
             dataset_id="../OTHER-WORKSPACE",
         )
+
+
+
+def test_local_dataset_registration_returns_stable_generated_id(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    frame = pd.DataFrame({"asset_id": ["A-1"], "throughput_tph": [10.0]})
+    first = platform.register_dataset(
+        "Production", "source.csv", frame,
+        db_path=str(tmp_path / "local-datasets.db"),
+    )
+    second = platform.register_dataset(
+        "Production renamed", "source-renamed.csv", frame,
+        db_path=str(tmp_path / "local-datasets.db"),
+        dataset_id=first,
+    )
+    assert first.startswith("DS-")
+    assert second == first
