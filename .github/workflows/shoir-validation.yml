@@ -24,6 +24,7 @@ jobs:
         run: python -m compileall -q .
       - name: Run regression tests
         env:
+          PYTHONTRACEMALLOC: "10"
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q tests
