@@ -178,35 +178,40 @@ def test_staging_referral_reconciliation_migration_is_idempotent_and_non_rewriti
     assert "grant select, insert, update, delete on table public.shoir_referrals to service_role" in executable_sql
 
 
+
 def test_private_rls_advisory_migration_adds_explicit_client_deny_policies_only():
     source = (
         MIGRATIONS
         / "20261105120000_explicit_deny_policies_for_private_rls_advisories.sql"
     ).read_text(encoding="utf-8")
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
-    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
-    policies = re.findall(
-        r"create policy [a-z_]+ on "
-        r"(public\\.shoir_referrals|shoir_internal\\.[a-z_]+) "
-        r"for all to anon, authenticated using \\(false\\) "
-        r"with check \\(false\\)\\s*;",
-        normalized,
-    )
-    expected = {
+    normalized = " ".join(executable_sql.casefold().split())
+
+    expected_tables = [
         "public.shoir_referrals",
-        *{
-            f"shoir_internal.{name}"
-            for name in (
-                "artifacts", "twin_assets", "twin_snapshots", "twin_scenarios",
-                "connector_health", "jobs", "collaboration", "knowledge",
-                "monitoring_rules", "monitoring_events", "report_provenance",
-                "security",
-            )
-        },
-    }
-    assert set(policies) == expected
-    assert len(policies) == len(expected) == 13
-    assert not re.search(r"\\bgrant\\b", executable_sql, re.IGNORECASE)
-    assert not re.search(r"\\bforce\\s+row\\s+level\\s+security\\b", executable_sql, re.IGNORECASE)
+        "shoir_internal.artifacts",
+        "shoir_internal.twin_assets",
+        "shoir_internal.twin_snapshots",
+        "shoir_internal.twin_scenarios",
+        "shoir_internal.connector_health",
+        "shoir_internal.jobs",
+        "shoir_internal.collaboration",
+        "shoir_internal.knowledge",
+        "shoir_internal.monitoring_rules",
+        "shoir_internal.monitoring_events",
+        "shoir_internal.report_provenance",
+        "shoir_internal.security",
+    ]
+    for table in expected_tables:
+        policy = (
+            f"create policy "
+            f"{table.split('.')[-1] if table.startswith('public.') else table.split('.')[-1]}_deny_browser_roles "
+            f"on {table} for all to anon, authenticated using (false) with check (false);"
+        )
+        assert policy in normalized, table
+
+    assert normalized.count("create policy ") == 13
+    assert "grant " not in normalized
+    assert "force row level security" not in normalized
