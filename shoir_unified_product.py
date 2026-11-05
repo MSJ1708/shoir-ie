@@ -7,6 +7,8 @@ showcase presentation.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import html
 import io
@@ -82,7 +84,7 @@ def _now() -> str:
 
 
 def _db(path: str = "enterprise_full_workspace.db"):
-    return sqlite3.connect(path, timeout=30)
+    return sqlite_connection(path, timeout=30)
 
 
 def _key(value: str) -> str:

@@ -7,6 +7,8 @@ execution, scenarios, health, governance and downloads.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import io
 import json
 import re
@@ -88,7 +90,7 @@ h1,h2,h3,h4,h5 = st.columns(5)
 h1.metric("User", USER)
 h2.metric("Tier", TIER)
 h3.metric("Modules", len(MODULE_MATRIX))
-with sqlite3.connect("enterprise_full_workspace.db") as c:
+with sqlite_connection("enterprise_full_workspace.db") as c:
     ds_count = c.execute("SELECT COUNT(*) FROM platform_datasets").fetchone()[0]
     model_count = c.execute("SELECT COUNT(*) FROM platform_models").fetchone()[0]
 h4.metric("Datasets", ds_count)

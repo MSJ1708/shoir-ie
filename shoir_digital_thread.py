@@ -11,6 +11,8 @@ as pending or inferred from available workspace metadata.
 
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import io
 import json
@@ -290,7 +292,7 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
     studies: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
     try:
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite_connection("enterprise_full_workspace.db", timeout=10) as conn:
             rows = conn.execute(
                 "SELECT study_id,research_id,title,methodology,module,updated_at FROM experience_research_studies WHERE owner=? ORDER BY updated_at DESC LIMIT 100",
                 (owner,),

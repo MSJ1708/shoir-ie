@@ -7,6 +7,8 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import html
 import json
@@ -170,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_shell_outcomes_decision
 
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return sqlite_connection(path, timeout=30)
 
 
 def _now() -> str:

@@ -6,6 +6,8 @@ feed the executive charts, readiness diagnostics, value calculations, and invest
 
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import html
 import io
@@ -152,7 +154,7 @@ def _hash(value: str) -> str:
 
 def _db() -> sqlite3.Connection:
     ensure_experience_db()
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite_connection(DB_PATH, timeout=30)
     for statement in SCHEMA.split(";\n"):
         if statement.strip():
             conn.execute(statement)

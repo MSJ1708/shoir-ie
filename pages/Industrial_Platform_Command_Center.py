@@ -4,6 +4,8 @@ A thin integration surface over the existing industrial_platform service layer.
 It intentionally reuses the same persisted model/database instead of creating
 parallel module state.
 """
+from shoir_sqlite import connect as sqlite_connection
+
 import json
 import sqlite3
 import pandas as pd
@@ -34,7 +36,7 @@ tier = st.session_state.get("user_tier", "Enterprise Plus Tier")
 user = st.session_state.get("current_user", "unknown")
 
 # Shared platform health
-with sqlite3.connect("enterprise_full_workspace.db") as c:
+with sqlite_connection("enterprise_full_workspace.db") as c:
     counts = {}
     for table in [
         "industrial_entities","platform_datasets","platform_models",

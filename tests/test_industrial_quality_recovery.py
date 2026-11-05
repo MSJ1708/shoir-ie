@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import ast
 import io
 from pathlib import Path
@@ -45,7 +47,7 @@ def test_industrial_relationships_and_mes_workflows(tmp_path) -> None:
     assert len(load_entity_relationships(str(db))) == 1
 
     import sqlite3
-    with sqlite3.connect(db) as con:
+    with sqlite_connection(db) as con:
         con.execute(
             "INSERT INTO mes_work_orders(work_order,product,quantity,due_date,status,machine,operator,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             ("WO-001", "P-100", 100, "2030-01-01", "Released", "M-01", "", "now"),

@@ -12,6 +12,8 @@ No persistent user data is deleted by this layer.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import io
 import json
@@ -231,7 +233,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return sqlite_connection(path, timeout=30)
 
 def _json(data: Any) -> str:
     return json.dumps(data, sort_keys=True, default=str, ensure_ascii=False)

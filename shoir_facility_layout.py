@@ -6,6 +6,8 @@ immediately drive every visual and analysis surface.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import io
 import math
 import re
@@ -37,7 +39,7 @@ def _workspace(owner: str) -> str:
 
 
 def _db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH, timeout=30)
+    return sqlite_connection(DB_PATH, timeout=30)
 
 
 def _key(value: str) -> str:

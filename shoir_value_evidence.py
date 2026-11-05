@@ -10,6 +10,8 @@ Cross-cutting value layer:
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import html
 import math
@@ -129,7 +131,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def ensure_value_evidence_db() -> None:
     try:
-        with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        with sqlite_connection(DB_PATH, timeout=30) as conn:
             for statement in _SCHEMA.split(";"):
                 if statement.strip():
                     conn.execute(statement)
@@ -175,7 +177,7 @@ def task_profile(module: str) -> dict[str, Any]:
 
 def _saved_baseline(owner: str, module: str) -> dict[str, Any] | None:
     try:
-        with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        with sqlite_connection(DB_PATH, timeout=30) as conn:
             row = conn.execute(
                 "SELECT task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source FROM shoir_value_task_baselines WHERE owner=? AND module=?",
                 (str(owner), str(module)),
@@ -210,7 +212,7 @@ def calculate_financial_bridge(baseline_cost: float, post_cost: float, implement
 
 def record_time_snapshot(owner: str, module: str, task: str, values: dict[str, Any], source: str) -> str:
     snapshot_id = "VE-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(f"{owner}|{module}|{task}|{_now()}".encode("utf-8")).hexdigest()[:10].upper()
-    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    with sqlite_connection(DB_PATH, timeout=30) as conn:
         conn.execute(
             "INSERT INTO shoir_value_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (snapshot_id, str(owner), str(module), str(task), values["baseline_hours"] * 60.0, values["shoir_hours"] * 60.0, values["hours_saved"], values["annual_capacity_hours"], values["annual_time_value"], str(values.get("currency", "SAR") or "SAR"), str(source), _now()),
@@ -328,7 +330,7 @@ def render_value_receipt(module: str, username: str) -> None:
             source_input = st.text_input("Traditional-time source / reference", value=str(saved.get("source", "Reference planning benchmark")), key=key+"_source")
             save_input = st.form_submit_button("Save value baseline", type="primary", width="stretch")
         if save_input:
-            with sqlite3.connect(DB_PATH, timeout=30) as conn:
+            with sqlite_connection(DB_PATH, timeout=30) as conn:
                 conn.execute(
                     """INSERT INTO shoir_value_task_baselines
                        (owner,module,task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source,updated_at)
@@ -458,7 +460,7 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
                 bridge_id = "VB-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(
                     f"{owner}|{module}|{baseline_cost}|{post_cost}|{implementation}|{_now()}".encode("utf-8")
                 ).hexdigest()[:10].upper()
-                with sqlite3.connect(DB_PATH, timeout=30) as conn:
+                with sqlite_connection(DB_PATH, timeout=30) as conn:
                     conn.execute(
                         """INSERT INTO shoir_value_financial_bridges
                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -507,7 +509,7 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
             if not source.strip() and confidence != "Reference estimate":
                 st.error("Customer measured or audited values require a source reference.")
             else:
-                with sqlite3.connect(DB_PATH, timeout=30) as conn:
+                with sqlite_connection(DB_PATH, timeout=30) as conn:
                     conn.execute(
                         """INSERT INTO shoir_value_task_baselines
                            (owner,module,task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source,updated_at)

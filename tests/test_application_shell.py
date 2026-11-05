@@ -1,3 +1,5 @@
+from shoir_sqlite import connect as sqlite_connection
+
 import json
 import os
 import sqlite3
@@ -59,7 +61,7 @@ def test_variance_calculation_is_numeric_and_traceable():
 def test_shell_schema_can_be_created(tmp_path):
     db = tmp_path / "shell.db"
     ensure_shell_schema(str(db))
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         tables = {
             row[0]
             for row in conn.execute(

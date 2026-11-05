@@ -5,6 +5,8 @@ surfaces for engineering modules without replacing their specialist logic.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import gzip
 import hashlib
 import html
@@ -131,7 +133,7 @@ def _now() -> str:
 
 
 def _db(path: str = "enterprise_full_workspace.db"):
-    return sqlite3.connect(path, timeout=30)
+    return sqlite_connection(path, timeout=30)
 
 
 def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
@@ -2469,7 +2471,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
 
         st.markdown("#### 🗃️ Saved scenario experiments")
         try:
-            with sqlite3.connect("enterprise_full_workspace.db") as scenario_conn:
+            with sqlite_connection("enterprise_full_workspace.db") as scenario_conn:
                 scenario_history = pd.read_sql_query(
                     """SELECT experiment_id AS "Experiment ID", name AS Name, module AS Module,
                                       created_by AS "Created By", created_at AS "Created At"
@@ -2496,7 +2498,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                     format_func=lambda value: history_labels[str(value)],
                     key=open_key,
                 )
-                with sqlite3.connect("enterprise_full_workspace.db") as detail_conn:
+                with sqlite_connection("enterprise_full_workspace.db") as detail_conn:
                     stored = detail_conn.execute(
                         """SELECT scenarios_json, results_json, created_at
                            FROM platform_experiments
