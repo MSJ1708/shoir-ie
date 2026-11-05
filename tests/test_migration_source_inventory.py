@@ -1,6 +1,7 @@
 """Fast source-integrity checks for the versioned Supabase migration set."""
 
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "supabase" / "migrations"
@@ -90,3 +91,59 @@ def test_additive_referral_migration_does_not_rewrite_existing_account_identifie
     assert "on public.shoir_accounts (lower(btrim(affiliate_code)))" in executable_sql
     assert "where affiliate_code is not null and btrim(affiliate_code) <> ''" in executable_sql
     assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in executable_sql
+
+
+
+def test_internal_schema_rls_migration_enables_only_private_deny_by_default_tables():
+    """Check executable SQL, not comments, for the intended RLS posture."""
+    source = (
+        MIGRATIONS
+        / "20261104183132_enable_shoir_internal_rls_20261104.sql"
+    ).read_text(encoding="utf-8")
+
+    # Strip line comments before asserting on SQL commands. A comment explaining
+    # that FORCE RLS is intentionally not used must not trigger a false failure.
+    executable_sql = "\\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+
+    expected_tables = {
+        "artifacts",
+        "twin_assets",
+        "twin_snapshots",
+        "twin_scenarios",
+        "connector_health",
+        "jobs",
+        "collaboration",
+        "knowledge",
+        "monitoring_rules",
+        "monitoring_events",
+        "report_provenance",
+        "security",
+    }
+    enabled_tables = {
+        table.casefold()
+        for table in re.findall(
+            r"alter\\s+table\\s+shoir_internal\\.([a-z_]+)\\s+enable\\s+row\\s+level\\s+security\\s*;",
+            executable_sql,
+            flags=re.IGNORECASE,
+        )
+    }
+
+    assert enabled_tables == expected_tables
+    assert not re.search(
+        r"\\bforce\\s+row\\s+level\\s+security\\b",
+        executable_sql,
+        flags=re.IGNORECASE,
+    )
+    assert not re.search(r"\\bcreate\\s+policy\\b", executable_sql, re.IGNORECASE)
+    assert not re.search(r"\\bgrant\\b", executable_sql, re.IGNORECASE)
+    assert (
+        "revoke all on schema shoir_internal from public, anon, authenticated"
+        in normalized
+    )
+    assert (
+        "revoke all on all tables in schema shoir_internal from public, anon, authenticated"
+        in normalized
+    )
