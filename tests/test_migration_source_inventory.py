@@ -28,6 +28,7 @@ EXPECTED_VERSIONS = [
     "20261104184453",
     "20261104192112",
     "20261104192857",
+    "20261105101231",
 ]
 
 
@@ -147,3 +148,30 @@ def test_internal_schema_rls_migration_enables_only_private_deny_by_default_tabl
         "revoke all on all tables in schema shoir_internal from public, anon, authenticated"
         in normalized
     )
+
+
+
+def test_staging_referral_reconciliation_migration_is_idempotent_and_non_rewriting():
+    source = (
+        MIGRATIONS
+        / "20261105101231_safe_beta_legal_referrals_20261105.sql"
+    ).read_text(encoding="utf-8").casefold()
+    executable_sql = "\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    assert "alter table public.shoir_subscription_requests" in executable_sql
+    assert "add column if not exists terms_accepted" in executable_sql
+    assert "create table if not exists public.shoir_referrals" in executable_sql
+    assert (
+        "create unique index if not exists idx_shoir_accounts_affiliate_code_trimmed_unique"
+        in executable_sql
+    )
+    assert "on public.shoir_accounts (lower(btrim(affiliate_code)))" in executable_sql
+    assert "update public.shoir_accounts" not in executable_sql
+    assert "set affiliate_code" not in executable_sql
+    assert "set updated_at" not in executable_sql
+    assert (
+        "revoke all on table public.shoir_referrals from public, anon, authenticated"
+        in executable_sql
+    )
+    assert "grant select, insert, update, delete on table public.shoir_referrals to service_role" in executable_sql
