@@ -516,3 +516,38 @@ def test_local_dataset_registration_returns_stable_generated_id(tmp_path, monkey
     )
     assert first.startswith("DS-")
     assert second == first
+
+
+
+def test_local_dataset_registration_initializes_missing_sqlite_schema(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    db_path = str(tmp_path / "dataset.db")
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2"],
+        "throughput_tph": [12.5, 14.0],
+    })
+
+    dataset_id = platform.register_dataset(
+        "Production",
+        "production.csv",
+        frame,
+        db_path=db_path,
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT dataset_id, name, source_name, row_count, column_count, sha256
+            FROM platform_datasets
+            WHERE dataset_id = ?
+            """,
+            (dataset_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == dataset_id
+    assert row[1:5] == ("Production", "production.csv", 2, 2)
+    assert len(row[5]) == 64
