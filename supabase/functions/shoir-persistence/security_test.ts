@@ -311,7 +311,6 @@ Deno.test("CSV shape inspection counts quoted logical records and handles CRLF",
   );
 });
 
-
 Deno.test("CSV shape inspection rejects duplicate, blank and malformed headers", () => {
   const invalid = [
     "asset_id,asset_id\nA-1,A-2\n",
