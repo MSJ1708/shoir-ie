@@ -183,7 +183,7 @@ def test_private_rls_advisory_migration_adds_explicit_client_deny_policies_only(
         MIGRATIONS
         / "20261105111832_explicit_deny_policies_for_private_rls_advisories.sql"
     ).read_text(encoding="utf-8")
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
     normalized = " ".join(executable_sql.casefold().split())
