@@ -16,7 +16,8 @@ Aggregate database checks:
 - Production has a private `subscription-payment-proofs` Storage bucket (512 KiB limit; PNG/JPEG/PDF MIME allow-list). The existing `storage.objects` policy denies browser roles access to that bucket. No `shoir-industrial-datasets` bucket currently exists.
 - The candidate dataset-storage migration drops and recreates the existing payment-proof policy with an additional dataset-bucket exclusion. Verify the exact resulting policy expression and prove payment-proof upload/download behavior remains unchanged before rollout.
 - Production migration history ends at `20261019140600` (`atomic_subscription_request_decisions`).
-- Production `shoir-persistence` is active at version 9 (source hash recorded in the release evidence); staging currently runs version 13.
+- Production `shoir-persistence` is active at version 9 (SHA-256 `d284858f4819a6034ef11309105db36ebac4088a7782aba8d605438d407c5740`); staging runs version 13 (SHA-256 `10b55455e9f2ae04d6c95f01e1f23b19748b7bb86038816c04bcc2ad90212bf2`).
+- Deployed source inspection found wildcard `Access-Control-Allow-Origin: *` and no browser-origin allowlist in production v9. Staging v13 uses an explicit origin allowlist and non-wildcard CORS. Both have `verify_jwt=false` because the function uses its own opaque-session validation; that custom authentication must be proven by the hosted session gate and must not be mistaken for anonymous access.
 - Supabase production Security Advisor returned no lints. Performance Advisor reports 18 informational unused-index notices. These indexes are not to be dropped based only on an unused-index observation.
 
 Production already contains accounts, sessions, subscription requests and workspace state. Any migration must be additive, preserve existing account codes/timestamps and workspace/session data, and avoid broad rewrites or resets.
