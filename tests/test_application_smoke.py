@@ -77,3 +77,11 @@ def test_application_sources_use_current_streamlit_width_api():
         if path.is_file() and "use_container_width" in path.read_text(encoding="utf-8")
     ]
     assert offenders == [], "Deprecated Streamlit width arguments remain: " + ", ".join(offenders)
+
+
+def test_application_bootstrap_uses_closing_sqlite_context_manager():
+    """The stdlib sqlite context manager does not close its connection."""
+    source = Path("app.py").read_text(encoding="utf-8")
+    assert "from shoir_sqlite import connect as sqlite_connection" in source
+    assert "with sqlite3.connect(" not in source
+    assert "with sqlite_connection(" in source
