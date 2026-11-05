@@ -548,6 +548,11 @@ def _existing_thread_entity_id(
     source_key = str(source or "")[:300]
     kind = str(entity_type)[:100]
 
+    # An immutable ID or at least one legacy alias is required for a lookup.
+    # Avoid an unnecessary database/API read for brand-new entities.
+    if not identity and not names:
+        return ""
+
     if str(APP_ENVIRONMENT).casefold() == "staging":
         records = _staging_platform_list(username, workspace, "canonical_entity", 10000)
         if records is None:
