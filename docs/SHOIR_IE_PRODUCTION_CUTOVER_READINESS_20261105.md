@@ -12,7 +12,9 @@ Aggregate database checks:
 - The protected Enterprise Admin aggregate invariant matches exactly one account. No admin row was read or changed.
 - `shoir_subscription_requests` is missing all six required current legal-acceptance columns: `terms_accepted`, `terms_version`, `privacy_policy_version`, `refund_policy_version`, `cookie_policy_version`, `accepted_at`.
 - `public.shoir_referrals` does not exist.
-- The 12 tables in `shoir_internal` exist, but 0/12 currently have row-level security enabled.
+- The 12 tables in `shoir_internal` exist, but 0/12 currently have row-level security enabled. Read-only privilege checks found no schema USAGE or table DML grants for `anon`, `authenticated` or `service_role`; do not assume the production Edge Function can access this schema.
+- Production has a private `subscription-payment-proofs` Storage bucket (512 KiB limit; PNG/JPEG/PDF MIME allow-list). The existing `storage.objects` policy denies browser roles access to that bucket. No `shoir-industrial-datasets` bucket currently exists.
+- The candidate dataset-storage migration drops and recreates the existing payment-proof policy with an additional dataset-bucket exclusion. Verify the exact resulting policy expression and prove payment-proof upload/download behavior remains unchanged before rollout.
 - Production migration history ends at `20261019140600` (`atomic_subscription_request_decisions`).
 - Production `shoir-persistence` is active at version 9 (source hash recorded in the release evidence); staging currently runs version 13.
 - Supabase production Security Advisor returned no lints. Performance Advisor reports 18 informational unused-index notices. These indexes are not to be dropped based only on an unused-index observation.
