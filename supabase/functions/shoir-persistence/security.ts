@@ -261,7 +261,9 @@ export function sessionEntitlementFields(
 export function normalizePlatformTier(value: unknown): string {
   const tier = String(value || "Starter").trim().toLowerCase();
   if (tier.includes("research")) return "Research Pack";
-  if (tier.includes("enterprise plus") || tier.includes("industrial enterprise")) {
+  if (
+    tier.includes("enterprise plus") || tier.includes("industrial enterprise")
+  ) {
     return "Enterprise Plus";
   }
   if (tier.includes("enterprise")) return "Enterprise";
@@ -360,7 +362,10 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
 
     if (character === '"') {
       if (fieldHasContent) {
-        throw new PublicRequestError("Dataset CSV contains an invalid quote.", 400);
+        throw new PublicRequestError(
+          "Dataset CSV contains an invalid quote.",
+          400,
+        );
       }
       inQuotes = true;
       fieldHasContent = true;
@@ -394,7 +399,10 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
   }
 
   if (inQuotes) {
-    throw new PublicRequestError("Dataset CSV contains an unterminated quoted field.", 400);
+    throw new PublicRequestError(
+      "Dataset CSV contains an unterminated quoted field.",
+      400,
+    );
   }
   if (firstRecord) {
     finishHeader();
@@ -403,7 +411,10 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
   }
 
   if (columnCount < 1) {
-    throw new PublicRequestError("Dataset CSV must contain at least one column.", 400);
+    throw new PublicRequestError(
+      "Dataset CSV must contain at least one column.",
+      400,
+    );
   }
   return { rowCount, columnCount, headers };
 }
