@@ -16,6 +16,7 @@ import math
 import folium
 from streamlit_folium import st_folium
 import sqlite3
+from shoir_sqlite import connect as sqlite_connection
 import json
 import datetime
 import random
@@ -416,7 +417,7 @@ os.makedirs("payment_proofs", exist_ok=True)
 # This is now a single, consolidated version. No feature was removed.
 # =====================================================================
 def init_db():
-    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+    with sqlite_connection("enterprise_full_workspace.db") as conn:
         cursor = conn.cursor()
 
         # 1. Saved Projects Table (Stores workspace / simulation states)
@@ -739,7 +740,7 @@ def is_valid_email(email):
     return bool(email) and bool(_EMAIL_RE.match(email.strip()))
 
 def local_account_exists(username):
-    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+    with sqlite_connection("enterprise_full_workspace.db") as conn:
         return conn.execute(
             "SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1",
             (str(username or "").strip().lower(),)
@@ -1781,7 +1782,7 @@ if not st.session_state.get("current_user"):
                         st.stop()
                     local_referrer_username = None
                     if referral_code and not _durable_accounts_ready:
-                        with sqlite3.connect("enterprise_full_workspace.db") as _ref_conn:
+                        with sqlite_connection("enterprise_full_workspace.db") as _ref_conn:
                             _ref_matches = _ref_conn.execute(
                                 "SELECT username FROM enterprise_users WHERE UPPER(affiliate_code)=? LIMIT 2",
                                 (referral_code,),
@@ -2452,7 +2453,7 @@ is_admin = (
 )
 if _current_username.casefold() == "sho" and not _current_role:
     try:
-        with sqlite3.connect("enterprise_full_workspace.db") as _admin_probe:
+        with sqlite_connection("enterprise_full_workspace.db") as _admin_probe:
             _role_row = _admin_probe.execute(
                 "SELECT role FROM enterprise_users WHERE LOWER(username)=? LIMIT 1",
                 ("sho",),
@@ -9862,7 +9863,7 @@ elif current_view == "Become an affiliate":
                 st.code(_fallback_code, language="text")
             st.caption("No reward is active. This fallback code display is informational and may not be accepted by the connected registration service.")
     else:
-        with sqlite3.connect("enterprise_full_workspace.db") as _ref_conn:
+        with sqlite_connection("enterprise_full_workspace.db") as _ref_conn:
             _ref_conn.execute("INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)", (st.session_state.current_user,))
             _code_row = _ref_conn.execute(
                 "SELECT affiliate_code FROM enterprise_users WHERE LOWER(username)=LOWER(?)",
