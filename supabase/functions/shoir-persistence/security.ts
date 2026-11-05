@@ -333,10 +333,16 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
   const finishHeader = () => {
     headers.push(field);
     if (headers.some((header) => !header.trim())) {
-      throw new PublicRequestError("Dataset CSV contains a blank column header.", 400);
+      throw new PublicRequestError(
+        "Dataset CSV contains a blank column header.",
+        400,
+      );
     }
     if (new Set(headers).size !== headers.length) {
-      throw new PublicRequestError("Dataset CSV contains duplicate column headers.", 400);
+      throw new PublicRequestError(
+        "Dataset CSV contains duplicate column headers.",
+        400,
+      );
     }
     columnCount = headers.length;
     firstRecord = false;
