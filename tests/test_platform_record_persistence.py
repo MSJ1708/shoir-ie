@@ -76,7 +76,8 @@ def test_edge_platform_record_actions_validate_session_before_data_access():
     assert 'String(body.token || "")' in listing
     assert "username" in listing
     assert '"workspace"' in listing
-    assert 'supabase.rpc("shoir_platform_upsert_record"' in save
+    assert '.rpc(' in save
+    assert '"shoir_platform_upsert_record"' in save
     assert '.eq("workspace_key", workspaceKey)' in listing
     assert 'PLATFORM_SECRET_KEY.test(key)' in source
 
@@ -401,8 +402,12 @@ def test_dataset_download_edge_action_is_session_and_workspace_scoped():
     assert "username" in action
     assert '"workspace"' in action
     assert '.eq("workspace_key", workspaceKey)' in action
-    assert '.eq("record_type", "dataset")' in action
-    assert '.eq("entity_key", datasetId)' in action
+    assert 'const recordType = requestedVersion === null' in action
+    assert 'const entityKey = requestedVersion === null' in action
+    assert '.eq("record_type", recordType)' in action
+    assert '.eq("entity_key", entityKey)' in action
+    assert 'datasetId + ":v" + requestedVersion' in action
+    assert 'datasetEntitlementDenial(' in action
     assert '.createSignedUrl(storageKey, 300, { download: true })' in action
     assert 'expectedPrefix = workspaceKey + "/" + datasetId + "/"' in action
 
