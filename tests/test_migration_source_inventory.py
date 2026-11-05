@@ -205,10 +205,15 @@ def test_private_rls_advisory_migration_adds_explicit_client_deny_policies_only(
         "shoir_internal.security",
     ]
     for table in expected_tables:
+        short_name = table.split(".")[-1]
+        policy_name = (
+            "shoir_referrals_deny_browser_roles"
+            if table == "public.shoir_referrals"
+            else f"shoir_internal_{short_name}_deny_browser_roles"
+        )
         policy = (
-            f"create policy "
-            f"{table.split('.')[-1] if table.startswith('public.') else table.split('.')[-1]}_deny_browser_roles "
-            f"on {table} for all to anon, authenticated using (false) with check (false);"
+            f"create policy {policy_name} on {table} "
+            "for all to anon, authenticated using (false) with check (false);"
         )
         assert policy in normalized, table
 
