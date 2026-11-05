@@ -6,6 +6,8 @@ immediately drive every visual and analysis surface.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import io
 import math
 import re
@@ -37,7 +39,7 @@ def _workspace(owner: str) -> str:
 
 
 def _db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH, timeout=30)
+    return sqlite_connection(DB_PATH, timeout=30)
 
 
 def _key(value: str) -> str:
@@ -903,9 +905,9 @@ def render_facility_layout(tier: str, username: str) -> None:
     with tabs[0]:
         left,right=st.columns([1.8,1])
         with left:
-            st.plotly_chart(_layout_figure(depts,flows),use_container_width=True,config={"displayModeBar":False})
+            st.plotly_chart(_layout_figure(depts,flows),width="stretch",config={"displayModeBar":False})
             st.markdown("#### Department register")
-            st.dataframe(depts.rename(columns={"id":"Dept ID","name":"Department","x":"X","y":"Y","area_sqm":"Area (m²)"}),use_container_width=True,hide_index=True)
+            st.dataframe(depts.rename(columns={"id":"Dept ID","name":"Department","x":"X","y":"Y","area_sqm":"Area (m²)"}),width="stretch",hide_index=True)
         with right:
             action=st.radio("Layout action",["Add","Edit","Remove"],horizontal=True,key="fl_crud_action")
             if action=="Add":
@@ -915,7 +917,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                     x=st.number_input("X coordinate",0.0,100.0,50.0,1.0,key="fl_add_x")
                     y=st.number_input("Y coordinate",0.0,100.0,50.0,1.0,key="fl_add_y")
                     area=st.number_input("Footprint (m²)",25.0,10000.0,400.0,25.0,key="fl_add_area")
-                    submit=st.form_submit_button("➕ Add department",type="primary",use_container_width=True)
+                    submit=st.form_submit_button("➕ Add department",type="primary",width="stretch")
                 if submit:
                     did=did.strip()
                     if not did or not name.strip(): st.error("Department ID and name are required.")
@@ -934,7 +936,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                         x=st.number_input("X coordinate",0.0,100.0,float(row["x"]),1.0,key="fl_edit_x")
                         y=st.number_input("Y coordinate",0.0,100.0,float(row["y"]),1.0,key="fl_edit_y")
                         area=st.number_input("Footprint (m²)",25.0,10000.0,float(row["area_sqm"]),25.0,key="fl_edit_area")
-                        save=st.form_submit_button("💾 Save department",type="primary",use_container_width=True)
+                        save=st.form_submit_button("💾 Save department",type="primary",width="stretch")
                     if save:
                         _save_departments(owner,workspace,[{"id":selected,"name":name,"x":x,"y":y,"area_sqm":area}])
                         st.success("Department updated. Connected flows and SLP read the same persistent registry.")
@@ -944,7 +946,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                 ids=depts["id"].astype(str).tolist()
                 target=st.selectbox("Department to remove",ids if ids else ["None"],key="fl_del_dept")
                 confirm=st.checkbox("I understand that its connections will also be removed.",key="fl_del_confirm")
-                if st.button("🗑️ Remove department",type="primary",disabled=target=="None" or not confirm,use_container_width=True,key="fl_del_btn"):
+                if st.button("🗑️ Remove department",type="primary",disabled=target=="None" or not confirm,width="stretch",key="fl_del_btn"):
                     with _db() as conn:
                         conn.execute("UPDATE facility_departments SET active=0,updated_at=? WHERE owner=? AND workspace=? AND dept_id=?",( _now(),owner,workspace,target))
                         conn.execute("DELETE FROM facility_flows WHERE owner=? AND workspace=? AND (from_id=? OR to_id=?)",(owner,workspace,target,target))
@@ -957,7 +959,7 @@ def render_facility_layout(tier: str, username: str) -> None:
         st.markdown("#### From-To load matrix")
         st.dataframe(
             _flow_matrix(depts, flows),
-            use_container_width=True,
+            width="stretch",
         )
         st.caption("Every connection below feeds the From-To table, process map, SLP relationship matrix, and what-if routing. Direction matters; the route model also uses the connection as a navigable edge.")
         a,b=st.columns([1.1,1.4])
@@ -971,7 +973,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                 rel=st.selectbox("SLP relationship",["A","E","I","O","U","X"],index=0,key="fl_flow_rel")
                 transport=st.selectbox("Handling mode",["Forklift","AMR / AGV","Conveyor","Pallet Jack","Manual"],key="fl_flow_transport")
                 reason=st.text_input("Reason / process step","Material transfer",key="fl_flow_reason")
-                add=st.form_submit_button("🔗 Create connection",type="primary",use_container_width=True)
+                add=st.form_submit_button("🔗 Create connection",type="primary",width="stretch")
             if add:
                 if not frm or not to or frm==to:
                     st.error("Choose two different departments.")
@@ -990,7 +992,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                     st.success(f"Connected {frm} → {to}. The live From-To and SLP surfaces are updated.")
                     st.rerun()
         with b:
-            st.plotly_chart(_flow_process_figure(depts,flows),use_container_width=True,config={"displayModeBar":False})
+            st.plotly_chart(_flow_process_figure(depts,flows),width="stretch",config={"displayModeBar":False})
             connected = flows[flows["from_id"].isin(ids) & flows["to_id"].isin(ids)].copy()
             if not connected.empty:
                 node_ids = ids
@@ -1009,7 +1011,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                     title="Material-flow volume by department",
                     margin=dict(l=8,r=8,t=50,b=8),
                 )
-                st.plotly_chart(fig_sankey,use_container_width=True,config={"displayModeBar":False})
+                st.plotly_chart(fig_sankey,width="stretch",config={"displayModeBar":False})
         st.markdown("#### Edit or remove an existing connection")
         if not flows.empty:
             labels={str(r.flow_id):f"{r.flow_id} · {r.from_id} → {r.to_id}" for r in flows.itertuples()}
@@ -1027,7 +1029,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                     mode2=st.selectbox("Handling mode",["Forklift","AMR / AGV","Conveyor","Pallet Jack","Manual"],index=["Forklift","AMR / AGV","Conveyor","Pallet Jack","Manual"].index(str(current["transport"])) if str(current["transport"]) in ["Forklift","AMR / AGV","Conveyor","Pallet Jack","Manual"] else 0,key="fl_e_mode")
                 with e3:
                     reason2=st.text_input("Reason / process step",str(current["reason"] or ""))
-                    up=st.form_submit_button("💾 Update connection",type="primary",use_container_width=True)
+                    up=st.form_submit_button("💾 Update connection",type="primary",width="stretch")
                 if up:
                     if frm2==to2:
                         st.error("From and To departments must be different.")
@@ -1042,31 +1044,31 @@ def render_facility_layout(tier: str, username: str) -> None:
                             conn.commit()
                         st.success("Connection updated; all dependent views use the new edge.")
                         st.rerun()
-            if st.button("🗑️ Remove connection",use_container_width=True,key="fl_delete_flow"):
+            if st.button("🗑️ Remove connection",width="stretch",key="fl_delete_flow"):
                 with _db() as conn:
                     conn.execute("DELETE FROM facility_flows WHERE owner=? AND workspace=? AND flow_id=?",(owner,workspace,fid))
                     conn.commit()
                 st.success("Connection removed.")
                 st.rerun()
             flow_view=flows.copy()
-            st.dataframe(flow_view.rename(columns={"flow_id":"Flow ID","from_id":"From","to_id":"To","loads_day":"Loads/day","distance_m":"Distance (m)","relationship":"REL","reason":"Reason","transport":"Handling"}),use_container_width=True,hide_index=True)
+            st.dataframe(flow_view.rename(columns={"flow_id":"Flow ID","from_id":"From","to_id":"To","loads_day":"Loads/day","distance_m":"Distance (m)","relationship":"REL","reason":"Reason","transport":"Handling"}),width="stretch",hide_index=True)
         else:
             st.info("No process connections yet. Create the first connection from the form above.")
 
     with tabs[2]:
         st.markdown("### Systematic Layout Planning")
         st.caption("SLP reads the same persistent connections used by the From-To process model. Every department pair is shown; unconnected pairs are explicitly marked so new departments never disappear from the SLP model.")
-        st.dataframe(slp,use_container_width=True,hide_index=True)
+        st.dataframe(slp,width="stretch",hide_index=True)
         if not depts.empty:
             matrix=_matrix(depts,slp)
             st.markdown("#### Relationship matrix")
-            st.dataframe(matrix,use_container_width=True)
+            st.dataframe(matrix,width="stretch")
             numeric=slp.groupby("REL",as_index=False).agg(Connections=("REL","size"),Daily_Loads=("Daily Loads","sum")) if not slp.empty else pd.DataFrame()
             if not numeric.empty:
-                st.plotly_chart(px.bar(numeric,x="REL",y="Connections",text="Connections",title="SLP relationship mix"),use_container_width=True,config={"displayModeBar":False})
+                st.plotly_chart(px.bar(numeric,x="REL",y="Connections",text="Connections",title="SLP relationship mix"),width="stretch",config={"displayModeBar":False})
             if not slp.empty:
                 heat = _slp_heatmap_values(matrix)
-                st.plotly_chart(px.imshow(heat,text_auto=True,aspect="auto",title="SLP closeness heatmap · A=4 … X=-1"),use_container_width=True,config={"displayModeBar":False})
+                st.plotly_chart(px.imshow(heat,text_auto=True,aspect="auto",title="SLP closeness heatmap · A=4 … X=-1"),width="stretch",config={"displayModeBar":False})
 
     with tabs[3]:
          st.markdown("### Process scenario laboratory")
@@ -1108,9 +1110,9 @@ def render_facility_layout(tier: str, username: str) -> None:
                      {"Scenario":"Baseline","Path":" → ".join(base_path) if base_path else "No route","Distance (m)":base_dist if math.isfinite(base_dist) else None,"Daily Loads on Path":base_vol if base_path else None},
                      {"Scenario":scenario_label,"Path":" → ".join(alt_path) if alt_path else "No route","Distance (m)":alt_dist if math.isfinite(alt_dist) else None,"Daily Loads on Path":alt_vol if alt_path else None},
                  ])
-                 st.dataframe(comparison,use_container_width=True,hide_index=True)
+                 st.dataframe(comparison,width="stretch",hide_index=True)
                  if comparison["Distance (m)"].notna().any():
-                     st.plotly_chart(px.bar(comparison.dropna(subset=["Distance (m)"]),x="Scenario",y="Distance (m)",text="Distance (m)",title="Routing distance impact"),use_container_width=True,config={"displayModeBar":False})
+                     st.plotly_chart(px.bar(comparison.dropna(subset=["Distance (m)"]),x="Scenario",y="Distance (m)",text="Distance (m)",title="Routing distance impact"),width="stretch",config={"displayModeBar":False})
          else:
              st.info("Create at least two departments and one connection to activate path scenarios.")
 
@@ -1129,8 +1131,8 @@ def render_facility_layout(tier: str, username: str) -> None:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
         st.markdown("#### Export current facility model")
         export=_export_workbook(depts,flows,slp)
-        st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="fl_export_workbook")
-        st.download_button("📄 Download From-To CSV",data=flows.to_csv(index=False).encode("utf-8"),file_name="facility_from_to.csv",mime="text/csv",use_container_width=True,key="fl_export_fromto")
+        st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",width="stretch",key="fl_export_workbook")
+        st.download_button("📄 Download From-To CSV",data=flows.to_csv(index=False).encode("utf-8"),file_name="facility_from_to.csv",mime="text/csv",width="stretch",key="fl_export_fromto")
         st.caption("The workbook contains Departments, From_To_Flows, SLP_Relationships and SLP_Matrix sheets.")
 
     # Keep the legacy state contract synchronized for older modules that read it.

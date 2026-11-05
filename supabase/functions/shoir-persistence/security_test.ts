@@ -1,8 +1,11 @@
 import {
   hasCanonicalMasterAdminInvariant,
+  inspectCsvShape,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
+  normalizePlatformTier,
   normalizeWorkspaceStateJson,
+  platformTierAllows,
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
@@ -245,5 +248,90 @@ Deno.test("protected administrator invariant is read-only and fails closed on dr
       !hasCanonicalMasterAdminInvariant(row),
       "Invariant drift must be detected and rejected.",
     );
+  }
+});
+
+Deno.test("dataset API package gate follows the canonical tier hierarchy", () => {
+  const allowed = [
+    "Enterprise Tier",
+    "Enterprise Plus Tier ($399)",
+    "Research Pack",
+  ];
+  assert(
+    normalizePlatformTier("Research Pack Add-on") === "Research Pack",
+    "Research Pack should be recognized as a separate add-on state.",
+  );
+  assert(
+    normalizePlatformTier("Enterprise Plus Tier ($399)") === "Enterprise Plus",
+    "Enterprise Plus should keep its own tier identity.",
+  );
+  const denied = [
+    "Starter Tier",
+    "Mid-Tier Pro",
+    "Pro Tier",
+    "Professional Tier",
+    "",
+    undefined,
+  ];
+  for (const tier of allowed) {
+    assert(
+      platformTierAllows(tier, "Enterprise"),
+      "Enterprise dataset capability should be allowed for " + String(tier),
+    );
+  }
+  for (const tier of denied) {
+    assert(
+      !platformTierAllows(tier, "Enterprise"),
+      "Enterprise dataset capability must be denied for " + String(tier),
+    );
+  }
+  assert(
+    !platformTierAllows("Enterprise Plus Tier ($399)", "Research Pack"),
+    "Enterprise Plus must not be treated as the Research Pack add-on.",
+  );
+  assert(
+    platformTierAllows("Research Pack", "Enterprise"),
+    "Research Pack should retain its inherited base capabilities.",
+  );
+});
+
+Deno.test("CSV shape inspection counts quoted logical records and handles CRLF", () => {
+  const input = new TextEncoder().encode(
+    "asset_id,description,value\r\n" +
+      'A-1,"line one, with comma",10\r\n' +
+      'A-2,"line one\nline two",20\r\n' +
+      'A-3,"escaped ""quote""",30\r\n',
+  );
+  const shape = inspectCsvShape(input);
+  assert(shape.rowCount === 3, "Quoted newlines must not create extra rows.");
+  assert(shape.columnCount === 3, "CSV column count is incorrect.");
+  assert(
+    shape.headers.join("|") === "asset_id|description|value",
+    "CSV headers were not parsed correctly.",
+  );
+});
+
+Deno.test("CSV shape inspection rejects duplicate, blank and malformed headers", () => {
+  const invalid = [
+    "asset_id,asset_id\nA-1,A-2\n",
+    "asset_id, \nA-1,A-2\n",
+    'asset_id,description\nA-1,"unterminated\n',
+    'asset_id,description\nA-1,unquoted"quote\n',
+  ];
+  for (const csv of invalid) {
+    try {
+      inspectCsvShape(new TextEncoder().encode(csv));
+    } catch (error) {
+      assert(
+        error instanceof PublicRequestError,
+        "Expected a public CSV validation error.",
+      );
+      assert(
+        error.status === 400,
+        "Malformed CSV must be rejected as client input.",
+      );
+      continue;
+    }
+    throw new Error("Malformed CSV should not be accepted.");
   }
 });

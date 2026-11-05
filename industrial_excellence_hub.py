@@ -6,6 +6,8 @@ experiments, verification, decisions, Copilot controls, exports and platform hea
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import io
 import json
 import hashlib
@@ -42,7 +44,7 @@ from industrial_experience import (
 
 def _db():
     ensure_experience_db()
-    return sqlite3.connect("enterprise_full_workspace.db", timeout=30)
+    return sqlite_connection("enterprise_full_workspace.db", timeout=30)
 
 
 def _now() -> str:
@@ -220,7 +222,7 @@ def _overview(username: str) -> None:
             )
             fig.update_layout(height=260, margin=dict(l=8,r=8,t=35,b=8), xaxis_title=None, yaxis_title="Recorded runs")
             fig.update_traces(textposition="outside")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     with right:
         st.markdown("#### Capability status declarations")
         catalog = feature_catalog().copy()
@@ -229,7 +231,7 @@ def _overview(username: str) -> None:
         fig = px.bar(groups, x="Status", y="Count", text="Count")
         fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), xaxis_title=None, yaxis_title="Catalog entries")
         fig.update_traces(textposition="outside")
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
         st.caption("Counts show static catalog labels. They do not prove runtime functionality or authenticated verification.")
 
     st.markdown("#### What changed")
@@ -265,7 +267,7 @@ def _benchmark_lab(username: str) -> None:
     st.markdown("### 🧪 Benchmark Laboratory")
     st.caption("Deterministic synthetic engineering workloads for runtime/reproducibility validation. These results are not customer ROI claims.")
     from benchmark_harness import run_standard_benchmarks
-    if st.button("▶️ Run standard engineering benchmarks", type="primary", use_container_width=True, key="px_run_standard_benchmarks"):
+    if st.button("▶️ Run standard engineering benchmarks", type="primary", width="stretch", key="px_run_standard_benchmarks"):
         with st.spinner("Running deterministic platform benchmarks..."):
             st.session_state["px_benchmark_results"] = run_standard_benchmarks(repetitions=3, rows=10000)
     results = st.session_state.get("px_benchmark_results")
@@ -274,18 +276,18 @@ def _benchmark_lab(username: str) -> None:
             results[["label","benchmark_type","dataset_rows","mean_ms","median_ms","p95_ms","min_ms","max_ms"]].rename(
                 columns={"label":"Benchmark","benchmark_type":"Type","dataset_rows":"Rows","mean_ms":"Mean ms","median_ms":"Median ms","p95_ms":"P95 ms","min_ms":"Min ms","max_ms":"Max ms"}
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         fig = px.bar(results, x="label", y="mean_ms", title="Standard Benchmark Runtime")
         fig.update_layout(xaxis_title=None, yaxis_title="Mean runtime (ms)")
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
         st.download_button(
             "📥 Download benchmark evidence (CSV)",
             results.to_csv(index=False).encode("utf-8"),
             "shoir_ie_standard_benchmark_evidence.csv",
             "text/csv",
-            use_container_width=True,
+            width="stretch",
             key="px_download_benchmark_results",
         )
 
@@ -302,7 +304,7 @@ def _visualization_readiness(username: str) -> None:
     v4.metric("Gaps", f'{summary["gaps"]:,}')
     audit = audit_all_module_visualizations(max_figures=4)
     if not audit.empty:
-        st.dataframe(audit, use_container_width=True, hide_index=True)
+        st.dataframe(audit, width="stretch", hide_index=True)
         if int(summary["gaps"]) == 0:
             st.success("No populated module table is currently graphless.")
         else:
@@ -328,14 +330,14 @@ def _digital_thread(username: str) -> None:
 
     left, right = st.columns([1.15, 1])
     with left:
-        st.dataframe(entities, use_container_width=True, hide_index=True)
+        st.dataframe(entities, width="stretch", hide_index=True)
     with right:
-        st.dataframe(edges, use_container_width=True, hide_index=True)
+        st.dataframe(edges, width="stretch", hide_index=True)
         if not edges.empty:
             st.plotly_chart(
                 px.bar(edges.groupby("relation", as_index=False).size().rename(columns={"size":"Links"}),
                        x="relation", y="Links", text="Links"),
-                use_container_width=True, config={"displayModeBar": False},
+                width="stretch", config={"displayModeBar": False},
             )
 
     with st.expander("➕ Add an industrial entity", expanded=False):
@@ -343,7 +345,7 @@ def _digital_thread(username: str) -> None:
         etype = a.selectbox("Entity type", ["Product","SKU","BOM","Customer","Order","Supplier","Material","Facility","Warehouse","Machine","Work Center","Operation","Routing","Employee","Skill","Asset","Maintenance Event","Quality Event","Shipment","Route","Scenario","Experiment","Model Run","Decision"])
         name = b.text_input("Name", key="thread_entity_name")
         status = c.selectbox("Status", ["Active","Draft","Watch","Archived"])
-        if st.button("Create entity", type="primary", use_container_width=True):
+        if st.button("Create entity", type="primary", width="stretch"):
             if not name.strip():
                 st.warning("Give the entity a name first.")
             else:
@@ -382,17 +384,17 @@ def _data_lab(username: str) -> None:
     q2.metric("Columns", f'{len(df.columns):,}')
     q3.metric("Verification", f'{check["score"]:.0f}%')
     q4.metric("Missing cells", f'{int(df.isna().sum().sum()):,}')
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
     nums = list(df.select_dtypes(include=np.number).columns)
     if nums:
         metric = st.selectbox("Response metric", nums, key="px_exp_metric")
         fig = px.line(df, x=df.columns[0], y=metric, markers=True, title=f"Scenario response · {metric}")
         fig.update_layout(height=300, margin=dict(l=8,r=8,t=45,b=8))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     a,b,c = st.columns(3)
-    if a.button("✅ Validate & register", type="primary", use_container_width=True):
+    if a.button("✅ Validate & register", type="primary", width="stretch"):
         run = "RUN-" + uuid.uuid4().hex[:12].upper()
         with _db() as conn:
             conn.execute(
@@ -403,12 +405,12 @@ def _data_lab(username: str) -> None:
             conn.commit()
         st.session_state["px_last_run"] = run
         st.success(f"Validation recorded · {run}")
-    if b.button("🧪 Queue experiment", use_container_width=True):
+    if b.button("🧪 Queue experiment", width="stretch"):
         jid = create_job("Platform Excellence", "scenario-sweep", username, {"rows": len(df), "metric": nums[0] if nums else None})
         update_job(jid, "Running", 25, "Experiment prepared", actor=username)
         st.session_state["px_job"] = jid
         st.success(f"Experiment queued · {jid}")
-    if c.button("💾 Save study", use_container_width=True):
+    if c.button("💾 Save study", width="stretch"):
         pid = save_project("Platform Excellence Study", "Platform Excellence", username, {"rows": len(df), "verification": check})
         st.session_state["px_project"] = pid
         st.success(f"Study saved · {pid}")
@@ -437,13 +439,13 @@ def _governance(username: str, tier: str) -> None:
         if decisions.empty:
             st.info("No decision cards yet. Create one from the action bar below.")
         else:
-            st.dataframe(decisions, use_container_width=True, hide_index=True)
+            st.dataframe(decisions, width="stretch", hide_index=True)
             did = st.selectbox("Decision", decisions["decision_id"].tolist(), key="px_decision_pick")
             selected_decision_id = str(did)
             status = decisions.loc[decisions["decision_id"] == did, "status"].iloc[0]
             next_state = st.selectbox("Move to", ["Validated","Proposed","Review","Approved","Implemented","Verified"], key="px_decision_next")
             comment = st.text_input("Approval note", key="px_decision_note")
-            if st.button("➡️ Transition decision", type="primary", use_container_width=True):
+            if st.button("➡️ Transition decision", type="primary", width="stretch"):
                 try:
                     transition_decision(did, username, next_state, comment, require_owner=True)
                     st.success(f"Decision moved to {next_state}.")
@@ -453,22 +455,22 @@ def _governance(username: str, tier: str) -> None:
             st.caption(f"Current state: {status}")
 
         a,b = st.columns(2)
-        if a.button("📝 Create decision card", use_container_width=True):
+        if a.button("📝 Create decision card", width="stretch"):
             did = create_decision("Platform Excellence decision", "Platform Excellence",
                                   {"verification": "Pending"}, {"tier": tier},
                                   {"uncertainty": "Document in review"}, username)
             st.success(f"Created {did}")
             st.rerun()
-        if b.button("💬 Add workspace comment", use_container_width=True):
+        if b.button("💬 Add workspace comment", width="stretch"):
             add_comment(None, st.session_state.get("px_selected_decision"), username, "Operator comment captured from Excellence Hub.")
             st.toast("Comment saved", icon="💬")
 
     with tab2:
         st.markdown("#### Approval-gated Copilot toolbelt")
         tools = pd.DataFrame(COPILOT_TOOLS, columns=["Tool","Scope","Approval"])
-        st.dataframe(tools, use_container_width=True, hide_index=True)
+        st.dataframe(tools, width="stretch", hide_index=True)
         action = st.selectbox("Preview action", tools["Tool"].tolist(), key="px_copilot_action")
-        if st.button("🤖 Stage Copilot action", type="primary", use_container_width=True):
+        if st.button("🤖 Stage Copilot action", type="primary", width="stretch"):
             rid = log_copilot_action("Platform Excellence", action, username, True, "Preview",
                                      {"source":"Excellence Hub","tier":tier})
             st.session_state["px_copilot_run"] = rid
@@ -482,7 +484,7 @@ def _governance(username: str, tier: str) -> None:
             if history.empty:
                 st.info("No approval transitions have been recorded for this decision yet.")
             else:
-                st.dataframe(history, use_container_width=True, hide_index=True)
+                st.dataframe(history, width="stretch", hide_index=True)
         else:
             st.info("Create or select one of your decision cards to view its recorded approval history.")
         st.markdown("#### Workspace comments")
@@ -500,7 +502,7 @@ def _governance(username: str, tier: str) -> None:
                    ORDER BY c.id DESC LIMIT 12""",
                 conn, params=(username, username, username),
             )
-        st.dataframe(comments, use_container_width=True, hide_index=True)
+        st.dataframe(comments, width="stretch", hide_index=True)
 
     with tab4:
         with _db() as conn:
@@ -508,7 +510,7 @@ def _governance(username: str, tier: str) -> None:
         if memory.empty:
             st.info("Decision Memory is ready. Record the first verified lesson after an implementation.")
         else:
-            st.dataframe(memory, use_container_width=True, hide_index=True)
+            st.dataframe(memory, width="stretch", hide_index=True)
         with st.form("px_memory_form"):
             problem = st.text_input("Problem")
             decision = st.text_input("Decision")
@@ -641,8 +643,8 @@ def _platform_health(username: str) -> None:
                 title="Stored freshness metadata (minutes; not live-tested)",
             )
             fig.update_layout(height=280, margin=dict(l=8,r=8,t=45,b=8), yaxis_title="Stored minutes")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-            st.dataframe(connectors, use_container_width=True, hide_index=True)
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+            st.dataframe(connectors, width="stretch", hide_index=True)
         else:
             st.info("No connector profiles are saved for this account.")
 
@@ -651,8 +653,8 @@ def _platform_health(username: str) -> None:
         if jobs.empty:
             st.info("No owned job records are available for this account. Existing legacy jobs without owner metadata are retained but not shown in another user's workspace.")
         else:
-            st.dataframe(jobs, use_container_width=True, hide_index=True)
-            if st.button("🛑 Cancel newest queued job", use_container_width=True):
+            st.dataframe(jobs, width="stretch", hide_index=True)
+            if st.button("🛑 Cancel newest queued job", width="stretch"):
                 queued = jobs[jobs["status"] == "Queued"]
                 if not queued.empty:
                     try:
@@ -679,11 +681,11 @@ def _platform_health(username: str) -> None:
         {"Control":"Accessibility", "Status":"Partially implemented", "Evidence":"Some labels and reduced-motion CSS exist; formal accessibility audit not run"},
         {"Control":"Arabic / RTL", "Status":"Preference support present", "Evidence":"Locale/direction persistence exists; complete RTL walkthrough not verified"},
     ])
-    st.dataframe(checks, use_container_width=True, hide_index=True)
+    st.dataframe(checks, width="stretch", hide_index=True)
 
-    if st.button("🔍 Run self-diagnostic", type="primary", use_container_width=True):
+    if st.button("🔍 Run self-diagnostic", type="primary", width="stretch"):
         result = _self_diagnostic_report()
-        st.dataframe(result, use_container_width=True, hide_index=True)
+        st.dataframe(result, width="stretch", hide_index=True)
         if (result["Status"] == "FAIL").any():
             st.error("One or more structural checks failed. Review the evidence above.")
         elif (result["Status"] == "NOT TESTED").any():

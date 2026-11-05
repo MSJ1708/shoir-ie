@@ -3,8 +3,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  inspectCsvShape,
   isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
+  platformTierAllows,
   publicErrorFor,
   readBoundedJsonObject,
   sessionEntitlementFields,
@@ -250,6 +252,25 @@ async function getSession(
   ) throw new Error("SUBSCRIPTION_EXPIRED");
   return row;
 }
+function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
+  return !platformTierAllows(row.tier, "Enterprise");
+}
+
+function datasetEntitlementDenial(
+  row: Record<string, unknown>,
+): {
+  error: string;
+  required_tier: string;
+  current_tier: string;
+} | null {
+  if (!datasetEntitlementDenied(row)) return null;
+  return {
+    error: "FEATURE_REQUIRES_ENTERPRISE",
+    required_tier: "Enterprise",
+    current_tier: String(row.tier || "Starter"),
+  };
+}
+
 async function adminSession(username: string, token: string) {
   const row = await getSession(token, username);
   if (row.username_lc !== "sho" || row.role !== "Enterprise Admin") {
@@ -312,6 +333,141 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
     });
   }
   return keys;
+}
+
+const PLATFORM_RECORD_TYPES = new Set([
+  "asset",
+  "dataset",
+  "dataset_version",
+  "process",
+  "product",
+  "material",
+  "calculation",
+  "kpi",
+  "scenario",
+  "recommendation",
+  "decision",
+  "project",
+  "action",
+  "document",
+  "workbook",
+  "model",
+  "quality",
+  "maintenance",
+  "energy",
+  "cost",
+  "traceability",
+  "risk",
+  "workflow",
+  "artifact",
+  "canonical_entity",
+  "canonical_relationship",
+  "canonical_event",
+  "twin_asset",
+  "twin_snapshot",
+  "twin_scenario",
+  "connector_health",
+  "job",
+  "knowledge_document",
+  "monitoring_event",
+  "report_provenance",
+  "security_policy",
+  "connector_run",
+  "connector_schedule",
+  "collaboration_item",
+  "monitoring_rule",
+  "cost_baseline",
+  "kpi_definition",
+  "project_record",
+  "work_order",
+  "change_request",
+  "risk_record",
+  "traceability_record",
+  "laboratory_sample",
+  "procurement_record",
+  "spare_part",
+  "shutdown_package",
+  "competency_record",
+]);
+const PLATFORM_SECRET_KEY =
+  /(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\bdob\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)/i;
+function validatePlatformPayload(
+  value: unknown,
+  depth = 0,
+): Record<string, unknown> {
+  if (
+    !value || typeof value !== "object" || Array.isArray(value) || depth > 8
+  ) {
+    throw new Error("Platform payload must be a bounded JSON object.");
+  }
+  const encoded = JSON.stringify(value);
+  if (new TextEncoder().encode(encoded).byteLength > 256 * 1024) {
+    throw new Error("Platform payload exceeds the 256 KiB limit.");
+  }
+  const walk = (item: unknown, level: number): void => {
+    if (level > 8) throw new Error("Platform payload nesting is too deep.");
+    if (Array.isArray(item)) {
+      if (item.length > 5000) {
+        throw new Error("Platform payload contains too many items.");
+      }
+      for (const child of item) walk(child, level + 1);
+    } else if (item && typeof item === "object") {
+      for (
+        const [key, child] of Object.entries(item as Record<string, unknown>)
+      ) {
+        if (PLATFORM_SECRET_KEY.test(key)) {
+          throw new Error(
+            "Credential or sensitive identifier fields are not accepted in platform records.",
+          );
+        }
+        walk(child, level + 1);
+      }
+    } else if (typeof item === "number" && !Number.isFinite(item)) {
+      throw new Error("Platform payload contains a non-finite number.");
+    }
+  };
+  walk(value, depth);
+  return value as Record<string, unknown>;
+}
+function stablePlatformJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return "[" + value.map(stablePlatformJson).join(",") + "]";
+  }
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return "{" + Object.keys(object).sort().map((key) =>
+      JSON.stringify(key) + ":" + stablePlatformJson(object[key])
+    ).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return bytesToHex(digest);
+}
+
+async function sha256Bytes(value: Uint8Array): Promise<string> {
+  const bytes = new Uint8Array(value.byteLength);
+  bytes.set(value);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    bytes.buffer as ArrayBuffer,
+  );
+  return bytesToHex(digest);
+}
+async function platformWorkspaceKey(
+  username: string,
+  workspace: string,
+): Promise<string> {
+  const user = username.trim().toLowerCase();
+  const scope = workspace.trim().toLowerCase();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(scope)) {
+    throw new Error("Workspace identifier is invalid.");
+  }
+  return (await sha256Hex(user + "::" + scope)).slice(0, 32);
 }
 
 Deno.serve(async (req) => {
@@ -801,6 +957,531 @@ Deno.serve(async (req) => {
         );
       if (error) throw error;
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
+    }
+
+    if (action === "dataset_download_url") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = datasetEntitlementDenial(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const requestedVersion = body.version == null || body.version === ""
+        ? null
+        : Number(body.version);
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        (requestedVersion !== null &&
+          (!Number.isSafeInteger(requestedVersion) || requestedVersion < 1))
+      ) {
+        return sendResponse(
+          { error: "Dataset identifier or version is invalid." },
+          400,
+        );
+      }
+      const recordType = requestedVersion === null
+        ? "dataset"
+        : "dataset_version";
+      const entityKey = requestedVersion === null
+        ? datasetId
+        : datasetId + ":v" + requestedVersion;
+      const { data: record, error } = await supabase
+        .from("shoir_platform_records")
+        .select("payload_json")
+        .eq("workspace_key", workspaceKey)
+        .eq("record_type", recordType)
+        .eq("entity_key", entityKey)
+        .maybeSingle();
+      if (error) throw error;
+      if (!record?.payload_json) {
+        return sendResponse(
+          { error: "Dataset version was not found in this workspace." },
+          404,
+        );
+      }
+      const payload = record.payload_json as Record<string, unknown>;
+      const storageKey = String(payload.storage_key || "");
+      const expectedPrefix = workspaceKey + "/" + datasetId + "/";
+      if (
+        !storageKey.startsWith(expectedPrefix) ||
+        !/^[0-9a-f]{64}\.csv$/.test(storageKey.slice(expectedPrefix.length))
+      ) {
+        return sendResponse(
+          { error: "Dataset storage reference is invalid." },
+          409,
+        );
+      }
+      const { data, error: signError } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .createSignedUrl(storageKey, 300, { download: true });
+      if (signError) throw signError;
+      if (!data?.signedUrl) {
+        throw new Error(
+          "Storage provider did not return a signed download URL.",
+        );
+      }
+      return sendResponse({
+        ok: true,
+        download_url: data.signedUrl,
+        data_hash: String(payload.data_hash || ""),
+        version: Number(payload.version || requestedVersion || 1),
+        row_count: Number(payload.row_count || 0),
+        column_count: Number(payload.column_count || 0),
+        version_record_id: String(payload.version_record_id || ""),
+        registered_at: String(payload.registered_at || ""),
+      });
+    }
+
+    if (action === "dataset_upload_create") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = datasetEntitlementDenial(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !/^[0-9a-f]{64}$/.test(dataHash)
+      ) {
+        return sendResponse(
+          { error: "Dataset upload identity is invalid." },
+          400,
+        );
+      }
+      const uploadPath = "tmp/" + workspaceKey + "/" + datasetId + "/" +
+        crypto.randomUUID().replace(/-/g, "") + ".csv";
+      const { data, error } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .createSignedUploadUrl(uploadPath, { upsert: false });
+      if (error) throw error;
+      if (!data?.signedUrl || !data?.token) {
+        throw new Error(
+          "Storage provider did not return a signed upload URL.",
+        );
+      }
+      return sendResponse({
+        ok: true,
+        upload_url: data.signedUrl,
+        upload_token: data.token,
+        upload_path: uploadPath,
+        max_bytes: 52428800,
+      });
+    }
+
+    if (action === "dataset_version_finalize") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = datasetEntitlementDenial(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const uploadPath = String(body.upload_path || "").trim();
+      const name = String(body.name || "").trim();
+      const sourceName = String(body.source_name || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      const fingerprint = String(body.version_fingerprint || "").toLowerCase();
+      const rowCount = Number(body.row_count);
+      const columnCount = Number(body.column_count);
+      const schema = body.schema;
+      const transformations = body.transformations || [];
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
+        uploadPath.includes("..") ||
+        uploadPath.length > 240 ||
+        !name ||
+        name.length > 200 ||
+        sourceName.length > 500 ||
+        !/^[0-9a-f]{64}$/.test(dataHash) ||
+        !/^[0-9a-f]{64}$/.test(fingerprint) ||
+        !Number.isSafeInteger(rowCount) ||
+        rowCount < 0 ||
+        rowCount > 100000000 ||
+        !Number.isSafeInteger(columnCount) ||
+        columnCount < 0 ||
+        columnCount > 5000 ||
+        !schema ||
+        typeof schema !== "object" ||
+        Array.isArray(schema) ||
+        new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+        !Array.isArray(transformations) ||
+        transformations.length > 50 ||
+        new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
+          16384
+      ) {
+        return sendResponse(
+          { error: "Dataset version metadata is invalid." },
+          400,
+        );
+      }
+      const expectedFingerprint = await sha256Hex(
+        stablePlatformJson({
+          dataset_id: datasetId,
+          data_hash: dataHash,
+          schema,
+          transformations,
+        }),
+      );
+      if (expectedFingerprint !== fingerprint) {
+        return sendResponse(
+          {
+            error:
+              "Dataset version fingerprint does not match the submitted metadata.",
+          },
+          422,
+        );
+      }
+      const { data: uploaded, error: downloadError } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .download(uploadPath);
+      if (downloadError || !uploaded) {
+        throw downloadError ||
+          new Error("Uploaded dataset file is missing.");
+      }
+      if (uploaded.size > 52428800) {
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        return sendResponse(
+          { error: "Dataset file exceeds the 50 MiB storage limit." },
+          413,
+        );
+      }
+      const bytes = new Uint8Array(await uploaded.arrayBuffer());
+      const digest = await sha256Bytes(bytes);
+      if (digest !== dataHash) {
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        return sendResponse(
+          {
+            error:
+              "Uploaded dataset content hash does not match the registered data hash.",
+          },
+          422,
+        );
+      }
+      let csvShape;
+      try {
+        csvShape = inspectCsvShape(bytes);
+      } catch (shapeError) {
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        throw shapeError;
+      }
+      const schemaColumns = Object.keys(schema as Record<string, unknown>);
+      if (
+        csvShape.rowCount !== rowCount ||
+        csvShape.columnCount !== columnCount ||
+        schemaColumns.length !== csvShape.columnCount ||
+        csvShape.headers.some((header) => !schemaColumns.includes(header))
+      ) {
+        await supabase.storage
+          .from("shoir-industrial-datasets")
+          .remove([uploadPath]);
+        return sendResponse(
+          {
+            error:
+              "Dataset row count, column count or schema does not match the uploaded CSV.",
+          },
+          422,
+        );
+      }
+      const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
+        ".csv";
+      const bucket = supabase.storage.from("shoir-industrial-datasets");
+      const { data: existingFile, error: existingError } = await bucket
+        .download(storageKey);
+      if (!existingError && existingFile) {
+        const existingBytes = new Uint8Array(
+          await existingFile.arrayBuffer(),
+        );
+        const existingHash = await sha256Bytes(existingBytes);
+        if (existingHash !== dataHash) {
+          await bucket.remove([uploadPath]);
+          throw new Error(
+            "Existing immutable dataset object does not match its content hash.",
+          );
+        }
+      } else {
+        const uploadBlob = new Blob(
+          [bytes.slice().buffer as ArrayBuffer],
+          { type: "text/csv" },
+        );
+        const { error: storeError } = await bucket.upload(
+          storageKey,
+          uploadBlob,
+          { contentType: "text/csv", upsert: false },
+        );
+        if (storeError) {
+          const { data: racedFile, error: racedError } = await bucket
+            .download(storageKey);
+          if (racedError || !racedFile) throw storeError;
+          const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
+          const racedHash = await sha256Bytes(racedBytes);
+          if (racedHash !== dataHash) {
+            throw new Error(
+              "Concurrent immutable dataset upload has a different content hash.",
+            );
+          }
+        }
+      }
+      const { error: removeError } = await bucket.remove([uploadPath]);
+      if (removeError) throw removeError;
+      const versionRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const headRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const { data, error } = await supabase.rpc(
+        "shoir_platform_register_dataset_version_with_storage",
+        {
+          p_workspace_key: workspaceKey,
+          p_dataset_id: datasetId,
+          p_name: name,
+          p_source_name: sourceName,
+          p_data_hash: dataHash,
+          p_version_fingerprint: fingerprint,
+          p_row_count: rowCount,
+          p_column_count: columnCount,
+          p_schema_json: schema,
+          p_transformations_json: transformations,
+          p_actor: row.username_lc,
+          p_version_record_id: versionRecordId,
+          p_head_record_id: headRecordId,
+          p_event_id: eventId,
+          p_storage_key: storageKey,
+        },
+      );
+      if (error) throw error;
+      const registration = Array.isArray(data) ? data[0] : data;
+      return sendResponse({ ok: true, registration });
+    }
+
+    if (action === "dataset_version_register") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = datasetEntitlementDenial(
+        row as unknown as Record<string, unknown>,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const name = String(body.name || "").trim();
+      const sourceName = String(body.source_name || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      const fingerprint = String(body.version_fingerprint || "").toLowerCase();
+      const rowCount = Number(body.row_count);
+      const columnCount = Number(body.column_count);
+      const schema = body.schema;
+      const transformations = body.transformations || [];
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !name || name.length > 200 || sourceName.length > 500 ||
+        !/^[0-9a-f]{64}$/.test(dataHash) ||
+        !/^[0-9a-f]{64}$/.test(fingerprint) ||
+        !Number.isSafeInteger(rowCount) || rowCount < 0 ||
+        rowCount > 100000000 ||
+        !Number.isSafeInteger(columnCount) || columnCount < 0 ||
+        columnCount > 5000 ||
+        !schema || typeof schema !== "object" || Array.isArray(schema) ||
+        new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+        !Array.isArray(transformations) || transformations.length > 50 ||
+        new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
+          16384
+      ) {
+        return sendResponse(
+          { error: "Dataset version metadata is invalid." },
+          400,
+        );
+      }
+      const versionRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const headRecordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const { data, error } = await supabase.rpc(
+        "shoir_platform_register_dataset_version",
+        {
+          p_workspace_key: workspaceKey,
+          p_dataset_id: datasetId,
+          p_name: name,
+          p_source_name: sourceName,
+          p_data_hash: dataHash,
+          p_version_fingerprint: fingerprint,
+          p_row_count: rowCount,
+          p_column_count: columnCount,
+          p_schema_json: schema,
+          p_transformations_json: transformations,
+          p_actor: row.username_lc,
+          p_version_record_id: versionRecordId,
+          p_head_record_id: headRecordId,
+          p_event_id: eventId,
+        },
+      );
+      if (error) throw error;
+      const registration = Array.isArray(data) ? data[0] : data;
+      return sendResponse({ ok: true, registration });
+    }
+
+    if (action === "platform_record_save") {
+      const username = String(body.username || "").trim();
+      const token = String(body.token || "");
+      const row = await getSession(token, username, "workspace");
+      const recordType = String(body.record_type || "").trim().toLowerCase();
+      if (recordType === "dataset" || recordType === "dataset_version") {
+        const entitlementResponse = datasetEntitlementDenial(
+          row as unknown as Record<string, unknown>,
+        );
+        if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      }
+      const entityKey = String(body.entity_key || "").trim();
+      if (!PLATFORM_RECORD_TYPES.has(recordType)) {
+        return sendResponse(
+          { error: "Platform record type is not supported." },
+          400,
+        );
+      }
+      if (
+        !entityKey || entityKey.length > 240 ||
+        /[\\x00-\\x1f\\x7f]/.test(entityKey)
+      ) {
+        return sendResponse({ error: "Platform entity key is invalid." }, 400);
+      }
+      const payload = validatePlatformPayload(body.payload);
+      const canonical = stablePlatformJson(payload);
+      const contentHash = await sha256Hex(canonical);
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const recordId = "SPR-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const eventId = "SPE-" +
+        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const { data, error } = await supabase.rpc(
+        "shoir_platform_upsert_record",
+        {
+          p_record_id: recordId,
+          p_workspace_key: workspaceKey,
+          p_record_type: recordType,
+          p_entity_key: entityKey,
+          p_payload: payload,
+          p_content_hash: contentHash,
+          p_actor: row.username_lc,
+          p_event_id: eventId,
+        },
+      );
+      if (error) throw error;
+      const saved = Array.isArray(data) ? data[0] : data;
+      return sendResponse({ ok: true, record: saved });
+    }
+    if (action === "platform_record_list") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const workspaceKey = await platformWorkspaceKey(
+        row.username_lc,
+        String(body.workspace || "default"),
+      );
+      const recordType = String(body.record_type || "").trim().toLowerCase();
+      if (recordType && !PLATFORM_RECORD_TYPES.has(recordType)) {
+        return sendResponse(
+          { error: "Platform record type is not supported." },
+          400,
+        );
+      }
+      if (recordType === "dataset" || recordType === "dataset_version") {
+        const entitlementResponse = datasetEntitlementDenial(
+          row as unknown as Record<string, unknown>,
+        );
+        if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      }
+      const entityKey = String(body.entity_key || "").trim();
+      if (entityKey.length > 240 || /[\\x00-\\x1f\\x7f]/.test(entityKey)) {
+        return sendResponse({ error: "Platform entity key is invalid." }, 400);
+      }
+      const requestedLimit = Number(body.limit || 100);
+      const requestedOffset = Number(body.offset || 0);
+      if (
+        !Number.isInteger(requestedLimit) || requestedLimit < 1 ||
+        requestedLimit > 200
+      ) {
+        return sendResponse({
+          error: "Platform record page size must be between 1 and 200.",
+        }, 400);
+      }
+      if (
+        !Number.isSafeInteger(requestedOffset) || requestedOffset < 0 ||
+        requestedOffset > 100000
+      ) {
+        return sendResponse(
+          { error: "Platform record offset is invalid." },
+          400,
+        );
+      }
+      let query = supabase.from("shoir_platform_records")
+        .select(
+          "record_id,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at",
+        )
+        .eq("workspace_key", workspaceKey)
+        .order("updated_at", { ascending: false })
+        .order("record_id", { ascending: true })
+        .range(requestedOffset, requestedOffset + requestedLimit);
+      if (recordType) query = query.eq("record_type", recordType);
+      if (entityKey) query = query.eq("entity_key", entityKey);
+      const { data, error } = await query;
+      if (error) throw error;
+      const page = data || [];
+      const hasMore = page.length > requestedLimit;
+      const records = hasMore ? page.slice(0, requestedLimit) : page;
+      return sendResponse({
+        ok: true,
+        records,
+        has_more: hasMore,
+        next_offset: requestedOffset + records.length,
+      });
     }
 
     if (action === "workspace_load") {

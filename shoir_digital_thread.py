@@ -11,6 +11,8 @@ as pending or inferred from available workspace metadata.
 
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import io
 import json
@@ -81,9 +83,81 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value).lower()).strip("_") or "item"
 
 
-def stable_id(node_type: str, name: str, source: str = "") -> str:
-    raw = f"{node_type}|{name}|{source}"
+def stable_id(
+    node_type: str,
+    name: str,
+    source: str = "",
+    identity_key: str = "",
+) -> str:
+    """Return a stable graph ID; prefer immutable external identity over labels."""
+    immutable_key = str(identity_key or "").strip()
+    raw = (
+        f"{node_type}|identity|{immutable_key}"
+        if immutable_key
+        else f"{node_type}|{name}|{source}"
+    )
     return f"{node_type[:3].upper()}-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
+
+
+def _stable_identity_column(frame: pd.DataFrame, node_type: str) -> str:
+    """Find an explicit business-key column, without inferring from personal names."""
+    candidates = {
+        "Asset": ("asset_id", "equipment_id", "machine_id", "asset_tag", "equipment_tag", "tag_number", "tag_id"),
+        "Product": ("product_id", "sku", "part_number", "product_code"),
+        "Material": ("material_id", "material_code", "component_id", "item_code"),
+        "Order": ("order_id", "work_order_id", "purchase_order_id", "sales_order_id"),
+        "Quality": ("nonconformance_id", "nc_id", "inspection_id", "quality_record_id"),
+        "Maintenance": ("maintenance_order_id", "notification_id", "failure_id"),
+        "Energy": ("meter_id", "energy_meter_id", "measurement_point_id"),
+        "Cost": ("cost_center_id", "cost_object_id"),
+        "Scenario": ("scenario_id",),
+        "Decision": ("decision_id",),
+        "Outcome": ("outcome_id",),
+        "Model": ("model_id",),
+        "Experiment": ("study_id", "experiment_id"),
+    }
+    allowed = set(candidates.get(node_type, ()))
+    for column in frame.columns:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+        if normalized in allowed:
+            return str(column)
+    return ""
+
+
+WORKFORCE_AGGREGATE_FIELDS = {
+    "operator_count", "operators_count", "staff_count", "headcount",
+    "workforce_count", "crew_size", "fte", "technician_count",
+}
+
+
+def _workforce_aggregate_columns(frame: pd.DataFrame) -> list[str]:
+    """Select aggregate count measures only; never employee names or personal IDs."""
+    selected = []
+    for column in frame.columns:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+        if normalized in WORKFORCE_AGGREGATE_FIELDS:
+            selected.append(str(column))
+    return selected
+
+
+def _display_column(frame: pd.DataFrame, node_type: str, identity_column: str) -> str:
+    tokens = {
+        "Asset": ("asset_name", "equipment_name", "machine_name", "asset_label", "equipment_label", "name", "description"),
+        "Product": ("product_name", "description", "name", "label"),
+        "Material": ("material_name", "description", "name", "label"),
+        "Order": ("order_name", "description", "name", "label"),
+        "Quality": ("description", "defect_name", "name", "label"),
+        "Maintenance": ("description", "maintenance_type", "name", "label"),
+        "Energy": ("meter_name", "measurement_point_name", "name", "label"),
+        "Cost": ("cost_center_name", "cost_object_name", "name", "label"),
+    }.get(node_type, ("name", "description", "label"))
+    for column in frame.columns:
+        if str(column) == identity_column:
+            continue
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(column).strip().lower()).strip("_")
+        if normalized in tokens:
+            return str(column)
+    return identity_column
 
 
 def _keys() -> dict[str, str]:
@@ -117,10 +191,52 @@ def ensure_thread_state(owner: str) -> dict[str, Any]:
     return keys
 
 
-def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", status: str = "Observed", metadata: dict[str, Any] | None = None) -> str:
+def _upsert_node(
+    node_type: str,
+    name: str,
+    source: str = "",
+    module: str = "",
+    status: str = "Observed",
+    metadata: dict[str, Any] | None = None,
+    identity_key: str = "",
+) -> str:
     keys = _keys()
-    node_id = stable_id(node_type, name, source)
+    node_id = stable_id(node_type, name, source, identity_key=identity_key)
     nodes = st.session_state[keys["nodes"]]
+    next_metadata = dict(metadata or {})
+    for idx, existing in enumerate(nodes):
+        if existing.get("node_id") != node_id:
+            continue
+        old_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        aliases = list(old_metadata.get("name_aliases", [])) if isinstance(old_metadata.get("name_aliases"), (list, tuple)) else []
+        incoming_aliases = next_metadata.get("name_aliases", [])
+        if isinstance(incoming_aliases, (list, tuple)):
+            aliases.extend(incoming_aliases)
+        old_name = str(existing.get("name") or "").strip()
+        new_name = str(name or "").strip()
+        if old_name and old_name != new_name:
+            aliases.append(old_name)
+        aliases = list(dict.fromkeys(
+            str(value).strip()[:180]
+            for value in aliases
+            if str(value or "").strip()
+        ))
+        if aliases:
+            next_metadata["name_aliases"] = aliases[-30:]
+        payload = {
+            "node_id": node_id,
+            "node_type": node_type,
+            "name": new_name[:180],
+            "source": str(source)[:240],
+            "module": str(module)[:180],
+            "status": str(status)[:80],
+            "metadata": next_metadata,
+            "updated_at": _now(),
+        }
+        nodes[idx] = payload
+        return node_id
+    if identity_key:
+        next_metadata.setdefault("identity_basis", "immutable_external_key")
     payload = {
         "node_id": node_id,
         "node_type": node_type,
@@ -128,13 +244,9 @@ def _upsert_node(node_type: str, name: str, source: str = "", module: str = "", 
         "source": str(source)[:240],
         "module": str(module)[:180],
         "status": str(status)[:80],
-        "metadata": metadata or {},
+        "metadata": next_metadata,
         "updated_at": _now(),
     }
-    for idx, existing in enumerate(nodes):
-        if existing.get("node_id") == node_id:
-            nodes[idx] = payload
-            return node_id
     nodes.append(payload)
     return node_id
 
@@ -180,7 +292,7 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
     studies: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
     try:
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite_connection("enterprise_full_workspace.db", timeout=10) as conn:
             rows = conn.execute(
                 "SELECT study_id,research_id,title,methodology,module,updated_at FROM experience_research_studies WHERE owner=? ORDER BY updated_at DESC LIMIT 100",
                 (owner,),
@@ -273,10 +385,14 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             source_key,
             module,
             metadata={"rows": int(len(df)), "columns": int(len(df.columns)), "column_names": [str(c) for c in df.columns[:80]]},
+            identity_key=f"dataset:{module}",
         )
         dataset_ids.append(dataset_id)
 
-        process_id = process_by_module.get(module) or _upsert_node("Process", module, f"module:{module}", module)
+        process_id = process_by_module.get(module) or _upsert_node(
+            "Process", module, f"module:{module}", module,
+            identity_key=f"process:{module}",
+        )
         process_by_module[module] = process_id
         _upsert_edge(dataset_id, process_id, "feeds process")
 
@@ -285,20 +401,87 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             if node_type == "Process":
                 values = [module]
                 matched_cols = []
-            else:
-                matched_cols = [
-                    col for col in df.columns
-                    if any(alias in str(col).lower().replace("-", "_").replace(" ", "_") for alias in aliases)
-                ]
+                canonical_by_type[node_type] = values
+                continue
+            matched_cols = [
+                col for col in df.columns
+                if any(alias in str(col).lower().replace("-", "_").replace(" ", "_") for alias in aliases)
+            ]
+
+            # Do not copy employee names, operator names or employee IDs into the
+            # general-purpose Digital Thread. Represent workforce information only
+            # through explicitly aggregated count fields in this cross-domain graph.
+            if node_type == "Workforce":
+                aggregate_cols = _workforce_aggregate_columns(df)
                 values = []
-                for col in matched_cols[:4]:
-                    try:
-                        for value in df[col].dropna().astype(str).drop_duplicates().head(40):
-                            clean_value = value.strip()
-                            if clean_value and clean_value not in values:
-                                values.append(clean_value)
-                    except Exception:
+                for column in aggregate_cols[:6]:
+                    numeric = pd.to_numeric(df[column], errors="coerce").dropna()
+                    if numeric.empty:
                         continue
+                    cohort_name = f"{module} workforce cohort"
+                    node_id = _upsert_node(
+                        "Workforce",
+                        cohort_name,
+                        f"{module}|workforce|aggregate|{column}",
+                        module,
+                        status="Observed",
+                        metadata={
+                            "aggregate_only": True,
+                            "aggregate_field": str(column),
+                            "observations": int(len(numeric)),
+                            "mean_count": float(numeric.mean()),
+                        },
+                        identity_key=f"workforce-cohort:{module}:{column}",
+                    )
+                    values.append(cohort_name)
+                    _upsert_edge(dataset_id, node_id, "contains aggregated workforce measures")
+                    _upsert_edge(process_id, node_id, "uses aggregated workforce")
+                canonical_by_type[node_type] = values
+                continue
+
+            # If a trusted business key column is available, pair it with a
+            # display column and use the business key—not the display label—to
+            # generate the stable identity. This makes rename refreshes update the
+            # same node instead of creating a second asset/product/order.
+            identity_column = _stable_identity_column(df, node_type)
+            if identity_column:
+                display_column = _display_column(df, node_type, identity_column)
+                values = []
+                pairs = df[[identity_column, display_column]].dropna(subset=[identity_column]).drop_duplicates().head(40)
+                for _, row in pairs.iterrows():
+                    identity_value = str(row[identity_column]).strip()
+                    display_value = str(row[display_column]).strip() if pd.notna(row[display_column]) else identity_value
+                    if not identity_value or not display_value:
+                        continue
+                    identity_key = f"{module}|{node_type}|{identity_column}|{identity_value}"
+                    node_id = _upsert_node(
+                        node_type,
+                        display_value,
+                        f"{module}|canonical|{node_type}|{identity_column}",
+                        module,
+                        status="Observed",
+                        metadata={
+                            "canonical": True,
+                            "fields": [str(identity_column), str(display_column)],
+                            "identity_field": str(identity_column),
+                        },
+                        identity_key=identity_key,
+                    )
+                    values.append(display_value)
+                    _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
+                    _upsert_edge(process_id, node_id, f"uses {node_type.lower()}")
+                canonical_by_type[node_type] = values
+                continue
+
+            values = []
+            for col in matched_cols[:4]:
+                try:
+                    for value in df[col].dropna().astype(str).drop_duplicates().head(40):
+                        clean_value = value.strip()
+                        if clean_value and clean_value not in values:
+                            values.append(clean_value)
+                except Exception:
+                    continue
             canonical_by_type[node_type] = values
             for value in values[:40]:
                 node_id = _upsert_node(
@@ -309,18 +492,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
                     status="Observed",
                     metadata={"canonical": True, "fields": matched_cols[:4]},
                 )
-                if node_type != "Process":
-                    _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
+                _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
                 _upsert_edge(process_id, node_id, f"uses {node_type.lower()}")
-
-        lowered = {str(c).lower(): c for c in df.columns}
-        asset_cols = [c for c in df.columns if any(k in str(c).lower() for k in ("asset", "machine", "facility", "workcenter", "equipment", "node"))]
-        for col in asset_cols[:3]:
-            vals = df[col].dropna().astype(str).drop_duplicates().head(40)
-            for value in vals:
-                asset_id = _upsert_node("Asset", value, f"{module}|{col}|{value}", module, metadata={"field": str(col)})
-                _upsert_edge(dataset_id, asset_id, f"identifies {col}")
-                _upsert_edge(asset_id, process_id, "participates in")
 
         numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         for col in numeric_cols[:12]:
@@ -330,6 +503,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
                 f"{module}|kpi|{col}",
                 module,
                 metadata={"dtype": str(df[col].dtype)},
+                identity_key=f"kpi:{module}:{col}",
             )
             _upsert_edge(process_id, kpi_id, "produces KPI")
             _upsert_edge(dataset_id, kpi_id, "measures")
@@ -344,7 +518,10 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
         if module_result_keys or numeric_cols:
             source = module_result_keys[0] if module_result_keys else f"module:{module}"
             model_status = "Observed" if module_result_keys else "Inferred"
-            model_id = _upsert_node("Model", f"{module} analytical model", source, module, status=model_status)
+            model_id = _upsert_node(
+                "Model", f"{module} analytical model", source, module,
+                status=model_status, identity_key=f"model:{module}",
+            )
             model_count += 1
             for col in numeric_cols[:4]:
                 _upsert_edge(_stable_kpi_for(module, col), model_id, "supports model")
@@ -360,6 +537,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             study.get("module", "") or "Experiment Lab",
             status="Observed",
             metadata={"research_id": study["research_id"], "methodology": study["methodology"]},
+            identity_key=f"experiment:{study['study_id']}",
         )
         experiment_ids.append(experiment_id)
 
@@ -372,6 +550,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             decision.get("module", ""),
             status=decision["status"],
             metadata={"decision_id": decision["decision_id"]},
+            identity_key=f"decision:{decision['decision_id']}",
         )
         decision_ids.append(decision_id)
 
@@ -384,6 +563,7 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             decision.get("module", ""),
             status="Pending verification",
             metadata={"decision_id": decision["decision_id"]},
+            identity_key=f"outcome:{decision['decision_id']}",
         )
         _upsert_edge(decision_id, outcome_id, "has outcome")
 
@@ -828,7 +1008,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
     c3.metric("Experiments + Decisions", f'{counts["Experiment"] + counts["Decision"]:,}')
     c4.metric("Last sync", st.session_state.get(keys["sync"]) or "Never")
 
-    if st.button("🔄 Sync Entire Workspace into Digital Thread", type="primary", use_container_width=True, key="global_thread_sync"):
+    if st.button("🔄 Sync Entire Workspace into Digital Thread", type="primary", width="stretch", key="global_thread_sync"):
         with st.spinner("Harvesting datasets, assets, KPIs, models, experiments and decisions..."):
             stats = sync_workspace_to_thread(username)
         st.success("Digital Thread synchronized: " + ", ".join(f"{k}={v}" for k, v in stats.items()))
@@ -855,7 +1035,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             st.success(f"✅ All {len(THREAD_TYPES)} canonical entity layers are represented in this project.")
 
         if raw_nodes:
-            st.dataframe(nodes.head(300), use_container_width=True, hide_index=True)
+            st.dataframe(nodes.head(300), width="stretch", hide_index=True)
 
     with tabs[1]:
         node_type_filter = st.multiselect("Thread layers", THREAD_TYPES, default=THREAD_TYPES, key="global_thread_layers")
@@ -864,12 +1044,12 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         filtered_edges = [e for e in raw_edges if e["source_id"] in selected_ids and e["target_id"] in selected_ids]
         fig = network_figure(filtered_nodes, filtered_edges)
         if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No traceability graph yet. Sync the workspace to create the graph.")
         sankey = sankey_figure(filtered_nodes, filtered_edges)
         if sankey is not None:
-            st.plotly_chart(sankey, use_container_width=True)
+            st.plotly_chart(sankey, width="stretch")
 
     with tabs[2]:
         if not raw_nodes:
@@ -880,7 +1060,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             traced = trace_from(selected_id)
             st.metric("Reachable trace items", len(traced))
             if traced:
-                st.dataframe(pd.DataFrame(traced), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(traced), width="stretch", hide_index=True)
 
     with tabs[3]:
         st.markdown("### Add explicit traceability link")
@@ -892,7 +1072,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             with right:
                 target_id = st.selectbox("Target node", list(labels.keys()), format_func=labels.get, key="global_thread_target")
             relation = st.text_input("Relationship", value="depends on", key="global_thread_relation")
-            if st.button("🔗 Create traceability link", use_container_width=True, key="global_thread_link"):
+            if st.button("🔗 Create traceability link", width="stretch", key="global_thread_link"):
                 if source_id == target_id:
                     st.warning("A node cannot link to itself.")
                 else:
@@ -902,16 +1082,30 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         else:
             st.info("Sync the workspace first to populate nodes.")
         st.markdown("### Create a node manually")
-        n1, n2, n3 = st.columns(3)
+        n1, n2, n3, n4 = st.columns(4)
         with n1:
             node_type = st.selectbox("Type", THREAD_TYPES, key="global_thread_new_type")
         with n2:
             node_name = st.text_input("Name", key="global_thread_new_name")
         with n3:
             node_status = st.selectbox("Status", ["Observed", "Inferred", "Pending verification"], key="global_thread_new_status")
-        if st.button("＋ Add node", use_container_width=True, key="global_thread_add_node"):
+        with n4:
+            manual_identity = st.text_input(
+                "Stable business ID (optional)",
+                key="global_thread_new_identity",
+                help="Use an immutable asset, product, order, project or decision ID. Do not enter passwords or personal identifiers.",
+            )
+        if st.button("＋ Add node", width="stretch", key="global_thread_add_node"):
             if node_name.strip():
-                _upsert_node(node_type, node_name.strip(), f"manual:{username}", module, node_status)
+                _upsert_node(
+                    node_type,
+                    node_name.strip(),
+                    f"manual:{username}",
+                    module,
+                    node_status,
+                    metadata={"identity_key_provided": bool(manual_identity.strip())},
+                    identity_key=manual_identity.strip(),
+                )
                 st.success("Node added to the project thread.")
             else:
                 st.warning("Enter a node name first.")
@@ -928,7 +1122,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
                 excel,
                 f"shoir_ie_{_slug(project.get('name','global_thread'))}_digital_thread.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+                width="stretch",
             )
         except Exception as exc:
             st.warning(f"Excel export unavailable: {exc}")
@@ -939,11 +1133,11 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             bundle,
             f"shoir_ie_{_slug(project.get('name','global_thread'))}_digital_thread.zip",
             "application/zip",
-            use_container_width=True,
+            width="stretch",
         )
 
         st.markdown("### Traceability coverage")
         coverage = pd.DataFrame([{"Layer": kind, "Nodes": counts[kind], "Present": counts[kind] > 0} for kind in THREAD_TYPES])
-        st.dataframe(coverage, use_container_width=True, hide_index=True)
+        st.dataframe(coverage, width="stretch", hide_index=True)
 
     st.caption("Persistence: project metadata and Digital Thread nodes/links live in the user workspace state and are captured by the existing autosave/durable persistence path.")

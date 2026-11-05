@@ -7,6 +7,8 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import html
 import json
@@ -127,10 +129,15 @@ MODULE_GROUP_RULES = (
 
 PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
 
+WORKFLOW_STEPS = (
+    "IMPORT", "VALIDATE", "MAP", "MODEL", "RUN",
+    "VISUALIZE", "COMPARE", "EXPLAIN", "DECIDE", "EXPORT", "VERIFY",
+)
+
 PASTED_SPEC_UPDATES = {
     "one_application_shell": "Unified application shell over existing engines",
     "module_launcher": "Searchable grouped module launcher with recents",
-    "universal_workflow": "Data → Validate → Model → Run → Visualize → Compare → Explain → Decide → Export → Verify",
+    "universal_workflow": "IMPORT → VALIDATE → MAP → MODEL → RUN → VISUALIZE → COMPARE → EXPLAIN → DECIDE → EXPORT → VERIFY",
     "reduced_tabs": "Grouped platform surfaces and progressive disclosure",
     "digital_thread_everywhere": "Persistent lineage/trace context",
     "universal_inspector": "Cross-module provenance/assumption/run inspector",
@@ -165,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_shell_outcomes_decision
 
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return sqlite_connection(path, timeout=30)
 
 
 def _now() -> str:
@@ -450,7 +457,7 @@ def render_global_search(
         if module_hits:
             st.markdown("**Modules**")
             for name in module_hits[:12]:
-                if st.button(f"Open · {name}", key=_global_module_button_key(name), use_container_width=True):
+                if st.button(f"Open · {name}", key=_global_module_button_key(name), width="stretch"):
                     st.session_state["_shoir_requested_module"] = str(name)
                     # Keep both the transient route request and the durable shell
                     # selection aligned so a stale widget cannot restore an old module.
@@ -462,13 +469,13 @@ def render_global_search(
                     st.rerun()
         if not dataset_hits.empty:
             st.markdown("**Datasets**")
-            st.dataframe(dataset_hits.head(20), use_container_width=True, hide_index=True)
+            st.dataframe(dataset_hits.head(20), width="stretch", hide_index=True)
         if not run_hits.empty:
             st.markdown("**Runs**")
-            st.dataframe(run_hits.head(20), use_container_width=True, hide_index=True)
+            st.dataframe(run_hits.head(20), width="stretch", hide_index=True)
         if not decision_hits.empty:
             st.markdown("**Decisions**")
-            st.dataframe(decision_hits.head(20), use_container_width=True, hide_index=True)
+            st.dataframe(decision_hits.head(20), width="stretch", hide_index=True)
         if not module_hits and dataset_hits.empty and run_hits.empty and decision_hits.empty:
             st.info("No matching engineering objects were found.")
 
@@ -658,10 +665,17 @@ def render_application_header(username: str, tier: str, module: str) -> None:
 
 def render_module_workflow(module: str, provenance: str | None = None) -> None:
     state = provenance or infer_provenance()
-    steps = ["DATA", "VALIDATE", "MODEL", "RUN", "VISUALIZE", "COMPARE", "EXPLAIN", "DECIDE", "EXPORT", "VERIFY"]
-    active_index = 3 if st.session_state.get("last_run_id") or st.session_state.get("shoir_latest_run_id") else 1
+    steps = list(WORKFLOW_STEPS)
+    active_index = 0
+    active_frame, _ = _first_dataframe()
+    if not active_frame.empty and infer_provenance() in {"IMPORTED", "LIVE"}:
+        active_index = 1
     if st.session_state.get("unified_readiness_score", 0):
         active_index = max(active_index, 2)
+    if st.session_state.get("last_run_id") or st.session_state.get("shoir_latest_run_id"):
+        # A saved run is evidence that model/run stages were reached; visualization
+        # remains the next stage until its own output is evidenced.
+        active_index = max(active_index, 5)
     chips = []
     for idx, step in enumerate(steps):
         tone = "active" if idx == active_index else ("done" if idx < active_index else "")
@@ -737,7 +751,7 @@ def render_inspector(module: str, username: str, tier: str) -> None:
                 data=snapshot.to_csv(index=False).encode("utf-8"),
                 file_name="shoir_ie_knowledge_trust_snapshot.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
                 key="kt_export_snapshot",
             )
         with st.expander("Provenance details", expanded=False):
@@ -891,7 +905,7 @@ def render_data_hub(username: str, tier: str) -> None:
             b.metric("Columns", f"{len(active_df.columns):,}")
             c.metric("Readiness", f"{ready['score']:.0f}%")
             d.metric("State", infer_provenance())
-            st.dataframe(active_df.head(12), use_container_width=True, hide_index=True)
+            st.dataframe(active_df.head(12), width="stretch", hide_index=True)
             if ready["warnings"]:
                 st.caption(" · ".join(ready["warnings"][:2]))
     else:
@@ -932,17 +946,17 @@ def render_industrial_home(username: str, tier: str) -> None:
     st.markdown("<div class='shoir-home-section'>Start here</div>", unsafe_allow_html=True)
     actions = st.columns(3)
     with actions[0]:
-        if st.button("📊 Open Industrial Workbook", type="primary", use_container_width=True, key="shoir_home_open_workbook"):
+        if st.button("📊 Open Industrial Workbook", type="primary", width="stretch", key="shoir_home_open_workbook"):
             st.session_state["_shoir_requested_module"] = "Industrial Workbook"
             st.session_state["shoir_shell_section"] = "WORKBENCH"
             st.rerun()
     with actions[1]:
-        if st.button("🧹 Open Excel Intelligence", use_container_width=True, key="shoir_home_open_excel"):
+        if st.button("🧹 Open Excel Intelligence", width="stretch", key="shoir_home_open_excel"):
             st.session_state["_shoir_requested_module"] = "Excel Data Cleaning & Import"
             st.session_state["shoir_shell_section"] = "DATA"
             st.rerun()
     with actions[2]:
-        if st.button("⚙ Open Core IE Tools", use_container_width=True, key="shoir_home_open_core"):
+        if st.button("⚙ Open Core IE Tools", width="stretch", key="shoir_home_open_core"):
             st.session_state["_shoir_requested_module"] = "Core IE Tools"
             st.session_state["shoir_shell_section"] = "ANALYZE"
             st.rerun()
@@ -958,7 +972,7 @@ def render_industrial_home(username: str, tier: str) -> None:
         {"Section": "Decisions", "Use it for": "Evidence-backed decision records, implementation tracking and actual outcomes."},
         {"Section": "Research / Knowledge", "Use it for": "Experiments, literature, standards, learning and reusable knowledge."},
     ])
-    st.dataframe(guide, use_container_width=True, hide_index=True)
+    st.dataframe(guide, width="stretch", hide_index=True)
 
     has_data = isinstance(st.session_state.get("universal_active_dataset"), pd.DataFrame) and not st.session_state["universal_active_dataset"].empty
     st.markdown("### 1 · Load your data", unsafe_allow_html=True)
@@ -1098,29 +1112,29 @@ def render_application_shell(
         st.markdown("---")
         action_cols = st.columns(2)
         with action_cols[0]:
-            if st.button("＋ New study", use_container_width=True, key="shoir_shell_new_study"):
+            if st.button("＋ New study", width="stretch", key="shoir_shell_new_study"):
                 st.session_state["shoir_new_study_requested"] = True
         with action_cols[1]:
-            if st.button("▣ Present", use_container_width=True, key="shoir_shell_present"):
+            if st.button("▣ Present", width="stretch", key="shoir_shell_present"):
                 st.session_state["shoir_shell_surface"] = "presentation"
 
         quick = st.columns(3)
         with quick[0]:
-            if st.button("✓ Trust", use_container_width=True, key="shoir_shell_trust"):
+            if st.button("✓ Trust", width="stretch", key="shoir_shell_trust"):
                 st.session_state["shoir_shell_surface"] = "trust"
         with quick[1]:
-            if st.button("▶ Runs", use_container_width=True, key="shoir_shell_runs"):
+            if st.button("▶ Runs", width="stretch", key="shoir_shell_runs"):
                 st.session_state["shoir_shell_surface"] = "runs"
         with quick[2]:
-            if st.button("⌘ Copilot", use_container_width=True, key="shoir_shell_copilot"):
+            if st.button("⌘ Copilot", width="stretch", key="shoir_shell_copilot"):
                 st.session_state["shoir_shell_surface"] = "copilot"
 
         platform = st.columns(2)
         with platform[0]:
-            if st.button("⚡ Operating System", use_container_width=True, key="shoir_shell_os"):
+            if st.button("⚡ Operating System", width="stretch", key="shoir_shell_os"):
                 st.session_state["shoir_shell_surface"] = "os"
         with platform[1]:
-            if st.button("✨ Excellence Hub", use_container_width=True, key="shoir_shell_excellence"):
+            if st.button("✨ Excellence Hub", width="stretch", key="shoir_shell_excellence"):
                 st.session_state["shoir_shell_surface"] = "excellence"
 
         st.markdown("---")
@@ -1128,11 +1142,11 @@ def render_application_shell(
             st.markdown(f"**Tier:** {tier}")
             st.markdown(f"**Role:** {st.session_state.get('user_role', 'Engineer')}")
             st.markdown(f"**Email:** {st.session_state.get('user_email', 'N/A')}")
-            if st.button("Edit Account / Profile", use_container_width=True, key="shoir_shell_edit_account"):
+            if st.button("Edit Account / Profile", width="stretch", key="shoir_shell_edit_account"):
                 st.session_state["selected_nav"] = "Edit Account"
                 st.session_state["shoir_shell_surface"] = "edit_account"
 
-        if st.button("Lock / Logout Workspace", use_container_width=True, key="shoir_shell_logout"):
+        if st.button("Lock / Logout Workspace", width="stretch", key="shoir_shell_logout"):
             st.session_state["shoir_shell_logout_requested"] = True
 
         st.markdown("---")
@@ -1239,7 +1253,7 @@ def render_data_catalog(username: str, tier: str) -> None:
         c2.metric("Visible datasets", f"{len(df):,}")
         c3.metric("Current readiness", f"{data_readiness(active)['score']:.0f}%")
         c4.metric("Current state", infer_provenance())
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("No durable dataset registrations are visible yet. The active session dataset is still available.")
         if not active.empty:
@@ -1249,7 +1263,7 @@ def render_data_catalog(username: str, tier: str) -> None:
             c2.metric("Columns", f"{len(active.columns):,}")
             c3.metric("Readiness", f"{ready['score']:.0f}%")
             c4.metric("State", infer_provenance())
-            st.dataframe(active.head(250), use_container_width=True, hide_index=True)
+            st.dataframe(active.head(250), width="stretch", hide_index=True)
     with st.expander("Dataset details", expanded=False):
         st.markdown(f"**Source key:** `{source_key or 'none'}`")
         st.markdown(f"**Source:** `{st.session_state.get('shoir_data_source', 'not declared')}`")
@@ -1279,7 +1293,7 @@ def render_run_center(username: str, tier: str) -> None:
     status_values = sorted(runs["status"].dropna().astype(str).unique())
     status_filter = st.multiselect("Status", status_values, default=status_values, key="shoir_run_status")
     shown = runs[runs["status"].astype(str).isin(status_filter)] if status_filter else runs.iloc[0:0]
-    st.dataframe(shown, use_container_width=True, hide_index=True)
+    st.dataframe(shown, width="stretch", hide_index=True)
 
     selected = st.selectbox("Inspect run", shown["run_id"].tolist() if not shown.empty else runs["run_id"].tolist(), key="shoir_run_select")
     one = runs[runs["run_id"] == selected]
@@ -1314,7 +1328,7 @@ def render_run_center(username: str, tier: str) -> None:
                 data=json.dumps(manifest, indent=2, default=str).encode("utf-8"),
                 file_name=f"shoir_{row['run_id']}_reproducibility.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
                 key=f"shoir_run_manifest_{row['run_id']}",
             )
 
@@ -1382,7 +1396,7 @@ def render_decision_center(username: str, tier: str) -> None:
     c3.metric("Implemented", f"{int(decisions['status'].astype(str).str.lower().isin(['implemented','verified']).sum()):,}")
     c4.metric("Outcomes", f"{outcome_count:,}")
 
-    st.dataframe(decisions[["decision_id","title","module","status","owner","updated_at"]], use_container_width=True, hide_index=True)
+    st.dataframe(decisions[["decision_id","title","module","status","owner","updated_at"]], width="stretch", hide_index=True)
     selected = st.selectbox("Decision to inspect", decisions["decision_id"].tolist(), key="shoir_decision_select")
     row = decisions[decisions["decision_id"] == selected].iloc[0]
     try:
@@ -1405,7 +1419,7 @@ def render_decision_center(username: str, tier: str) -> None:
             actual_text = st.text_area("Actual KPI values (JSON)", value=json.dumps(expected, indent=2, default=str), height=180)
             notes = st.text_area("Observation / learning note", height=90)
             status = st.selectbox("Outcome status", ["Observed", "Verified", "Needs review"], key="shoir_outcome_status")
-            submitted = st.form_submit_button("Record actual outcome", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Record actual outcome", type="primary", width="stretch")
             if submitted:
                 try:
                     actual = _parse_json_object(actual_text)
@@ -1431,12 +1445,12 @@ def render_decision_center(username: str, tier: str) -> None:
             if variance.empty:
                 st.info("No numeric overlapping KPIs were available for variance analysis.")
             else:
-                st.dataframe(variance, use_container_width=True, hide_index=True)
+                st.dataframe(variance, width="stretch", hide_index=True)
                 numeric_variance = variance[pd.to_numeric(variance["Variance"], errors="coerce").notna()].copy()
                 if not numeric_variance.empty:
                     fig = px.bar(numeric_variance, x="Metric", y="Variance", title="Actual minus expected")
                     fig.update_layout(height=300, margin=dict(l=10,r=10,t=55,b=10))
-                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
             st.caption(f"Latest outcome: {latest['outcome_id']} · {latest['observed_at']} · {latest['status']}")
             if latest["notes"]:
                 st.markdown(f"**Learning note:** {latest['notes']}")
@@ -1496,7 +1510,7 @@ def render_trust_center(username: str, tier: str) -> None:
                 {"Signal":"Assumptions recorded","Value":str(metrics["assumptions"]),"Meaning":"Explicit assumptions stored in the workspace."},
                 {"Signal":"Knowledge documents","Value":str(len(docs)),"Meaning":"Documents currently linked to this workspace session."},
             ]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
             if source_key:
                 st.markdown(
                     f"<div class='kt-note'><b>Trace:</b> {html.escape(source_key)} · "
@@ -1512,7 +1526,7 @@ def render_trust_center(username: str, tier: str) -> None:
             if not coverage_counts.empty:
                 st.plotly_chart(
                     px.pie(coverage_counts, names="Coverage", values="Features", title="Capability evidence coverage", hole=0.58),
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": False},
                 )
             st.caption("Capability coverage is a descriptive inventory of recorded evidence states, not a guarantee of runtime behavior.")
@@ -1541,10 +1555,10 @@ def render_trust_center(username: str, tier: str) -> None:
             if evidence.empty:
                 st.info("No capability evidence records are currently indexed.")
             else:
-                st.dataframe(evidence, use_container_width=True, hide_index=True)
+                st.dataframe(evidence, width="stretch", hide_index=True)
                 st.plotly_chart(
                     px.bar(evidence, x="source_type", y="records", title="Evidence records by source"),
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": False},
                 )
         with b:
@@ -1552,10 +1566,10 @@ def render_trust_center(username: str, tier: str) -> None:
             if lineage.empty:
                 st.info("No lineage events are currently indexed.")
             else:
-                st.dataframe(lineage, use_container_width=True, hide_index=True)
+                st.dataframe(lineage, width="stretch", hide_index=True)
                 st.plotly_chart(
                     px.bar(lineage.head(12), x="records", y="source_module", orientation="h", title="Lineage activity by module"),
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": False},
                 )
         st.markdown("#### Current run / version trace")
@@ -1565,7 +1579,7 @@ def render_trust_center(username: str, tier: str) -> None:
             {"Trace item":"Data source","Value":st.session_state.get("shoir_data_source") or source_key or "Not recorded"},
             {"Trace item":"Workspace","Value":st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or "default"},
         ])
-        st.dataframe(trace, use_container_width=True, hide_index=True)
+        st.dataframe(trace, width="stretch", hide_index=True)
 
     with tabs[3]:
         st.markdown("### Capability coverage by area")
@@ -1580,8 +1594,8 @@ def render_trust_center(username: str, tier: str) -> None:
                 title="Recorded capability state by product area",
             )
             fig.update_layout(height=420, xaxis_title="", yaxis_title="Capabilities", legend_title="State")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-            st.dataframe(by_area, use_container_width=True, hide_index=True)
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+            st.dataframe(by_area, width="stretch", hide_index=True)
         st.markdown("#### Verified capability index")
         matrix = feature_matrix()
         verified = matrix[matrix["coverage"].astype(str).str.casefold().eq("verified")]
@@ -1590,7 +1604,7 @@ def render_trust_center(username: str, tier: str) -> None:
         else:
             st.dataframe(
                 verified[["id","name","area","state","coverage","evidence"]],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -1637,7 +1651,7 @@ def render_presentation_mode(username: str, tier: str, module: str) -> None:
         plot = df[[x,y]].dropna() if x else df[[y]].dropna()
         fig = px.line(plot, x=x, y=y, markers=True, title=f"{module} · {y}") if x else px.line(plot, y=y, title=f"{module} · {y}")
         fig.update_layout(height=430, margin=dict(l=8,r=8,t=60,b=8))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("No numeric active dataset is available for a primary trend chart.")
 
@@ -1651,7 +1665,7 @@ def render_presentation_mode(username: str, tier: str, module: str) -> None:
         unsafe_allow_html=True,
     )
 
-    if st.button("← Return to engineering workspace", type="primary", use_container_width=True, key="shoir_presentation_return"):
+    if st.button("← Return to engineering workspace", type="primary", width="stretch", key="shoir_presentation_return"):
         st.session_state.pop("shoir_shell_surface", None)
         st.rerun()
 
@@ -1661,7 +1675,7 @@ def render_new_study(username: str, tier: str, current_module: str) -> None:
     st.caption("Start with an objective, then let the common workflow connect data, modeling, scenarios and decisions.")
     title = st.text_input("Study title", value=f"{current_module} study", key="shoir_new_study_title")
     objective = st.text_area("Decision objective", placeholder="What operational or research decision are you trying to support?", height=110, key="shoir_new_study_objective")
-    if st.button("Create study workspace", type="primary", use_container_width=True, key="shoir_create_study"):
+    if st.button("Create study workspace", type="primary", width="stretch", key="shoir_create_study"):
         try:
             from shoir_unified_product import create_unified_study
             sid = create_unified_study(title, current_module, username, objective or "Engineering decision support")
@@ -1715,7 +1729,7 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
                 st.info("Upload or select a dataset before starting a module-aware Copilot workflow.")
             else:
                 prompt = st.text_area("Ask Shoir to orchestrate the engineering task", placeholder="Clean this workbook, determine data readiness, run an analysis and prepare the evidence pack.", height=120, key="shoir_shell_copilot_prompt")
-                if st.button("Plan workflow", type="primary", use_container_width=True, key="shoir_shell_copilot_plan"):
+                if st.button("Plan workflow", type="primary", width="stretch", key="shoir_shell_copilot_plan"):
                     st.session_state["shoir_shell_copilot_plan_result"] = build_workflow_plan(prompt, module, df)
                 plan = st.session_state.get("shoir_shell_copilot_plan_result")
                 if plan:

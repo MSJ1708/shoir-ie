@@ -1,3 +1,5 @@
+from shoir_sqlite import connect as sqlite_connection
+
 import io
 import json
 import sqlite3
@@ -49,7 +51,7 @@ def test_experience_database_is_idempotent():
         db = str(Path(td) / "experience.db")
         ensure_experience_db(db)
         ensure_experience_db(db)
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "experience_projects" in names
         assert "experience_decisions" in names
@@ -76,7 +78,7 @@ def test_evidence_roi_is_transparent_and_assumption_driven():
 def test_research_protocol_update_keeps_stable_research_id(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         protocol = {
             "title": "Boundary Study",
@@ -118,7 +120,7 @@ def test_research_protocol_update_keeps_stable_research_id(monkeypatch):
 def test_legacy_research_project_can_be_recovered(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         protocol = {
             "title": "Recovered Study",
@@ -165,7 +167,7 @@ def test_legacy_research_project_can_be_recovered(monkeypatch):
 def test_legacy_app_saved_project_can_be_recovered(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(path, timeout=30))
         ensure_experience_db(db)
         protocol = {
             "title": "Recovered App-Level Study",
@@ -194,7 +196,7 @@ def test_legacy_app_saved_project_can_be_recovered(monkeypatch):
             "protocol_notes": "Legacy app recovery test.",
             "protocol_locked": False,
         }
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             conn.execute("CREATE TABLE saved_projects (name TEXT PRIMARY KEY, data TEXT, updated_at TEXT)")
             payload = {"research_protocol": protocol, "owner": "alice"}
             conn.execute(
@@ -212,7 +214,7 @@ def test_legacy_app_saved_project_can_be_recovered(monkeypatch):
 def test_decision_readiness_restore_is_idempotent(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(path, timeout=30))
         ensure_experience_db(db)
         first_id, first_rid = restore_decision_readiness_study("alice")
         second_id, second_rid = restore_decision_readiness_study("alice")
@@ -226,7 +228,7 @@ def test_decision_readiness_restore_is_idempotent(monkeypatch):
 def test_research_run_history_persists_completed_run(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(path, timeout=30))
         ensure_experience_db(db)
         protocol = {
             "title": "Run History Study",
@@ -265,7 +267,7 @@ def test_research_run_history_persists_completed_run(monkeypatch):
 def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(path, timeout=30))
         ensure_experience_db(db)
         protocol = {
             "title": "Boundary Study",
@@ -338,7 +340,7 @@ def test_all_named_fallback_modules_run_on_their_starter_data():
 def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research-owner-boundary.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         original = {
             "title": "Alice's protected study",
@@ -361,7 +363,7 @@ def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch
         with pytest.raises(PermissionError):
             create_research_protocol("PRJ-OWNER-GUARD", attempted, "bob")
 
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             row = conn.execute(
                 "SELECT research_id,owner,title,objective FROM experience_research_studies WHERE study_id=?",
                 ("PRJ-OWNER-GUARD",),
@@ -372,7 +374,7 @@ def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch
 def test_load_research_protocol_and_evidence_bundle_enforce_owner(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research-read-owner.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         create_research_protocol(
             "PRJ-ALICE-PRIVATE",
@@ -403,7 +405,7 @@ def test_load_research_protocol_and_evidence_bundle_enforce_owner(monkeypatch):
 def test_research_run_registration_rejects_another_owner_and_mismatched_protocol(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research-run-owner-boundary.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         alice_research_id, _ = create_research_protocol(
             "PRJ-ALICE-RUNS",
@@ -427,7 +429,7 @@ def test_research_run_registration_rejects_another_owner_and_mismatched_protocol
 
         frame = research_runs_frame("PRJ-ALICE-RUNS", owner="alice")
         assert frame.empty
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             count = conn.execute(
                 "SELECT COUNT(*) FROM experience_research_runs WHERE study_id=?",
                 ("PRJ-ALICE-RUNS",),
@@ -438,7 +440,7 @@ def test_research_run_registration_rejects_another_owner_and_mismatched_protocol
 def test_project_autosave_rejects_other_owner_without_mutating_snapshot_or_payload(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "project-autosave-owner.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         project_id = save_project(
             "Alice project", "Experiment Lab", "alice", {"value": "original"}
@@ -449,7 +451,7 @@ def test_project_autosave_rejects_other_owner_without_mutating_snapshot_or_paylo
         with pytest.raises(PermissionError):
             ie.autosave_project(project_id, {"value": "bob overwrite"}, owner="bob")
 
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             owner, payload = conn.execute(
                 "SELECT owner,payload_json FROM experience_projects WHERE project_id=?",
                 (project_id,),
@@ -468,7 +470,7 @@ def test_project_autosave_rejects_other_owner_without_mutating_snapshot_or_paylo
 def test_autosave_materializes_missing_legacy_project_only_for_research_owner(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "restored-research-project.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         study_id = "PRJ-RESTORED-REMOTE"
         protocol = {"title": "Alice restored protocol", "module": "Experiment Lab"}
@@ -487,7 +489,7 @@ def test_autosave_materializes_missing_legacy_project_only_for_research_owner(mo
                 owner="bob",
             )
 
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             owner, title = conn.execute(
                 "SELECT owner,name FROM experience_projects WHERE project_id=?",
                 (study_id,),
@@ -502,7 +504,7 @@ def test_autosave_materializes_missing_legacy_project_only_for_research_owner(mo
 def test_decision_spec_save_rejects_non_owner_and_preserves_original_spec(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "decision-spec-owner.db")
-        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite_connection(db, timeout=30))
         ensure_experience_db(db)
         decision_id = create_decision(
             "Alice decision", "Quality", {"Cpk": 1.25}, {"baseline": "measured"},

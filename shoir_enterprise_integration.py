@@ -6,6 +6,8 @@ an explicit live connector implementation.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import io
 import math
 import re
@@ -37,7 +39,7 @@ def _workspace() -> str:
 
 
 def _db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH, timeout=30)
+    return sqlite_connection(DB_PATH, timeout=30)
 
 
 def _slug(v: str) -> str:
@@ -384,7 +386,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 status=str(row.get("status") or row.get("Status") or "Draft")
                 fig.add_trace(go.Scatter(x=[x],y=[y],mode="markers+text",text=[name],textposition="top center",marker=dict(size=25),name=name,hovertemplate=f"{name}<br>Status: {status}<extra></extra>"))
             fig.update_layout(height=450,title="System-to-workspace topology",xaxis=dict(visible=False),yaxis=dict(visible=False),showlegend=False,margin=dict(l=10,r=10,t=55,b=10),plot_bgcolor="#f8fafc",paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            st.plotly_chart(fig,width="stretch",config={"displayModeBar":False})
         else:
              st.markdown("### Start here")
              st.markdown("**Register a system → validate it → publish shared data → coordinate work**")
@@ -395,13 +397,13 @@ def render_enterprise_integration(tier: str, username: str) -> None:
              })
              st.plotly_chart(
                  px.bar(adapter_catalog,x="Adapter",y="Configured",title="Enterprise adapter catalog"),
-                 use_container_width=True,
+                 width="stretch",
                  config={"displayModeBar":False},
              )
              st.info("No external systems are configured yet. The catalog describes adapter types; it does not claim a live connection.")
         if not health.empty:
             st.markdown("#### Adapter availability and health context")
-            st.plotly_chart(px.bar(health,x="Protocol",color="Status",title="Connector coverage"),use_container_width=True,config={"displayModeBar":False})
+            st.plotly_chart(px.bar(health,x="Protocol",color="Status",title="Connector coverage"),width="stretch",config={"displayModeBar":False})
 
     with tabs[1]:
         st.markdown("### Connector registry")
@@ -415,7 +417,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 endpoint=st.text_input("Endpoint / DSN",placeholder="https://… or host=…")
             with c:
                 notes=st.text_input("Notes",placeholder="Purpose, owner, refresh expectation")
-                save=st.form_submit_button("➕ Register connector",type="primary",use_container_width=True)
+                save=st.form_submit_button("➕ Register connector",type="primary",width="stretch")
         if save:
             status,detail=_validate_endpoint(endpoint)
             now = _now()
@@ -446,7 +448,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
             st.rerun()
 
         if not connectors.empty:
-            st.dataframe(connectors.rename(columns={"connector_id":"ID","name":"System","system_type":"Protocol","endpoint":"Endpoint / DSN","last_validated":"Validated","updated_at":"Updated"}),use_container_width=True,hide_index=True)
+            st.dataframe(connectors.rename(columns={"connector_id":"ID","name":"System","system_type":"Protocol","endpoint":"Endpoint / DSN","last_validated":"Validated","updated_at":"Updated"}),width="stretch",hide_index=True)
             sel=st.selectbox("Select connector",connectors["connector_id"].astype(str).tolist(),key="ei_validate_select")
             selected=connectors[connectors["connector_id"].astype(str)==sel].iloc[0]
             with st.expander("✏️ Edit selected connector",expanded=False):
@@ -460,7 +462,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                     with e3:
                         edit_endpoint=st.text_input("Endpoint / DSN",value=str(selected["endpoint"] or ""))
                         edit_notes=st.text_input("Notes",value=str(selected["notes"] or ""))
-                    save_edit=st.form_submit_button("💾 Save connector changes",type="primary",use_container_width=True)
+                    save_edit=st.form_submit_button("💾 Save connector changes",type="primary",width="stretch")
                 if save_edit:
                     edit_status,detail=_validate_endpoint(edit_endpoint)
                     now = _now()
@@ -486,7 +488,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                     if not durable:
                         st.warning("The update is in the current session, but durable workspace storage did not confirm the save.")
                     st.rerun()
-            if st.button("✓ Validate configuration",type="primary",use_container_width=True,key="ei_validate_btn"):
+            if st.button("✓ Validate configuration",type="primary",width="stretch",key="ei_validate_btn"):
                 status,detail=_validate_endpoint(selected["endpoint"])
                 now = _now()
                 with _db() as conn:
@@ -503,7 +505,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 if not durable:
                     st.warning("The validation result is in the current session, but durable workspace storage did not confirm the save.")
                 st.rerun()
-            if st.button("🗑️ Remove connector",use_container_width=True,key="ei_remove_connector"):
+            if st.button("🗑️ Remove connector",width="stretch",key="ei_remove_connector"):
                 with _db() as conn:
                     conn.execute("DELETE FROM workspace_connectors WHERE owner=? AND workspace=? AND connector_id=?",(owner,workspace,sel))
                     conn.commit()
@@ -527,7 +529,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 names=list(frames)
                 sheet=st.selectbox("Imported sheet",names,key="ei_import_sheet")
                 df=frames[sheet]
-                if st.button("🔗 Publish sheet to shared workspace",type="primary",use_container_width=True,key="ei_publish_data"):
+                if st.button("🔗 Publish sheet to shared workspace",type="primary",width="stretch",key="ei_publish_data"):
                     _publish_active(df,str(upload.name),sheet,digest)
                     asset_id="DATA-"+_hash_df(df)[:14].upper()
                     asset_hash = _hash_df(df)
@@ -557,7 +559,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                     if not durable:
                         st.warning("The dataset is active in this session, but durable workspace storage did not confirm the save.")
                     st.rerun()
-                st.dataframe(df.head(18),use_container_width=True,hide_index=True)
+                st.dataframe(df.head(18),width="stretch",hide_index=True)
                 profile={"rows":len(df),"columns":len(df.columns),"quality_score":0}
                 try:
                     from shoir_enterprise_services import data_intelligence_profile
@@ -572,7 +574,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
         if not assets.empty:
             st.markdown("#### Shared asset register")
-            st.dataframe(assets,use_container_width=True,hide_index=True)
+            st.dataframe(assets,width="stretch",hide_index=True)
 
     with tabs[3]:
         st.markdown("### Collaboration board")
@@ -586,7 +588,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
             with b:
                 assignee=st.text_input("Assignee",placeholder="engineering")
                 reviewer=st.text_input("Reviewer",placeholder="manager")
-                submit=st.form_submit_button("💬 Add work item",type="primary",use_container_width=True)
+                submit=st.form_submit_button("💬 Add work item",type="primary",width="stretch")
         if submit and subject.strip():
             created_at = _now()
             work_item_id = int(datetime.now(timezone.utc).timestamp() * 1_000_000)
@@ -611,7 +613,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 st.warning("The item is in the current session, but durable workspace storage did not confirm the save.")
             st.rerun()
         if not activity.empty:
-            st.dataframe(activity,use_container_width=True,hide_index=True)
+            st.dataframe(activity,width="stretch",hide_index=True)
             open_ids=activity.loc[activity["status"]=="Open","id"].tolist()
             if open_ids:
                 pick=st.selectbox("Work item to update",open_ids,key="ei_collab_update_select")
@@ -619,7 +621,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 with c1:
                     new_status=st.selectbox("Status",["Open","In Review","Blocked","Done"],key="ei_collab_status")
                 with c2:
-                    if st.button("✓ Update status",use_container_width=True,key="ei_collab_update_btn"):
+                    if st.button("✓ Update status",width="stretch",key="ei_collab_update_btn"):
                         with _db() as conn:
                             conn.execute("UPDATE workspace_collaboration SET status=? WHERE id=? AND owner=? AND workspace=?",(new_status,int(pick),owner,workspace))
                             conn.commit()
@@ -645,7 +647,7 @@ def render_enterprise_integration(tier: str, username: str) -> None:
             {"Area":"Collaboration items","Value":len(activity),"State":"Tracked"},
             {"Area":"Live connector claims","Value":int(live_status),"State":"Only explicit statuses"},
         ]
-        st.dataframe(pd.DataFrame(audit_rows),use_container_width=True,hide_index=True)
+        st.dataframe(pd.DataFrame(audit_rows),width="stretch",hide_index=True)
         out = _build_enterprise_workspace_pack(connectors, assets, activity, audit_rows)
-        st.download_button("📥 Download Enterprise Workspace Pack",data=out,file_name="shoir_ie_enterprise_workspace.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="ei_export_pack")
-        st.download_button("📄 Download collaboration CSV",data=activity.to_csv(index=False).encode("utf-8"),file_name="enterprise_collaboration.csv",mime="text/csv",use_container_width=True,key="ei_export_collab")
+        st.download_button("📥 Download Enterprise Workspace Pack",data=out,file_name="shoir_ie_enterprise_workspace.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",width="stretch",key="ei_export_pack")
+        st.download_button("📄 Download collaboration CSV",data=activity.to_csv(index=False).encode("utf-8"),file_name="enterprise_collaboration.csv",mime="text/csv",width="stretch",key="ei_export_collab")

@@ -254,6 +254,177 @@ export function sessionEntitlementFields(
   };
 }
 
+/**
+ * Match the application's package normalization rules at the API boundary.
+ * Research Pack is an add-on access state, not the Enterprise Plus tier.
+ */
+export function normalizePlatformTier(value: unknown): string {
+  const tier = String(value || "Starter").trim().toLowerCase();
+  if (tier.includes("research")) return "Research Pack";
+  if (
+    tier.includes("enterprise plus") || tier.includes("industrial enterprise")
+  ) {
+    return "Enterprise Plus";
+  }
+  if (tier.includes("enterprise")) return "Enterprise";
+  if (tier.includes("professional")) return "Professional";
+  if (tier.includes("pro")) return "Mid-Tier Pro";
+  return "Starter";
+}
+
+export function platformTierAllows(
+  currentValue: unknown,
+  requiredValue: string,
+): boolean {
+  const current = normalizePlatformTier(currentValue);
+  const required = normalizePlatformTier(requiredValue);
+  const order = [
+    "Starter",
+    "Mid-Tier Pro",
+    "Professional",
+    "Enterprise",
+    "Enterprise Plus",
+  ];
+  if (current === "Research Pack") {
+    return [
+      "Starter",
+      "Mid-Tier Pro",
+      "Professional",
+      "Enterprise",
+      "Research Pack",
+    ].includes(required);
+  }
+  if (required === "Research Pack") return current === "Research Pack";
+  return order.indexOf(current) >= order.indexOf(required);
+}
+
+export interface CsvShape {
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+}
+
+/**
+ * Inspect an already size-bounded UTF-8 CSV without materializing a DataFrame.
+ * Counts logical records (quoted newlines are not row separators) and rejects
+ * malformed quoting, duplicate/blank headers and invalid UTF-8.
+ */
+export function inspectCsvShape(bytes: Uint8Array): CsvShape {
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new PublicRequestError("Dataset CSV must be valid UTF-8.", 400);
+  }
+  if (source.startsWith("\uFEFF")) source = source.slice(1);
+  if (!source.length) {
+    throw new PublicRequestError("Dataset CSV is empty.", 400);
+  }
+
+  const headers: string[] = [];
+  let field = "";
+  let fieldHasContent = false;
+  let inQuotes = false;
+  let firstRecord = true;
+  let rowCount = 0;
+  let recordHasContent = false;
+  let columnCount = 0;
+
+  const finishHeader = () => {
+    headers.push(field);
+    if (headers.some((header) => !header.trim())) {
+      throw new PublicRequestError(
+        "Dataset CSV contains a blank column header.",
+        400,
+      );
+    }
+    if (new Set(headers).size !== headers.length) {
+      throw new PublicRequestError(
+        "Dataset CSV contains duplicate column headers.",
+        400,
+      );
+    }
+    columnCount = headers.length;
+    firstRecord = false;
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (inQuotes) {
+      if (character === '"') {
+        if (source[index + 1] === '"') {
+          if (firstRecord) field += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else if (firstRecord) {
+        field += character;
+      }
+      fieldHasContent = true;
+      recordHasContent = true;
+      continue;
+    }
+
+    if (character === '"') {
+      if (fieldHasContent) {
+        throw new PublicRequestError(
+          "Dataset CSV contains an invalid quote.",
+          400,
+        );
+      }
+      inQuotes = true;
+      fieldHasContent = true;
+      recordHasContent = true;
+      continue;
+    }
+    if (character === ",") {
+      if (firstRecord) headers.push(field);
+      field = "";
+      fieldHasContent = false;
+      recordHasContent = true;
+      continue;
+    }
+    if (character === "\n" || character === "\r") {
+      if (firstRecord) {
+        finishHeader();
+      } else if (recordHasContent) {
+        rowCount += 1;
+      }
+      field = "";
+      fieldHasContent = false;
+      recordHasContent = false;
+      if (character === "\r" && source[index + 1] === "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (firstRecord) field += character;
+    fieldHasContent = true;
+    recordHasContent = true;
+  }
+
+  if (inQuotes) {
+    throw new PublicRequestError(
+      "Dataset CSV contains an unterminated quoted field.",
+      400,
+    );
+  }
+  if (firstRecord) {
+    finishHeader();
+  } else if (recordHasContent) {
+    rowCount += 1;
+  }
+
+  if (columnCount < 1) {
+    throw new PublicRequestError(
+      "Dataset CSV must contain at least one column.",
+      400,
+    );
+  }
+  return { rowCount, columnCount, headers };
+}
+
 export function publicErrorFor(
   error: unknown,
 ): { status: number; message: string } {

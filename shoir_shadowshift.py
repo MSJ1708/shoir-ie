@@ -5,6 +5,8 @@ experiment priority is a transparent heuristic, not a causal model or savings cl
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import json
 import math
@@ -124,7 +126,7 @@ def _text(value: Any, limit: int = 1000) -> str:
 
 def ensure_shadowshift_schema(db_path: str = DB_PATH) -> None:
     """Create ShadowShift-only tables without altering existing Shoir-IE tables."""
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS shadowshift_studies (
@@ -164,7 +166,7 @@ def ensure_shadowshift_schema(db_path: str = DB_PATH) -> None:
 def create_study(owner: str, name: str = "New ShadowShift Study", db_path: str = DB_PATH) -> str:
     ensure_shadowshift_schema(db_path)
     sid, now = "SS-" + uuid.uuid4().hex[:12].upper(), _now()
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         conn.execute(
             """INSERT INTO shadowshift_studies
             (study_id,owner,name,process_name,observation_window_min,shift_window_min,shifts_per_year,
@@ -179,20 +181,20 @@ def create_study(owner: str, name: str = "New ShadowShift Study", db_path: str =
 
 def list_studies(owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         return pd.read_sql_query("SELECT * FROM shadowshift_studies WHERE owner=? ORDER BY updated_at DESC", conn, params=(str(owner),))
 
 
 def load_study(study_id: str, owner: str, db_path: str = DB_PATH) -> dict[str, Any] | None:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         cursor = conn.execute("SELECT * FROM shadowshift_studies WHERE study_id=? AND owner=?", (str(study_id), str(owner)))
         row = cursor.fetchone()
         return dict(zip([x[0] for x in cursor.description], row)) if row else None
 
 
 def update_study(study_id: str, owner: str, settings: dict[str, Any], db_path: str = DB_PATH) -> None:
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         conn.execute(
             """UPDATE shadowshift_studies SET name=?,process_name=?,observation_window_min=?,shift_window_min=?,
             shifts_per_year=?,loaded_hourly_rate_sar=?,downstream_stress_factor=?,notes=?,updated_at=?
@@ -304,7 +306,7 @@ def add_event(study_id: str, owner: str, event: dict[str, Any], db_path: str = D
     item = _event_record(event, study_id, owner)
     keys = ("event_id", "study_id", "owner", "observed_at", "event_type", "station", "interruption_min",
             "recovery_min", "people_affected", "suspected_cause", "evidence_strength", "evidence_source", "notes", "created_at")
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("""INSERT INTO shadowshift_events
@@ -318,7 +320,7 @@ def add_event(study_id: str, owner: str, event: dict[str, Any], db_path: str = D
 
 def load_events(study_id: str, owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         d = pd.read_sql_query(
             """SELECT event_id AS 'Event ID',observed_at AS 'Observed at',event_type AS 'Event type',
             station AS 'Station',interruption_min AS 'Interruption min',recovery_min AS 'Recovery min',
@@ -336,7 +338,7 @@ def replace_events(study_id: str, owner: str, frame: pd.DataFrame, db_path: str 
     d = clean_event_frame(frame)
     keys = ("event_id", "study_id", "owner", "observed_at", "event_type", "station", "interruption_min",
             "recovery_min", "people_affected", "suspected_cause", "evidence_strength", "evidence_source", "notes", "created_at")
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("DELETE FROM shadowshift_events WHERE study_id=? AND owner=?", (study_id, owner))
@@ -424,7 +426,7 @@ def rank_next_experiments(events: pd.DataFrame) -> pd.DataFrame:
 def save_experiment(study_id: str, owner: str, design: dict[str, Any], db_path: str = DB_PATH) -> str:
     ensure_shadowshift_schema(db_path)
     eid, now = "SSX-" + uuid.uuid4().hex[:10].upper(), _now()
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("""INSERT INTO shadowshift_experiments
@@ -442,7 +444,7 @@ def save_experiment(study_id: str, owner: str, design: dict[str, Any], db_path: 
 
 def list_experiments(study_id: str, owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         return pd.read_sql_query("""SELECT experiment_id AS 'Experiment ID',hypothesis AS 'Hypothesis',
             comparison_condition AS 'Comparison',test_condition AS 'Test condition',primary_metric AS 'Primary metric',
             unit AS 'Unit',target_n AS 'Target n',planned_minutes AS 'Planned min',
@@ -457,7 +459,7 @@ def record_experiment_result(experiment_id: str, study_id: str, owner: str, resu
         "observations_completed": max(0, int(_num(result.get("observations_completed")))),
         "notes": _text(result.get("notes"), 2000), "recorded_at": _now(),
     }
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         cur = conn.execute("""UPDATE shadowshift_experiments SET result_json=?,status='Measured',updated_at=?
             WHERE experiment_id=? AND study_id=? AND owner=?""",
             (json.dumps(payload, sort_keys=True), _now(), experiment_id, study_id, owner))
@@ -470,7 +472,7 @@ def save_analysis_snapshot(study_id: str, owner: str, assumptions: dict[str, Any
     ensure_shadowshift_schema(db_path)
     evidence_hash = hashlib.sha256(clean_event_frame(events).to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
     sid = "SSN-" + uuid.uuid4().hex[:12].upper()
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("INSERT INTO shadowshift_snapshots VALUES(?,?,?,?,?,?,?)", (
@@ -482,7 +484,7 @@ def save_analysis_snapshot(study_id: str, owner: str, assumptions: dict[str, Any
 
 def load_snapshots(study_id: str, owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite_connection(db_path, timeout=30) as conn:
         return pd.read_sql_query("""SELECT snapshot_id AS 'Snapshot ID',evidence_sha256 AS 'Evidence SHA-256',
             created_at AS 'Created at' FROM shadowshift_snapshots WHERE study_id=? AND owner=? ORDER BY created_at DESC""",
             conn, params=(study_id, owner))
@@ -539,7 +541,7 @@ def render_shadowshift(tier: str, username: str) -> None:
         labels = {str(r["study_id"]): f'{r["name"]} · {r["study_id"]}' for _, r in studies.iterrows()}
         c1, c2 = st.columns([4, 1])
         selected = c1.selectbox("Active study", list(labels), index=list(labels).index(current), format_func=lambda x: labels[x], key=key)
-        if c2.button("＋ New study", use_container_width=True, key="shadowshift_new_study"):
+        if c2.button("＋ New study", width="stretch", key="shadowshift_new_study"):
             sid = create_study(owner)
             st.session_state[key] = sid
             st.rerun()
@@ -586,13 +588,13 @@ def render_shadowshift(tier: str, username: str) -> None:
             timer_station = st.text_input("Timer station / step", "Unspecified station", key=timer_key + "_station")
             left, right = st.columns(2)
             if timer is None:
-                if left.button("▶ Start interruption timer", type="primary", use_container_width=True, key=timer_key + "_start"):
+                if left.button("▶ Start interruption timer", type="primary", width="stretch", key=timer_key + "_start"):
                     st.session_state[timer_key] = {"started": datetime.now(timezone.utc).timestamp(), "type": timer_type, "station": timer_station}
                     st.rerun()
             else:
                 elapsed = max(0.0, datetime.now(timezone.utc).timestamp() - float(timer["started"]))
                 left.info(f"Timer running · about {elapsed/60:.1f} min elapsed")
-                if right.button("■ Stop & log interruption", type="primary", use_container_width=True, key=timer_key + "_stop"):
+                if right.button("■ Stop & log interruption", type="primary", width="stretch", key=timer_key + "_stop"):
                     duration = max(0.0, (datetime.now(timezone.utc).timestamp() - float(timer["started"])) / 60)
                     add_event(study_id, owner, {
                         "Observed at": _now(), "Event type": timer["type"], "Station": timer["station"],
@@ -618,7 +620,7 @@ def render_shadowshift(tier: str, username: str) -> None:
                 strength = g.slider("Evidence strength", 1, 5, 3, help="1 = weak/inferred; 5 = directly verified. Not a statistical confidence interval.")
                 source = h.selectbox("Evidence source", EVIDENCE_SOURCES[:-1])
                 notes = st.text_area("Observed fact / note (avoid unsupported cause claims)", height=70)
-                submitted = st.form_submit_button("＋ Add observed event", type="primary", use_container_width=True)
+                submitted = st.form_submit_button("＋ Add observed event", type="primary", width="stretch")
                 if submitted:
                     add_event(study_id, owner, {
                         "Observed at": _now(), "Event type": typ, "Station": station, "Interruption min": interrupt,
@@ -631,9 +633,9 @@ def render_shadowshift(tier: str, username: str) -> None:
             events = load_events(study_id, owner)
             if not events.empty:
                 st.markdown("#### Editable evidence log")
-                edited = st.data_editor(events, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"shadowshift_editor_{study_id}")
+                edited = st.data_editor(events, width="stretch", hide_index=True, num_rows="dynamic", key=f"shadowshift_editor_{study_id}")
                 save_col, delete_col = st.columns([1, 2])
-                if save_col.button("💾 Save log edits", type="primary", use_container_width=True, key=f"shadowshift_save_{study_id}"):
+                if save_col.button("💾 Save log edits", type="primary", width="stretch", key=f"shadowshift_save_{study_id}"):
                     try:
                         count = replace_events(study_id, owner, edited)
                         st.success(f"Saved {count} event rows to this account's study.")
@@ -641,8 +643,8 @@ def render_shadowshift(tier: str, username: str) -> None:
                     except Exception as exc:
                         st.error(f"Could not save log edits: {exc}")
                 pick = delete_col.selectbox("Remove event", ["— Keep all events —"] + events["Event ID"].astype(str).tolist(), key=f"shadowshift_delete_pick_{study_id}")
-                if delete_col.button("Delete selected event", use_container_width=True, key=f"shadowshift_delete_{study_id}") and pick != "— Keep all events —":
-                    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+                if delete_col.button("Delete selected event", width="stretch", key=f"shadowshift_delete_{study_id}") and pick != "— Keep all events —":
+                    with sqlite_connection(DB_PATH, timeout=30) as conn:
                         conn.execute("DELETE FROM shadowshift_events WHERE event_id=? AND study_id=? AND owner=?", (pick, study_id, owner))
                         conn.commit()
                     st.rerun()
@@ -684,10 +686,10 @@ def render_shadowshift(tier: str, username: str) -> None:
                 by_station = event_burden.groupby("Station", as_index=False).agg(**{"Observed burden min": ("Observed burden min", "sum"), "Events": ("Event ID", "count")}).sort_values("Observed burden min", ascending=False)
                 fig1 = px.bar(by_type, x="Event type", y="Observed burden min", color="Events", title="Observed burden by event type")
                 fig1.update_layout(height=350, xaxis_title=None, margin=dict(l=10, r=10, t=55, b=10))
-                chart1.plotly_chart(fig1, use_container_width=True)
+                chart1.plotly_chart(fig1, width="stretch")
                 fig2 = px.bar(by_station, x="Station", y="Observed burden min", color="Events", title="Observed burden by station / step")
                 fig2.update_layout(height=350, xaxis_title=None, margin=dict(l=10, r=10, t=55, b=10))
-                chart2.plotly_chart(fig2, use_container_width=True)
+                chart2.plotly_chart(fig2, width="stretch")
                 compare = pd.DataFrame([
                     {"Quantity": "Interruption", "Value": metrics["interruption_minutes_observed"], "Status": "Observed"},
                     {"Quantity": "Recovery", "Value": metrics["recovery_minutes_observed"], "Status": "Observed"},
@@ -695,7 +697,7 @@ def render_shadowshift(tier: str, username: str) -> None:
                     {"Quantity": "Per-shift burden", "Value": metrics["projected_elapsed_burden_minutes_per_shift"], "Status": "Modelled extrapolation" if metrics["is_extrapolation"] else "Observed-window equivalent"},
                     {"Quantity": "Downstream stress increment", "Value": metrics["modeled_downstream_extra_minutes_per_shift"], "Status": "Scenario only"},
                 ])
-                st.dataframe(compare, use_container_width=True, hide_index=True)
+                st.dataframe(compare, width="stretch", hide_index=True)
                 if metrics["is_extrapolation"]:
                     st.warning(f"Per-shift values scale a {metrics['observation_window_minutes']:.0f}-minute observation window by {metrics['projection_factor']:.2f}. Validate with representative shifts.")
                 if events["Evidence source"].eq("Synthetic demo").any():
@@ -706,7 +708,7 @@ def render_shadowshift(tier: str, username: str) -> None:
             st.write("A transparent heuristic ranks high-burden patterns with weak evidence and affordable tests. It helps choose what to investigate; it does not prove causation.")
             events = load_events(study_id, owner)
             ranked = rank_next_experiments(events)
-            st.dataframe(ranked[["Rank", "Cause", "Observed events", "Observed burden min", "Mean evidence (1-5)", "Priority score (relative)"]], use_container_width=True, hide_index=True)
+            st.dataframe(ranked[["Rank", "Cause", "Observed events", "Observed burden min", "Mean evidence (1-5)", "Priority score (relative)"]], width="stretch", hide_index=True)
             top = ranked.iloc[0].to_dict()
             st.markdown("##### Recommended low-cost test")
             st.markdown(f"**Hypothesis:** {top['Hypothesis']}")
@@ -725,7 +727,7 @@ def render_shadowshift(tier: str, username: str) -> None:
                 target_n = st.number_input("Target observations", min_value=1, max_value=100000, value=int(play["target_n"]), step=1)
                 effort = st.number_input("Planned effort (minutes)", min_value=1.0, max_value=100000.0, value=float(play["effort_min"]), step=5.0)
                 direction = st.selectbox("Expected direction", ["Decrease", "Increase", "No worse than", "Difference / unknown"])
-                if st.form_submit_button("＋ Register experiment before testing", type="primary", use_container_width=True):
+                if st.form_submit_button("＋ Register experiment before testing", type="primary", width="stretch"):
                     eid = save_experiment(study_id, owner, {
                         "hypothesis": f"{selected_cause}: {play['hypothesis']}", "comparison_condition": comparison,
                         "test_condition": treatment, "primary_metric": metric, "unit": unit, "target_n": target_n,
@@ -737,7 +739,7 @@ def render_shadowshift(tier: str, username: str) -> None:
             experiments = list_experiments(study_id, owner)
             if not experiments.empty:
                 st.markdown("#### Experiment register")
-                st.dataframe(experiments.drop(columns=["Result"], errors="ignore"), use_container_width=True, hide_index=True)
+                st.dataframe(experiments.drop(columns=["Result"], errors="ignore"), width="stretch", hide_index=True)
                 experiment_labels = {str(r["Experiment ID"]): f'{r["Experiment ID"]} · {str(r["Hypothesis"])[:70]}' for _, r in experiments.iterrows()}
                 chosen = st.selectbox("Record a measured result", list(experiment_labels), format_func=lambda x: experiment_labels[x], key=f"shadowshift_result_pick_{study_id}")
                 current_result = {}
@@ -789,16 +791,16 @@ def render_shadowshift(tier: str, username: str) -> None:
             }
             jdata = json.dumps(report, indent=2, default=str, ensure_ascii=False)
             left, right = st.columns(2)
-            left.download_button("⬇ Download event log (CSV)", events.to_csv(index=False), f"shadowshift_{study_id.lower()}_events.csv", "text/csv", use_container_width=True)
-            right.download_button("⬇ Download evidence report (JSON)", jdata, f"shadowshift_{study_id.lower()}_report.json", "application/json", use_container_width=True)
-            if st.button("🔐 Save snapshot + evidence hash", type="primary", use_container_width=True, key=f"shadowshift_snapshot_{study_id}"):
+            left.download_button("⬇ Download event log (CSV)", events.to_csv(index=False), f"shadowshift_{study_id.lower()}_events.csv", "text/csv", width="stretch")
+            right.download_button("⬇ Download evidence report (JSON)", jdata, f"shadowshift_{study_id.lower()}_report.json", "application/json", width="stretch")
+            if st.button("🔐 Save snapshot + evidence hash", type="primary", width="stretch", key=f"shadowshift_snapshot_{study_id}"):
                 assumptions = {k: study.get(k) for k in ("observation_window_min", "shift_window_min", "shifts_per_year", "loaded_hourly_rate_sar", "downstream_stress_factor")}
                 sid, sha = save_analysis_snapshot(study_id, owner, assumptions, metrics, events)
                 st.success(f"Snapshot {sid} saved. Event-log SHA-256: {sha}")
             snapshots = load_snapshots(study_id, owner)
             if not snapshots.empty:
                 st.markdown("#### Saved evidence snapshots")
-                st.dataframe(snapshots, use_container_width=True, hide_index=True)
+                st.dataframe(snapshots, width="stretch", hide_index=True)
 
         with tabs[4]:
             st.markdown("#### Study definition and assumptions")
@@ -814,7 +816,7 @@ def render_shadowshift(tier: str, username: str) -> None:
                 rate = r.number_input("Loaded labor cost (SAR / person-hour)", min_value=0.0, max_value=1000000.0, value=float(study["loaded_hourly_rate_sar"]), step=5.0)
                 stress = s.slider("Downstream stress factor (scenario only)", min_value=1.0, max_value=3.0, value=float(study["downstream_stress_factor"]), step=0.1)
                 notes = st.text_area("Context, exclusions and protocol", value=str(study["notes"] or ""), height=90)
-                if st.form_submit_button("Save study settings", type="primary", use_container_width=True):
+                if st.form_submit_button("Save study settings", type="primary", width="stretch"):
                     update_study(study_id, owner, {"name": name, "process_name": process,
                         "observation_window_min": window, "shift_window_min": shift, "shifts_per_year": shifts,
                         "loaded_hourly_rate_sar": rate, "downstream_stress_factor": stress, "notes": notes})

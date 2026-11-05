@@ -13,6 +13,8 @@ optimization, forecasting and reporting layers.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import ast
 import base64
 import hashlib
@@ -713,7 +715,7 @@ def _starter_templates()->dict[str,dict[str,Any]]:
     }
 
 def ensure_workbook_db(path:str=DB_PATH)->None:
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbooks(
             workbook_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,owner TEXT NOT NULL,name TEXT NOT NULL,
             payload_b64 TEXT NOT NULL,formulas_json TEXT NOT NULL,semantic_map_json TEXT,
@@ -884,7 +886,7 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     formula_json=json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str,sort_keys=True)
     semantic_json=json.dumps(dict(semantic_map or {}),default=str,sort_keys=True)
     variables_json=json.dumps(dict(variables),default=str,sort_keys=True)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         # Workbook IDs are global primary keys; do not let a stale/session-supplied
         # ID transfer an existing workbook across owners or workspaces.
         existing_identity=conn.execute(
@@ -960,7 +962,7 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
 
 def list_workbook_versions(workbook_id:str|None=None,path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         if workbook_id:
             return pd.read_sql(
                 """SELECT version_id AS ID,version_no AS Version,COALESCE(label,'Autosave') AS Label,
@@ -991,7 +993,7 @@ def load_workbook_version(
     returns workbook, formulas, semantic map and variables.
     """
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         if version_no is None:
             row=conn.execute(
                 """SELECT payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')
@@ -1019,7 +1021,7 @@ def load_workbook_version(
 
 def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         row=conn.execute(
             """SELECT COALESCE(variables_json,'{}') FROM industrial_workbook_versions
                WHERE workbook_id=? AND workspace=? AND owner=? AND version_no=?""",
@@ -1031,7 +1033,7 @@ def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_P
 def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:str,path:str=DB_PATH)->int:
     if not str(comment).strip(): raise ValueError("Comment text is required.")
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         workbook_exists=conn.execute(
             "SELECT 1 FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
             (workbook_id,_workspace(),_actor()),
@@ -1047,7 +1049,7 @@ def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:st
 
 def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         return pd.read_sql(
             "SELECT comment_id AS ID,sheet_name AS Sheet,cell_ref AS Cell,comment AS Comment,owner AS Author,created_at AS Created "
             "FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? AND owner=? ORDER BY comment_id DESC",
@@ -1056,7 +1058,7 @@ def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         row=conn.execute(
             "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
             (workbook_id,_workspace(),_actor())).fetchone()
@@ -1065,7 +1067,7 @@ def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame
 
 def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         return pd.read_sql(
             "SELECT workbook_id AS ID,name AS Name,owner AS Owner,updated_at AS Updated,sha256 AS SHA256 "
             "FROM industrial_workbooks WHERE workspace=? AND owner=? ORDER BY updated_at DESC",
@@ -1074,7 +1076,7 @@ def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
 
 def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         row=conn.execute(
             "SELECT COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
             (workbook_id,_workspace(),_actor())).fetchone()
@@ -1083,7 +1085,7 @@ def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
 
 def save_template(name:str,category:str,description:str,workbook:Mapping[str,pd.DataFrame],path:str=DB_PATH)->str:
     ensure_workbook_db(path); payload=_serialize_workbook(workbook); tid="TPL-"+uuid.uuid4().hex[:10].upper()
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         conn.execute("INSERT INTO industrial_workbook_templates(template_id,workspace,owner,name,category,description,payload_b64,builtin,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                      (tid,_workspace(),_actor(),str(name)[:160],str(category)[:80],str(description)[:500],
                       base64.b64encode(payload).decode("ascii"),0,_now(),_now())); conn.commit()
@@ -1092,7 +1094,7 @@ def save_template(name:str,category:str,description:str,workbook:Mapping[str,pd.
 def list_templates(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
     built=[{"ID":"builtin:"+_slug(n),"Name":n,"Category":d["category"],"Description":d["description"],"Source":"Shoir-IE built-in"} for n,d in _starter_templates().items()]
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         try:
             custom=pd.read_sql("SELECT template_id AS ID,name AS Name,category AS Category,description AS Description,'Workspace library' AS Source FROM industrial_workbook_templates WHERE workspace=? AND owner=? ORDER BY updated_at DESC",
                                conn,params=(_workspace(),_actor()))
@@ -1108,21 +1110,21 @@ def load_template(template_id:str,path:str=DB_PATH)->tuple[str,dict[str,pd.DataF
             if _slug(name)==target: return name,{"Sheet1":data["data"].copy(deep=True)}
         raise KeyError("Built-in template not found.")
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         row=conn.execute("SELECT name,payload_b64 FROM industrial_workbook_templates WHERE template_id=? AND workspace=? AND owner=?",(template_id,_workspace(),_actor())).fetchone()
     if not row: raise KeyError("Template not found.")
     return str(row[0]),_deserialize_workbook(base64.b64decode(row[1]))
 
 def save_query_pipeline(name:str,source_sheet:str,steps:Sequence[Mapping[str,Any]],path:str=DB_PATH)->str:
     ensure_workbook_db(path); pid="Q-"+uuid.uuid4().hex[:10].upper()
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         conn.execute("INSERT INTO industrial_workbook_queries(pipeline_id,workspace,owner,name,source_sheet,steps_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
                      (pid,_workspace(),_actor(),str(name)[:160],str(source_sheet)[:160],json.dumps(list(steps),default=str),_now(),_now())); conn.commit()
     return pid
 
 def list_query_pipelines(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with sqlite3.connect(path,timeout=30) as conn:
+    with sqlite_connection(path,timeout=30) as conn:
         return pd.read_sql("SELECT pipeline_id AS ID,name AS Name,source_sheet AS Source,updated_at AS Updated FROM industrial_workbook_queries WHERE workspace=? AND owner=? ORDER BY updated_at DESC",
                            conn,params=(_workspace(),_actor()))
 
@@ -1219,21 +1221,21 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         key="industrial_workbook_upload_v2",
         help="Imports are passed through the governed Excel Intelligence cleaning + structure pipeline before entering the workbook."
     )
-    if c2.button("➕ Sheet",use_container_width=True):
+    if c2.button("➕ Sheet",width="stretch"):
         name=f"Sheet{len(wb)+1}"; wb[name]=pd.DataFrame({"Value":[None]}); formulas[name]={}; st.rerun()
-    if c3.button("↶ Undo",disabled=not st.session_state["industrial_workbook_undo"],use_container_width=True):
+    if c3.button("↶ Undo",disabled=not st.session_state["industrial_workbook_undo"],width="stretch"):
         snap=st.session_state["industrial_workbook_undo"].pop(); st.session_state["industrial_workbook_redo"].append({k:v.copy(deep=True) for k,v in wb.items()})
         wb.clear(); wb.update({k:v.copy(deep=True) for k,v in snap.items()}); st.rerun()
-    if c4.button("↷ Redo",disabled=not st.session_state["industrial_workbook_redo"],use_container_width=True):
+    if c4.button("↷ Redo",disabled=not st.session_state["industrial_workbook_redo"],width="stretch"):
         snap=st.session_state["industrial_workbook_redo"].pop(); st.session_state["industrial_workbook_undo"].append({k:v.copy(deep=True) for k,v in wb.items()})
         wb.clear(); wb.update({k:v.copy(deep=True) for k,v in snap.items()}); st.rerun()
-    if c5.button("💾 Save",type="primary",use_container_width=True):
+    if c5.button("💾 Save",type="primary",width="stretch"):
         try:
             wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables)
             st.session_state["industrial_workbook_id"]=wid; st.success(f"Saved workbook {wid}.")
         except Exception as exc: st.error(f"Workbook save failed safely: {exc}")
     saved=list_saved_workbooks()
-    if c6.button("📂 Load saved",use_container_width=True): st.session_state["industrial_workbook_show_saved"]=True
+    if c6.button("📂 Load saved",width="stretch"): st.session_state["industrial_workbook_show_saved"]=True
 
     if uploaded is not None:
         try:
@@ -1278,7 +1280,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     k1.metric("Sheets",f"{len(wb):,}"); k2.metric("Rows",f"{workbook_health['rows']:,}"); k3.metric("Data health",f"{workbook_health['health']:.1f}%")
     k4.metric("Formula cells",f"{formula_count:,}"); k5.metric("Semantic mappings",f"{semantic_count:,}")
     a1,a2,a3,a4=st.columns(4)
-    if a1.button("✅ Validate & recalculate",type="primary",use_container_width=True,key="iw_validate_recalculate"):
+    if a1.button("✅ Validate & recalculate",type="primary",width="stretch",key="iw_validate_recalculate"):
         try:
             recalculated,audit=evaluate_workbook_formulas(wb,formulas,variables=variables)
             st.session_state[WORKBOOK_STATE_KEY]=recalculated
@@ -1287,7 +1289,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             st.rerun()
         except Exception as exc:
             st.error(f"Workbook recalculation failed safely: {type(exc).__name__}: {exc}")
-    if a2.button("💾 Save checkpoint",use_container_width=True,key="iw_save_checkpoint"):
+    if a2.button("💾 Save checkpoint",width="stretch",key="iw_save_checkpoint"):
         try:
             wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables,version_label="Checkpoint")
             st.session_state["industrial_workbook_id"]=wid
@@ -1296,13 +1298,13 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             st.error(f"Checkpoint failed safely: {exc}")
     verified_xlsx=_serialize_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),variables)
     verified_bundle=_build_workbook_evidence_bundle(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),variables)
-    a3.download_button("📥 Verified Excel",verified_xlsx,file_name=f"shoir_ie_{_slug(current_sheet)}_workbook.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True,key="iw_verified_xlsx")
-    a4.download_button("📦 Evidence ZIP",verified_bundle,file_name=f"shoir_ie_{_slug(current_sheet)}_evidence.zip",mime="application/zip",use_container_width=True,key="iw_verified_zip")
+    a3.download_button("📥 Verified Excel",verified_xlsx,file_name=f"shoir_ie_{_slug(current_sheet)}_workbook.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",width="stretch",key="iw_verified_xlsx")
+    a4.download_button("📦 Evidence ZIP",verified_bundle,file_name=f"shoir_ie_{_slug(current_sheet)}_evidence.zip",mime="application/zip",width="stretch",key="iw_verified_zip")
     tabs=st.tabs(["📊 Workbook","⚡ Instant Analyze","🔧 Query Studio","🧰 Templates","🧬 Semantic Thread","🤖 Copilot Edit","🎓 Learn & Extend"])
 
     with tabs[0]:
         st.caption(f"{current_sheet} · {len(current):,} rows × {len(current.columns):,} columns")
-        edited=st.data_editor(current,num_rows="dynamic",use_container_width=True,hide_index=True,key=f"industrial_workbook_editor_{_slug(current_sheet)}")
+        edited=st.data_editor(current,num_rows="dynamic",width="stretch",hide_index=True,key=f"industrial_workbook_editor_{_slug(current_sheet)}")
         if not edited.equals(current):
             st.session_state["industrial_workbook_undo"].append({k:v.copy(deep=True) for k,v in wb.items()}); st.session_state["industrial_workbook_redo"].clear(); wb[current_sheet]=edited.copy(deep=True)
         f1,f2,f3=st.columns([1,4,1]); formula_cell=f1.text_input("Cell",value="E2",key="industrial_workbook_formula_cell")
@@ -1315,7 +1317,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             except Exception as exc: st.error(f"Formula error safely contained: {type(exc).__name__}: {exc}")
         if formulas.get(current_sheet):
             with st.expander("Formula register"):
-                st.dataframe(pd.DataFrame([{"Cell":c,"Formula":v} for c,v in formulas[current_sheet].items()]),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame([{"Cell":c,"Formula":v} for c,v in formulas[current_sheet].items()]),width="stretch",hide_index=True)
         with st.expander("💬 Cell comments & version history", expanded=False):
             cc1,cc2,cc3=st.columns([1,1,2])
             comment_cell=cc1.text_input("Cell", value="A2", key="iw_comment_cell")
@@ -1336,10 +1338,10 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                 versions=list_workbook_versions(wid)
                 if not comments.empty:
                     st.markdown("#### Comments")
-                    st.dataframe(comments,use_container_width=True,hide_index=True)
+                    st.dataframe(comments,width="stretch",hide_index=True)
                 if not versions.empty:
                     st.markdown("#### Version history")
-                    st.dataframe(versions,use_container_width=True,hide_index=True)
+                    st.dataframe(versions,width="stretch",hide_index=True)
                     version_options=[int(v) for v in versions["Version"].tolist()]
                     selected_version=st.selectbox("Version to restore",version_options,key="iw_version_restore_select")
                     if st.button("↩ Restore selected version as new current version",key="iw_restore_version"):
@@ -1377,7 +1379,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         if u4.button("Convert",key="iw_convert_unit"):
             try: st.metric("Converted",f"{convert_units(value,fr,to):,.6g} {to}")
             except Exception as exc: st.warning(f"Unit conversion not available: {exc}")
-        if not st.session_state["industrial_workbook_formula_audit_df"].empty: st.dataframe(st.session_state["industrial_workbook_formula_audit_df"],use_container_width=True,hide_index=True)
+        if not st.session_state["industrial_workbook_formula_audit_df"].empty: st.dataframe(st.session_state["industrial_workbook_formula_audit_df"],width="stretch",hide_index=True)
         with st.expander("📐 Named engineering variables", expanded=False):
             variable_editor=st.data_editor(
                 pd.DataFrame([
@@ -1390,7 +1392,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                     for k,v in variables.items()
                 ]),
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 key="iw_variables_editor",
             )
@@ -1418,9 +1420,9 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     with tabs[1]:
         profile=instant_analyze(current); health=validate_workbook({current_sheet:current}); runtime=instant_runtime_profile(current)
         a1,a2,a3,a4=st.columns(4); a1.metric("Rows",f"{len(current):,}"); a2.metric("Columns",f"{len(current.columns):,}"); a3.metric("Data health",f"{health['health']:.1f}%"); a4.metric("Execution mode",runtime["mode"])
-        st.dataframe(profile["profile"],use_container_width=True,hide_index=True); st.markdown("#### What to analyze next")
+        st.dataframe(profile["profile"],width="stretch",hide_index=True); st.markdown("#### What to analyze next")
         for item in profile["recommendations"]: st.write("✓ "+item)
-        if profile["figure"] is not None: st.plotly_chart(profile["figure"],use_container_width=True,config={"displayModeBar":False})
+        if profile["figure"] is not None: st.plotly_chart(profile["figure"],width="stretch",config={"displayModeBar":False})
         numeric_cols=[str(col) for col in current.columns if pd.api.types.is_numeric_dtype(current[col])]
         if numeric_cols:
             with st.expander("🎨 Conditional formatting", expanded=False):
@@ -1432,7 +1434,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                 high=high_col.number_input("Upper threshold",value=100.0,key=f"iw_cf_high_{_slug(current_sheet)}") if high_enabled else None
                 try:
                     from shoir_adoption_engine import conditional_format_dataframe
-                    st.dataframe(conditional_format_dataframe(current,cf_col,low,high),use_container_width=True,hide_index=True)
+                    st.dataframe(conditional_format_dataframe(current,cf_col,low,high),width="stretch",hide_index=True)
                     st.caption("Formatting is a presentation layer; source values remain unchanged.")
                 except Exception as exc:
                     st.warning(f"Conditional formatting preview unavailable: {type(exc).__name__}: {exc}")
@@ -1471,21 +1473,21 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                 result=apply_query_pipeline(current,st.session_state["industrial_workbook_query_steps"]); st.session_state["industrial_workbook_query_result_df"]=result; st.success(f"Pipeline produced {len(result):,} row(s) × {len(result.columns):,} column(s).")
             except Exception as exc: st.error(f"Pipeline execution failed safely: {exc}")
         if b3.button("🧹 Clear steps",key="iw_query_clear"): st.session_state["industrial_workbook_query_steps"]=[]; st.session_state["industrial_workbook_query_result_df"]=pd.DataFrame()
-        if st.session_state["industrial_workbook_query_steps"]: st.dataframe(pd.DataFrame(st.session_state["industrial_workbook_query_steps"]),use_container_width=True,hide_index=True)
+        if st.session_state["industrial_workbook_query_steps"]: st.dataframe(pd.DataFrame(st.session_state["industrial_workbook_query_steps"]),width="stretch",hide_index=True)
         result=st.session_state["industrial_workbook_query_result_df"]
         if not result.empty:
-            st.dataframe(result,use_container_width=True,hide_index=True)
+            st.dataframe(result,width="stretch",hide_index=True)
             nums=[c for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
-            if nums: st.plotly_chart(px.histogram(result,x=nums[0],title=f"Query Result · {nums[0]}"),use_container_width=True,config={"displayModeBar":False})
+            if nums: st.plotly_chart(px.histogram(result,x=nums[0],title=f"Query Result · {nums[0]}"),width="stretch",config={"displayModeBar":False})
             qa,qb,qc=st.columns(3)
-            if qa.button("↪ Apply result to current sheet",type="primary",use_container_width=True,key="iw_query_apply_result"):
+            if qa.button("↪ Apply result to current sheet",type="primary",width="stretch",key="iw_query_apply_result"):
                 prior={k:v.copy(deep=True) for k,v in wb.items()}
                 st.session_state["industrial_workbook_undo"].append(prior)
                 st.session_state["industrial_workbook_redo"].clear()
                 wb[current_sheet]=result.copy(deep=True)
                 st.session_state[WORKBOOK_STATE_KEY]=wb
                 st.success(f"Applied pipeline result to {current_sheet}."); st.rerun()
-            if qb.button("➕ Add result as new sheet",use_container_width=True,key="iw_query_add_sheet"):
+            if qb.button("➕ Add result as new sheet",width="stretch",key="iw_query_add_sheet"):
                 prior={k:v.copy(deep=True) for k,v in wb.items()}
                 st.session_state["industrial_workbook_undo"].append(prior)
                 st.session_state["industrial_workbook_redo"].clear()
@@ -1520,7 +1522,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         st.markdown("### Industrial Semantic / Ontology Layer")
         st.caption("This reuses the Digital Thread vocabulary; it does not create a second ontology.")
         inferred=infer_semantic_roles(current)
-        st.dataframe(inferred,use_container_width=True,hide_index=True)
+        st.dataframe(inferred,width="stretch",hide_index=True)
         overrides=st.session_state.get("industrial_workbook_semantic_map",{}).get(current_sheet,{})
         selected_roles={}
         for col in current.columns:
@@ -1545,11 +1547,11 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                 st.warning(f"Semantic mapping saved locally; Digital Thread synchronization needs attention: {exc}")
         semantic_df=st.session_state.get("industrial_workbook_semantic_map_df",pd.DataFrame())
         if isinstance(semantic_df,pd.DataFrame) and not semantic_df.empty:
-            st.dataframe(semantic_df,use_container_width=True,hide_index=True)
+            st.dataframe(semantic_df,width="stretch",hide_index=True)
             rel=semantic_relationships(semantic_df.rename(columns={"Role":"Suggested Role"}),current_sheet)
             if not rel.empty:
                 st.markdown("#### Traceability relationships")
-                st.dataframe(rel,use_container_width=True,hide_index=True)
+                st.dataframe(rel,width="stretch",hide_index=True)
 
     with tabs[5]:
         st.markdown("### Copilot direct editing")
@@ -1584,7 +1586,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Topic":"Industrial Pivot","What to do":"Summarize plant, line, machine, product or order measures using a multi-dimensional pivot view."},
             {"Topic":"Shoir Script","What to do":"Use deterministic workbook automation from Industrial Home; executable Python is not accepted."},
             {"Topic":"Trust & Explain","What to do":"Use the dependency graph and Explain This Number workflow to trace formulas and assumptions."},
-        ]),use_container_width=True,hide_index=True)
+        ]),width="stretch",hide_index=True)
         st.markdown("### Formula reference")
         st.dataframe(pd.DataFrame([
             {"Function":"SUM","Example":"=SUM(D2:D10)","Purpose":"Total"},
@@ -1606,11 +1608,11 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Function":"CAPEX_NPV","Example":"=CAPEX_NPV(B2,C2,C3:C7)","Purpose":"NPV minus upfront CAPEX"},
             {"Function":"FORECAST_DEMAND","Example":"=FORECAST_DEMAND(B2:B13,1)","Purpose":"Deterministic trend forecast"},
             {"Function":"CAPACITY_GAP","Example":"=CAPACITY_GAP(B2,C2)","Purpose":"Capacity minus demand"},
-        ]),use_container_width=True,hide_index=True)
+        ]),width="stretch",hide_index=True)
         try:
             from shoir_adoption_engine import formula_library_frame
             st.markdown("### Shared industrial formula library")
-            st.dataframe(formula_library_frame(),use_container_width=True,hide_index=True)
+            st.dataframe(formula_library_frame(),width="stretch",hide_index=True)
         except Exception as exc:
             st.caption(f"Engineering formula library metadata unavailable: {type(exc).__name__}: {exc}")
         st.markdown("### Safe automation reference")
@@ -1621,7 +1623,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Name":x.name,"Version":x.version,"Category":x.category,"Description":x.description,"Executable":bool(x.transform)}
             for x in exts
         ]) if exts else pd.DataFrame([{"Name":"No extensions installed","Executable":False}]),
-        use_container_width=True,hide_index=True)
+        width="stretch",hide_index=True)
         st.markdown("### Excel interoperability & product shell")
         st.write("Import/export uses the existing Shoir-IE Excel pipeline. The responsive workbook UI is browser-first, and the companion Office add-in scaffold in excel_addin/ can connect to a configured Shoir-IE API host.")
         st.caption("Large-data mode is explicit: interactive cell editing remains in-memory, while vectorized and chunked CSV primitives provide a path for larger datasets without changing the workbook contract.")
@@ -1629,7 +1631,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
     st.session_state["industrial_workbook_query_result_df"]=st.session_state.get("industrial_workbook_query_result_df",pd.DataFrame())
     with st.expander("🔎 Workbook health & readiness",expanded=False):
-        st.dataframe(workbook_health["sheet_summary"],use_container_width=True,hide_index=True)
+        st.dataframe(workbook_health["sheet_summary"],width="stretch",hide_index=True)
         if workbook_health["health"] < 90:
             st.warning("Review missing or duplicate data before using this workbook as decision evidence.")
         else:
@@ -1639,7 +1641,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         st.download_button("⬇️ Export current workbook (.xlsx)",data=export_payload,
                            file_name=f"{_slug('Shoir-IE-' + current_sheet)}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True,key="industrial_workbook_export_xlsx")
+                           width="stretch",key="industrial_workbook_export_xlsx")
     except Exception as exc:
         st.warning(f"Workbook export is temporarily unavailable: {exc}")
     try:

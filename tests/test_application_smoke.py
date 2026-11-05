@@ -61,3 +61,27 @@ def test_160_operating_system_route_is_wired():
     assert '"🚀 160 Operating System"' in app_source
     assert "render_160_command_center" in app_source
     assert 'if st.session_state.get("selected_nav") == "🚀 160 Operating System"' in app_source
+
+
+def test_application_sources_use_current_streamlit_width_api():
+    """Prevent reintroduction of Streamlit's removed use_container_width API."""
+    from pathlib import Path
+
+    sources = [Path("app.py")]
+    sources.extend(Path(".").glob("shoir_*.py"))
+    sources.extend(Path(".").glob("industrial_*.py"))
+    sources.extend(Path("pages").glob("*.py"))
+    offenders = [
+        str(path)
+        for path in sources
+        if path.is_file() and "use_container_width" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], "Deprecated Streamlit width arguments remain: " + ", ".join(offenders)
+
+
+def test_application_bootstrap_uses_closing_sqlite_context_manager():
+    """The stdlib sqlite context manager does not close its connection."""
+    source = Path("app.py").read_text(encoding="utf-8")
+    assert "from shoir_sqlite import connect as sqlite_connection" in source
+    assert "sqlite3.connect(" not in source
+    assert "with sqlite_connection(" in source

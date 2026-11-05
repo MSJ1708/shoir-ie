@@ -7,6 +7,8 @@ shown as unavailable rather than replaced with invented performance.
 
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import hashlib
 import io
 import json
@@ -235,16 +237,16 @@ def render_digital_twin_extension(username: str = "unknown") -> None:
         downtime = w3.slider("Random downtime shock rate", 0.00, 0.50, 0.05, 0.01, key="twin_ext_downtime")
         drain = w4.number_input("AGV battery drain / tick", 0.0, 20.0, 2.0, 0.5, key="twin_ext_battery")
         ticks = st.slider("Replay ticks", 4, 96, 24, 4, key="twin_ext_ticks")
-        if st.button("▶ Run synchronized what-if replay", type="primary", use_container_width=True, key="twin_ext_run"):
+        if st.button("▶ Run synchronized what-if replay", type="primary", width="stretch", key="twin_ext_run"):
             result = run_twin_what_if(_df(queues), _df(buffers), _df(agv), service_multiplier=service, arrival_multiplier=arrival, downtime_rate=downtime, battery_drain=drain, ticks=ticks)
             st.session_state["digital_twin_replay_df"] = result
             st.success("What-if replay completed from the current twin state.")
         result = st.session_state.get("digital_twin_replay_df", pd.DataFrame())
         if isinstance(result, pd.DataFrame) and not result.empty:
-            st.dataframe(result, use_container_width=True, hide_index=True)
+            st.dataframe(result, width="stretch", hide_index=True)
             fig = px.line(result, x="Tick", y=["WIP", "Utilization %"], title="Digital Twin Scenario Replay")
-            st.plotly_chart(fig, use_container_width=True)
-            st.download_button("📥 Download replay evidence", result.to_csv(index=False).encode(), "shoir_ie_twin_replay.csv", "text/csv", use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
+            st.download_button("📥 Download replay evidence", result.to_csv(index=False).encode(), "shoir_ie_twin_replay.csv", "text/csv", width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -407,16 +409,16 @@ def render_control_tower_extension() -> None:
         view=view[view["Operator Status"].isin(status_filter)]
     if not show_no_data:
         view=view[view["Operator Status"].ne("No Data")]
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     if "Health %" in view.columns:
         fig=px.bar(view,x="Area",y="Health %",color="Operator Status",range_y=[0,100],title="Industrial domain health")
-        st.plotly_chart(fig,use_container_width=True)
+        st.plotly_chart(fig,width="stretch")
 
     # Persist an explicit action queue so the tower supports intervention, not only observation.
     try:
         import sqlite3
-        with sqlite3.connect("enterprise_full_workspace.db") as con:
+        with sqlite_connection("enterprise_full_workspace.db") as con:
             con.execute(
                 "CREATE TABLE IF NOT EXISTS control_tower_actions("
                 "action_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,domain TEXT,action TEXT,owner TEXT,status TEXT,"
@@ -450,10 +452,10 @@ def render_control_tower_extension() -> None:
     with a2:
         action_notes=st.text_area("Action notes / evidence",height=118,key="ct_action_notes")
         action_status=st.selectbox("Status",["Planned","In Progress","Blocked","Done"],key="ct_action_status")
-        if st.button("➕ Create control-tower action",type="primary",use_container_width=True,key="ct_action_create"):
+        if st.button("➕ Create control-tower action",type="primary",width="stretch",key="ct_action_create"):
             import uuid,sqlite3
             action_id="CTA-"+uuid.uuid4().hex[:10].upper()
-            with sqlite3.connect("enterprise_full_workspace.db") as con:
+            with sqlite_connection("enterprise_full_workspace.db") as con:
                 con.execute(
                     "INSERT INTO control_tower_actions(action_id,workspace,domain,action,owner,status,notes,created_at,updated_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (action_id,workspace,action_domain,action_type,action_owner.strip() or username,action_status,action_notes.strip(),_now(),_now(),username)
@@ -466,15 +468,15 @@ def render_control_tower_extension() -> None:
     if not actions.empty:
         st.markdown("#### Open action queue")
         action_view=actions[actions["status"].astype(str).str.lower().ne("done")].copy()
-        st.dataframe(action_view,use_container_width=True,hide_index=True)
+        st.dataframe(action_view,width="stretch",hide_index=True)
         action_ids=action_view["action_id"].astype(str).tolist() if not action_view.empty else []
         if action_ids:
             selected_action=st.selectbox("Action to update",action_ids,key="ct_action_update_id")
             new_status=st.selectbox("Move action to",["Planned","In Progress","Blocked","Done"],key="ct_action_update_status")
             update_note=st.text_input("Update note",key="ct_action_update_note")
-            if st.button("✅ Update selected action",use_container_width=True,key="ct_action_update"):
+            if st.button("✅ Update selected action",width="stretch",key="ct_action_update"):
                 import sqlite3
-                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                with sqlite_connection("enterprise_full_workspace.db") as con:
                     con.execute("UPDATE control_tower_actions SET status=?,notes=?,updated_at=? WHERE action_id=? AND workspace=?",(new_status,update_note,_now(),selected_action,workspace))
                     con.commit()
                 st.success(f"{selected_action} updated.")
@@ -571,7 +573,7 @@ def render_connectivity_extension() -> None:
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("🧪 Test connection", type="primary", use_container_width=True, key="conn_wizard_test"):
+            if st.button("🧪 Test connection", type="primary", width="stretch", key="conn_wizard_test"):
                 if not endpoint.strip():
                     st.warning("Enter an endpoint before testing.")
                 else:
@@ -581,7 +583,7 @@ def render_connectivity_extension() -> None:
         with c2:
             interval = st.number_input("Sync interval (minutes)", 1, 10080, 60, 5, key="conn_wizard_interval")
             enabled = st.checkbox("Enable schedule", value=True, key="conn_wizard_enabled")
-            if st.button("⏱️ Save synchronization schedule", use_container_width=True, key="conn_wizard_schedule"):
+            if st.button("⏱️ Save synchronization schedule", width="stretch", key="conn_wizard_schedule"):
                 last = st.session_state.get("connector_last_test") or {}
                 connector_id = str(last.get("connector_id") or "")
                 if not connector_id:
@@ -597,8 +599,8 @@ def render_connectivity_extension() -> None:
     schedules = connector_schedule_frame(username, workspace)
     if not schedules.empty:
         st.markdown("#### ⏱️ Synchronization schedules")
-        st.dataframe(schedules, use_container_width=True, hide_index=True)
-        if st.button("▶️ Run due synchronization checks", use_container_width=True, key="conn_run_due"):
+        st.dataframe(schedules, width="stretch", hide_index=True)
+        if st.button("▶️ Run due synchronization checks", width="stretch", key="conn_run_due"):
             try:
                 result = run_due_connector_syncs(username, workspace, max_attempts=3, require_approval=True)
                 st.session_state["connector_due_run_result"] = result
@@ -610,7 +612,7 @@ def render_connectivity_extension() -> None:
     due_result = st.session_state.get("connector_due_run_result")
     if isinstance(due_result, pd.DataFrame) and not due_result.empty:
         st.markdown("#### Latest scheduled synchronization result")
-        st.dataframe(due_result, use_container_width=True, hide_index=True)
+        st.dataframe(due_result, width="stretch", hide_index=True)
 
     last_test = st.session_state.get("connector_last_test") or {}
     if last_test.get("connector_id") and str(last_test.get("status")) == "Healthy" and str(protocol).upper() in {"REST","ODATA","HTTPS","SQL","JDBC"}:
@@ -619,7 +621,7 @@ def render_connectivity_extension() -> None:
             if str(protocol).upper() in {"SQL","JDBC"}:
                 sample_query = st.text_area("Read-only SQL query", value="SELECT * FROM your_table", key="conn_sample_query")
             sample_limit = st.number_input("Sample limit", 1, 10000, 1000, 100, key="conn_sample_limit")
-            if st.button("📥 Fetch sample", use_container_width=True, key="conn_sample_fetch"):
+            if st.button("📥 Fetch sample", width="stretch", key="conn_sample_fetch"):
                 result = fetch_connector_sample(username, str(last_test["connector_id"]), protocol, endpoint, secret_ref, sample_query, workspace, int(sample_limit), float(timeout))
                 st.session_state["connector_sample_result"] = result
             sample = st.session_state.get("connector_sample_result")
@@ -627,20 +629,20 @@ def render_connectivity_extension() -> None:
                 st.caption(str(sample.get("detail", "")))
                 frame = sample.get("frame")
                 if isinstance(frame, pd.DataFrame) and not frame.empty:
-                    st.dataframe(frame.head(100), use_container_width=True, hide_index=True)
+                    st.dataframe(frame.head(100), width="stretch", hide_index=True)
                     st.json(sample.get("schema_mapping", {}))
                     st.session_state["connector_sample_df"] = frame.copy(deep=True)
     if health.empty:
         st.info("Register or test a connector above to begin health monitoring.")
     else:
-        st.dataframe(health, use_container_width=True, hide_index=True)
+        st.dataframe(health, width="stretch", hide_index=True)
         if "Health %" in health.columns:
             fig = px.bar(health, x="Name", y="Health %", color="Protocol", range_y=[0,100], title="Enterprise Connector Health")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         runs = connector_run_frame(username, workspace, 100)
         if not runs.empty:
             st.markdown("#### Connector Test / Sync History")
-            st.dataframe(runs, use_container_width=True, hide_index=True)
+            st.dataframe(runs, width="stretch", hide_index=True)
 
     _render_universal_viz("Industrial Connectivity Hub", "connectivity_health_df")
 
@@ -701,17 +703,17 @@ def render_security_extension() -> None:
                     {"Check":"Upload safety","Status":"PASS" if scan_result["safe"] else "FAIL","Evidence":"; ".join(scan_result["reasons"]) or "Extension/container/signature checks passed"},
                 ])
                 st.session_state["security_file_scan_df"] = scan
-                st.dataframe(scan, use_container_width=True, hide_index=True)
+                st.dataframe(scan, width="stretch", hide_index=True)
                 if not scan_result["safe"]:
                     st.error("File rejected by the secure upload gate.")
             except Exception as exc:
                 st.error("Secure upload scan failed safely: " + str(exc))
 
     st.markdown("### 🔐 Enterprise Security Posture")
-    st.dataframe(posture, use_container_width=True, hide_index=True)
+    st.dataframe(posture, width="stretch", hide_index=True)
     maturity = security_maturity_status(username, workspace)
     st.markdown("### 🛡️ Security Control Maturity")
-    st.dataframe(maturity, use_container_width=True, hide_index=True)
+    st.dataframe(maturity, width="stretch", hide_index=True)
     gate = security_access_check(username, "connector_sync", workspace, require_approval=False)
     message = "Allowed" if gate["allowed"] else "Blocked"
     if gate["reasons"]:
@@ -783,7 +785,7 @@ def render_persistence_extension(username: str, show_controls: bool = True) -> N
     if show_controls:
         save_col, restore_col = st.columns(2)
         with save_col:
-            if st.button("💾 Save workspace now", type="primary", use_container_width=True, key="enterprise_persistence_save"):
+            if st.button("💾 Save workspace now", type="primary", width="stretch", key="enterprise_persistence_save"):
                 try:
                     ok = bool(save_user_workspace(username, st.session_state))
                     st.session_state["enterprise_persistence_last_save"] = ok
@@ -795,7 +797,7 @@ def render_persistence_extension(username: str, show_controls: bool = True) -> N
                 except Exception as exc:
                     st.error(f"Workspace save failed safely: {type(exc).__name__}: {exc}")
         with restore_col:
-            if st.button("🔄 Restore saved workspace", use_container_width=True, key="enterprise_persistence_restore"):
+            if st.button("🔄 Restore saved workspace", width="stretch", key="enterprise_persistence_restore"):
                 try:
                     ok = bool(load_user_workspace(username, st.session_state))
                     if ok:
@@ -806,7 +808,7 @@ def render_persistence_extension(username: str, show_controls: bool = True) -> N
                 except Exception as exc:
                     st.error(f"Workspace restore failed safely: {type(exc).__name__}: {exc}")
     if catalog:
-        st.dataframe(pd.DataFrame(catalog), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(catalog), width="stretch", hide_index=True)
     st.caption("Workspace state, including module datasets/results and artifact metadata, follows the configured persistence path. Exported binary files are represented by provenance/hash metadata unless separately stored in a connected file/object store.")
 
 
@@ -831,18 +833,18 @@ def render_collaboration_extension(username: str) -> None:
         mention = st.text_input("Mention", placeholder="@Engineer or @Manager", key="collab_mention_text")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            if st.button("💬 Add comment", use_container_width=True, key="collab_add_comment"):
+            if st.button("💬 Add comment", width="stretch", key="collab_add_comment"):
                 if comment.strip():
                     iid = add_collaboration_item(username, "Comment", comment.strip(), "Engineering comment", workspace=workspace)
                     st.success(f"Comment saved · {iid}")
         with c2:
-            if st.button("🔔 Add mention", use_container_width=True, key="collab_add_mention"):
+            if st.button("🔔 Add mention", width="stretch", key="collab_add_mention"):
                 if mention.strip():
                     iid = add_collaboration_item(username, "Mention", mention.strip(), "Workspace mention", workspace=workspace)
                     st.success(f"Mention saved · {iid}")
         with c3:
             assignee = st.selectbox("Assignee", users_df.iloc[:, 0].astype(str).tolist(), key="collab_assignee")
-            if st.button("📌 Assign review", use_container_width=True, key="collab_assign"):
+            if st.button("📌 Assign review", width="stretch", key="collab_assign"):
                 iid = add_collaboration_item(
                     username, "Assignment", "Review assigned", "Engineering review",
                     assignee=assignee, status="Pending", workspace=workspace,
@@ -850,7 +852,7 @@ def render_collaboration_extension(username: str) -> None:
                 st.success(f"Assignment saved · {iid}")
         with c4:
             reviewer = st.text_input("Reviewer role", "Engineering Manager", key="collab_reviewer_role")
-            if st.button("🧑‍⚖️ Add reviewer", use_container_width=True, key="collab_reviewer"):
+            if st.button("🧑‍⚖️ Add reviewer", width="stretch", key="collab_reviewer"):
                 iid = add_collaboration_item(
                     username, "Reviewer", "Reviewer role added", "Engineering review",
                     reviewer=reviewer, status="Pending", workspace=workspace,
@@ -860,7 +862,7 @@ def render_collaboration_extension(username: str) -> None:
     persisted = collaboration_frame(username, workspace)
     if not persisted.empty:
         st.markdown("#### Persisted collaboration activity")
-        st.dataframe(persisted, use_container_width=True, hide_index=True)
+        st.dataframe(persisted, width="stretch", hide_index=True)
         st.session_state["collaboration_assignment_df"] = persisted.copy(deep=True)
         _render_universal_viz("Team Workspaces & RBAC", "collaboration_assignment_df")
     else:
@@ -1002,18 +1004,18 @@ def render_research_extension(username: str) -> None:
                 "research_citations_df",
                 pd.DataFrame({"Citation": [""], "Role": ["Background"], "DOI / URL": [""], "Notes": [""]}),
             ),
-            num_rows="dynamic", use_container_width=True, key="research_citations_editor",
+            num_rows="dynamic", width="stretch", key="research_citations_editor",
         )
         files = st.data_editor(
             st.session_state.setdefault(
                 "research_supplementary_df",
                 pd.DataFrame({"File": ["results.csv", "figures/", "protocol.json"], "Purpose": ["Results", "Figures", "Protocol"]}),
             ),
-            num_rows="dynamic", use_container_width=True, key="research_supplementary_editor",
+            num_rows="dynamic", width="stretch", key="research_supplementary_editor",
         )
         st.session_state["research_citations_df"] = citations.copy(deep=True)
         st.session_state["research_supplementary_df"] = files.copy(deep=True)
-        if st.button("🧾 Create manuscript evidence manifest", use_container_width=True, key="research_manifest"):
+        if st.button("🧾 Create manuscript evidence manifest", width="stretch", key="research_manifest"):
             manifest = {
                 "generated_at": _now(),
                 "owner": username,
@@ -1026,7 +1028,7 @@ def render_research_extension(username: str) -> None:
             st.success("Research manuscript evidence manifest staged.")
         manifest = st.session_state.get("research_manuscript_manifest")
         if isinstance(manifest, dict):
-            st.download_button("📥 Download research manifest", json.dumps(manifest, indent=2, default=str).encode(), "shoir_ie_research_manifest.json", "application/json", use_container_width=True)
+            st.download_button("📥 Download research manifest", json.dumps(manifest, indent=2, default=str).encode(), "shoir_ie_research_manifest.json", "application/json", width="stretch")
 
         protocol_for_paper = proto if isinstance(proto, dict) else {}
         result_tables = []
@@ -1042,7 +1044,7 @@ def render_research_extension(username: str) -> None:
                 result_tables.append((key.replace("_", " ").title(), frame))
         st.markdown("#### 📝 Manuscript & Supplementary Package")
         st.caption("Generates a reproducible manuscript scaffold from the recorded protocol and observed result tables. Missing findings stay marked as gaps.")
-        if st.button("✍️ Generate manuscript draft", use_container_width=True, key="research_generate_manuscript"):
+        if st.button("✍️ Generate manuscript draft", width="stretch", key="research_generate_manuscript"):
             md, tex = build_research_manuscript(protocol_for_paper, citations, result_tables, username)
             st.session_state["research_manuscript_md"] = md
             st.session_state["research_manuscript_tex"] = tex
@@ -1050,9 +1052,9 @@ def render_research_extension(username: str) -> None:
         md = st.session_state.get("research_manuscript_md")
         tex = st.session_state.get("research_manuscript_tex")
         if isinstance(md, str) and md:
-            st.download_button("📄 Download manuscript (Markdown)", md.encode("utf-8"), "shoir_ie_manuscript.md", "text/markdown", use_container_width=True, key="research_md_download")
+            st.download_button("📄 Download manuscript (Markdown)", md.encode("utf-8"), "shoir_ie_manuscript.md", "text/markdown", width="stretch", key="research_md_download")
         if isinstance(tex, str) and tex:
-            st.download_button("📐 Download manuscript scaffold (LaTeX)", tex.encode("utf-8"), "shoir_ie_manuscript.tex", "text/x-tex", use_container_width=True, key="research_tex_download")
+            st.download_button("📐 Download manuscript scaffold (LaTeX)", tex.encode("utf-8"), "shoir_ie_manuscript.tex", "text/x-tex", width="stretch", key="research_tex_download")
     _render_universal_viz("Experiment Lab", None)
 
 
@@ -1082,7 +1084,7 @@ def render_reporting_extension(module: str, tables: Sequence[tuple[str, pd.DataF
     with st.expander("📑 Provenance & exact-graph export manifest", expanded=False):
         st.json(manifest)
         st.caption("The existing Excel/PDF/PowerPoint export actions should receive the same figure object used by the module. This manifest records the source hashes and the exact chart configuration used for reconstruction.")
-        st.download_button("📥 Download provenance manifest", json.dumps(manifest, indent=2, default=str).encode(), f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_provenance.json", "application/json", use_container_width=True)
+        st.download_button("📥 Download provenance manifest", json.dumps(manifest, indent=2, default=str).encode(), f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_provenance.json", "application/json", width="stretch")
     _render_universal_viz(module, None)
 
 
@@ -1152,7 +1154,7 @@ def render_data_intelligence_extension(module: str, df: pd.DataFrame, previous: 
     c2.metric("ID-like fields", f"{int(intel['ID-like'].sum()):,}")
     c3.metric("Date-like fields", f"{int(intel['Date-like'].sum()):,}")
     c4.metric("Total outliers", f"{int(intel['Outliers'].sum()):,}")
-    st.dataframe(intel, use_container_width=True, hide_index=True)
+    st.dataframe(intel, width="stretch", hide_index=True)
     _render_universal_viz(module, f"data_intelligence_{hashlib.sha1(str(module).encode()).hexdigest()[:10]}")
 
 
@@ -1251,7 +1253,7 @@ def render_knowledge_extension(username: str = "unknown") -> None:
             "Characters": len(str(x.get("text", ""))),
         } for x in sources])
         st.session_state["knowledge_registry_df"] = table.copy(deep=True)
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(table, width="stretch", hide_index=True)
         query = st.text_input("Knowledge search", key="knowledge_layer_query")
         if query:
             ctx = knowledge_context(query, 3500)
@@ -1273,7 +1275,7 @@ def render_model_registry_extension(username: str = "unknown") -> None:
     model_version = c1.text_input("Model version", "1.1.0", key="model_ext_version")
     solver_version = c2.text_input("Solver / runtime version", "CBC / HiGHS / SciPy", key="model_ext_solver")
     result_ref = c3.text_input("Result reference", "current workspace result", key="model_ext_result_ref")
-    if st.button("🧬 Record reproducibility snapshot", use_container_width=True, key="model_ext_record"):
+    if st.button("🧬 Record reproducibility snapshot", width="stretch", key="model_ext_record"):
         entry = {
             "Model Version": model_version.strip(),
             "Solver Version": solver_version.strip(),
@@ -1289,7 +1291,7 @@ def render_model_registry_extension(username: str = "unknown") -> None:
         st.success("Reproducibility snapshot recorded.")
     data = pd.DataFrame(st.session_state.get("model_reproducibility_catalog", []))
     if not data.empty:
-        st.dataframe(data, use_container_width=True, hide_index=True)
+        st.dataframe(data, width="stretch", hide_index=True)
     _render_universal_viz("Engineering Model Registry", "model_registry_governance_df")
 
 
@@ -1302,7 +1304,7 @@ def render_jobs_extension(username: str = "unknown", module: str = "Industrial S
     with st.expander("Create / control job", expanded=False):
         job_type = st.selectbox("Job type", ["Simulation","Optimization","Forecast","Report","Data profiling","Connector sync"], key=f"job_ext_type_{module}")
         payload_text = st.text_area("Job payload JSON", '{"priority":"standard","requested_by":"operator"}', key=f"job_ext_payload_{module}")
-        if st.button("➕ Queue job", use_container_width=True, key=f"job_ext_queue_{module}"):
+        if st.button("➕ Queue job", width="stretch", key=f"job_ext_queue_{module}"):
             try:
                 payload = json.loads(payload_text)
             except Exception:
@@ -1314,18 +1316,18 @@ def render_jobs_extension(username: str = "unknown", module: str = "Industrial S
         active = st.session_state.get("job_ext_active")
         if active and not jobs.empty and active in set(jobs["job_id"].astype(str)):
             row = jobs.loc[jobs["job_id"].astype(str).eq(str(active))].iloc[0]
-            st.dataframe(pd.DataFrame([row.to_dict()]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame([row.to_dict()]), width="stretch", hide_index=True)
             a1, a2, a3, a4 = st.columns(4)
-            if a1.button("▶ Run", use_container_width=True, key=f"job_ext_run_{module}"):
+            if a1.button("▶ Run", width="stretch", key=f"job_ext_run_{module}"):
                 update_job_record(username, active, status="Running", progress=max(1.0, float(row["progress"])), message="Operator requested start.", workspace=workspace)
                 st.rerun()
-            if a2.button("⏸ Pause", use_container_width=True, key=f"job_ext_pause_{module}"):
+            if a2.button("⏸ Pause", width="stretch", key=f"job_ext_pause_{module}"):
                 request_job_action(username, active, "pause", workspace)
                 st.rerun()
-            if a3.button("⏹ Cancel", use_container_width=True, key=f"job_ext_cancel_{module}"):
+            if a3.button("⏹ Cancel", width="stretch", key=f"job_ext_cancel_{module}"):
                 request_job_action(username, active, "cancel", workspace)
                 st.rerun()
-            if a4.button("↻ Retry", use_container_width=True, key=f"job_ext_retry_{module}"):
+            if a4.button("↻ Retry", width="stretch", key=f"job_ext_retry_{module}"):
                 request_job_action(username, active, "retry", workspace)
                 st.rerun()
         elif not jobs.empty:
@@ -1336,7 +1338,7 @@ def render_jobs_extension(username: str = "unknown", module: str = "Industrial S
 
     jobs = list_jobs(username, workspace, 200)
     if not jobs.empty:
-        st.dataframe(jobs, use_container_width=True, hide_index=True)
+        st.dataframe(jobs, width="stretch", hide_index=True)
         st.session_state["enterprise_job_history_df"] = jobs.copy(deep=True)
         st.session_state["job_history_df"] = jobs.copy(deep=True)
         _render_universal_viz(module, "enterprise_job_history_df")
@@ -1374,7 +1376,7 @@ def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) 
 def _load_persisted_telemetry(limit: int = 500) -> pd.DataFrame:
     try:
         import sqlite3
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite_connection("enterprise_full_workspace.db", timeout=10) as conn:
             data = pd.read_sql(
                 "SELECT asset_id AS Asset, ts AS Timestamp, metric AS Metric, value AS Value, source AS Source "
                 "FROM telemetry_events ORDER BY id DESC LIMIT ?",
@@ -1400,7 +1402,7 @@ def render_realtime_monitoring_extension(sensor_df: Any = None, module: str = "D
     numeric = [c for c in monitor.columns if pd.api.types.is_numeric_dtype(monitor[c])]
     metric = st.selectbox("Telemetry measure", numeric, key=f"rt_metric_{module}")
     threshold = st.number_input("Optional alert threshold", value=float(_numeric(monitor[metric]).median()) if monitor[metric].notna().any() else 0.0, key=f"rt_threshold_{module}")
-    if st.button("↻ Refresh persisted telemetry", use_container_width=True, key=f"rt_refresh_{module}"):
+    if st.button("↻ Refresh persisted telemetry", width="stretch", key=f"rt_refresh_{module}"):
         refreshed = _load_persisted_telemetry()
         if not refreshed.empty:
             source = refreshed
@@ -1412,11 +1414,11 @@ def render_realtime_monitoring_extension(sensor_df: Any = None, module: str = "D
     c1.metric("Samples", f"{len(updated):,}")
     c2.metric("3σ anomalies", f"{anomalies:,}")
     c3.metric("Threshold breaches", f"{breaches:,}")
-    st.dataframe(updated, use_container_width=True, hide_index=True)
+    st.dataframe(updated, width="stretch", hide_index=True)
     if metric in updated.columns:
         time_col = next((c for c in updated.columns if pd.api.types.is_datetime64_any_dtype(updated[c])), None)
         fig = px.line(updated, x=time_col if time_col else updated.index, y=metric, title=f"{module} · Live Monitoring")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     _render_universal_viz(module, f"realtime_monitoring_{hashlib.sha1(module.encode()).hexdigest()[:10]}")
 
 
@@ -1444,8 +1446,8 @@ def render_economics_extension(username: str = "unknown") -> None:
     c1.metric("Nominal TCO", f"{tco_nominal:,.2f}")
     c2.metric("Discounted TCO", f"{tco_discounted:,.2f}")
     c3.metric("Lifecycle", f"{years} yr")
-    st.dataframe(out, use_container_width=True, hide_index=True)
-    st.plotly_chart(px.line(out, x="Year", y=["OPEX", "Discounted OPEX"], title="Lifecycle OPEX Profile"), use_container_width=True)
+    st.dataframe(out, width="stretch", hide_index=True)
+    st.plotly_chart(px.line(out, x="Year", y=["OPEX", "Discounted OPEX"], title="Lifecycle OPEX Profile"), width="stretch")
     record_artifact("Economics", "TCO", out, "Engineering Economics", username, "engineering_economics_tco_df")
 
 
@@ -1472,8 +1474,8 @@ def render_sustainability_extension(username: str = "unknown") -> None:
     if summary.empty:
         st.info("No sustainability source data is currently available.")
         return
-    st.dataframe(summary, use_container_width=True, hide_index=True)
-    st.plotly_chart(px.bar(summary, x="Metric", y="Value", title="Sustainability KPI Bridge"), use_container_width=True)
+    st.dataframe(summary, width="stretch", hide_index=True)
+    st.plotly_chart(px.bar(summary, x="Metric", y="Value", title="Sustainability KPI Bridge"), width="stretch")
     _render_universal_viz("Industrial Sustainability & LCA", "sustainability_decision_bridge_df")
 
 
@@ -1507,7 +1509,7 @@ def render_benchmarking_evidence(username: str = "unknown") -> None:
     payback = result["payback_months"]
     m3.metric("Payback", f"{payback:,.1f} months" if payback is not None else "Not reached")
     m4.metric("Cycle reduction", f"{result['cycle_reduction_pct']:,.1f}%" if result["cycle_reduction_pct"] is not None else "n/a")
-    st.dataframe(metrics, use_container_width=True, hide_index=True)
+    st.dataframe(metrics, width="stretch", hide_index=True)
     st.caption("Evidence status: " + result["evidence_status"] + ". Replace defaults with measured pilot data before using the values externally.")
     st.session_state["benchmark_roi_df"] = metrics.copy(deep=True)
     _render_universal_viz("Benchmarking & Engineering Standards", "benchmark_roi_df")
@@ -1522,7 +1524,7 @@ def render_human_factors_extension(username: str = "unknown") -> None:
         return
     numeric = list(source.select_dtypes(include=np.number).columns)
     if not numeric:
-        st.dataframe(source, use_container_width=True, hide_index=True)
+        st.dataframe(source, width="stretch", hide_index=True)
         return
     metrics = []
     for col in numeric[:6]:
@@ -1538,14 +1540,14 @@ def render_human_factors_extension(username: str = "unknown") -> None:
         })
     result = pd.DataFrame(metrics)
     st.session_state["human_factors_metrics_df"] = result
-    st.dataframe(result, use_container_width=True, hide_index=True)
+    st.dataframe(result, width="stretch", hide_index=True)
     st.plotly_chart(px.bar(
         result,
         x="Measure",
         y="Mean",
         hover_data=["P95", "Spread (P95-Mean)", "CV %"],
         title="Human Factors / Workload Measures",
-    ), use_container_width=True)
+    ), width="stretch")
     st.caption("These outputs are engineering workload measures, not medical or clinical assessments.")
 
 
@@ -1573,9 +1575,9 @@ def render_geospatial_extension(username: str = "unknown") -> None:
             })
     routes = pd.DataFrame(rows)
     st.session_state["geospatial_network_routes_df"] = routes
-    st.dataframe(routes.head(100), use_container_width=True, hide_index=True)
+    st.dataframe(routes.head(100), width="stretch", hide_index=True)
     if not routes.empty:
-        st.plotly_chart(px.scatter(routes, x="Distance km", y="Scenario Freight Cost", size="Demand tons/yr", hover_data=["Origin","Destination"], title="Geospatial Route / Cost Surface"), use_container_width=True)
+        st.plotly_chart(px.scatter(routes, x="Distance km", y="Scenario Freight Cost", size="Demand tons/yr", hover_data=["Origin","Destination"], title="Geospatial Route / Cost Surface"), width="stretch")
 
 
 def render_artifact_journal_for_tables(module: str, tables: Sequence[tuple[str, pd.DataFrame]], username: str) -> None:

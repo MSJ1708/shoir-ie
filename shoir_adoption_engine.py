@@ -9,6 +9,8 @@ decision -> implementation -> outcome.
 """
 from __future__ import annotations
 
+from shoir_sqlite import connect as sqlite_connection
+
 import ast
 import hashlib
 import io
@@ -677,7 +679,7 @@ def create_scenario_branch(
         variables=variables,
         version_label=f"Scenario branch · {name}",
     )
-    with sqlite3.connect(path, timeout=30) as conn:
+    with sqlite_connection(path, timeout=30) as conn:
         conn.execute(
             "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
             (
@@ -696,7 +698,7 @@ def create_scenario_branch(
 def product_home_snapshot(username: str, workspace: str = "default", db_path: str = "enterprise_full_workspace.db") -> dict[str, Any]:
     """Collect adoption metrics without exposing credentials or secret values."""
     counts = {"workbooks": 0, "decisions": 0, "studies": 0, "templates": 0}
-    with sqlite3.connect(db_path, timeout=10) as conn:
+    with sqlite_connection(db_path, timeout=10) as conn:
         queries = [
             ("workbooks", "SELECT COUNT(*) FROM industrial_workbooks WHERE workspace=?"),
             ("templates", "SELECT COUNT(*) FROM industrial_workbook_templates WHERE workspace=?"),
@@ -746,7 +748,7 @@ def action_center_snapshot(
             rows.append({"Priority": "Action", "Type": "Job", "Item": f"{len(pending):,} job record(s) need attention.", "Source": "Jobs System"})
 
     try:
-        with sqlite3.connect(db_path, timeout=10) as conn:
+        with sqlite_connection(db_path, timeout=10) as conn:
             decisions = conn.execute(
                 "SELECT decision_id,title,status FROM experience_decisions WHERE owner=? AND status IN ('Draft','Review','Proposed','Validated') ORDER BY updated_at DESC LIMIT 20",
                 (username,),
@@ -800,7 +802,7 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
     top[3].metric("Templates", f"{product['templates'] + len(_starter_templates()):,}")
     top[4].metric("Current table", f"{len(data):,} × {len(data.columns):,}")
 
-    if st.button("Open Industrial Workbook", type="primary", use_container_width=True, key="adoption_open_workbook"):
+    if st.button("Open Industrial Workbook", type="primary", width="stretch", key="adoption_open_workbook"):
         st.session_state["_shoir_requested_module"] = "Industrial Workbook"
         st.session_state["shoir_shell_section"] = "WORKBENCH"
         st.rerun()
@@ -812,13 +814,13 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
     with st.container(border=True):
         st.markdown("### Quick actions")
         q1, q2, q3 = st.columns(3)
-        if q1.button("⚡ Quick Analyze", use_container_width=True, key="adoption_quick_action"):
+        if q1.button("⚡ Quick Analyze", width="stretch", key="adoption_quick_action"):
             st.session_state["adoption_tab_request"] = "Quick Analyze"
             st.rerun()
-        if q2.button("📊 Industrial Pivot", use_container_width=True, key="adoption_pivot_action"):
+        if q2.button("📊 Industrial Pivot", width="stretch", key="adoption_pivot_action"):
             st.session_state["adoption_tab_request"] = "Industrial Pivot"
             st.rerun()
-        if q3.button("🤖 Automate", use_container_width=True, key="adoption_automate_action"):
+        if q3.button("🤖 Automate", width="stretch", key="adoption_automate_action"):
             st.session_state["adoption_tab_request"] = "Automate"
             st.rerun()
 
@@ -860,11 +862,11 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
         source = st.session_state.get("adoption_quick_analyze_source", source)
         analysis = instant_analyze(source)
-        st.dataframe(analysis["profile"], use_container_width=True, hide_index=True)
+        st.dataframe(analysis["profile"], width="stretch", hide_index=True)
         for item in analysis["recommendations"]:
             st.write("✓ " + item)
         if analysis.get("figure") is not None:
-            st.plotly_chart(analysis["figure"], use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(analysis["figure"], width="stretch", config={"displayModeBar": False})
         runtime = choose_runtime(len(source), len(source.columns))
         st.caption(f"Runtime path: **{runtime['selected_runtime']}**")
 
@@ -876,7 +878,7 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
             col = st.selectbox("Columns", ["(none)"] + cols, key="adoption_pivot_columns")
             vals = st.selectbox("Values", cols, key="adoption_pivot_values")
             agg = st.selectbox("Aggregation", ["sum", "mean", "median", "min", "max", "count"], key="adoption_pivot_agg")
-            if st.button("Build Pivot", type="primary", use_container_width=True, key="adoption_pivot_run"):
+            if st.button("Build Pivot", type="primary", width="stretch", key="adoption_pivot_run"):
                 try:
                     result = industrial_pivot(data, idx or [cols[0]], None if col == "(none)" else col, vals, agg)
                     st.session_state["adoption_pivot_result"] = result
@@ -884,13 +886,13 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
                     st.error(f"Pivot failed safely: {type(exc).__name__}: {exc}")
         pivot_result = st.session_state.get("adoption_pivot_result", pd.DataFrame())
         if isinstance(pivot_result, pd.DataFrame) and not pivot_result.empty:
-            st.dataframe(pivot_result, use_container_width=True, hide_index=True)
+            st.dataframe(pivot_result, width="stretch", hide_index=True)
             numeric = [c for c in pivot_result.columns if pd.api.types.is_numeric_dtype(pivot_result[c])]
             categorical = [c for c in pivot_result.columns if c not in numeric]
             if numeric:
                 import plotly.express as px
                 fig = px.bar(pivot_result, x=categorical[0] if categorical else pivot_result.index, y=numeric[0], title="Industrial Pivot result")
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with automation_tab:
         st.markdown("### Shoir Script")
@@ -901,7 +903,7 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
             height=150,
             key="adoption_script",
         )
-        if st.button("▶ Run automation", type="primary", use_container_width=True, key="adoption_script_run"):
+        if st.button("▶ Run automation", type="primary", width="stretch", key="adoption_script_run"):
             try:
                 from shoir_industrial_workbook import WORKBOOK_STATE_KEY, FORMULA_STATE_KEY
                 wb = st.session_state.get(WORKBOOK_STATE_KEY, {"Sheet1": data})
@@ -920,7 +922,7 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
             except Exception as exc:
                 st.error(f"Automation stopped safely: {type(exc).__name__}: {exc}")
         if st.session_state.get("adoption_script_outputs"):
-            st.dataframe(pd.json_normalize(st.session_state["adoption_script_outputs"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.json_normalize(st.session_state["adoption_script_outputs"]), width="stretch", hide_index=True)
 
     with trust_tab:
         st.markdown("### Trust & Explain")
@@ -929,7 +931,7 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
         semantic = st.session_state.get("industrial_workbook_semantic_map", {})
         node_df, edge_df = build_dependency_graph(workbook, formulas, semantic)
         st.markdown("#### Dependency graph")
-        st.dataframe(edge_df.head(500), use_container_width=True, hide_index=True)
+        st.dataframe(edge_df.head(500), width="stretch", hide_index=True)
         st.caption(f"{len(node_df):,} dependency nodes · {len(edge_df):,} relationships")
         st.markdown("#### Explain this number")
         sheet = st.selectbox("Sheet", list(workbook), key="adoption_explain_sheet")
@@ -945,15 +947,15 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
         if actions.empty:
             st.success("No outstanding action is visible from the current workspace state.")
         else:
-            st.dataframe(actions, use_container_width=True, hide_index=True)
+            st.dataframe(actions, width="stretch", hide_index=True)
         st.markdown("#### Runtime")
-        st.dataframe(runtime_capability_report(), use_container_width=True, hide_index=True)
+        st.dataframe(runtime_capability_report(), width="stretch", hide_index=True)
 
     with learn_tab:
         st.markdown("### Industrial Academy")
-        st.dataframe(pd.DataFrame(ACADEMY_COURSES, columns=["Course", "Outcome"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(ACADEMY_COURSES, columns=["Course", "Outcome"]), width="stretch", hide_index=True)
         st.markdown("### Formula library")
-        st.dataframe(formula_library_frame(), use_container_width=True, hide_index=True)
+        st.dataframe(formula_library_frame(), width="stretch", hide_index=True)
         st.markdown("### Template ecosystem")
-        st.dataframe(list_templates(), use_container_width=True, hide_index=True)
+        st.dataframe(list_templates(), width="stretch", hide_index=True)
         st.caption("Community and public marketplace publication should be enabled through explicit workspace publication controls; the local library remains workspace-scoped.")

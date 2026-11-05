@@ -7,10 +7,35 @@ CI reports the real Python exception while avoiding the interactive UI lifecycle
 """
 from __future__ import annotations
 
+import logging
 import ast
 import sys
 import traceback
 from pathlib import Path
+
+
+class _BareStreamlitContextNoticeFilter(logging.Filter):
+    """Hide only Streamlit's expected no-runtime notices in this import-only smoke."""
+
+    _expected = (
+        "missing ScriptRunContext",
+        "Session state does not function when running a script without",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not any(notice in message for notice in self._expected)
+
+
+# This smoke intentionally executes app.py outside a Streamlit runtime. These
+# two messages describe the test harness, not application runtime failures.
+# Keep all other warning/error logging visible.
+_bare_context_filter = _BareStreamlitContextNoticeFilter()
+for _logger_name in (
+    "streamlit.runtime.scriptrunner_utils.script_run_context",
+    "streamlit.runtime.state.session_state_proxy",
+):
+    logging.getLogger(_logger_name).addFilter(_bare_context_filter)
 
 
 def main() -> int:

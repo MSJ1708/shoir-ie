@@ -40,8 +40,14 @@ EXPECTED_VERSIONS = [
     "20261019140600",
     "20261021130000",
     "20261022110000",
-    "20261023130000",
+    "20261025164602",
     "20261026110000",
+    "20261104183132",
+    "20261104184453",
+    "20261104192112",
+    "20261104192857",
+    "20261105101231",
+    "20261105111832",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -435,6 +441,34 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "Populated referral codes must be protected by a unique partial index."
             )
 
+            internal_tables = (
+                "artifacts", "twin_assets", "twin_snapshots", "twin_scenarios",
+                "connector_health", "jobs", "collaboration", "knowledge",
+                "monitoring_rules", "monitoring_events", "report_provenance", "security",
+            )
+            for table in internal_tables:
+                rls_state = _fetchone(
+                    target,
+                    """
+                    SELECT c.relrowsecurity
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid=c.relnamespace
+                    WHERE n.nspname='shoir_internal' AND c.relname=%s;
+                    """,
+                    (table,),
+                )
+                assert rls_state == (True,), f"RLS is not enabled on shoir_internal.{table}"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('anon', %s, 'SELECT');",
+                    (f"shoir_internal.{table}",),
+                )[0] is False, f"anon has a direct SELECT grant on shoir_internal.{table}"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('authenticated', %s, 'SELECT');",
+                    (f"shoir_internal.{table}",),
+                )[0] is False, f"authenticated has a direct SELECT grant on shoir_internal.{table}"
+
             for table in ("shoir_accounts", "shoir_pending_credentials", "shoir_sessions",
                           "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states", "shoir_login_throttle"):
                 assert _fetchone(
@@ -462,6 +496,165 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 target,
                 "SELECT public IS FALSE FROM storage.buckets WHERE id='subscription-payment-proofs';",
             )[0] is True, "Subscription payment proof bucket is not private after replay."
+
+            dataset_version_signature = (
+                "public.shoir_platform_register_dataset_version("
+                "text,text,text,text,text,text,bigint,integer,jsonb,jsonb,text,text,text,text)"
+            )
+            dataset_version_function = _fetchone(
+                target,
+                """
+                SELECT p.prosecdef, p.proconfig,
+                       has_function_privilege('anon', p.oid, 'EXECUTE'),
+                       has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                       has_function_privilege('service_role', p.oid, 'EXECUTE')
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='public'
+                  AND p.proname='shoir_platform_register_dataset_version'
+                  AND pg_get_function_identity_arguments(p.oid) =
+                      'p_workspace_key text, p_dataset_id text, p_name text, p_source_name text, p_data_hash text, p_version_fingerprint text, p_row_count bigint, p_column_count integer, p_schema_json jsonb, p_transformations_json jsonb, p_actor text, p_version_record_id text, p_head_record_id text, p_event_id text';
+                """,
+            )
+            assert dataset_version_function is not None, (
+                "Atomic dataset version registration function is missing after replay."
+            )
+            assert dataset_version_function[0] is True, (
+                "Dataset version registration must run as SECURITY DEFINER."
+            )
+            assert "search_path=pg_catalog, public" in (dataset_version_function[1] or []), (
+                "Dataset version registration must pin its search_path."
+            )
+            assert dataset_version_function[2] is False
+            assert dataset_version_function[3] is False
+            assert dataset_version_function[4] is True
+
+            dataset_storage_bucket = _fetchone(
+                target,
+                "SELECT public, file_size_limit FROM storage.buckets WHERE id='shoir-industrial-datasets';",
+            )
+            assert dataset_storage_bucket == (False, 52428800), (
+                "Industrial dataset storage must be private and limited to 50 MiB."
+            )
+            storage_policy = _fetchone(
+                target,
+                """
+                SELECT qual, with_check
+                FROM pg_policies
+                WHERE schemaname='storage' AND tablename='objects'
+                  AND policyname='private_subscription_payment_proofs_only_server';
+                """,
+            )
+            assert storage_policy is not None
+            assert "shoir-industrial-datasets" in storage_policy[0]
+            assert "shoir-industrial-datasets" in storage_policy[1]
+
+            storage_function = _fetchone(
+                target,
+                """
+                SELECT p.prosecdef, p.proconfig,
+                       has_function_privilege('anon', p.oid, 'EXECUTE'),
+                       has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                       has_function_privilege('service_role', p.oid, 'EXECUTE')
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='public'
+                  AND p.proname='shoir_platform_register_dataset_version_with_storage';
+                """,
+            )
+            assert storage_function is not None
+            assert storage_function[0] is True
+            assert "search_path=pg_catalog, public" in (storage_function[1] or [])
+            assert storage_function[2:4] == (False, False)
+            assert storage_function[4] is True
+
+            workspace_key = "a" * 32
+            dataset_id = "DS-AABBCCDDEEFF"
+            first_data_hash = "b" * 64
+            first_fingerprint = "c" * 64
+            first_registration = _fetchone(
+                target,
+                """
+                SELECT dataset_id, version, data_hash, version_fingerprint,
+                       version_record_id, created_new_version
+                FROM public.shoir_platform_register_dataset_version(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s
+                );
+                """,
+                (
+                    workspace_key, dataset_id, "Production", "synthetic.csv",
+                    first_data_hash, first_fingerprint, 100, 3,
+                    '{"asset_id":{"dtype":"object"}}', '[{"operation":"import"}]',
+                    "synthetic-test", "SPR-" + "1" * 24, "SPR-" + "2" * 24,
+                    "SPE-" + "3" * 24,
+                ),
+            )
+            assert first_registration[0:2] == (dataset_id, 1)
+            assert first_registration[2:4] == (first_data_hash, first_fingerprint)
+            assert first_registration[5] is True
+
+            retry_registration = _fetchone(
+                target,
+                """
+                SELECT dataset_id, version, version_record_id, created_new_version
+                FROM public.shoir_platform_register_dataset_version(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s
+                );
+                """,
+                (
+                    workspace_key, dataset_id, "Production", "synthetic.csv",
+                    first_data_hash, first_fingerprint, 100, 3,
+                    '{"asset_id":{"dtype":"object"}}', '[{"operation":"import"}]',
+                    "synthetic-test", "SPR-" + "4" * 24, "SPR-" + "5" * 24,
+                    "SPE-" + "6" * 24,
+                ),
+            )
+            assert retry_registration[0:2] == (dataset_id, 1)
+            assert retry_registration[2] == first_registration[4]
+            assert retry_registration[3] is False
+
+            second_data_hash = "d" * 64
+            second_fingerprint = "e" * 64
+            second_registration = _fetchone(
+                target,
+                """
+                SELECT dataset_id, version, data_hash, version_fingerprint,
+                       created_new_version
+                FROM public.shoir_platform_register_dataset_version(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s
+                );
+                """,
+                (
+                    workspace_key, dataset_id, "Production", "synthetic.csv",
+                    second_data_hash, second_fingerprint, 120, 3,
+                    '{"asset_id":{"dtype":"object"}}', '[{"operation":"clean"}]',
+                    "synthetic-test", "SPR-" + "7" * 24, "SPR-" + "8" * 24,
+                    "SPE-" + "9" * 24,
+                ),
+            )
+            assert second_registration == (
+                dataset_id, 2, second_data_hash, second_fingerprint, True
+            )
+            version_count = _fetchone(
+                target,
+                """
+                SELECT count(*) FROM public.shoir_platform_records
+                WHERE workspace_key=%s AND record_type='dataset_version'
+                  AND entity_key IN (%s, %s);
+                """,
+                (workspace_key, dataset_id + ":v1", dataset_id + ":v2"),
+            )
+            assert version_count == (2,)
+            head = _fetchone(
+                target,
+                """
+                SELECT payload_json->>'version'
+                FROM public.shoir_platform_records
+                WHERE workspace_key=%s AND record_type='dataset' AND entity_key=%s;
+                """,
+                (workspace_key, dataset_id),
+            )
+            assert head == ("2",)
 
             for signature in (
                 "public.shoir_check_login_throttle(text,text,integer,integer,integer)",

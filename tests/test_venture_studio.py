@@ -257,8 +257,8 @@ def test_investor_room_export_contains_only_the_requested_owners_artifacts(tmp_p
 
     assert alice_id in set(artifacts["artifact_id"])
     assert artifacts["title"].tolist() == ["Alice confidential"]
-    assert "Bob-only content" not in artifacts.to_json()
-    assert "Bob confidential" not in artifacts.to_json()
+    assert "Bob-only content" not in artifacts.to_json(date_format="iso")
+    assert "Bob confidential" not in artifacts.to_json(date_format="iso")
     assert set(versions["artifact_id"]) == {alice_id}
     assert manifest["owner"] == "alice"
     assert int(artifacts.iloc[0]["version"]) == 2
