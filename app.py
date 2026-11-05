@@ -9734,8 +9734,8 @@ def cached_milp_optimization(customers_tuple, warehouses_tuple, w_cost, w_carbon
     
     prob = pulp.LpProblem("Facility_Location_Optimization", pulp.LpMinimize)
     
-    y = {j: pulp.LpVariable(f"y_{j}", cat="Binary") for j in range(len(warehouses))}
-    x = {(i, j): pulp.LpVariable(f"x_{i}_{j}", cat="Binary") for i in range(len(customers)) for j in range(len(warehouses))}
+    y = {j: prob.add_variable(f"y_{j}", cat=pulp.LpBinary) for j in range(len(warehouses))}
+    x = {(i, j): prob.add_variable(f"x_{i}_{j}", cat=pulp.LpBinary) for i in range(len(customers)) for j in range(len(warehouses))}
     
     dist = {}
     for i, cust in enumerate(customers):
@@ -9762,7 +9762,7 @@ def cached_milp_optimization(customers_tuple, warehouses_tuple, w_cost, w_carbon
         prob += pulp.lpSum(customers[i]['Demand'] * x[(i, j)] for i in range(len(customers))) <= wh['capacity'] * y[j], f"Wh_{j}_capacity"
         
     prob += w_cost * cost_expr + w_carbon * carbon_expr * 10
-    prob.solve(pulp.PULP_CBC_CMD(msg=0))
+    prob.solve(pulp.COIN_CMD(msg=False))
     
     status = pulp.LpStatus[prob.status]
     if status == 'Optimal':
@@ -12811,8 +12811,8 @@ if mod == "Cryptographic Ledger":
 
     if st.button("Generate Cryptographic Proof Block", type="primary"):
         import hashlib
-        from datetime import datetime
-        raw_data = f"{batch_id}:{supplier_name}:{esg_score}:{compliance_tier}:{datetime.utcnow().isoformat()}"
+        from datetime import datetime, timezone
+        raw_data = f"{batch_id}:{supplier_name}:{esg_score}:{compliance_tier}:{datetime.now(timezone.utc).isoformat()}"
         block_hash = hashlib.sha256(raw_data.encode()).hexdigest()
         
         # Save to session history
@@ -12821,7 +12821,7 @@ if mod == "Cryptographic Ledger":
             "Supplier": supplier_name,
             "ESG Score": esg_score,
             "SHA-256 Hash": block_hash[:16] + "...",
-            "Timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         })
         st.session_state.last_hash = block_hash
         st.session_state.last_batch = batch_id
