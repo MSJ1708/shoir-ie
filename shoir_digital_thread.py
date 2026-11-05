@@ -16,6 +16,7 @@ import io
 import json
 import re
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import zipfile
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -290,7 +291,7 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
     studies: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
     try:
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite3.connect("enterprise_full_workspace.db", timeout=10, factory=ClosingSQLiteConnection) as conn:
             rows = conn.execute(
                 "SELECT study_id,research_id,title,methodology,module,updated_at FROM experience_research_studies WHERE owner=? ORDER BY updated_at DESC LIMIT 100",
                 (owner,),
