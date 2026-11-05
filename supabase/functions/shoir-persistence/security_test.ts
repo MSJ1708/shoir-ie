@@ -1,8 +1,8 @@
 import {
   hasCanonicalMasterAdminInvariant,
+  inspectCsvShape,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
-  inspectCsvShape,
   normalizeWorkspaceStateJson,
   normalizePlatformTier,
   platformTierAllows,
@@ -251,8 +251,6 @@ Deno.test("protected administrator invariant is read-only and fails closed on dr
   }
 });
 
-
-
 Deno.test("dataset API package gate follows the canonical tier hierarchy", () => {
   const allowed = [
     "Enterprise Tier",
@@ -296,8 +294,6 @@ Deno.test("dataset API package gate follows the canonical tier hierarchy", () =>
     "Research Pack should retain its inherited base capabilities.",
   );
 });
-
-
 
 Deno.test("CSV shape inspection counts quoted logical records and handles CRLF", () => {
   const input = new TextEncoder().encode(
