@@ -38,7 +38,12 @@ jobs:
         if: always()
         run: |
           sudo apt-get update
-          sudo apt-get install -y libreoffice-impress poppler-utils
+          sudo apt-get install -y libreoffice-impress poppler-utils default-jre-headless
+      - name: Require PDF and PowerPoint export evidence
+        if: success()
+        run: |
+          test -s artifacts/report-export-validation/complete_export_verification.pdf
+          test -s artifacts/report-export-validation/complete_export_verification.pptx
       - name: Render the exact-head synthetic PDF and every PowerPoint slide
         if: always()
         run: |
@@ -58,11 +63,11 @@ jobs:
           fi
       - name: Upload sanitized report-export validation artifacts and rendered pages
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-report-export-validation
           path: artifacts/report-export-validation/
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 14
       - name: Parse required application modules
         run: |
@@ -107,13 +112,18 @@ jobs:
         env:
           SHOIR_LIVE_URL: http://127.0.0.1:8501/
         run: python scripts/live_deployment_smoke.py
+      - name: Require desktop and mobile browser screenshots
+        if: success()
+        run: |
+          test -s artifacts/live-deployment-smoke/desktop.png
+          test -s artifacts/live-deployment-smoke/mobile.png
       - name: Upload local runtime smoke evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-local-runtime-smoke
           path: artifacts/live-deployment-smoke/
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
   live-deployment-smoke:
     # Probe the currently hosted, anonymous shell for audit PRs and after
@@ -144,9 +154,9 @@ jobs:
         run: python scripts/live_deployment_smoke.py
       - name: Save live browser screenshots and result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-live-deployment-smoke
           path: artifacts/live-deployment-smoke/
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
