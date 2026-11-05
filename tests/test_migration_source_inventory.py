@@ -103,10 +103,10 @@ def test_internal_schema_rls_migration_enables_only_private_deny_by_default_tabl
 
     # Strip line comments before asserting on SQL commands. A comment explaining
     # that FORCE RLS is intentionally not used must not trigger a false failure.
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
-    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+    normalized = re.sub(r"\s+", " ", executable_sql).casefold()
 
     expected_tables = {
         "artifacts",
@@ -125,7 +125,7 @@ def test_internal_schema_rls_migration_enables_only_private_deny_by_default_tabl
     enabled_tables = {
         table.casefold()
         for table in re.findall(
-            r"alter\\s+table\\s+shoir_internal\\.([a-z_]+)\\s+enable\\s+row\\s+level\\s+security\\s*;",
+            r"alter\s+table\s+shoir_internal\.([a-z_]+)\s+enable\s+row\s+level\s+security\s*;",
             executable_sql,
             flags=re.IGNORECASE,
         )
@@ -133,12 +133,12 @@ def test_internal_schema_rls_migration_enables_only_private_deny_by_default_tabl
 
     assert enabled_tables == expected_tables
     assert not re.search(
-        r"\\bforce\\s+row\\s+level\\s+security\\b",
+        r"\bforce\s+row\s+level\s+security\b",
         executable_sql,
         flags=re.IGNORECASE,
     )
-    assert not re.search(r"\\bcreate\\s+policy\\b", executable_sql, re.IGNORECASE)
-    assert not re.search(r"\\bgrant\\b", executable_sql, re.IGNORECASE)
+    assert not re.search(r"\bcreate\s+policy\b", executable_sql, re.IGNORECASE)
+    assert not re.search(r"\bgrant\b", executable_sql, re.IGNORECASE)
     assert (
         "revoke all on schema shoir_internal from public, anon, authenticated"
         in normalized
