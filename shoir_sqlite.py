@@ -15,6 +15,14 @@ from typing import Any
 class ClosingSQLiteConnection(sqlite3.Connection):
     """Connection that closes after its normal commit/rollback context exit."""
 
+    def __del__(self) -> None:
+        """Close an abandoned connection before sqlite3 emits an unclosed-handle warning."""
+        try:
+            self.close()
+        except Exception:
+            # Finalizers must not leak errors during interpreter shutdown.
+            pass
+
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
         try:
             return super().__exit__(exc_type, exc_value, traceback)
