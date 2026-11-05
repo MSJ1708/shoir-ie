@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  inspectCsvShape,
   isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
   platformTierAllows,
