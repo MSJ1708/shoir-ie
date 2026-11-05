@@ -15,6 +15,7 @@ import base64
 import datetime as dt
 import os
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
 
@@ -909,7 +910,7 @@ def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db")
             )
             rows = [dict(row) for row in cur.fetchall()]
     inserted = 0
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         for row in rows:
             exists = conn.execute(
                 """
@@ -957,7 +958,7 @@ def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db")
     rows = remote_accounts()
     if not rows:
         return 0
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         for row in rows:
             conn.execute(
                 """
@@ -1013,7 +1014,7 @@ def migrate_local_accounts_to_remote(db_path: str = "enterprise_full_workspace.d
         return 0
     ensure_remote_schema()
     existing = {row["username_lc"] for row in remote_accounts()}
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         rows = conn.execute(
             """
             SELECT
