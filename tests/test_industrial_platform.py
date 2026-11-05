@@ -439,3 +439,60 @@ def test_industrial_data_platform_entitlement_matches_existing_catalog_and_tool(
     with pytest.raises(PermissionError):
         require_tool_access("Professional", "T020")
     require_tool_access("Enterprise", "T020")
+
+
+
+def test_staging_dataset_registration_can_append_version_to_existing_logical_id(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    calls = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 4,
+                "created_new_version": True,
+            },
+        },
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    frame = pd.DataFrame({"asset_id": ["A-1"], "throughput_tph": [15.0]})
+    saved_id = platform.register_dataset(
+        "Renamed production view",
+        "production-export-2026-11.csv",
+        frame,
+        username="synthetic-user",
+        workspace="plant-a",
+        token="session-token",
+        dataset_id="DS-AABBCCDDEEFF",
+        transformations=[{"operation": "normalize_sheet_to_csv", "status": "completed"}],
+    )
+    assert saved_id == "DS-AABBCCDDEEFF"
+    assert calls[0]["dataset_id"] == "DS-AABBCCDDEEFF"
+    assert state["data_platform_latest_version"] == 4
+
+
+def test_dataset_registration_rejects_malformed_existing_dataset_id_before_network(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: pytest.fail("invalid logical ID must be rejected before network"),
+    )
+    with pytest.raises(ValueError, match="canonical DS- identifier"):
+        platform.register_dataset(
+            "Production",
+            "production.csv",
+            pd.DataFrame({"asset_id": ["A-1"]}),
+            username="synthetic-user",
+            workspace="plant-a",
+            token="session-token",
+            dataset_id="../OTHER-WORKSPACE",
+        )
