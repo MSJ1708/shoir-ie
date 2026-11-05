@@ -25,6 +25,7 @@ jobs:
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PYTHONTRACEMALLOC: "5"
         run: python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q tests
       - name: Set up Deno
         uses: denoland/setup-deno@v2
