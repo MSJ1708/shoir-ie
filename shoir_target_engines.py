@@ -135,11 +135,11 @@ def solve_cutting_stock(
     bins = range(total_items)
     choices = range(len(normalized))
     used = {
-        b: pulp.LpVariable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
+        b: model.add_variable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
         for b in bins
     }
     allocation = {
-        (i, b): pulp.LpVariable(
+        (i, b): model.add_variable(
             f"part_{i}_in_stock_{b}",
             lowBound=0,
             upBound=normalized[i]["quantity"],
@@ -163,7 +163,7 @@ def solve_cutting_stock(
             model += used[b] >= used[b + 1], f"symmetry_{b}"
 
     try:
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds)
+        solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit_seconds)
         if not solver.available():
             raise RuntimeError("PuLP's CBC solver is not available in this runtime.")
         model.solve(solver)
@@ -4490,11 +4490,11 @@ def optimize_supply_chain_network(
 
     model = pulp.LpProblem("shoir_single_period_supply_chain_transport", pulp.LpMinimize)
     shipment_vars = {
-        key: pulp.LpVariable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
+        key: model.add_variable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
         for i, (key, item) in enumerate(route_map.items(), start=1)
     }
     unmet_vars = {
-        site: pulp.LpVariable(f"unmet_{i}", lowBound=0)
+        site: model.add_variable(f"unmet_{i}", lowBound=0)
         for i, site in enumerate(demand, start=1)
     }
     model += pulp.lpSum(route_map[key]["unit_cost"] * shipment_vars[key] for key in route_map) + penalty * pulp.lpSum(unmet_vars.values())
@@ -4506,7 +4506,7 @@ def optimize_supply_chain_network(
         model += pulp.lpSum(
             var for (_, destination), var in shipment_vars.items() if destination == site
         ) + unmet_vars[site] == requested, f"site_demand_{list(demand).index(site)}"
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
+    solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit)
     try:
         model.solve(solver)
     except Exception as exc:
@@ -4911,7 +4911,7 @@ def run_solver_diagnostics(
         pulp.LpMinimize if direction_value in {"minimize", "min"} else pulp.LpMaximize,
     )
     variables = {
-        name: pulp.LpVariable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
+        name: problem.add_variable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
         for name, spec in normalized_specs.items()
     }
     problem += pulp.lpSum(coefficient * variables[name] for name, coefficient in objective.items()), "objective"
@@ -4925,7 +4925,7 @@ def run_solver_diagnostics(
             problem += expression == item["rhs"], item["name"]
 
     try:
-        solver_status_code = problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit))
+        solver_status_code = problem.solve(pulp.COIN_CMD(msg=False, timeLimit=time_limit))
     except Exception as exc:
         return {
             "status": "SOLVER_ERROR",
@@ -5425,11 +5425,11 @@ def optimize_facility_location_flow(
 
     model = pulp.LpProblem("ShoirIE_Facility_Location_Flow", pulp.LpMinimize)
     open_vars = {
-        i: pulp.LpVariable(f"facility_open_{i}", cat=pulp.LpBinary)
+        i: model.add_variable(f"facility_open_{i}", cat=pulp.LpBinary)
         for i in range(len(normalized_facilities))
     }
     flow_vars = {
-        r["index"] - 1: pulp.LpVariable(
+        r["index"] - 1: model.add_variable(
             f"route_flow_{r['index'] - 1}", lowBound=0, upBound=r["capacity"], cat=pulp.LpContinuous
         )
         for r in normalized_routes
@@ -5451,7 +5451,7 @@ def optimize_facility_location_flow(
         model += inbound == customer["demand"], f"customer_demand_{i}"
 
     try:
-        model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=limit))
+        model.solve(pulp.COIN_CMD(msg=False, timeLimit=limit))
     except pulp.PulpSolverError:
         return {
             "status": "SOLVER_UNAVAILABLE",

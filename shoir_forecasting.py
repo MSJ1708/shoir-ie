@@ -21,6 +21,19 @@ FORECAST_TARGETS = {
 }
 
 
+def infer_datetime_frequency(values: Any, default: str = "D") -> str:
+    """Infer a pandas frequency without relying on its deprecated string return."""
+    try:
+        with pd.option_context("future.infer_freq_returns_offset", True):
+            inferred = pd.infer_freq(values)
+    except pd.errors.OptionError:
+        inferred = pd.infer_freq(values)
+    if inferred is None:
+        return str(default)
+    frequency = getattr(inferred, "freqstr", None)
+    return str(frequency or inferred)
+
+
 def infer_forecast_target(columns: Sequence[str], subject: str = "Demand") -> str | None:
     aliases = FORECAST_TARGETS.get(subject, FORECAST_TARGETS["Demand"])
     normalized = [(str(c), str(c).lower().replace("_", " ")) for c in columns]
@@ -86,7 +99,7 @@ def engineering_forecast(
             "Holdout R2": float(r2_score(test[target_col], pred_test)) if len(test) > 1 else float("nan"),
         }
 
-    freq = pd.infer_freq(d[date_col]) or "D"
+    freq = infer_datetime_frequency(d[date_col])
     future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon)+1, freq=freq)[1:]
     future = pd.DataFrame({date_col: future_dates})
     for col in external:
