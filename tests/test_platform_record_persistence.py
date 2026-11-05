@@ -554,3 +554,22 @@ def test_every_dataset_edge_action_enforces_server_side_professional_entitlement
     assert 'recordType === "dataset"' in listing
     assert 'recordType === "dataset_version"' in listing
     assert "datasetEntitlementDenial(" in listing
+
+
+
+def test_platform_record_payload_rejects_bare_dob_key_on_python_and_edge():
+    from pathlib import Path
+
+    with pytest.raises(ValueError, match="Credential or sensitive"):
+        store._validate_platform_record_payload({
+            "asset": {"metadata": {"dob": "1980-01-01"}}
+        })
+
+    edge_source = (
+        Path(__file__).resolve().parents[1]
+        / "supabase/functions/shoir-persistence/index.ts"
+    ).read_text(encoding="utf-8")
+    # Ensure the Edge Function uses a real word-boundary escape rather than
+    # matching a literal backslash sequence.
+    assert r"\bdob\b" in edge_source
+    assert r"\\bdob\\b" not in edge_source
