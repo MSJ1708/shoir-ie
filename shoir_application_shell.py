@@ -12,6 +12,7 @@ import html
 import json
 import math
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
@@ -170,7 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_shell_outcomes_decision
 
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return sqlite3.connect(path, timeout=30, factory=ClosingSQLiteConnection)
 
 
 def _now() -> str:
