@@ -40,3 +40,17 @@ def test_context_manager_rolls_back_and_closes_after_exception(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table' AND name='sample'"
         ).fetchone()
         assert table is None
+
+
+def test_abandoned_connection_is_closed_by_finalizer_without_resource_warning(tmp_path):
+    import gc
+    import warnings
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always", ResourceWarning)
+        connection = connect(tmp_path / "finalized.db", timeout=5)
+        connection.execute("CREATE TABLE sample (value INTEGER)")
+        del connection
+        gc.collect()
+
+    assert not [warning for warning in captured if issubclass(warning.category, ResourceWarning)]
