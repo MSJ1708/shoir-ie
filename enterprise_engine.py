@@ -2,7 +2,7 @@ import hashlib
 import json
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Callable
 import pulp
 import simpy
@@ -23,9 +23,9 @@ def secure_audit_log(required_role: str):
                 logger.warning(f"Unauthorized access attempt by {user_context['user']} for {func.__name__}")
                 raise PermissionError(f"Access denied. Requires role: {required_role}")
             
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             result = await func(self, *args, **kwargs) if asyncio.iscoroutinefunction(func) else func(self, *args, **kwargs)
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             
             # Generate cryptographic log hash for SOC2 Type II compliance
             log_payload = f"{user_context['user']}:{func.__name__}:{start_time.isoformat()}:{duration}"
