@@ -28,6 +28,7 @@ EXPECTED_VERSIONS = [
     "20261104184453",
     "20261104192112",
     "20261104192857",
+    "20261105120000",
     "20261105101231",
 ]
 
@@ -175,3 +176,37 @@ def test_staging_referral_reconciliation_migration_is_idempotent_and_non_rewriti
         in executable_sql
     )
     assert "grant select, insert, update, delete on table public.shoir_referrals to service_role" in executable_sql
+
+
+def test_private_rls_advisory_migration_adds_explicit_client_deny_policies_only():
+    source = (
+        MIGRATIONS
+        / "20261105120000_explicit_deny_policies_for_private_rls_advisories.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+    policies = re.findall(
+        r"create policy [a-z_]+ on "
+        r"(public\\.shoir_referrals|shoir_internal\\.[a-z_]+) "
+        r"for all to anon, authenticated using \\(false\\) "
+        r"with check \\(false\\)\\s*;",
+        normalized,
+    )
+    expected = {
+        "public.shoir_referrals",
+        *{
+            f"shoir_internal.{name}"
+            for name in (
+                "artifacts", "twin_assets", "twin_snapshots", "twin_scenarios",
+                "connector_health", "jobs", "collaboration", "knowledge",
+                "monitoring_rules", "monitoring_events", "report_provenance",
+                "security",
+            )
+        },
+    }
+    assert set(policies) == expected
+    assert len(policies) == len(expected) == 13
+    assert not re.search(r"\\bgrant\\b", executable_sql, re.IGNORECASE)
+    assert not re.search(r"\\bforce\\s+row\\s+level\\s+security\\b", executable_sql, re.IGNORECASE)
