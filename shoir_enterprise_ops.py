@@ -416,7 +416,7 @@ def render_control_tower_extension() -> None:
     # Persist an explicit action queue so the tower supports intervention, not only observation.
     try:
         import sqlite3
-from shoir_sqlite import ClosingSQLiteConnection
+        from shoir_sqlite import ClosingSQLiteConnection
         with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
             con.execute(
                 "CREATE TABLE IF NOT EXISTS control_tower_actions("
