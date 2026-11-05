@@ -1767,6 +1767,7 @@ def test_solver_diagnostics_distinguishes_infeasible_unbounded_and_milp_models()
     assert infeasible["solver_status"] == "Infeasible"
     assert infeasible["status"] == "INFEASIBLE"
     assert infeasible["objective_value"] is None
+    assert "continuous-LP fallback" in infeasible["solver_backend"]
 
     unbounded = run_solver_diagnostics(
         {"x": {"low": 0, "up": None, "category": "Continuous"}},
