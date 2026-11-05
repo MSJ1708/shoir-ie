@@ -390,7 +390,7 @@ const PLATFORM_RECORD_TYPES = new Set([
   "competency_record",
 ]);
 const PLATFORM_SECRET_KEY =
-  /(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\\bdob\\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)/i;
+  /(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\bdob\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)/i;
 function validatePlatformPayload(
   value: unknown,
   depth = 0,
