@@ -326,7 +326,7 @@ def register_dataset(
             (resolved_dataset_id, name, source_name, len(df), len(df.columns), data_hash, _now(), json.dumps(schema)),
         )
         conn.commit()
-    return dataset_id
+    return resolved_dataset_id
 
 def load_registered_dataset(
     dataset_id: str,
