@@ -14,6 +14,14 @@ from typing import Any
 class ClosingSQLiteConnection(sqlite3.Connection):
     """A SQLite connection that always closes after its context manager exits."""
 
+    def __del__(self) -> None:
+        """Close a forgotten connection before sqlite3's unclosed-handle warning."""
+        try:
+            self.close()
+        except Exception:
+            # Finalizers must not leak errors during interpreter shutdown.
+            pass
+
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> bool | None:
         try:
             return super().__exit__(exc_type, exc_value, traceback)
