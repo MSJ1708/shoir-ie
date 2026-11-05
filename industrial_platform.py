@@ -13,7 +13,7 @@ from __future__ import annotations
 import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
 from datetime import datetime, timedelta, timezone
 from itertools import product
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -320,6 +320,11 @@ def register_dataset(
         _industrial_platform_session_state()["data_platform_latest_version"] = int(registration.get("version") or 1)
         return resolved_dataset_id
 
+    # Initialise the local schema before standalone registration. The app shell
+    # normally does this at startup, but library callers and fresh workspaces may
+    # reach this path without that startup sequence. This is idempotent and local
+    # only; staging has already returned through the authenticated managed API.
+    init_platform_db(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",
