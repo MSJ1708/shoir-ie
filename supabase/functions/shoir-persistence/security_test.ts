@@ -3,6 +3,7 @@ import {
   hasCanonicalMasterAdminInvariant,
   inspectCsvShape,
   isAllowedBrowserOrigin,
+  isAllowedApiMethod,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizePlatformTier,
@@ -13,6 +14,14 @@ import {
   readBoundedJsonObject,
   sessionEntitlementFields,
 } from "./security.ts";
+
+Deno.test("only POST may dispatch persistence API actions", () => {
+  assert(isAllowedApiMethod("POST"), "POST must be accepted.");
+  assert(isAllowedApiMethod("post"), "HTTP method comparison must be case-insensitive.");
+  for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    assert(!isAllowedApiMethod(method), `${method} must not dispatch API actions.`);
+  }
+});
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
