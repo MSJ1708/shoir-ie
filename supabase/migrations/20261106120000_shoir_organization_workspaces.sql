@@ -534,6 +534,110 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.shoir_org_invitation_revoke(
+    p_actor text, p_organization_id uuid, p_invitation_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+DECLARE
+    v_actor text := lower(btrim(p_actor));
+    v_role text;
+BEGIN
+    IF p_organization_id IS NULL OR p_invitation_id IS NULL
+       OR v_actor IS NULL OR v_actor = '' THEN
+        RAISE EXCEPTION 'Invalid organization invitation revocation input.'
+            USING ERRCODE = '22023';
+    END IF;
+    SELECT role INTO v_role
+      FROM public.shoir_organization_memberships
+     WHERE organization_id = p_organization_id
+       AND username_lc = v_actor AND status = 'active'
+     FOR UPDATE;
+    IF v_role IS NULL OR v_role NOT IN ('owner','admin') THEN
+        RAISE EXCEPTION 'Organization invitation revocation permission denied.'
+            USING ERRCODE = '42501';
+    END IF;
+    UPDATE public.shoir_organization_invitations
+       SET revoked_at = now()
+     WHERE invitation_id = p_invitation_id
+       AND organization_id = p_organization_id
+       AND used_at IS NULL AND revoked_at IS NULL
+       AND expires_at > now();
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Invitation is missing, expired, used or already revoked.'
+            USING ERRCODE = '42501';
+    END IF;
+    INSERT INTO public.shoir_organization_audit_events(
+        organization_id, actor_username_lc, event_type, payload_json
+    ) VALUES (
+        p_organization_id, v_actor, 'organization.invitation_revoked',
+        jsonb_build_object('invitation_id', p_invitation_id)
+    );
+    RETURN jsonb_build_object('ok', true, 'invitation_id', p_invitation_id);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.shoir_org_workspace_archive(
+    p_actor text, p_organization_id uuid, p_workspace_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+DECLARE
+    v_actor text := lower(btrim(p_actor));
+    v_role text;
+    v_name text;
+    v_active_count integer;
+BEGIN
+    IF p_organization_id IS NULL OR p_workspace_id IS NULL
+       OR v_actor IS NULL OR v_actor = '' THEN
+        RAISE EXCEPTION 'Invalid organization workspace archive input.'
+            USING ERRCODE = '22023';
+    END IF;
+    SELECT role INTO v_role
+      FROM public.shoir_organization_memberships
+     WHERE organization_id = p_organization_id
+       AND username_lc = v_actor AND status = 'active'
+     FOR UPDATE;
+    IF v_role IS NULL OR v_role NOT IN ('owner','admin') THEN
+        RAISE EXCEPTION 'Organization workspace archive permission denied.'
+            USING ERRCODE = '42501';
+    END IF;
+    SELECT display_name INTO v_name
+      FROM public.shoir_organization_workspaces
+     WHERE workspace_id = p_workspace_id
+       AND organization_id = p_organization_id
+       AND status = 'active'
+     FOR UPDATE;
+    IF v_name IS NULL THEN
+        RAISE EXCEPTION 'Active organization workspace was not found.'
+            USING ERRCODE = '42501';
+    END IF;
+    SELECT count(*) INTO v_active_count
+      FROM public.shoir_organization_workspaces
+     WHERE organization_id = p_organization_id AND status = 'active';
+    IF v_active_count <= 1 THEN
+        RAISE EXCEPTION 'The last active organization workspace cannot be archived.'
+            USING ERRCODE = '23514';
+    END IF;
+    UPDATE public.shoir_organization_workspaces
+       SET status = 'archived', updated_at = now()
+     WHERE workspace_id = p_workspace_id AND organization_id = p_organization_id;
+    INSERT INTO public.shoir_organization_audit_events(
+        organization_id, actor_username_lc, event_type, payload_json
+    ) VALUES (
+        p_organization_id, v_actor, 'organization.workspace_archived',
+        jsonb_build_object('workspace_id', p_workspace_id, 'workspace_name', v_name)
+    );
+    RETURN jsonb_build_object('ok', true, 'workspace_id', p_workspace_id);
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.shoir_org_resolve_workspace(
     p_actor text, p_organization_id uuid, p_workspace_id uuid, p_permission text
 )
@@ -642,6 +746,8 @@ REVOKE ALL ON FUNCTION public.shoir_org_member_role_set(text,uuid,text,text) FRO
 REVOKE ALL ON FUNCTION public.shoir_org_member_remove(text,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_owner_transfer(text,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_workspace_create(text,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.shoir_org_invitation_revoke(text,uuid,uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.shoir_org_workspace_archive(text,uuid,uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_resolve_workspace(text,uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_resolve_legacy_workspace(text,text,text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.shoir_org_create(text,text) TO service_role;
@@ -651,5 +757,7 @@ GRANT EXECUTE ON FUNCTION public.shoir_org_member_role_set(text,uuid,text,text) 
 GRANT EXECUTE ON FUNCTION public.shoir_org_member_remove(text,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_owner_transfer(text,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_workspace_create(text,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.shoir_org_invitation_revoke(text,uuid,uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.shoir_org_workspace_archive(text,uuid,uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_resolve_workspace(text,uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_resolve_legacy_workspace(text,text,text) TO service_role;
