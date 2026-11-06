@@ -39,6 +39,7 @@ try:
         database_url,
         edge_list_platform_records,
         edge_save_platform_record,
+        edge_organization_action,
         postgres_backend_configured,
     )
 except Exception:  # local/unit-test safety
@@ -48,6 +49,9 @@ except Exception:  # local/unit-test safety
     edge_list_platform_records = lambda *args, **kwargs: []
     edge_save_platform_record = lambda *args, **kwargs: (_ for _ in ()).throw(
         RuntimeError("Managed platform persistence is unavailable.")
+    )
+    edge_organization_action = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("Managed organization workspaces are unavailable.")
     )
     postgres_backend_configured = lambda: False
 
@@ -2875,6 +2879,341 @@ def create_generic_audit_event(username: str, event_type: str, detail: str, work
     return record_artifact(username, "audit_event", event_type, {"detail": detail, "timestamp": now_iso()}, workspace)
 
 
+def _render_organization_workspace_controls(username: str, tier: str) -> None:
+    """Render the authenticated organization workspace controls inside the existing collaboration module."""
+    st.markdown("#### 🏢 Organization-level workspace")
+    try:
+        from durable_account_store import APP_ENVIRONMENT, edge_backend_configured
+    except Exception:
+        APP_ENVIRONMENT = "local"
+        edge_backend_configured = lambda: False
+
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        st.info(
+            "Organization sharing is currently staging-only. This view does not "
+            "use a local SQLite fallback or claim that company-wide sharing is live."
+        )
+        return
+    if not edge_backend_configured():
+        st.warning("The staging persistence endpoint is not configured for this app.")
+        return
+    token = str(st.session_state.get("remote_session_token") or "")
+    actor = str(st.session_state.get("current_user") or username or "").strip()
+    if not token or not actor or actor.casefold() == "guest visitor":
+        st.warning("Sign in with a dedicated staging account to manage an organization.")
+        return
+
+    def call(action: str, **payload: Any) -> dict[str, Any]:
+        return edge_organization_action(action, actor, token, **payload)
+
+    try:
+        organizations = call("org_list_session").get("organizations", [])
+    except Exception:
+        st.info(
+            "The organization API is not available on the deployed staging function yet. "
+            "No local or in-memory shared workspace was created."
+        )
+        return
+
+    team_organizations = [
+        item for item in organizations
+        if isinstance(item, Mapping) and item.get("org_type") == "team"
+    ]
+    with st.expander("Create a team organization", expanded=not bool(team_organizations)):
+        with st.form("shoir_org_create_form"):
+            display_name = st.text_input(
+                "Organization name",
+                placeholder="e.g. Plant Operations Team",
+                key="shoir_org_create_name",
+            )
+            create = st.form_submit_button("Create organization")
+        if create:
+            try:
+                result = call("org_create_session", display_name=display_name)
+                st.success(
+                    "Organization created: "
+                    + str(result.get("organization", {}).get("display_name") or display_name)
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Organization could not be created: {exc}")
+
+    if not team_organizations:
+        st.caption(
+            "Create a team organization first. Invited members must sign in with "
+            "their own accounts; invitations are single-use and expire."
+        )
+        return
+
+    org_labels = {
+        f"{item.get('display_name')} · {item.get('role')}": str(item.get("organization_id"))
+        for item in team_organizations
+    }
+    org_label = st.selectbox(
+        "Team organization",
+        list(org_labels),
+        key="shoir_org_selected_label",
+    )
+    organization_id = org_labels[org_label]
+    try:
+        workspace_result = call(
+            "org_workspace_list_session",
+            organization_id=organization_id,
+        )
+        workspaces = workspace_result.get("workspaces", [])
+        membership_role = str(workspace_result.get("role") or "")
+    except Exception as exc:
+        st.error(f"Organization workspaces could not be loaded: {exc}")
+        return
+    if not workspaces:
+        st.warning("This organization has no active workspaces.")
+        return
+
+    workspace_labels = {
+        f"{item.get('display_name')}": str(item.get("workspace_id"))
+        for item in workspaces
+    }
+    workspace_label = st.selectbox(
+        "Shared workspace",
+        list(workspace_labels),
+        key="shoir_org_selected_workspace",
+    )
+    workspace_id = workspace_labels[workspace_label]
+    st.session_state["shoir_active_organization_id"] = organization_id
+    st.session_state["shoir_active_organization_workspace_id"] = workspace_id
+    st.caption(
+        f"Active shared workspace · role: {membership_role}. "
+        "Managed platform records and dataset versions now use this organisation scope; "
+        "the server checks membership and role on every operation."
+    )
+
+    with st.form("shoir_org_workspace_create_form"):
+        new_workspace = st.text_input(
+            "New shared workspace name",
+            placeholder="e.g. Line 3 Improvement",
+            key="shoir_org_new_workspace_name",
+        )
+        create_workspace = st.form_submit_button("Create workspace")
+    if create_workspace:
+        try:
+            call(
+                "org_workspace_create_session",
+                organization_id=organization_id,
+                display_name=new_workspace,
+            )
+            st.success("Shared workspace created.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Shared workspace could not be created: {exc}")
+
+    if membership_role in {"owner", "admin"}:
+        with st.expander("Archive an unused shared workspace"):
+            archive_options = {
+                str(item.get("display_name")): str(item.get("workspace_id"))
+                for item in workspaces
+                if str(item.get("workspace_id")) != workspace_id
+            }
+            if archive_options:
+                archive_label = st.selectbox(
+                    "Workspace to archive",
+                    list(archive_options),
+                    key="shoir_org_archive_target",
+                )
+                if st.button("Archive selected workspace", key="shoir_org_archive_button"):
+                    try:
+                        call(
+                            "org_workspace_archive_session",
+                            organization_id=organization_id,
+                            organization_workspace_id=archive_options[archive_label],
+                        )
+                        st.success("Workspace archived.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Workspace could not be archived: {exc}")
+            else:
+                st.caption("At least one active workspace must remain.")
+
+    try:
+        members = call(
+            "org_member_list_session",
+            organization_id=organization_id,
+        ).get("members", [])
+        st.markdown("**Active members**")
+        st.dataframe(pd.DataFrame(members), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.error(f"Members could not be loaded: {exc}")
+        members = []
+
+    if membership_role in {"owner", "admin"}:
+        with st.expander("Invite a member"):
+            with st.form("shoir_org_invite_form"):
+                target_username = st.text_input(
+                    "Existing Shoir-IE username",
+                    key="shoir_org_invite_target",
+                )
+                invite_role = st.selectbox(
+                    "Role",
+                    ["viewer", "engineer", "approver", "admin"],
+                    key="shoir_org_invite_role",
+                )
+                lifetime = st.number_input(
+                    "Invitation validity (days)",
+                    min_value=1,
+                    max_value=30,
+                    value=7,
+                    step=1,
+                    key="shoir_org_invite_lifetime",
+                )
+                issue_invite = st.form_submit_button("Create single-use invitation")
+            if issue_invite:
+                try:
+                    result = call(
+                        "org_invitation_create_session",
+                        organization_id=organization_id,
+                        target_username_lc=target_username,
+                        role=invite_role,
+                        lifetime_days=int(lifetime),
+                    )
+                    invitation_token = str(result.get("invitation_token") or "")
+                    if invitation_token:
+                        st.success("Invitation created. Copy the token now; it is not retrievable later.")
+                        st.code(invitation_token, language="text")
+                        st.caption(
+                            "Share this token with the named user using a trusted channel. "
+                            "An external email delivery provider is not configured."
+                        )
+                    else:
+                        st.error("The server did not return the one-time invitation token.")
+                except Exception as exc:
+                    st.error(f"Invitation could not be created: {exc}")
+
+        with st.expander("Pending invitations and access changes"):
+            try:
+                invitations = call(
+                    "org_invitation_list_session",
+                    organization_id=organization_id,
+                ).get("invitations", [])
+            except Exception as exc:
+                invitations = []
+                st.error(f"Invitations could not be loaded: {exc}")
+            pending = [
+                item for item in invitations
+                if not item.get("used_at") and not item.get("revoked_at")
+            ]
+            if pending:
+                invite_labels = {
+                    f"{item.get('target_username_lc')} · {item.get('role')} · {item.get('expires_at')}":
+                        str(item.get("invitation_id"))
+                    for item in pending
+                }
+                invite_label = st.selectbox(
+                    "Pending invitation to revoke",
+                    list(invite_labels),
+                    key="shoir_org_revoke_invitation_target",
+                )
+                if st.button("Revoke invitation", key="shoir_org_revoke_invitation_button"):
+                    try:
+                        call(
+                            "org_invitation_revoke_session",
+                            organization_id=organization_id,
+                            invitation_id=invite_labels[invite_label],
+                        )
+                        st.success("Invitation revoked.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Invitation could not be revoked: {exc}")
+
+            member_names = [
+                str(item.get("username_lc"))
+                for item in members
+                if item.get("username_lc") != actor
+            ]
+            if member_names:
+                target_member = st.selectbox(
+                    "Member",
+                    member_names,
+                    key="shoir_org_member_target",
+                )
+                col_role, col_remove, col_owner = st.columns(3)
+                with col_role:
+                    new_role = st.selectbox(
+                        "New role",
+                        ["viewer", "engineer", "approver", "admin"],
+                        key="shoir_org_member_new_role",
+                    )
+                    if st.button("Change role", key="shoir_org_member_role_button"):
+                        try:
+                            call(
+                                "org_member_role_set_session",
+                                organization_id=organization_id,
+                                target_username_lc=target_member,
+                                role=new_role,
+                            )
+                            st.success("Member role updated.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Role change denied: {exc}")
+                with col_remove:
+                    if st.button("Remove member", key="shoir_org_member_remove_button"):
+                        try:
+                            call(
+                                "org_member_remove_session",
+                                organization_id=organization_id,
+                                target_username_lc=target_member,
+                            )
+                            st.success("Member removed.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Member could not be removed: {exc}")
+                with col_owner:
+                    if st.button("Transfer ownership", key="shoir_org_owner_transfer_button"):
+                        try:
+                            call(
+                                "org_owner_transfer_session",
+                                organization_id=organization_id,
+                                target_username_lc=target_member,
+                            )
+                            st.success("Organization ownership transferred.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Ownership transfer denied: {exc}")
+
+        with st.expander("Organization audit history"):
+            try:
+                events = call(
+                    "org_audit_list_session",
+                    organization_id=organization_id,
+                    limit=100,
+                ).get("events", [])
+                st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
+                st.caption("Audit entries are append-only for application roles; database administrators retain infrastructure-level control.")
+            except Exception as exc:
+                st.error(f"Audit history could not be loaded: {exc}")
+
+    with st.expander("Accept an invitation"):
+        with st.form("shoir_org_invitation_accept_form"):
+            invitation_token = st.text_input(
+                "Single-use invitation token",
+                type="password",
+                key="shoir_org_accept_token",
+            )
+            accept = st.form_submit_button("Accept invitation")
+        if accept:
+            try:
+                result = edge_organization_action(
+                    "org_invitation_accept_session",
+                    actor,
+                    token,
+                    invitation_token=invitation_token,
+                )
+                st.success(
+                    "Invitation accepted. You can now choose the organization from the shared workspace selector."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Invitation was not accepted: {exc}")
+
+
 def _render_enterprise_integration_surface_base(module: str, username: str, tier: str) -> None:
     """Render the established enterprise capabilities for the selected module."""
     import streamlit as st
@@ -2967,6 +3306,7 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
 
     # Collaboration: shared comments, assignments and reviewer records.
     if module in {"Team Workspaces & RBAC","Enterprise Integration & Collaboration","Enterprise Integration","Collaboration Suite"}:
+        _render_organization_workspace_controls(username, str(st.session_state.get("user_tier") or "Starter"))
         st.markdown("### 👥 Collaboration & Review")
         c1,c2=st.columns(2)
         with c1:
