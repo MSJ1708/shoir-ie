@@ -254,7 +254,8 @@ BEGIN
         RAISE EXCEPTION 'Invalid organization invitation input.' USING ERRCODE = '22023';
     END IF;
     SELECT org_type INTO v_org_type FROM public.shoir_organizations
-    WHERE organization_id = p_organization_id AND status = 'active';
+    WHERE organization_id = p_organization_id AND status = 'active'
+    FOR UPDATE;
     IF v_org_type IS DISTINCT FROM 'team' THEN
         RAISE EXCEPTION 'Invitations are available only for active team organizations.' USING ERRCODE = '42501';
     END IF;
@@ -399,6 +400,12 @@ BEGIN
        OR v_new_role IS NULL OR v_new_role NOT IN ('admin','engineer','approver','viewer') THEN
         RAISE EXCEPTION 'Invalid organization role update input.' USING ERRCODE = '22023';
     END IF;
+    PERFORM 1 FROM public.shoir_organizations
+     WHERE organization_id = p_organization_id AND status = 'active'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Active organization was not found.' USING ERRCODE = '42501';
+    END IF;
     SELECT role INTO v_actor_role
       FROM public.shoir_organization_memberships
      WHERE organization_id = p_organization_id AND username_lc = v_actor AND status = 'active'
@@ -504,6 +511,16 @@ DECLARE
     v_actor_role text;
     v_target_role text;
 BEGIN
+    IF p_organization_id IS NULL OR v_actor IS NULL OR v_actor = ''
+       OR v_target IS NULL OR v_target = '' THEN
+        RAISE EXCEPTION 'Invalid organization member removal input.' USING ERRCODE = '22023';
+    END IF;
+    PERFORM 1 FROM public.shoir_organizations
+     WHERE organization_id = p_organization_id AND status = 'active'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Active organization was not found.' USING ERRCODE = '42501';
+    END IF;
     SELECT role INTO v_actor_role
       FROM public.shoir_organization_memberships
      WHERE organization_id = p_organization_id AND username_lc = v_actor AND status = 'active'
@@ -550,15 +567,18 @@ BEGIN
        OR length(v_name) < 1 OR length(v_name) > 120 OR v_name ~ '[[:cntrl:]]' THEN
         RAISE EXCEPTION 'Invalid organization workspace input.' USING ERRCODE = '22023';
     END IF;
+    PERFORM 1 FROM public.shoir_organizations
+     WHERE organization_id = p_organization_id AND status = 'active'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Active organization was not found.' USING ERRCODE = '42501';
+    END IF;
     SELECT m.role INTO v_role
       FROM public.shoir_organization_memberships m
-      JOIN public.shoir_organizations o
-        ON o.organization_id = m.organization_id
-       AND o.status = 'active'
      WHERE m.organization_id = p_organization_id
        AND m.username_lc = v_actor
        AND m.status = 'active'
-     FOR UPDATE OF m, o;
+     FOR UPDATE OF m;
     IF v_role IS NULL OR v_role NOT IN ('owner','admin') THEN
         RAISE EXCEPTION 'Organization workspace creation permission denied.' USING ERRCODE = '42501';
     END IF;
@@ -652,6 +672,12 @@ BEGIN
        OR v_actor IS NULL OR v_actor = '' THEN
         RAISE EXCEPTION 'Invalid organization workspace archive input.'
             USING ERRCODE = '22023';
+    END IF;
+    PERFORM 1 FROM public.shoir_organizations
+     WHERE organization_id = p_organization_id AND status = 'active'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Active organization was not found.' USING ERRCODE = '42501';
     END IF;
     SELECT role INTO v_role
       FROM public.shoir_organization_memberships
