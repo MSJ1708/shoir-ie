@@ -415,7 +415,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -1017,6 +1017,137 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
                             spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
                             run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
+                        elif selected_tool["tool_id"] == "T046":
+                            st.caption(
+                                "Single-task, two-handed NIOSH Revised Lifting Equation screen. "
+                                "Measure H and A at both the origin and destination. Enter FM and "
+                                "CM from the applicable official NIOSH tables; the app does not guess them."
+                            )
+                            st.markdown(
+                                "[NIOSH RNLE Applications Manual (DHHS/NIOSH 94-110, revised 2021)]"
+                                "(https://www.cdc.gov/niosh/publications/numbered/94-110.html)"
+                            )
+                            rnle_units = st.selectbox(
+                                "Measurement units",
+                                ["metric", "imperial"],
+                                key="tool046_units",
+                            )
+                            distance_unit = "cm" if rnle_units == "metric" else "in"
+                            load_unit = "kg" if rnle_units == "metric" else "lb"
+                            default_h = 25.0 if rnle_units == "metric" else 10.0
+                            default_v = 75.0 if rnle_units == "metric" else 30.0
+                            default_d = 25.0 if rnle_units == "metric" else 10.0
+                            h_limit = 63.0 if rnle_units == "metric" else 25.0
+                            v_limit = 175.0 if rnle_units == "metric" else 70.0
+                            rnle_task = st.text_input("Task description", key="tool046_task")
+                            rnle_load = st.number_input(
+                                f"Object weight ({load_unit})",
+                                min_value=0.01,
+                                value=10.0 if rnle_units == "metric" else 22.0,
+                                step=0.5,
+                                key="tool046_load",
+                            )
+                            rnle_h_origin = st.number_input(
+                                f"Horizontal hand location at origin ({distance_unit})",
+                                min_value=0.01,
+                                max_value=h_limit,
+                                value=default_h,
+                                step=1.0,
+                                key="tool046_h_origin",
+                            )
+                            rnle_h_destination = st.number_input(
+                                f"Horizontal hand location at destination ({distance_unit})",
+                                min_value=0.01,
+                                max_value=h_limit,
+                                value=default_h,
+                                step=1.0,
+                                key="tool046_h_destination",
+                            )
+                            rnle_v_start = st.number_input(
+                                f"Vertical hand location at origin ({distance_unit})",
+                                min_value=0.0,
+                                max_value=v_limit,
+                                value=default_v,
+                                step=1.0,
+                                key="tool046_v_start",
+                            )
+                            rnle_distance = st.number_input(
+                                f"Vertical travel distance ({distance_unit})",
+                                min_value=0.01,
+                                max_value=v_limit,
+                                value=default_d,
+                                step=1.0,
+                                key="tool046_distance",
+                            )
+                            rnle_a_origin = st.number_input(
+                                "Asymmetry angle at origin (degrees)",
+                                min_value=0.0,
+                                max_value=135.0,
+                                value=0.0,
+                                step=5.0,
+                                key="tool046_a_origin",
+                            )
+                            rnle_a_destination = st.number_input(
+                                "Asymmetry angle at destination (degrees)",
+                                min_value=0.0,
+                                max_value=135.0,
+                                value=0.0,
+                                step=5.0,
+                                key="tool046_a_destination",
+                            )
+                            rnle_frequency = st.number_input(
+                                "Average lifting frequency (lifts/minute)",
+                                min_value=0.01,
+                                max_value=15.0,
+                                value=1.0,
+                                step=0.25,
+                                key="tool046_frequency",
+                            )
+                            rnle_duration = st.selectbox(
+                                "Task duration (with required recovery)",
+                                [
+                                    "Select duration",
+                                    "Short (≤ 1 hour)",
+                                    "Moderate (> 1 to 2 hours)",
+                                    "Long (> 2 to 8 hours)",
+                                ],
+                                key="tool046_duration",
+                            )
+                            rnle_fm = st.number_input(
+                                "Frequency multiplier (FM) from NIOSH table",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=0.0,
+                                step=0.01,
+                                key="tool046_fm",
+                            )
+                            rnle_fm_source = st.text_input(
+                                "Frequency multiplier table reference (required)",
+                                key="tool046_fm_source",
+                            )
+                            rnle_coupling = st.selectbox(
+                                "Observed hand-to-load coupling",
+                                ["Select coupling", "Good", "Fair", "Poor"],
+                                key="tool046_coupling",
+                            )
+                            rnle_cm = st.number_input(
+                                "Coupling multiplier (CM) from NIOSH table",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=0.0,
+                                step=0.01,
+                                key="tool046_cm",
+                            )
+                            rnle_cm_source = st.text_input(
+                                "Coupling multiplier table reference (required)",
+                                key="tool046_cm_source",
+                            )
+                            run_method = st.form_submit_button(
+                                "Calculate RNLE screening estimate",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool046_run",
+                            )
                         elif selected_tool["tool_id"] == "T047":
                             st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
                             hazard_json = st.text_area(
@@ -1294,6 +1425,25 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
                     elif selected_tool["tool_id"] == "T045":
                         current_tool_inputs = {"parts_json": spare_parts_json}
+                    elif selected_tool["tool_id"] == "T046":
+                        current_tool_inputs = {
+                            "units": rnle_units,
+                            "task_description": rnle_task,
+                            "load_weight": rnle_load,
+                            "horizontal_origin": rnle_h_origin,
+                            "horizontal_destination": rnle_h_destination,
+                            "vertical_hand_start": rnle_v_start,
+                            "vertical_travel_distance": rnle_distance,
+                            "asymmetry_origin": rnle_a_origin,
+                            "asymmetry_destination": rnle_a_destination,
+                            "frequency_lifts_per_minute": rnle_frequency,
+                            "frequency_duration_category": rnle_duration,
+                            "frequency_multiplier": rnle_fm,
+                            "frequency_multiplier_source": rnle_fm_source,
+                            "coupling_quality": rnle_coupling,
+                            "coupling_multiplier": rnle_cm,
+                            "coupling_multiplier_source": rnle_cm_source,
+                        }
                     elif selected_tool["tool_id"] == "T047":
                         current_tool_inputs = {"hazards_json": hazard_json}
                     elif selected_tool["tool_id"] == "T050":
@@ -1406,6 +1556,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 build_guided_study_plan,
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
+                                calculate_niosh_revised_lifting_equation,
                             )
                             if selected_tool["tool_id"] == "T007":
                                 result = classify_diagnostic(diagnostic_inspector_text)
@@ -1727,6 +1878,30 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_parts, list):
                                     raise ValueError("Spare parts must be a JSON list of part objects.")
                                 result = analyze_spare_parts_criticality(parsed_parts)
+                            elif selected_tool["tool_id"] == "T046":
+                                if rnle_duration == "Select duration":
+                                    raise ValueError("Select the lifting-task duration from the NIOSH definitions.")
+                                if rnle_coupling == "Select coupling":
+                                    raise ValueError("Select the observed hand-to-load coupling quality.")
+                                result = calculate_niosh_revised_lifting_equation(
+                                    load_weight=rnle_load,
+                                    horizontal_origin=rnle_h_origin,
+                                    horizontal_destination=rnle_h_destination,
+                                    vertical_hand_start=rnle_v_start,
+                                    vertical_travel_distance=rnle_distance,
+                                    asymmetry_origin=rnle_a_origin,
+                                    asymmetry_destination=rnle_a_destination,
+                                    frequency_lifts_per_minute=rnle_frequency,
+                                    frequency_multiplier=rnle_fm,
+                                    coupling_multiplier=rnle_cm,
+                                    units=rnle_units,
+                                    frequency_duration_category=rnle_duration,
+                                    coupling_quality=rnle_coupling,
+                                    frequency_multiplier_source=rnle_fm_source,
+                                    coupling_multiplier_source=rnle_cm_source,
+                                    task_description=rnle_task,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T047":
                                 parsed_hazards = json.loads(hazard_json)
                                 if not isinstance(parsed_hazards, list):
@@ -1966,7 +2141,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
