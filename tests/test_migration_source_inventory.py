@@ -250,7 +250,6 @@ def test_organization_workspace_migration_is_server_only_and_preserves_legacy_ke
     assert "shoir_org_resolve_workspace" in normalized
     assert "shoir_org_resolve_legacy_workspace" in normalized
     assert "token_hash text not null unique" in normalized
-    assert "target_username_lc <> v_actor" not in normalized  # accept requires exact target equality below
     assert "v_inv.target_username_lc <> v_actor" in normalized
     assert "used_at is null" in normalized
     # Existing account-derived keys are registered lazily; no platform records,
