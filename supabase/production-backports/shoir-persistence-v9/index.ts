@@ -629,8 +629,12 @@ Deno.serve(async (req) => {
 
     return sendResponse({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "";
+    if (message === "Administrator account requires manual security review.") {
+      return sendResponse({ error: message }, 503);
+    }
     return sendResponse(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: message || "The persistence service could not complete this request." },
       500,
     );
   }
