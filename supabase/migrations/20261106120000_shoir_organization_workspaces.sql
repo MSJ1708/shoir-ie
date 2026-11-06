@@ -250,7 +250,7 @@ BEGIN
        OR v_target ~ '[[:space:][:cntrl:]]'
        OR v_role IS NULL OR v_role NOT IN ('admin','engineer','approver','viewer')
        OR p_token_hash IS NULL OR p_token_hash !~ '^[0-9a-f]{64}$'
-       OR p_expires_at <= now() OR p_expires_at > now() + interval '30 days' THEN
+       OR p_expires_at IS NULL OR p_expires_at <= now() OR p_expires_at > now() + interval '30 days' THEN
         RAISE EXCEPTION 'Invalid organization invitation input.' USING ERRCODE = '22023';
     END IF;
     SELECT org_type INTO v_org_type FROM public.shoir_organizations
