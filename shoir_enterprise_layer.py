@@ -2938,10 +2938,33 @@ def _render_organization_workspace_controls(username: str, tier: str) -> None:
             except Exception as exc:
                 st.error(f"Organization could not be created: {exc}")
 
+    with st.expander("Accept an invitation"):
+        with st.form("shoir_org_invitation_accept_form"):
+            invitation_token = st.text_input(
+                "Single-use invitation token",
+                type="password",
+                key="shoir_org_accept_token",
+            )
+            accept = st.form_submit_button("Accept invitation")
+        if accept:
+            try:
+                edge_organization_action(
+                    "org_invitation_accept_session",
+                    actor,
+                    token,
+                    invitation_token=invitation_token,
+                )
+                st.success(
+                    "Invitation accepted. You can now choose the organization from the shared workspace selector."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Invitation was not accepted: {exc}")
+
     if not team_organizations:
         st.caption(
-            "Create a team organization first. Invited members must sign in with "
-            "their own accounts; invitations are single-use and expire."
+            "Create a team organization or accept an invitation to use a shared workspace. "
+            "Invited members must sign in with their own accounts."
         )
         return
 
@@ -3189,30 +3212,6 @@ def _render_organization_workspace_controls(username: str, tier: str) -> None:
                 st.caption("Audit entries are append-only for application roles; database administrators retain infrastructure-level control.")
             except Exception as exc:
                 st.error(f"Audit history could not be loaded: {exc}")
-
-    with st.expander("Accept an invitation"):
-        with st.form("shoir_org_invitation_accept_form"):
-            invitation_token = st.text_input(
-                "Single-use invitation token",
-                type="password",
-                key="shoir_org_accept_token",
-            )
-            accept = st.form_submit_button("Accept invitation")
-        if accept:
-            try:
-                result = edge_organization_action(
-                    "org_invitation_accept_session",
-                    actor,
-                    token,
-                    invitation_token=invitation_token,
-                )
-                st.success(
-                    "Invitation accepted. You can now choose the organization from the shared workspace selector."
-                )
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Invitation was not accepted: {exc}")
-
 
 def _render_enterprise_integration_surface_base(module: str, username: str, tier: str) -> None:
     """Render the established enterprise capabilities for the selected module."""
