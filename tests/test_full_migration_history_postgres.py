@@ -819,13 +819,20 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     target,
                     "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'DELETE');",
                 )[0] is False
+                # Every privileged organization RPC is callable only by
+                # the server-side service role, never by browser-facing roles.
                 for signature in (
                     "public.shoir_org_create(text,text)",
                     "public.shoir_org_invitation_create(text,uuid,text,text,text,timestamp with time zone)",
                     "public.shoir_org_invitation_accept(text,text)",
+                    "public.shoir_org_member_role_set(text,uuid,text,text)",
+                    "public.shoir_org_member_remove(text,uuid,text)",
+                    "public.shoir_org_owner_transfer(text,uuid,text)",
+                    "public.shoir_org_workspace_create(text,uuid,text)",
                     "public.shoir_org_invitation_revoke(text,uuid,uuid)",
                     "public.shoir_org_workspace_archive(text,uuid,uuid)",
                     "public.shoir_org_resolve_workspace(text,uuid,uuid,text)",
+                    "public.shoir_org_resolve_legacy_workspace(text,text,text)",
                 ):
                     assert _fetchone(
                         target,
