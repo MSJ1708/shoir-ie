@@ -4,6 +4,7 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
+  isAllowedApiMethod,
   normalizeWorkspaceStateJson,
   PublicRequestError,
   readBoundedJsonObject,
@@ -328,6 +329,9 @@ Deno.serve(async (req) => {
       status: 204,
       headers: corsHeadersForOrigin(origin, SUPABASE_URL),
     });
+  }
+  if (!isAllowedApiMethod(req.method)) {
+    return sendResponse({ error: "Method not allowed." }, 405);
   }
   try {
     const body = await readBoundedJsonObject(req) as Record<string, any>;
