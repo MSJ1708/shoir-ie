@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import sqlite3
 import pandas as pd
 import pytest
@@ -23,7 +24,7 @@ def test_catalog_and_tiers():
 def test_db_migration(tmp_path):
     db=tmp_path/"platform.db"
     assert init_platform_db(str(db))
-    with sqlite3.connect(db) as c:
+    with sqlite_connection(db) as c:
         tables={r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     assert {"industrial_entities","platform_datasets","platform_models","platform_experiments","platform_decisions"} <= tables
 
@@ -154,7 +155,7 @@ def test_save_experiment_persists_all_seven_columns(tmp_path):
     )
 
     assert experiment_id.startswith("EXP-")
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         row = conn.execute(
             """SELECT experiment_id, name, module, scenarios_json, results_json, created_by, created_at
                FROM platform_experiments WHERE experiment_id=?""",
@@ -537,7 +538,7 @@ def test_local_dataset_registration_initializes_missing_sqlite_schema(tmp_path, 
         db_path=db_path,
     )
 
-    with sqlite3.connect(db_path) as conn:
+    with sqlite_connection(db_path) as conn:
         row = conn.execute(
             """
             SELECT dataset_id, name, source_name, row_count, column_count, sha256
