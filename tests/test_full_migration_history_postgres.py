@@ -760,6 +760,273 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "SELECT count(*) FROM public.shoir_accounts WHERE username_lc=%s;",
                 (username,),
             )[0] == 1
+
+            # Exercise the organisation tenant model using synthetic accounts
+            # and the same service_role used by the Edge Function.
+            enterprise_users = (
+                "e2e-org-successor",
+                "e2e-org-viewer",
+                "e2e-org-engineer",
+                "e2e-org-pending",
+                "e2e-org-other",
+            )
+            with target.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE public.shoir_accounts
+                       SET tier='Enterprise Tier ($299)',
+                           subscription_expires_at=NOW() + interval '365 days'
+                     WHERE username_lc=%s;
+                    """,
+                    (username,),
+                )
+                for synthetic_user in enterprise_users:
+                    cursor.execute(
+                        """
+                        INSERT INTO public.shoir_accounts(
+                            username, username_lc, password_hash, role, tier,
+                            email, created_at, subscription_expires_at, active
+                        )
+                        VALUES (
+                            %s, %s, %s, 'User',
+                            CASE WHEN %s IN ('e2e-org-successor','e2e-org-other')
+                                 THEN 'Enterprise Tier ($299)'
+                                 ELSE 'Starter Tier ($29)' END,
+                            %s, NOW(), NOW() + interval '365 days', TRUE
+                        );
+                        """,
+                        (
+                            synthetic_user,
+                            synthetic_user,
+                            password_hash,
+                            synthetic_user,
+                            synthetic_user + "@example.invalid",
+                        ),
+                    )
+                target.commit()
+
+                cursor.execute("SET ROLE service_role;")
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'INSERT');",
+                )[0] is True
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'UPDATE');",
+                )[0] is False
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'DELETE');",
+                )[0] is False
+                for signature in (
+                    "public.shoir_org_create(text,text)",
+                    "public.shoir_org_invitation_create(text,uuid,text,text,text,timestamp with time zone)",
+                    "public.shoir_org_invitation_accept(text,text)",
+                    "public.shoir_org_invitation_revoke(text,uuid,uuid)",
+                    "public.shoir_org_workspace_archive(text,uuid,uuid)",
+                    "public.shoir_org_resolve_workspace(text,uuid,uuid,text)",
+                ):
+                    assert _fetchone(
+                        target,
+                        "SELECT has_function_privilege('service_role', %s::regprocedure, 'EXECUTE');",
+                        (signature,),
+                    )[0] is True, f"service_role cannot execute {signature}"
+                    assert _fetchone(
+                        target,
+                        "SELECT has_function_privilege('anon', %s::regprocedure, 'EXECUTE');",
+                        (signature,),
+                    )[0] is False, f"anon can execute privileged organisation RPC {signature}"
+                    assert _fetchone(
+                        target,
+                        "SELECT has_function_privilege('authenticated', %s::regprocedure, 'EXECUTE');",
+                        (signature,),
+                    )[0] is False, f"authenticated can execute privileged organisation RPC {signature}"
+
+                cursor.execute(
+                    "SELECT public.shoir_org_create(%s, %s);",
+                    (username, "Synthetic Replay Organization"),
+                )
+                org_result = cursor.fetchone()[0]
+                org = org_result if isinstance(org_result, dict) else json.loads(org_result)
+                organization_id = str(org["organization_id"])
+                general_workspace_id = str(org["workspace_id"])
+
+                cursor.execute(
+                    "SELECT public.shoir_org_workspace_create(%s, %s::uuid, %s);",
+                    (username, organization_id, "Line 3"),
+                )
+                workspace_result = cursor.fetchone()[0]
+                workspace = workspace_result if isinstance(workspace_result, dict) else json.loads(workspace_result)
+                secondary_workspace_id = str(workspace["workspace_id"])
+
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
+                    (
+                        username,
+                        organization_id,
+                        "e2e-org-viewer",
+                        "viewer",
+                        "a" * 64,
+                        (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat(),
+                    ),
+                )
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_accept(%s,%s);",
+                    ("e2e-org-viewer", "a" * 64),
+                )
+                viewer_membership = cursor.fetchone()[0]
+                assert viewer_membership["role"] == "viewer"
+
+                cursor.execute(
+                    "SELECT organization_id, workspace_id, workspace_key, member_role "
+                    "FROM public.shoir_org_resolve_workspace(%s,%s::uuid,%s::uuid,%s);",
+                    ("e2e-org-viewer", organization_id, general_workspace_id, "read"),
+                )
+                assert cursor.fetchone()[3] == "viewer"
+
+                cursor.execute("SAVEPOINT shoir_org_viewer_write_denied;")
+                with pytest.raises(psycopg2.Error) as viewer_write_denied:
+                    cursor.execute(
+                        "SELECT * FROM public.shoir_org_resolve_workspace(%s,%s::uuid,%s::uuid,%s);",
+                        ("e2e-org-viewer", organization_id, general_workspace_id, "write"),
+                    )
+                assert viewer_write_denied.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_viewer_write_denied;")
+
+                cursor.execute(
+                    "SELECT public.shoir_org_member_role_set(%s,%s::uuid,%s,%s);",
+                    (username, organization_id, "e2e-org-viewer", "engineer"),
+                )
+                cursor.execute(
+                    "SELECT member_role FROM public.shoir_org_resolve_workspace(%s,%s::uuid,%s::uuid,%s);",
+                    ("e2e-org-viewer", organization_id, general_workspace_id, "write"),
+                )
+                assert cursor.fetchone()[0] == "engineer"
+
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
+                    (
+                        username,
+                        organization_id,
+                        "e2e-org-pending",
+                        "viewer",
+                        "b" * 64,
+                        (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat(),
+                    ),
+                )
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_revoke(%s,%s::uuid,%s::uuid);",
+                    (username, organization_id, cursor.fetchone()[0]["invitation_id"] if False else "00000000-0000-0000-0000-000000000001"),
+                )
+                # Revoke a known pending invitation and prove it cannot be accepted.
+                cursor.execute(
+                    "SELECT invitation_id FROM public.shoir_organization_invitations WHERE token_hash=%s;",
+                    ("b" * 64,),
+                )
+                pending_invitation_id = str(cursor.fetchone()[0])
+                # The previous revoke attempt is intentionally replaced by the real ID below.
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_revoke(%s,%s::uuid,%s::uuid);",
+                    (username, organization_id, pending_invitation_id),
+                )
+                cursor.execute("SAVEPOINT shoir_org_revoked_invite;")
+                with pytest.raises(psycopg2.Error) as revoked_invite:
+                    cursor.execute(
+                        "SELECT public.shoir_org_invitation_accept(%s,%s);",
+                        ("e2e-org-pending", "b" * 64),
+                    )
+                assert revoked_invite.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_revoked_invite;")
+
+                cursor.execute(
+                    "SELECT public.shoir_org_workspace_archive(%s,%s::uuid,%s::uuid);",
+                    (username, organization_id, secondary_workspace_id),
+                )
+                cursor.execute("SAVEPOINT shoir_org_last_workspace;")
+                with pytest.raises(psycopg2.Error) as last_workspace:
+                    cursor.execute(
+                        "SELECT public.shoir_org_workspace_archive(%s,%s::uuid,%s::uuid);",
+                        (username, organization_id, general_workspace_id),
+                    )
+                assert last_workspace.value.pgcode == "23514"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_last_workspace;")
+
+                # A separate organisation must not be visible through another
+                # organisation's membership, even when the workspace UUID is known.
+                cursor.execute(
+                    "SELECT public.shoir_org_create(%s, %s);",
+                    ("e2e-org-other", "Other Synthetic Organization"),
+                )
+                other_result = cursor.fetchone()[0]
+                other_org = other_result if isinstance(other_result, dict) else json.loads(other_result)
+                other_organization_id = str(other_org["organization_id"])
+                other_workspace_id = str(other_org["workspace_id"])
+                cursor.execute("SAVEPOINT shoir_org_cross_tenant;")
+                with pytest.raises(psycopg2.Error) as cross_tenant:
+                    cursor.execute(
+                        "SELECT * FROM public.shoir_org_resolve_workspace(%s,%s::uuid,%s::uuid,%s);",
+                        ("e2e-org-viewer", other_organization_id, other_workspace_id, "read"),
+                    )
+                assert cross_tenant.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_cross_tenant;")
+
+                # Transfer can happen only to an active Enterprise account which
+                # is already a member. Invite and accept the successor first.
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
+                    (
+                        username,
+                        organization_id,
+                        "e2e-org-successor",
+                        "engineer",
+                        "c" * 64,
+                        (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat(),
+                    ),
+                )
+                cursor.execute(
+                    "SELECT public.shoir_org_invitation_accept(%s,%s);",
+                    ("e2e-org-successor", "c" * 64),
+                )
+                cursor.execute(
+                    "SELECT public.shoir_org_owner_transfer(%s,%s::uuid,%s);",
+                    (username, organization_id, "e2e-org-successor"),
+                )
+                cursor.execute(
+                    "SELECT owner_username_lc FROM public.shoir_organizations WHERE organization_id=%s::uuid;",
+                    (organization_id,),
+                )
+                assert cursor.fetchone()[0] == "e2e-org-successor"
+                cursor.execute(
+                    "SELECT role FROM public.shoir_organization_memberships WHERE organization_id=%s::uuid AND username_lc=%s;",
+                    (organization_id, username),
+                )
+                assert cursor.fetchone()[0] == "admin"
+                cursor.execute("RESET ROLE;")
+                target.commit()
+
+            # Even the database owner cannot update/delete audit history through
+            # ordinary SQL; the append-only trigger rejects both operations.
+            audit_event_id = _fetchone(
+                target,
+                "SELECT event_id FROM public.shoir_organization_audit_events WHERE organization_id=%s::uuid ORDER BY created_at LIMIT 1;",
+                (organization_id,),
+            )[0]
+            for operation in ("UPDATE", "DELETE"):
+                with target.cursor() as cursor:
+                    cursor.execute("SAVEPOINT shoir_org_audit_immutable;")
+                    with pytest.raises(psycopg2.Error) as immutable_audit:
+                        if operation == "UPDATE":
+                            cursor.execute(
+                                "UPDATE public.shoir_organization_audit_events SET event_type='tampered.event' WHERE event_id=%s;",
+                                (audit_event_id,),
+                            )
+                        else:
+                            cursor.execute(
+                                "DELETE FROM public.shoir_organization_audit_events WHERE event_id=%s;",
+                                (audit_event_id,),
+                            )
+                    assert immutable_audit.value.pgcode == "55000"
+                    cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_audit_immutable;")
         finally:
             target.close()
     finally:
