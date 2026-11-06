@@ -199,7 +199,7 @@ export function corsHeadersForOrigin(
   const headers = new Headers({
     "Content-Type": "application/json",
     "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
+      "authorization, x-client-info, apikey, content-type, x-retry-count, traceparent, tracestate, baggage",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   });
