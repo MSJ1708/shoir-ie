@@ -146,7 +146,9 @@ export function normalizeWorkspaceStateJson(
  * corresponding Streamlit deployment. The Python server-to-server caller
  * normally sends no Origin header; it remains subject to action authentication.
  */
-const BROWSER_ORIGINS_BY_PROJECT: Readonly<Record<string, ReadonlySet<string>>> = {
+const BROWSER_ORIGINS_BY_PROJECT: Readonly<
+  Record<string, ReadonlySet<string>>
+> = {
   hfhrosthswcybccepmak: new Set([
     "https://shoirieverified.streamlit.app",
     "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
@@ -161,9 +163,11 @@ const BROWSER_ORIGINS_BY_PROJECT: Readonly<Record<string, ReadonlySet<string>>> 
 function supabaseProjectRef(projectUrl: string): string | null {
   try {
     const parsed = new URL(projectUrl);
-    if (parsed.protocol !== "https:" || parsed.port !== "" ||
+    if (
+      parsed.protocol !== "https:" || parsed.port !== "" ||
       parsed.username !== "" || parsed.password !== "" ||
-      parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+      parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== ""
+    ) {
       return null;
     }
     const match = parsed.hostname.match(/^([a-z0-9-]+)\.supabase\.co$/i);
