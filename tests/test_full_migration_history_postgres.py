@@ -860,6 +860,21 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 workspace = workspace_result if isinstance(workspace_result, dict) else json.loads(workspace_result)
                 secondary_workspace_id = str(workspace["workspace_id"])
 
+                # A suspended organization must not accumulate newly-created
+                # workspaces that cannot subsequently be resolved or accessed.
+                cursor.execute("SAVEPOINT shoir_org_suspended_workspace_create;")
+                cursor.execute(
+                    "UPDATE public.shoir_organizations SET status='suspended' WHERE organization_id=%s::uuid;",
+                    (organization_id,),
+                )
+                with pytest.raises(psycopg2.Error) as suspended_workspace:
+                    cursor.execute(
+                        "SELECT public.shoir_org_workspace_create(%s,%s::uuid,%s);",
+                        (username, organization_id, "Must Not Exist"),
+                    )
+                assert suspended_workspace.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_suspended_workspace_create;")
+
                 cursor.execute(
                     "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
                     (
