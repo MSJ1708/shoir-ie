@@ -6116,3 +6116,161 @@ def assess_capa_8d_records(
         "warning": "This register checks record completeness and status only. It does not verify the truth of root-cause claims, action effectiveness, regulatory compliance or engineering safety.",
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
+
+def calculate_niosh_revised_lifting_equation(
+    load_weight: float,
+    horizontal_distance: float,
+    vertical_hand_start: float,
+    vertical_travel_distance: float,
+    asymmetry_angle: float,
+    frequency_lifts_per_minute: float,
+    frequency_multiplier: float,
+    coupling_multiplier: float,
+    *,
+    units: str = "metric",
+    frequency_duration_category: str = "",
+    coupling_quality: str = "",
+    frequency_multiplier_source: str = "",
+    coupling_multiplier_source: str = "",
+    task_description: str = "",
+) -> dict[str, Any]:
+    """Calculate a single-task NIOSH Revised Lifting Equation (RNLE) screen.
+
+    Frequency and coupling multipliers are explicit inputs taken by the user
+    from the official RNLE tables; they are not guessed or interpolated here.
+    This function does not calculate a multi-task composite lifting index.
+    """
+    unit_system = str(units or "").strip().casefold()
+    if unit_system not in {"metric", "imperial"}:
+        raise ValueError("Units must be either metric or imperial.")
+    load = _finite_number(load_weight, "Load weight")
+    horizontal = _finite_number(horizontal_distance, "Horizontal hand location")
+    vertical = _finite_number(vertical_hand_start, "Vertical hand location")
+    travel = _finite_number(vertical_travel_distance, "Vertical travel distance")
+    asymmetry = _finite_number(asymmetry_angle, "Asymmetry angle")
+    frequency = _finite_number(frequency_lifts_per_minute, "Lift frequency")
+    fm = _finite_number(frequency_multiplier, "Frequency multiplier")
+    cm = _finite_number(coupling_multiplier, "Coupling multiplier")
+    duration = str(frequency_duration_category or "").strip()
+    coupling = str(coupling_quality or "").strip()
+    fm_source = str(frequency_multiplier_source or "").strip()
+    cm_source = str(coupling_multiplier_source or "").strip()
+    description = str(task_description or "").strip()
+
+    if load <= 0:
+        raise ValueError("Load weight must be greater than zero.")
+    if horizontal <= 0:
+        raise ValueError("Horizontal hand location must be greater than zero.")
+    if vertical < 0:
+        raise ValueError("Vertical hand location cannot be negative.")
+    if travel <= 0:
+        raise ValueError("Vertical travel distance must be greater than zero.")
+    if not 0 <= asymmetry <= 135:
+        raise ValueError("Asymmetry angle must be between 0 and 135 degrees.")
+    if not 0 < frequency <= 15:
+        raise ValueError("Lift frequency must be greater than zero and no more than 15 lifts per minute.")
+    if not 0 < fm <= 1:
+        raise ValueError("Frequency multiplier must be greater than zero and no more than 1.")
+    if not 0 < cm <= 1:
+        raise ValueError("Coupling multiplier must be greater than zero and no more than 1.")
+    if duration not in {"Short (≤ 1 hour)", "Moderate (> 1 to 2 hours)", "Long (> 2 to 8 hours)"}:
+        raise ValueError("Select a valid RNLE lifting-duration category.")
+    if coupling not in {"Good", "Fair", "Poor"}:
+        raise ValueError("Select the observed coupling quality.")
+    if not fm_source:
+        raise ValueError("Provide the official RNLE table/source reference used for FM.")
+    if not cm_source:
+        raise ValueError("Provide the official RNLE table/source reference used for CM.")
+
+    if unit_system == "metric":
+        load_constant = 23.0
+        unit = "kg"
+        distance_unit = "cm"
+        horizontal_reference = 25.0
+        max_horizontal = 63.0
+        max_vertical = 175.0
+        min_travel = 25.0
+        horizontal_multiplier = min(1.0, horizontal_reference / horizontal)
+        vertical_multiplier = 1.0 - 0.003 * abs(vertical - 75.0)
+        distance_multiplier = 0.82 + 4.5 / max(travel, min_travel)
+    else:
+        load_constant = 51.0
+        unit = "lb"
+        distance_unit = "in"
+        horizontal_reference = 10.0
+        max_horizontal = 25.0
+        max_vertical = 70.0
+        min_travel = 10.0
+        horizontal_multiplier = min(1.0, horizontal_reference / horizontal)
+        vertical_multiplier = 1.0 - 0.0075 * abs(vertical - 30.0)
+        distance_multiplier = 0.82 + 1.8 / max(travel, min_travel)
+
+    if horizontal > max_horizontal:
+        raise ValueError(
+            f"Horizontal hand location exceeds the RNLE limit of {max_horizontal:g} {distance_unit}."
+        )
+    if vertical > max_vertical:
+        raise ValueError(
+            f"Vertical hand location exceeds the RNLE limit of {max_vertical:g} {distance_unit}."
+        )
+    if travel > (175.0 if unit_system == "metric" else 70.0):
+        raise ValueError("Vertical travel distance is outside the RNLE application range.")
+
+    vertical_multiplier = max(0.0, vertical_multiplier)
+    asymmetry_multiplier = 1.0 - 0.0032 * asymmetry
+    multipliers = {
+        "Horizontal multiplier (HM)": horizontal_multiplier,
+        "Vertical multiplier (VM)": vertical_multiplier,
+        "Distance multiplier (DM)": distance_multiplier,
+        "Asymmetry multiplier (AM)": asymmetry_multiplier,
+        "Frequency multiplier (FM)": fm,
+        "Coupling multiplier (CM)": cm,
+    }
+    rwl = load_constant
+    for multiplier in multipliers.values():
+        rwl *= multiplier
+    if not math.isfinite(rwl) or rwl <= 0:
+        raise ValueError("The calculated recommended weight limit is zero or invalid for these inputs.")
+    lifting_index = load / rwl
+    status = "LI_AT_OR_BELOW_1" if lifting_index <= 1.0 else "LI_ABOVE_1_REVIEW_REQUIRED"
+    table = pd.DataFrame([
+        {"Multiplier": name, "Value": value}
+        for name, value in multipliers.items()
+    ])
+    return {
+        "status": status,
+        "method": "NIOSH Revised Lifting Equation — single-task screening calculation",
+        "task_description": description or "NOT PROVIDED",
+        "units": unit_system,
+        "load_weight": load,
+        "load_unit": unit,
+        "horizontal_distance": horizontal,
+        "vertical_hand_start": vertical,
+        "vertical_travel_distance": travel,
+        "distance_unit": distance_unit,
+        "asymmetry_angle_degrees": asymmetry,
+        "frequency_lifts_per_minute": frequency,
+        "frequency_duration_category": duration,
+        "coupling_quality": coupling,
+        "load_constant": load_constant,
+        "recommended_weight_limit": rwl,
+        "recommended_weight_limit_unit": unit,
+        "lifting_index": lifting_index,
+        "multipliers": multipliers,
+        "multiplier_table": table,
+        "frequency_multiplier_source": fm_source,
+        "coupling_multiplier_source": cm_source,
+        "formula": "RWL = LC × HM × VM × DM × AM × FM × CM; LI = actual load / RWL",
+        "assumptions": (
+            "Single-task, two-handed lifting only. FM and CM are user-supplied values "
+            "read from the applicable official RNLE tables for the task frequency, "
+            "duration, coupling and other table conditions."
+        ),
+        "warning": (
+            "A lifting index at or below 1 is a screening goal, not proof of safety. "
+            "This calculation does not assess multi-task Composite Lifting Index, "
+            "one-handed or seated lifting, carrying, pushing, pulling, unstable loads, "
+            "or all workplace hazards. Confirm measurements and table lookups with a "
+            "qualified ergonomics professional and assess the whole task and workforce."
+        ),
+    }
