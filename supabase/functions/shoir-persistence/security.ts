@@ -456,6 +456,11 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
   return { rowCount, columnCount, headers };
 }
 
+/** Only POST may dispatch API actions; OPTIONS is handled by the HTTP boundary. */
+export function isAllowedApiMethod(method: string): boolean {
+  return method.toUpperCase() === "POST";
+}
+
 export function publicErrorFor(
   error: unknown,
 ): { status: number; message: string } {
