@@ -557,7 +557,8 @@ BEGIN
        AND o.status = 'active'
      WHERE m.organization_id = p_organization_id
        AND m.username_lc = v_actor
-       AND m.status = 'active';
+       AND m.status = 'active'
+     FOR UPDATE OF m, o;
     IF v_role IS NULL OR v_role NOT IN ('owner','admin') THEN
         RAISE EXCEPTION 'Organization workspace creation permission denied.' USING ERRCODE = '42501';
     END IF;
