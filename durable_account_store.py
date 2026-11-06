@@ -250,6 +250,12 @@ def edge_organization_action(
     """Call one allow-listed, session-authenticated organization operation."""
     if action not in _ORGANIZATION_EDGE_ACTIONS:
         raise ValueError("Organization operation is not supported.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError(
+            "Organization workspace actions require explicit SHOIR_ENVIRONMENT=staging configuration."
+        )
+    if not edge_backend_configured():
+        raise RuntimeError("The staging organization persistence endpoint is not configured.")
     actor = str(username or "").strip()
     bearer = str(token or "")
     if not actor or not bearer:
