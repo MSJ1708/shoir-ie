@@ -250,6 +250,11 @@ def test_organization_workspace_migration_is_server_only_and_preserves_legacy_ke
     assert "shoir_org_resolve_workspace" in normalized
     assert "shoir_org_resolve_legacy_workspace" in normalized
     assert "token_hash text not null unique" in normalized
+    assert "grant select, insert on table public.shoir_organization_audit_events to service_role" in normalized
+    assert "grant select, insert, update, delete on table public.shoir_organization_audit_events" not in normalized
+    assert "shoir_org_audit_events_immutable" in normalized
+    assert "before update or delete on public.shoir_organization_audit_events" in normalized
+    assert "organization audit events are append-only" in normalized
     assert "v_inv.target_username_lc <> v_actor" in normalized
     assert "used_at is null" in normalized
     # Existing account-derived keys are registered lazily; no platform records,
