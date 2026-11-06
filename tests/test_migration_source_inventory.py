@@ -247,6 +247,8 @@ def test_organization_workspace_migration_is_server_only_and_preserves_legacy_ke
     assert "to service_role" in normalized
     assert "using (false) with check (false)" in normalized
     assert "shoir_org_invitation_accept" in normalized
+    assert "shoir_org_invitation_revoke" in normalized
+    assert "shoir_org_workspace_archive" in normalized
     assert "shoir_org_resolve_workspace" in normalized
     assert "shoir_org_resolve_legacy_workspace" in normalized
     assert "token_hash text not null unique" in normalized
@@ -286,5 +288,11 @@ def test_organization_owner_and_invitation_lifecycle_is_fail_closed():
     assert "v_inv.revoked_at is not null" in normalized
     assert "the organization account is inactive" in normalized
     assert "new owner account is inactive" in normalized
+    assert "last active organization workspace cannot be archived" in normalized
+    assert "invitation is missing, expired, used or already revoked" in normalized
+    assert "revoke all on function public.shoir_org_invitation_revoke(text,uuid,uuid)" in normalized
+    assert "grant execute on function public.shoir_org_invitation_revoke(text,uuid,uuid) to service_role" in normalized
+    assert "revoke all on function public.shoir_org_workspace_archive(text,uuid,uuid)" in normalized
+    assert "grant execute on function public.shoir_org_workspace_archive(text,uuid,uuid) to service_role" in normalized
     assert "revoke all on function public.shoir_org_owner_transfer(text,uuid,text)" in normalized
     assert "grant execute on function public.shoir_org_owner_transfer(text,uuid,text) to service_role" in normalized
