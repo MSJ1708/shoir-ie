@@ -470,6 +470,106 @@ async function platformWorkspaceKey(
   return (await sha256Hex(user + "::" + scope)).slice(0, 32);
 }
 
+const ORGANIZATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function validatedOrganizationId(value: unknown): string {
+  const id = String(value || "").trim();
+  if (!ORGANIZATION_ID_PATTERN.test(id)) {
+    throw new Error("Organization identifier is invalid.");
+  }
+  return id;
+}
+
+function requireOrganizationTier(row: Record<string, unknown>): void {
+  if (!platformTierAllows(row.tier, "Enterprise")) {
+    throw new Error("Organization workspaces require an active Enterprise subscription.");
+  }
+  if (
+    row.active !== true ||
+    isExpired(typeof row.subscription_expires_at === "string"
+      ? row.subscription_expires_at
+      : null)
+  ) {
+    throw new Error("The organization owner subscription is inactive or expired.");
+  }
+}
+
+async function organizationForActor(
+  actor: string,
+  organizationIdValue: unknown,
+  requireManage = false,
+): Promise<{ organization: Record<string, unknown>; role: string }> {
+  const organizationId = validatedOrganizationId(organizationIdValue);
+  const { data: organization, error: organizationError } = await supabase
+    .from("shoir_organizations")
+    .select("organization_id,display_name,org_type,owner_username_lc,status")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (organizationError) throw organizationError;
+  if (!organization || organization.status !== "active") {
+    throw new Error("Active organization was not found.");
+  }
+  const { data: membership, error: membershipError } = await supabase
+    .from("shoir_organization_memberships")
+    .select("role,status")
+    .eq("organization_id", organizationId)
+    .eq("username_lc", actor)
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership || membership.status !== "active") {
+    throw new Error("Active organization membership is required.");
+  }
+  const role = String(membership.role || "");
+  if (requireManage && !["owner", "admin"].includes(role)) {
+    throw new Error("Organization management permission is required.");
+  }
+  if (organization.org_type === "team") {
+    const owner = await getAccount(String(organization.owner_username_lc || ""));
+    if (!owner) throw new Error("Organization owner account was not found.");
+    requireOrganizationTier(owner as Record<string, unknown>);
+  }
+  return { organization: organization as Record<string, unknown>, role };
+}
+
+async function resolveManagedWorkspaceKey(
+  row: Record<string, unknown>,
+  body: Record<string, unknown>,
+  permission: "read" | "write" | "approve" | "manage",
+): Promise<string> {
+  const organizationId = String(body.organization_id || "").trim();
+  const workspaceId = String(body.organization_workspace_id || "").trim();
+  if (!organizationId && !workspaceId) {
+    return await platformWorkspaceKey(
+      String(row.username_lc || ""),
+      String(body.workspace || "default"),
+    );
+  }
+  if (!organizationId || !workspaceId) {
+    throw new Error("Both organization_id and organization_workspace_id are required.");
+  }
+  const organization = await organizationForActor(
+    String(row.username_lc || ""),
+    organizationId,
+  );
+  if (!ORGANIZATION_ID_PATTERN.test(workspaceId)) {
+    throw new Error("Organization workspace identifier is invalid.");
+  }
+  const { data, error } = await supabase.rpc("shoir_org_resolve_workspace", {
+    p_actor: String(row.username_lc || ""),
+    p_organization_id: organizationId,
+    p_workspace_id: workspaceId,
+    p_permission: permission,
+  });
+  if (error) throw new Error("Organization workspace access was denied.");
+  const resolved = Array.isArray(data) ? data[0] : data;
+  const key = String(resolved?.workspace_key || "");
+  if (!/^[0-9a-f]{32}$/.test(key)) {
+    throw new Error("Organization workspace could not be resolved.");
+  }
+  return key;
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
   if (!isAllowedBrowserOrigin(origin, SUPABASE_URL)) {
@@ -959,6 +1059,269 @@ Deno.serve(async (req) => {
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
 
+    if (action === "org_list_session") {
+      const username = String(body.username || "").trim();
+      const actor = await getSession(String(body.token || ""), username, "workspace");
+      const { data, error } = await supabase.from("shoir_organization_memberships")
+        .select("organization_id,role,status,joined_at")
+        .eq("username_lc", actor.username_lc)
+        .eq("status", "active")
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      const memberships = data || [];
+      const organizationIds = memberships.map((item) => item.organization_id);
+      if (!organizationIds.length) return sendResponse({ ok: true, organizations: [] });
+      const { data: organizations, error: organizationError } = await supabase
+        .from("shoir_organizations")
+        .select("organization_id,display_name,org_type,owner_username_lc,status")
+        .in("organization_id", organizationIds)
+        .eq("status", "active")
+        .order("display_name", { ascending: true });
+      if (organizationError) throw organizationError;
+      const byId = new Map((organizations || []).map((item) => [
+        item.organization_id,
+        item,
+      ]));
+      const result = memberships.flatMap((membership) => {
+        const organization = byId.get(membership.organization_id);
+        if (!organization) return [];
+        return [{
+          organization_id: organization.organization_id,
+          display_name: organization.display_name,
+          org_type: organization.org_type,
+          owner_username_lc: organization.owner_username_lc,
+          role: membership.role,
+          joined_at: membership.joined_at,
+        }];
+      });
+      return sendResponse({ ok: true, organizations: result });
+    }
+
+    if (action === "org_create_session") {
+      const username = String(body.username || "").trim();
+      const actor = await getSession(String(body.token || ""), username, "workspace");
+      requireOrganizationTier(actor as Record<string, unknown>);
+      const displayName = String(body.display_name || "").trim();
+      if (displayName.length < 2 || displayName.length > 120) {
+        return sendResponse({ error: "Organization name must contain 2 to 120 characters." }, 400);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_create", {
+        p_actor: actor.username_lc,
+        p_display_name: displayName,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, organization: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_workspace_list_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      const { data, error } = await supabase.from("shoir_organization_workspaces")
+        .select("workspace_id,display_name,name_key,status,created_at,updated_at")
+        .eq("organization_id", String(membership.organization.organization_id))
+        .eq("status", "active")
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        role: membership.role,
+        workspaces: data || [],
+      });
+    }
+
+    if (action === "org_member_list_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      const { data, error } = await supabase.from("shoir_organization_memberships")
+        .select("username_lc,role,status,joined_at,created_at,updated_at")
+        .eq("organization_id", String(membership.organization.organization_id))
+        .eq("status", "active")
+        .order("role", { ascending: true })
+        .order("username_lc", { ascending: true });
+      if (error) throw error;
+      return sendResponse({ ok: true, role: membership.role, members: data || [] });
+    }
+
+    if (action === "org_invitation_create_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      if (membership.organization.org_type !== "team") {
+        return sendResponse({ error: "Invitations are available only for team organizations." }, 403);
+      }
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      const role = String(body.role || "viewer").trim().toLowerCase();
+      if (!target || target.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(target)) {
+        return sendResponse({ error: "Invitation username is invalid." }, 400);
+      }
+      if (!["admin", "engineer", "approver", "viewer"].includes(role)) {
+        return sendResponse({ error: "Invitation role is invalid." }, 400);
+      }
+      const lifetimeDays = Number(body.lifetime_days ?? 7);
+      if (!Number.isInteger(lifetimeDays) || lifetimeDays < 1 || lifetimeDays > 30) {
+        return sendResponse({ error: "Invitation lifetime must be between 1 and 30 days." }, 400);
+      }
+      const tokenBytes = new Uint8Array(32);
+      crypto.getRandomValues(tokenBytes);
+      const invitationToken = bytesToHex(tokenBytes);
+      const tokenHash = await sha256Hex(invitationToken);
+      const expiresAt = new Date(Date.now() + lifetimeDays * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase.rpc("shoir_org_invitation_create", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+        p_role: role,
+        p_token_hash: tokenHash,
+        p_expires_at: expiresAt,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        invitation: Array.isArray(data) ? data[0] : data,
+        invitation_token: invitationToken,
+        token_notice: "Copy this token now. It is stored only as a SHA-256 hash and cannot be retrieved again.",
+      });
+    }
+
+    if (action === "org_invitation_accept_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const invitationToken = String(body.invitation_token || "").trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(invitationToken)) {
+        return sendResponse({ error: "Invitation token is invalid." }, 400);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_invitation_accept", {
+        p_actor: actor.username_lc,
+        p_token_hash: await sha256Hex(invitationToken),
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, membership: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_invitation_list_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const { data, error } = await supabase.from("shoir_organization_invitations")
+        .select("invitation_id,target_username_lc,role,created_by_username_lc,expires_at,used_at,revoked_at,accepted_by_username_lc,created_at")
+        .eq("organization_id", String(membership.organization.organization_id))
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return sendResponse({ ok: true, invitations: data || [] });
+    }
+
+    if (action === "org_invitation_revoke_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const invitationId = validatedOrganizationId(body.invitation_id);
+      const { data, error } = await supabase.rpc("shoir_org_invitation_revoke", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_invitation_id: invitationId,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_member_role_set_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      const newRole = String(body.role || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const { data, error } = await supabase.rpc("shoir_org_member_role_set", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+        p_role: newRole,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_member_remove_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const { data, error } = await supabase.rpc("shoir_org_member_remove", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_owner_transfer_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "New owner username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(actor.username_lc, body.organization_id);
+      const { data, error } = await supabase.rpc("shoir_org_owner_transfer", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_workspace_create_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const displayName = String(body.display_name || "").trim();
+      if (!displayName || displayName.length > 120) {
+        return sendResponse({ error: "Workspace name must contain 1 to 120 characters." }, 400);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_workspace_create", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_display_name: displayName,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, workspace: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_workspace_archive_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const workspaceId = validatedOrganizationId(body.organization_workspace_id);
+      const { data, error } = await supabase.rpc("shoir_org_workspace_archive", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_workspace_id: workspaceId,
+      });
+      if (error) throw error;
+      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+    }
+
+    if (action === "org_audit_list_session") {
+      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const limit = Number(body.limit ?? 100);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return sendResponse({ error: "Audit event page size must be between 1 and 200." }, 400);
+      }
+      const { data, error } = await supabase.from("shoir_organization_audit_events")
+        .select("event_id,actor_username_lc,subject_username_lc,event_type,payload_json,created_at")
+        .eq("organization_id", String(membership.organization.organization_id))
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return sendResponse({ ok: true, events: data || [] });
+    }
+
     if (action === "dataset_download_url") {
       const username = String(body.username || "").trim();
       const row = await getSession(
@@ -970,9 +1333,10 @@ Deno.serve(async (req) => {
         row as unknown as Record<string, unknown>,
       );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
-      const workspaceKey = await platformWorkspaceKey(
-        row.username_lc,
-        String(body.workspace || "default"),
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "read",
       );
       const datasetId = String(body.dataset_id || "").trim();
       const requestedVersion = body.version == null || body.version === ""
@@ -1052,9 +1416,10 @@ Deno.serve(async (req) => {
         row as unknown as Record<string, unknown>,
       );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
-      const workspaceKey = await platformWorkspaceKey(
-        row.username_lc,
-        String(body.workspace || "default"),
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
       );
       const datasetId = String(body.dataset_id || "").trim();
       const dataHash = String(body.data_hash || "").toLowerCase();
@@ -1098,9 +1463,10 @@ Deno.serve(async (req) => {
         row as unknown as Record<string, unknown>,
       );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
-      const workspaceKey = await platformWorkspaceKey(
-        row.username_lc,
-        String(body.workspace || "default"),
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
       );
       const datasetId = String(body.dataset_id || "").trim();
       const uploadPath = String(body.upload_path || "").trim();
@@ -1299,9 +1665,10 @@ Deno.serve(async (req) => {
         row as unknown as Record<string, unknown>,
       );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
-      const workspaceKey = await platformWorkspaceKey(
-        row.username_lc,
-        String(body.workspace || "default"),
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
       );
       const datasetId = String(body.dataset_id || "").trim();
       const name = String(body.name || "").trim();
@@ -1389,9 +1756,10 @@ Deno.serve(async (req) => {
       const payload = validatePlatformPayload(body.payload);
       const canonical = stablePlatformJson(payload);
       const contentHash = await sha256Hex(canonical);
-      const workspaceKey = await platformWorkspaceKey(
-        row.username_lc,
-        String(body.workspace || "default"),
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
       );
       const recordId = "SPR-" +
         crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
@@ -1421,9 +1789,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const workspaceKey = await platformWorkspaceKey(
-        row.username_lc,
-        String(body.workspace || "default"),
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "read",
       );
       const recordType = String(body.record_type || "").trim().toLowerCase();
       if (recordType && !PLATFORM_RECORD_TYPES.has(recordType)) {
