@@ -272,6 +272,13 @@ DECLARE
     v_actor text := lower(btrim(p_actor));
     v_inv public.shoir_organization_invitations%ROWTYPE;
 BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM public.shoir_organizations
+        WHERE organization_id = (SELECT organization_id FROM public.shoir_organization_invitations WHERE token_hash = p_token_hash)
+          AND org_type = 'team' AND status = 'active'
+    ) THEN
+        RAISE EXCEPTION 'Active team organization is required.' USING ERRCODE = '42501';
+    END IF;
     IF v_actor IS NULL OR v_actor = '' OR p_token_hash IS NULL OR p_token_hash !~ '^[0-9a-f]{64}$' THEN
         RAISE EXCEPTION 'Invalid invitation acceptance input.' USING ERRCODE = '22023';
     END IF;
@@ -394,6 +401,9 @@ BEGIN
      WHERE organization_id = p_organization_id
        AND username_lc = v_target AND status = 'active'
      FOR UPDATE;
+    IF NOT EXISTS (SELECT 1 FROM public.shoir_accounts WHERE username_lc = v_target AND COALESCE(active, true)) THEN
+        RAISE EXCEPTION 'New owner account is inactive.' USING ERRCODE = '42501';
+    END IF;
     IF v_target_role IS NULL OR v_target_role NOT IN ('admin','engineer','approver','viewer') THEN
         RAISE EXCEPTION 'The new owner must be an active organization member.' USING ERRCODE = '42501';
     END IF;
@@ -519,6 +529,12 @@ BEGIN
        AND m.status = 'active' AND o.status = 'active';
     IF v_role IS NULL THEN
         RAISE EXCEPTION 'Organization membership is required.' USING ERRCODE = '42501';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.shoir_accounts
+        WHERE username_lc = lower(btrim(p_actor)) AND COALESCE(active, true)
+    ) THEN
+        RAISE EXCEPTION 'The organization account is inactive.' USING ERRCODE = '42501';
     END IF;
     IF p_permission NOT IN ('read','write','approve','manage') THEN
         RAISE EXCEPTION 'Invalid workspace permission request.' USING ERRCODE = '22023';
