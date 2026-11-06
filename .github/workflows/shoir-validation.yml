@@ -31,7 +31,7 @@ jobs:
           PYTHONTRACEMALLOC: "5"
         run: |
           mkdir -p artifacts/test-results
-          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -q -ra --junitxml=artifacts/test-results/junit.xml tests
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -q tests -ra --junitxml=artifacts/test-results/junit.xml
       - name: Upload regression test results and skip/warning detail
         if: always()
         uses: actions/upload-artifact@v7.0.2
