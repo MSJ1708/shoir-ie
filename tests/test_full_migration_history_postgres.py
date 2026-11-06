@@ -882,6 +882,15 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 assert suspended_workspace.value.pgcode == "42501"
                 cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_suspended_workspace_create;")
 
+                cursor.execute("SAVEPOINT shoir_org_null_invite_expiry;")
+                with pytest.raises(psycopg2.Error) as null_invite_expiry:
+                    cursor.execute(
+                        "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
+                        (username, organization_id, "e2e-org-viewer", "viewer", "d" * 64, None),
+                    )
+                assert null_invite_expiry.value.pgcode == "22023"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_null_invite_expiry;")
+
                 cursor.execute(
                     "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
                     (
