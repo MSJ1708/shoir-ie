@@ -885,6 +885,17 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 )
                 assert cursor.fetchone()[3] == "viewer"
 
+                # NULL is not a valid permission: SQL three-valued logic must
+                # not allow it to skip the explicit permission allow-list.
+                cursor.execute("SAVEPOINT shoir_org_null_permission;")
+                with pytest.raises(psycopg2.Error) as null_permission:
+                    cursor.execute(
+                        "SELECT * FROM public.shoir_org_resolve_workspace(%s,%s::uuid,%s::uuid,%s);",
+                        ("e2e-org-viewer", organization_id, general_workspace_id, None),
+                    )
+                assert null_permission.value.pgcode == "22023"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_null_permission;")
+
                 cursor.execute("SAVEPOINT shoir_org_viewer_write_denied;")
                 with pytest.raises(psycopg2.Error) as viewer_write_denied:
                     cursor.execute(
@@ -893,6 +904,15 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     )
                 assert viewer_write_denied.value.pgcode == "42501"
                 cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_viewer_write_denied;")
+
+                cursor.execute("SAVEPOINT shoir_org_null_role;")
+                with pytest.raises(psycopg2.Error) as null_role:
+                    cursor.execute(
+                        "SELECT public.shoir_org_member_role_set(%s,%s::uuid,%s,%s);",
+                        (username, organization_id, "e2e-org-viewer", None),
+                    )
+                assert null_role.value.pgcode == "22023"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_null_role;")
 
                 cursor.execute(
                     "SELECT public.shoir_org_member_role_set(%s,%s::uuid,%s,%s);",
