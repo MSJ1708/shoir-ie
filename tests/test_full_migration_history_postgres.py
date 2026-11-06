@@ -990,6 +990,49 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 assert last_workspace.value.pgcode == "23514"
                 cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_last_workspace;")
 
+                # Suspended organizations cannot be mutated. Each call runs
+                # inside its own savepoint so its expected SQL error does not
+                # abort the outer migration-replay transaction.
+                cursor.execute("SAVEPOINT shoir_org_suspended_mutations;")
+                cursor.execute(
+                    "UPDATE public.shoir_organizations SET status='suspended' WHERE organization_id=%s::uuid;",
+                    (organization_id,),
+                )
+                suspended_mutations = [
+                    (
+                        "SELECT public.shoir_org_workspace_create(%s,%s::uuid,%s);",
+                        (username, organization_id, "Suspended Org Workspace"),
+                    ),
+                    (
+                        "SELECT public.shoir_org_workspace_archive(%s,%s::uuid,%s::uuid);",
+                        (username, organization_id, general_workspace_id),
+                    ),
+                    (
+                        "SELECT public.shoir_org_member_role_set(%s,%s::uuid,%s,%s);",
+                        (username, organization_id, "e2e-org-viewer", "engineer"),
+                    ),
+                    (
+                        "SELECT public.shoir_org_member_remove(%s,%s::uuid,%s);",
+                        (username, organization_id, "e2e-org-viewer"),
+                    ),
+                    (
+                        "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
+                        (
+                            username, organization_id, "e2e-org-pending", "viewer",
+                            "c" * 64,
+                            (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat(),
+                        ),
+                    ),
+                ]
+                for index, (statement, parameters) in enumerate(suspended_mutations):
+                    savepoint = f"shoir_org_suspended_mutation_{index}"
+                    cursor.execute(f"SAVEPOINT {savepoint};")
+                    with pytest.raises(psycopg2.Error) as suspended_mutation:
+                        cursor.execute(statement, parameters)
+                    assert suspended_mutation.value.pgcode == "42501"
+                    cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint};")
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_suspended_mutations;")
+
                 # A separate organisation must not be visible through another
                 # organisation's membership, even when the workspace UUID is known.
                 cursor.execute(
