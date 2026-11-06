@@ -248,7 +248,7 @@ BEGIN
     IF p_organization_id IS NULL OR v_actor IS NULL OR v_actor = ''
        OR v_target IS NULL OR v_target = '' OR length(v_target) > 128
        OR v_target ~ '[[:space:][:cntrl:]]'
-       OR v_role NOT IN ('admin','engineer','approver','viewer')
+       OR v_role IS NULL OR v_role NOT IN ('admin','engineer','approver','viewer')
        OR p_token_hash IS NULL OR p_token_hash !~ '^[0-9a-f]{64}$'
        OR p_expires_at <= now() OR p_expires_at > now() + interval '30 days' THEN
         RAISE EXCEPTION 'Invalid organization invitation input.' USING ERRCODE = '22023';
@@ -396,7 +396,7 @@ DECLARE
     v_old_role text;
 BEGIN
     IF p_organization_id IS NULL OR v_actor IS NULL OR v_target IS NULL
-       OR v_new_role NOT IN ('admin','engineer','approver','viewer') THEN
+       OR v_new_role IS NULL OR v_new_role NOT IN ('admin','engineer','approver','viewer') THEN
         RAISE EXCEPTION 'Invalid organization role update input.' USING ERRCODE = '22023';
     END IF;
     SELECT role INTO v_actor_role
@@ -727,7 +727,7 @@ BEGIN
         RAISE EXCEPTION 'Organization owner Enterprise subscription is inactive or expired.'
             USING ERRCODE = '42501';
     END IF;
-    IF p_permission NOT IN ('read','write','approve','manage') THEN
+    IF p_permission IS NULL OR p_permission NOT IN ('read','write','approve','manage') THEN
         RAISE EXCEPTION 'Invalid workspace permission request.' USING ERRCODE = '22023';
     END IF;
     IF (p_permission = 'write' AND v_role NOT IN ('owner','admin','engineer'))
