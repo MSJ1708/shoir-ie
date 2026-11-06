@@ -476,6 +476,9 @@ export function publicErrorFor(
   if (message === "Admin authorization failed.") {
     return { status: 403, message };
   }
+  if (message === "Administrator account requires manual security review.") {
+    return { status: 503, message };
+  }
   if (message === "SUBSCRIPTION_EXPIRED") {
     return { status: 403, message: "SUBSCRIPTION_EXPIRED" };
   }
