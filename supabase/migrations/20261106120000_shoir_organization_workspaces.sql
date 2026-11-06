@@ -124,9 +124,34 @@ FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.shoir_organizations,
     public.shoir_organization_memberships,
     public.shoir_organization_invitations,
-    public.shoir_organization_workspaces,
-    public.shoir_organization_audit_events
+    public.shoir_organization_workspaces
 TO service_role;
+-- Organisation audit events are append-only for application roles. The service
+-- role may read and append events, but cannot update or delete history.
+GRANT SELECT, INSERT ON TABLE public.shoir_organization_audit_events
+TO service_role;
+
+CREATE OR REPLACE FUNCTION public.shoir_org_audit_events_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $function$
+BEGIN
+    RAISE EXCEPTION 'Organization audit events are append-only.'
+        USING ERRCODE = '55000';
+    RETURN NULL;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.shoir_org_audit_events_immutable()
+FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.shoir_org_audit_events_immutable()
+TO service_role;
+
+CREATE TRIGGER shoir_org_audit_events_no_update_delete
+    BEFORE UPDATE OR DELETE ON public.shoir_organization_audit_events
+    FOR EACH ROW
+    EXECUTE FUNCTION public.shoir_org_audit_events_immutable();
 
 CREATE POLICY shoir_organizations_deny_browser_roles
     ON public.shoir_organizations FOR ALL TO anon, authenticated
