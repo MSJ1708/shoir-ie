@@ -228,6 +228,14 @@ async function getSession(
   }
   const row = await getAccount(data.username_lc);
   if (!row || row.active === false) throw new Error("Account is inactive.");
+  // Re-check the immutable reserved-administrator invariant for every
+  // already-issued session, not only at the moment of login.
+  if (
+    row.username_lc === "sho" &&
+    !hasCanonicalMasterAdminInvariant(row)
+  ) {
+    throw new Error("Administrator account requires manual security review.");
+  }
   if (
     requiredScope === "workspace" &&
     !(row.username_lc === "sho" && row.role === "Enterprise Admin") &&
