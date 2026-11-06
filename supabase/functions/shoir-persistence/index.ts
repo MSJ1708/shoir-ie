@@ -271,6 +271,38 @@ function datasetEntitlementDenial(
   };
 }
 
+async function datasetEntitlementDenialForRequest(
+  row: Record<string, unknown>,
+  body: Record<string, unknown>,
+): Promise<{
+  error: string;
+  required_tier: string;
+  current_tier: string;
+} | null> {
+  const organizationId = String(body.organization_id || "").trim();
+  const workspaceId = String(body.organization_workspace_id || "").trim();
+  if (organizationId || workspaceId) {
+    if (!organizationId || !workspaceId) {
+      return {
+        error: "ORGANIZATION_WORKSPACE_ACCESS_DENIED",
+        required_tier: "Active Enterprise organization membership",
+        current_tier: String(row.tier || "Starter"),
+      };
+    }
+    try {
+      await organizationForActor(String(row.username_lc || ""), organizationId);
+      return null;
+    } catch {
+      return {
+        error: "ORGANIZATION_WORKSPACE_ACCESS_DENIED",
+        required_tier: "Active Enterprise organization membership",
+        current_tier: String(row.tier || "Starter"),
+      };
+    }
+  }
+  return datasetEntitlementDenial(row);
+}
+
 async function adminSession(username: string, token: string) {
   const row = await getSession(token, username);
   if (row.username_lc !== "sho" || row.role !== "Enterprise Admin") {
@@ -1329,9 +1361,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = datasetEntitlementDenial(
-        row as unknown as Record<string, unknown>,
-      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+          row as unknown as Record<string, unknown>,
+          body,
+        );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1412,9 +1445,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = datasetEntitlementDenial(
-        row as unknown as Record<string, unknown>,
-      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+          row as unknown as Record<string, unknown>,
+          body,
+        );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1459,9 +1493,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = datasetEntitlementDenial(
-        row as unknown as Record<string, unknown>,
-      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+          row as unknown as Record<string, unknown>,
+          body,
+        );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1661,9 +1696,10 @@ Deno.serve(async (req) => {
         username,
         "workspace",
       );
-      const entitlementResponse = datasetEntitlementDenial(
-        row as unknown as Record<string, unknown>,
-      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+          row as unknown as Record<string, unknown>,
+          body,
+        );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1735,8 +1771,9 @@ Deno.serve(async (req) => {
       const row = await getSession(token, username, "workspace");
       const recordType = String(body.record_type || "").trim().toLowerCase();
       if (recordType === "dataset" || recordType === "dataset_version") {
-        const entitlementResponse = datasetEntitlementDenial(
+        const entitlementResponse = await datasetEntitlementDenialForRequest(
           row as unknown as Record<string, unknown>,
+          body,
         );
         if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       }
@@ -1802,8 +1839,9 @@ Deno.serve(async (req) => {
         );
       }
       if (recordType === "dataset" || recordType === "dataset_version") {
-        const entitlementResponse = datasetEntitlementDenial(
+        const entitlementResponse = await datasetEntitlementDenialForRequest(
           row as unknown as Record<string, unknown>,
+          body,
         );
         if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       }
