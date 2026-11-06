@@ -141,30 +141,57 @@ export function normalizeWorkspaceStateJson(
 }
 
 /**
- * Browser origins allowed to call this function directly.
- *
- * Keep this list aligned with the Streamlit app host/origin allowlists. The
- * Python server-to-server caller normally sends no Origin header; that traffic
- * remains supported and must still satisfy action-level authentication.
+ * Browser origins are bound to the Supabase project, not shared between
+ * staging and production. Keep these exact origins aligned with the
+ * corresponding Streamlit deployment. The Python server-to-server caller
+ * normally sends no Origin header; it remains subject to action authentication.
  */
-const ALLOWED_BROWSER_ORIGINS = new Set<string>([
-  "https://shoir-ie-app.streamlit.app",
-  "https://shoirieverified.streamlit.app",
-  "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
-  "http://127.0.0.1:8501",
-  "http://localhost:8501",
-]);
+const BROWSER_ORIGINS_BY_PROJECT: Readonly<Record<string, ReadonlySet<string>>> = {
+  hfhrosthswcybccepmak: new Set([
+    "https://shoirieverified.streamlit.app",
+    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+    "http://127.0.0.1:8501",
+    "http://localhost:8501",
+  ]),
+  gcsamrdaeraxieaagsta: new Set([
+    "https://shoir-ie-app.streamlit.app",
+  ]),
+};
 
-/** Missing Origin is allowed for non-browser server-to-server clients only. */
-export function isAllowedBrowserOrigin(origin: string | null): boolean {
-  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+function supabaseProjectRef(projectUrl: string): string | null {
+  try {
+    const parsed = new URL(projectUrl);
+    if (parsed.protocol !== "https:" || parsed.port !== "" ||
+      parsed.username !== "" || parsed.password !== "" ||
+      parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+      return null;
+    }
+    const match = parsed.hostname.match(/^([a-z0-9-]+)\.supabase\.co$/i);
+    return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Missing Origin is allowed only for non-browser server-to-server clients. */
+export function isAllowedBrowserOrigin(
+  origin: string | null,
+  projectUrl: string,
+): boolean {
+  if (origin === null) return true;
+  const projectRef = supabaseProjectRef(projectUrl);
+  if (!projectRef) return false;
+  return BROWSER_ORIGINS_BY_PROJECT[projectRef]?.has(origin) ?? false;
 }
 
 /**
- * Return restrictive CORS headers. Never emit a wildcard origin; callers must
- * reject non-allowlisted Origin values before reaching this helper.
+ * Return project-bound CORS headers. Never emit wildcard or cross-environment
+ * origins; the request handler rejects non-allowlisted Origin values first.
  */
-export function corsHeadersForOrigin(origin: string | null): Headers {
+export function corsHeadersForOrigin(
+  origin: string | null,
+  projectUrl: string,
+): Headers {
   const headers = new Headers({
     "Content-Type": "application/json",
     "Access-Control-Allow-Headers":
@@ -172,7 +199,7 @@ export function corsHeadersForOrigin(origin: string | null): Headers {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   });
-  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+  if (origin !== null && isAllowedBrowserOrigin(origin, projectUrl)) {
     headers.set("Access-Control-Allow-Origin", origin);
   }
   return headers;
