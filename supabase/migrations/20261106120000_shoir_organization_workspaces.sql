@@ -550,8 +550,14 @@ BEGIN
        OR length(v_name) < 1 OR length(v_name) > 120 OR v_name ~ '[[:cntrl:]]' THEN
         RAISE EXCEPTION 'Invalid organization workspace input.' USING ERRCODE = '22023';
     END IF;
-    SELECT role INTO v_role FROM public.shoir_organization_memberships
-     WHERE organization_id = p_organization_id AND username_lc = v_actor AND status = 'active';
+    SELECT m.role INTO v_role
+      FROM public.shoir_organization_memberships m
+      JOIN public.shoir_organizations o
+        ON o.organization_id = m.organization_id
+       AND o.status = 'active'
+     WHERE m.organization_id = p_organization_id
+       AND m.username_lc = v_actor
+       AND m.status = 'active';
     IF v_role IS NULL OR v_role NOT IN ('owner','admin') THEN
         RAISE EXCEPTION 'Organization workspace creation permission denied.' USING ERRCODE = '42501';
     END IF;
