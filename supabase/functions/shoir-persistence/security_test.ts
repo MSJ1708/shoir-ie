@@ -338,7 +338,6 @@ Deno.test("CSV shape inspection rejects duplicate, blank and malformed headers",
   }
 });
 
-
 Deno.test("CORS origins are isolated by the exact Supabase project", () => {
   const stagingUrl = "https://hfhrosthswcybccepmak.supabase.co";
   const productionUrl = "https://gcsamrdaeraxieaagsta.supabase.co";
@@ -348,33 +347,68 @@ Deno.test("CORS origins are isolated by the exact Supabase project", () => {
     "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app";
   const localOrigin = "http://localhost:8501";
 
-  assert(isAllowedBrowserOrigin(productionOrigin, productionUrl),
-    "Production app origin should be allowed by production.");
-  assert(!isAllowedBrowserOrigin(stagingOrigin, productionUrl),
-    "Staging origin must not be allowed by production.");
-  assert(!isAllowedBrowserOrigin(alternateStagingOrigin, productionUrl),
-    "Alternate staging origin must not be allowed by production.");
-  assert(isAllowedBrowserOrigin(stagingOrigin, stagingUrl),
-    "Staging app origin should be allowed by staging.");
-  assert(isAllowedBrowserOrigin(alternateStagingOrigin, stagingUrl),
-    "Configured alternate staging origin should be allowed by staging.");
-  assert(isAllowedBrowserOrigin(localOrigin, stagingUrl),
-    "Local development origin should be allowed only by staging.");
-  assert(!isAllowedBrowserOrigin(productionOrigin, stagingUrl),
-    "Production origin must not be allowed by staging.");
-  assert(!isAllowedBrowserOrigin("https://attacker.example", stagingUrl),
-    "Unknown browser origin must be rejected.");
-  assert(!isAllowedBrowserOrigin("https://shoir-ie-app.streamlit.app.evil.test", productionUrl),
-    "Lookalike production host must be rejected.");
-  assert(!isAllowedBrowserOrigin(productionOrigin, "https://unknown.supabase.co"),
-    "Unknown Supabase project must fail closed.");
-  assert(isAllowedBrowserOrigin(null, productionUrl),
-    "Origin-less server-to-server call should remain possible.");
+  assert(
+    isAllowedBrowserOrigin(productionOrigin, productionUrl),
+    "Production app origin should be allowed by production.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(stagingOrigin, productionUrl),
+    "Staging origin must not be allowed by production.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(alternateStagingOrigin, productionUrl),
+    "Alternate staging origin must not be allowed by production.",
+  );
+  assert(
+    isAllowedBrowserOrigin(stagingOrigin, stagingUrl),
+    "Staging app origin should be allowed by staging.",
+  );
+  assert(
+    isAllowedBrowserOrigin(alternateStagingOrigin, stagingUrl),
+    "Configured alternate staging origin should be allowed by staging.",
+  );
+  assert(
+    isAllowedBrowserOrigin(localOrigin, stagingUrl),
+    "Local development origin should be allowed only by staging.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(productionOrigin, stagingUrl),
+    "Production origin must not be allowed by staging.",
+  );
+  assert(
+    !isAllowedBrowserOrigin("https://attacker.example", stagingUrl),
+    "Unknown browser origin must be rejected.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(
+      "https://shoir-ie-app.streamlit.app.evil.test",
+      productionUrl,
+    ),
+    "Lookalike production host must be rejected.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(
+      productionOrigin,
+      "https://unknown.supabase.co",
+    ),
+    "Unknown Supabase project must fail closed.",
+  );
+  assert(
+    isAllowedBrowserOrigin(null, productionUrl),
+    "Origin-less server-to-server call should remain possible.",
+  );
 
-  const productionHeaders = corsHeadersForOrigin(productionOrigin, productionUrl);
-  assert(productionHeaders.get("Access-Control-Allow-Origin") === productionOrigin,
-    "Production CORS header must echo only the production origin.");
+  const productionHeaders = corsHeadersForOrigin(
+    productionOrigin,
+    productionUrl,
+  );
+  assert(
+    productionHeaders.get("Access-Control-Allow-Origin") === productionOrigin,
+    "Production CORS header must echo only the production origin.",
+  );
   const deniedHeaders = corsHeadersForOrigin(stagingOrigin, productionUrl);
-  assert(deniedHeaders.get("Access-Control-Allow-Origin") === null,
-    "Denied origin must not receive Access-Control-Allow-Origin.");
+  assert(
+    deniedHeaders.get("Access-Control-Allow-Origin") === null,
+    "Denied origin must not receive Access-Control-Allow-Origin.",
+  );
 });
