@@ -406,8 +406,20 @@ Deno.test("CORS origins are isolated by the exact Supabase project", () => {
     productionHeaders.get("Access-Control-Allow-Origin") === productionOrigin,
     "Production CORS header must echo only the production origin.",
   );
-  const allowedHeaders = productionHeaders.get("Access-Control-Allow-Headers") || "";
-  for (const header of ["authorization", "x-client-info", "apikey", "content-type", "x-retry-count", "traceparent", "tracestate", "baggage"]) {
+  const allowedHeaders = productionHeaders.get(
+    "Access-Control-Allow-Headers",
+  ) || "";
+  const expectedHeaders = [
+    "authorization",
+    "x-client-info",
+    "apikey",
+    "content-type",
+    "x-retry-count",
+    "traceparent",
+    "tracestate",
+    "baggage",
+  ];
+  for (const header of expectedHeaders) {
     assert(
       allowedHeaders.toLowerCase().includes(header),
       `CORS preflight must allow the supported Supabase client header: ${header}`,
