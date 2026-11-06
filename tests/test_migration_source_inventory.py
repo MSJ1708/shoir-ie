@@ -220,3 +220,42 @@ def test_private_rls_advisory_migration_adds_explicit_client_deny_policies_only(
     assert normalized.count("create policy ") == 13
     assert "grant " not in normalized
     assert "force row level security" not in normalized
+
+
+def test_organization_workspace_migration_is_server_only_and_preserves_legacy_keys():
+    source = (
+        MIGRATIONS
+        / "20261106120000_shoir_organization_workspaces.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = " ".join(executable_sql.casefold().split())
+    expected_tables = {
+        "shoir_organizations",
+        "shoir_organization_memberships",
+        "shoir_organization_invitations",
+        "shoir_organization_workspaces",
+        "shoir_organization_audit_events",
+    }
+    for table in expected_tables:
+        assert f"create table public.{table}" in normalized
+        assert f"alter table public.{table} enable row level security" in normalized
+        assert f"public.{table}" in normalized
+    assert "revoke all on table public.shoir_organizations" in normalized
+    assert "from public, anon, authenticated" in normalized
+    assert "to service_role" in normalized
+    assert "using (false) with check (false)" in normalized
+    assert "shoir_org_invitation_accept" in normalized
+    assert "shoir_org_resolve_workspace" in normalized
+    assert "shoir_org_resolve_legacy_workspace" in normalized
+    assert "token_hash text not null unique" in normalized
+    assert "target_username_lc <> v_actor" not in normalized  # accept requires exact target equality below
+    assert "v_inv.target_username_lc <> v_actor" in normalized
+    assert "used_at is null" in normalized
+    # Existing account-derived keys are registered lazily; no platform records,
+    # storage objects, or dataset payloads are rewritten by this migration.
+    assert "update public.shoir_platform_records" not in normalized
+    assert "update public.shoir_platform_events" not in normalized
+    assert "update storage.objects" not in normalized
+    assert "legacy_workspace_key" in normalized
