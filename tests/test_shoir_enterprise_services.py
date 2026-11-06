@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import hashlib
 
 import numpy as np
@@ -85,7 +86,7 @@ def test_model_registry_provenance_schema_is_additive(tmp_path):
         result_hash="RESHASH",
     )
     import sqlite3
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         row = conn.execute(
             "SELECT solver_version,result_hash FROM platform_models WHERE model_id=?",
             (model_id,),
