@@ -4,6 +4,9 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
+  normalizeWorkspaceStateJson,
+  PublicRequestError,
+  readBoundedJsonObject,
 } from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -319,7 +322,7 @@ Deno.serve(async (req) => {
     });
   }
   const sendResponse = (data: unknown, status = 200) =>
-    sendResponse(data, status, origin);
+    response(data, status, origin);
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -327,7 +330,7 @@ Deno.serve(async (req) => {
     });
   }
   try {
-    const body = await req.json();
+    const body = await readBoundedJsonObject(req) as Record<string, any>;
     const action = String(body.action || "");
 
     if (action === "login") {
@@ -455,7 +458,7 @@ Deno.serve(async (req) => {
       await getSession(String(body.token), String(body.username));
       const { error } = await supabase.from("shoir_workspace_states").upsert({
         username_lc: String(body.username).trim().toLowerCase(),
-        state_json: String(body.state_json || "{}"),
+        state_json: normalizeWorkspaceStateJson(body.state_json),
         updated_at: new Date().toISOString(),
       }, { onConflict: "username_lc" });
       if (error) throw error;
@@ -629,6 +632,9 @@ Deno.serve(async (req) => {
 
     return sendResponse({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
+    if (err instanceof PublicRequestError) {
+      return sendResponse({ error: err.message }, err.status);
+    }
     const message = err instanceof Error ? err.message : "";
     if (message === "Administrator account requires manual security review.") {
       return sendResponse({ error: message }, 503);
