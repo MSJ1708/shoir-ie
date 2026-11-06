@@ -13,6 +13,7 @@ This directory is a narrowly scoped compatibility hotfix for the currently deplo
 ## Changes
 
 - Replace wildcard CORS with an exact project-bound allowlist for `https://shoir-ie-app.streamlit.app`.
+- Enforce a 12 MiB streamed JSON request limit and an 8 MiB validated workspace-state limit before accepting data.
 - Reject other browser origins before request dispatch; preserve origin-less server-to-server calls, which continue to require valid application sessions.
 - Keep CORS preflight responses explicit and allow Supabase retry/trace request headers.
 - Stop login from rewriting the reserved `sho` administrator tier or `updated_at`. Check the full invariant and fail closed for manual review if it drifts.
