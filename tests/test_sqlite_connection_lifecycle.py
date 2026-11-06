@@ -35,6 +35,11 @@ def test_context_manager_rolls_back_and_closes_after_exception(tmp_path):
     with pytest.raises(RuntimeError, match="force rollback"):
         with sqlite_connect(database, timeout=5) as active:
             connection = active
+            # sqlite3's legacy transaction mode does not necessarily begin a
+            # transaction for DDL alone. Start one explicitly so this test
+            # verifies transactional DDL rollback rather than SQLite's
+            # implicit-transaction rules.
+            active.execute("BEGIN")
             active.execute("CREATE TABLE sample(value INTEGER NOT NULL)")
             active.execute("INSERT INTO sample(value) VALUES (11)")
             raise RuntimeError("force rollback")
