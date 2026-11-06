@@ -30,3 +30,10 @@ Earlier synthetic PDF/PPTX artifact: [`shoir-ie-report-export-validation`, artif
 ## Required finalization
 
 Inspect current JUnit XML after completion; reconcile every skip and warning; fix every current failure; rerun affected suites and the full suite on the resulting SHA; verify migration replay, Deno, exports, browser screenshots and authenticated staging acceptance. Do not treat skipped live smoke or component workflows as authenticated release acceptance.
+
+
+## Additional CORS recheck — 2026-11-06
+
+A read-only inspection of the deployed production persistence Edge Function v9 found a response header hard-coded as `Access-Control-Allow-Origin: *`. The deployed staging v13 helper uses an explicit allowlist, but its previous source allowlist included production and staging hosts together. The candidate now binds allowed origins to the exact Supabase project ref: production permits only `https://shoir-ie-app.streamlit.app`; staging permits the configured staging Streamlit hosts and local development origins; an unknown project fails closed; origin-less server-to-server requests remain supported and still require session/action authentication. Cross-environment CORS regression tests were added.
+
+Dedicated Edge Function verification [run #42251683171](https://github.com/MSJ1708/shoir-ie/actions/runs/42251683171) on SHA `cf806aad170916f7e1003a3ef92ffbda2195899c` passed: Deno format checked 3 files, Deno type-check passed, and the security test suite reported **13 passed, 0 failed**. This source fix is not deployed. Production remains on v9 and continues to return wildcard CORS until a reviewed coordinated production rollout is explicitly approved. Do not treat this as a production remediation already applied.
