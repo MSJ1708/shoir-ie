@@ -2,10 +2,19 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
+  isAllowedApiMethod,
   normalizeWorkspaceStateJson,
   PublicRequestError,
   readBoundedJsonObject,
 } from "./security.ts";
+
+Deno.test("production v9 dispatches API actions only for POST", () => {
+  assert(isAllowedApiMethod("POST"), "POST must be accepted.");
+  assert(isAllowedApiMethod("post"), "HTTP method comparison must be case-insensitive.");
+  for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    assert(!isAllowedApiMethod(method), `${method} must not dispatch API actions.`);
+  }
+});
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
