@@ -6288,3 +6288,360 @@ def calculate_niosh_revised_lifting_equation(
             "qualified ergonomics professional and assess the whole task and workforce."
         ),
     }
+
+
+def build_rcm_decision_support(
+    failure_modes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Create reviewable first-pass RCM task candidates from explicit failure data.
+
+    This is a decision-support screen, not a certified SAE JA1011/JA1012 RCM
+    analysis. Safety/environmental and hidden protective-function cases are
+    always escalated; no task is silently authorized for execution.
+    """
+    if isinstance(failure_modes, (str, bytes)) or not isinstance(failure_modes, Sequence) or not failure_modes:
+        raise ValueError("Provide at least one RCM failure-mode record.")
+    if len(failure_modes) > 2000:
+        raise ValueError("RCM screening is limited to 2,000 failure-mode records.")
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    consequences = {"safety", "environmental", "operational", "non_operational", "hidden"}
+    for index, raw in enumerate(failure_modes, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"RCM row {index} must be an object.")
+        asset = str(raw.get("asset", "")).strip()
+        mode = str(raw.get("failure_mode", "")).strip()
+        if not asset or not mode:
+            raise ValueError(f"RCM row {index} needs an asset and failure_mode.")
+        key = (asset + "::" + mode).casefold()
+        if key in seen:
+            raise ValueError(f"Duplicate RCM failure mode for {asset}: {mode}.")
+        seen.add(key)
+        consequence = str(raw.get("consequence", "")).strip().casefold().replace("-", "_").replace(" ", "_")
+        if consequence not in consequences:
+            raise ValueError(
+                f"RCM row {index} consequence must be one of: "
+                + ", ".join(sorted(consequences))
+                + "."
+            )
+        severity_value = _finite_number(raw.get("severity"), f"Severity for {asset} / {mode}")
+        if not severity_value.is_integer() or not 1 <= severity_value <= 10:
+            raise ValueError(f"Severity for {asset} / {mode} must be a whole number from 1 to 10.")
+        severity = int(severity_value)
+        booleans = (
+            "detectable",
+            "age_related",
+            "hidden_protective_function",
+            "on_condition_applicable",
+            "scheduled_restoration_applicable",
+            "scheduled_discard_applicable",
+            "failure_finding_applicable",
+            "run_to_failure_accepted",
+        )
+        flags: dict[str, bool] = {}
+        for field in booleans:
+            value = raw.get(field, False)
+            if not isinstance(value, bool):
+                raise ValueError(f"{field} for {asset} / {mode} must be true or false.")
+            flags[field] = value
+        task_cost = _finite_number(raw.get("preventive_task_cost", 0), f"Preventive task cost for {asset} / {mode}")
+        failure_cost = _finite_number(raw.get("consequence_cost", 0), f"Consequence cost for {asset} / {mode}")
+        if task_cost < 0 or failure_cost < 0:
+            raise ValueError("RCM task and consequence costs cannot be negative.")
+        interval = raw.get("interval_days")
+        if interval not in (None, ""):
+            interval_value = _finite_number(interval, f"Interval days for {asset} / {mode}")
+            if not interval_value.is_integer() or interval_value <= 0:
+                raise ValueError("An RCM task interval must be a positive whole number of days.")
+            interval = int(interval_value)
+        else:
+            interval = None
+        evidence = str(raw.get("evidence_reference", "")).strip()
+
+        chosen = "HUMAN_REVIEW_REQUIRED"
+        rationale = "No applicable maintenance task has been evidenced; review the failure mode and maintenance policy."
+        review = True
+        if consequence in {"safety", "environmental"} or severity >= 9:
+            chosen = "SPECIALIST_SAFETY_REVIEW"
+            rationale = "High-consequence or severity-9/10 failure: do not automate task selection; require a competent safety/reliability review."
+        elif flags["hidden_protective_function"] or consequence == "hidden":
+            if flags["failure_finding_applicable"]:
+                chosen = "FAILURE_FINDING_TASK_CANDIDATE"
+                rationale = "Hidden protective function: a documented failure-finding task is a candidate; define the proof-test interval and independence requirements."
+            else:
+                chosen = "HUMAN_REVIEW_REQUIRED"
+                rationale = "Hidden protective function has no evidenced failure-finding task; specialist review is required."
+        elif flags["detectable"] and flags["on_condition_applicable"]:
+            chosen = "ON_CONDITION_TASK_CANDIDATE"
+            rationale = "A detectable potential-failure condition and an applicable on-condition task were explicitly recorded."
+        elif flags["age_related"] and flags["scheduled_restoration_applicable"]:
+            chosen = "SCHEDULED_RESTORATION_CANDIDATE"
+            rationale = "An age-related failure pattern and an applicable scheduled-restoration task were explicitly recorded."
+        elif flags["age_related"] and flags["scheduled_discard_applicable"]:
+            chosen = "SCHEDULED_DISCARD_CANDIDATE"
+            rationale = "An age-related failure pattern and an applicable scheduled-discard task were explicitly recorded."
+        elif flags["run_to_failure_accepted"] and consequence in {"non_operational", "operational"}:
+            if task_cost > failure_cost:
+                chosen = "RUN_TO_FAILURE_CANDIDATE"
+                rationale = "The user accepted run-to-failure and entered a lower consequence cost than preventive-task cost; verify lifecycle, spare and safety impacts."
+            else:
+                chosen = "HUMAN_REVIEW_REQUIRED"
+                rationale = "Run-to-failure was accepted, but its entered consequence cost is not lower than preventive-task cost."
+        if chosen.endswith("_CANDIDATE"):
+            review = True
+        rows.append({
+            "Asset": asset,
+            "Failure mode": mode,
+            "Consequence": consequence.replace("_", " ").title(),
+            "Severity (1–10)": severity,
+            "Recommended task candidate": chosen,
+            "Review required": review,
+            "Suggested interval (days)": interval,
+            "Preventive task cost": task_cost,
+            "Consequence cost": failure_cost,
+            "Evidence reference": evidence or "NOT PROVIDED",
+            "Rationale": rationale,
+        })
+
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Review required", "Severity (1–10)", "Asset", "Failure mode"],
+        ascending=[False, False, True, True],
+        kind="stable",
+    ).reset_index(drop=True)
+    return {
+        "status": "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL",
+        "method": "First-pass failure-consequence and task-applicability screen",
+        "record_count": len(frame),
+        "specialist_review_count": int(frame["Review required"].sum()),
+        "task_candidate_count": int(frame["Recommended task candidate"].str.endswith("_CANDIDATE").sum()),
+        "decision_tree": frame,
+        "warning": (
+            "This is not a certified RCM analysis and does not establish SAE JA1011/JA1012 compliance. "
+            "Confirm functions, functional failures, failure effects, failure modes, consequence classes, "
+            "task applicability, intervals, cost assumptions and site safety controls with a competent "
+            "reliability engineer before approving a maintenance strategy."
+        ),
+    }
+
+
+def calibrate_simulation_outputs(
+    simulated_values: Sequence[float],
+    measured_values: Sequence[float],
+    *,
+    training_fraction: float = 0.75,
+    min_slope: float = 0.0,
+    max_slope: float = 10.0,
+) -> dict[str, Any]:
+    """Fit and chronologically hold out an affine calibration of simulation outputs.
+
+    Fits measured ~= intercept + slope * simulated on the first observations and
+    evaluates the unchanged fit on the final holdout observations. This calibrates
+    an output mapping only; it does not tune internal simulator physics or connect
+    to a live asset.
+    """
+    simulated = _finite_vector(simulated_values, "Simulated values", minimum=5)
+    measured = _finite_vector(measured_values, "Measured values", minimum=5)
+    if len(simulated) != len(measured):
+        raise ValueError("Simulated and measured series must contain the same number of observations.")
+    fraction = _finite_number(training_fraction, "Training fraction")
+    lower = _finite_number(min_slope, "Minimum calibration slope")
+    upper = _finite_number(max_slope, "Maximum calibration slope")
+    if not 0.5 <= fraction <= 0.9:
+        raise ValueError("Training fraction must be between 0.5 and 0.9.")
+    if lower < 0 or upper <= lower:
+        raise ValueError("Calibration slope bounds must satisfy 0 <= min_slope < max_slope.")
+    split = int(math.floor(len(simulated) * fraction))
+    if split < 3 or len(simulated) - split < 2:
+        raise ValueError("Calibration needs at least three training and two holdout observations.")
+    x_train = np.asarray(simulated[:split], dtype=float)
+    y_train = np.asarray(measured[:split], dtype=float)
+    x_holdout = np.asarray(simulated[split:], dtype=float)
+    y_holdout = np.asarray(measured[split:], dtype=float)
+    if float(np.ptp(x_train)) <= 1e-12:
+        raise ValueError("Training simulated values must contain variation to identify a calibration slope.")
+    design = np.column_stack([np.ones(len(x_train)), x_train])
+    intercept, slope = np.linalg.lstsq(design, y_train, rcond=None)[0]
+    intercept = float(intercept)
+    slope = float(slope)
+    if not math.isfinite(intercept) or not math.isfinite(slope):
+        raise ValueError("Calibration produced a non-finite fit.")
+    if slope < lower or slope > upper:
+        raise ValueError("Fitted calibration slope is outside the configured bounds; revise the model or approved bounds.")
+    train_fit = intercept + slope * x_train
+    holdout_fit = intercept + slope * x_holdout
+
+    def metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
+        residual = actual - predicted
+        denominator = float(np.sum((actual - float(np.mean(actual))) ** 2))
+        r2_value = 1.0 - float(np.sum(residual ** 2)) / denominator if denominator > 1e-12 else float("nan")
+        return {
+            "mae": float(np.mean(np.abs(residual))),
+            "rmse": float(np.sqrt(np.mean(residual ** 2))),
+            "bias_measured_minus_calibrated": float(np.mean(residual)),
+            "r_squared": r2_value,
+        }
+
+    calibrated_all = intercept + slope * np.asarray(simulated, dtype=float)
+    holdout = metrics(y_holdout, holdout_fit)
+    train = metrics(y_train, train_fit)
+    residuals = pd.DataFrame({
+        "Observation": np.arange(1, len(simulated) + 1),
+        "Segment": ["TRAIN"] * split + ["HOLDOUT"] * (len(simulated) - split),
+        "Simulated": simulated,
+        "Measured": measured,
+        "Calibrated simulation": calibrated_all.tolist(),
+        "Residual (measured - calibrated)": (np.asarray(measured) - calibrated_all).tolist(),
+    })
+    return {
+        "status": "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT",
+        "method": "Affine output calibration: measured = intercept + slope × simulated",
+        "training_observations": split,
+        "holdout_observations": len(simulated) - split,
+        "training_fraction": fraction,
+        "calibration_intercept": intercept,
+        "calibration_slope": slope,
+        "calibration_equation": f"measured ≈ {intercept:.8g} + {slope:.8g} × simulated",
+        "training_metrics": train,
+        "holdout_metrics": holdout,
+        "residuals": residuals,
+        "warning": (
+            "This is an affine output correction with a chronological holdout, not a physics-based digital-twin calibration. "
+            "Check measurement traceability, sensor bias, operating regimes, residual structure, uncertainty and out-of-range behavior. "
+            "Do not deploy calibrated parameters to a live controller."
+        ),
+    }
+
+
+def evaluate_kpi_alerts(
+    kpi_records: Sequence[Mapping[str, Any]],
+    alert_rules: Sequence[Mapping[str, Any]],
+    *,
+    as_of: Any = None,
+    stale_after_hours: float = 24.0,
+    previous_open_alert_ids: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Evaluate freshness-aware KPI threshold rules and deduplicate alert identities."""
+    if isinstance(kpi_records, (str, bytes)) or not isinstance(kpi_records, Sequence):
+        raise ValueError("KPI records must be a list of objects.")
+    if isinstance(alert_rules, (str, bytes)) or not isinstance(alert_rules, Sequence) or not alert_rules:
+        raise ValueError("Provide at least one KPI alert rule.")
+    stale_hours = _finite_number(stale_after_hours, "Stale-data threshold")
+    if stale_hours <= 0 or stale_hours > 24 * 365:
+        raise ValueError("Stale-data threshold must be greater than zero and no more than one year.")
+    now = pd.Timestamp.now(tz="UTC") if as_of is None else pd.to_datetime(as_of, utc=True, errors="coerce")
+    if pd.isna(now):
+        raise ValueError("Alert evaluation as-of timestamp must be valid.")
+    prior = {str(value).strip() for value in previous_open_alert_ids if str(value).strip()}
+    by_name: dict[str, Mapping[str, Any]] = {}
+    for index, raw in enumerate(kpi_records, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"KPI record {index} must be an object.")
+        name = str(raw.get("kpi", "")).strip()
+        if not name:
+            raise ValueError(f"KPI record {index} needs a KPI name.")
+        key = name.casefold()
+        if key in by_name:
+            raise ValueError(f"Duplicate KPI record: {name}.")
+        by_name[key] = raw
+
+    rows: list[dict[str, Any]] = []
+    seen_rules: set[str] = set()
+    seen_active_ids: set[str] = set()
+    operators = {">", ">=", "<", "<=", "=="}
+    severities = {"INFO", "WARNING", "CRITICAL"}
+    for index, rule in enumerate(alert_rules, start=1):
+        if not isinstance(rule, Mapping):
+            raise ValueError(f"Alert rule {index} must be an object.")
+        rule_id = str(rule.get("rule_id", "")).strip()
+        name = str(rule.get("kpi", "")).strip()
+        operator = str(rule.get("operator", "")).strip()
+        severity = str(rule.get("severity", "WARNING")).strip().upper()
+        if not rule_id or len(rule_id) > 100 or rule_id.casefold() in seen_rules:
+            raise ValueError("Alert rule IDs must be non-empty, unique and no longer than 100 characters.")
+        seen_rules.add(rule_id.casefold())
+        if not name:
+            raise ValueError(f"Alert rule {rule_id} needs a KPI name.")
+        if operator not in operators:
+            raise ValueError(f"Alert rule {rule_id} has an unsupported operator.")
+        if severity not in severities:
+            raise ValueError(f"Alert rule {rule_id} severity must be INFO, WARNING or CRITICAL.")
+        threshold = _finite_number(rule.get("threshold"), f"Threshold for {rule_id}")
+        record = by_name.get(name.casefold())
+        state = "MISSING_DATA"
+        value: float | None = None
+        unit = ""
+        source = ""
+        observed = None
+        breached = False
+        if record is not None:
+            value = _finite_number(record.get("value"), f"KPI value for {name}")
+            unit = str(record.get("unit", "")).strip()
+            source = str(record.get("source", "")).strip()
+            observed = pd.to_datetime(record.get("observed_at"), utc=True, errors="coerce")
+            if pd.isna(observed):
+                state = "INVALID_TIMESTAMP"
+            elif observed > now:
+                state = "FUTURE_TIMESTAMP"
+            elif not source:
+                state = "SOURCE_NOT_IDENTIFIED"
+            elif (now - observed).total_seconds() > stale_hours * 3600:
+                state = "STALE_DATA"
+            else:
+                if operator == ">":
+                    breached = value > threshold
+                elif operator == ">=":
+                    breached = value >= threshold
+                elif operator == "<":
+                    breached = value < threshold
+                elif operator == "<=":
+                    breached = value <= threshold
+                else:
+                    breached = math.isclose(value, threshold, rel_tol=1e-9, abs_tol=1e-12)
+                state = "OPEN" if breached else "NORMAL"
+        alert_identity = rule_id + "::" + name.casefold()
+        import hashlib
+        alert_id = "ALT-" + hashlib.sha256(alert_identity.encode("utf-8")).hexdigest()[:20].upper()
+        event_state = (
+            "NEW" if breached and alert_id not in prior
+            else "CONTINUING" if breached
+            else "RESOLVED" if alert_id in prior and state == "NORMAL"
+            else state
+        )
+        if breached:
+            seen_active_ids.add(alert_id)
+        rows.append({
+            "Alert ID": alert_id,
+            "Rule ID": rule_id,
+            "KPI": name,
+            "Value": value,
+            "Operator": operator,
+            "Threshold": threshold,
+            "Unit": unit,
+            "Severity": severity,
+            "State": state,
+            "Event": event_state,
+            "Source": source or "NOT PROVIDED",
+            "Observed at": "" if observed is None or pd.isna(observed) else observed.isoformat(),
+        })
+    frame = pd.DataFrame(rows)
+    duplicate_count = int(frame["Alert ID"].duplicated().sum())
+    if duplicate_count:
+        raise RuntimeError("Internal KPI alert identity collision detected.")
+    return {
+        "status": "KPI_ALERT_RULES_EVALUATED",
+        "evaluated_at": now.isoformat(),
+        "rule_count": len(frame),
+        "open_alert_count": int((frame["State"] == "OPEN").sum()),
+        "new_alert_count": int((frame["Event"] == "NEW").sum()),
+        "continuing_alert_count": int((frame["Event"] == "CONTINUING").sum()),
+        "stale_or_missing_count": int(frame["State"].isin(["STALE_DATA", "MISSING_DATA", "INVALID_TIMESTAMP", "FUTURE_TIMESTAMP", "SOURCE_NOT_IDENTIFIED"]).sum()),
+        "resolved_alert_count": int((frame["Event"] == "RESOLVED").sum()),
+        "alerts": frame,
+        "next_open_alert_ids": sorted(seen_active_ids),
+        "warning": (
+            "This evaluation does not dispatch notifications or prove that KPI sources are live. "
+            "Persist rule definitions and alert state in an authorized workspace; validate source freshness and ownership before acting."
+        ),
+    }
+
