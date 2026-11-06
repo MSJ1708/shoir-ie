@@ -2,6 +2,9 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   isAllowedBrowserOrigin,
+  normalizeWorkspaceStateJson,
+  PublicRequestError,
+  readBoundedJsonObject,
 } from "./security.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -54,4 +57,85 @@ Deno.test("reserved administrator invariant is exact and side-effect free", () =
     "Role drift must fail closed.");
   assert(!hasCanonicalMasterAdminInvariant({...canonical, subscription_expires_at: "2098-01-01T00:00:00Z"}),
     "Expiry drift must fail closed.");
+});
+
+Deno.test("production v9 rejects malformed, oversized and non-object request bodies", async () => {
+  const normal = await readBoundedJsonObject(
+    new Request("https://example.test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "health", value: 1 }),
+    }),
+  );
+  assert(normal.action === "health", "Normal JSON objects must parse.");
+
+  for (const body of ["{", "null", "[]", '"string"', "1"]) {
+    let caught: unknown;
+    try {
+      await readBoundedJsonObject(
+        new Request("https://example.test", { method: "POST", body }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert(caught instanceof PublicRequestError, "Invalid JSON shape must be rejected.");
+    assert(caught.status === 400, "Invalid JSON shape must return HTTP 400.");
+  }
+
+  let lengthError: unknown;
+  try {
+    await readBoundedJsonObject(
+      new Request("https://example.test", {
+        method: "POST",
+        headers: { "content-length": "200" },
+        body: '{"ok":true}',
+      }),
+      32,
+    );
+  } catch (error) {
+    lengthError = error;
+  }
+  assert(lengthError instanceof PublicRequestError, "Oversized declared length must be rejected.");
+  assert(lengthError.status === 413, "Oversized declared length must return HTTP 413.");
+
+  let streamedError: unknown;
+  try {
+    await readBoundedJsonObject(
+      new Request("https://example.test", {
+        method: "POST",
+        body: JSON.stringify({ data: "x".repeat(200) }),
+      }),
+      32,
+    );
+  } catch (error) {
+    streamedError = error;
+  }
+  assert(streamedError instanceof PublicRequestError, "Actual stream bytes must be bounded.");
+  assert(streamedError.status === 413, "Oversized stream must return HTTP 413.");
+});
+
+Deno.test("production v9 validates workspace JSON before persistence replacement", () => {
+  assert(normalizeWorkspaceStateJson({ selected: "Dashboard" }) ===
+    '{"selected":"Dashboard"}', "Object workspace state must normalize.");
+  assert(normalizeWorkspaceStateJson(null) === "{}", "Missing workspace state must remain recoverable.");
+
+  for (const value of ["{", "null", "[]", 5]) {
+    let caught: unknown;
+    try {
+      normalizeWorkspaceStateJson(value);
+    } catch (error) {
+      caught = error;
+    }
+    assert(caught instanceof PublicRequestError, "Invalid workspace state must be rejected.");
+    assert(caught.status === 400, "Invalid workspace state must return HTTP 400.");
+  }
+
+  let oversized: unknown;
+  try {
+    normalizeWorkspaceStateJson({ data: "x".repeat(128) }, 64);
+  } catch (error) {
+    oversized = error;
+  }
+  assert(oversized instanceof PublicRequestError, "Oversized workspace state must be rejected.");
+  assert(oversized.status === 413, "Oversized workspace state must return HTTP 413.");
 });
