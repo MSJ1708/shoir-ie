@@ -27,6 +27,9 @@ CREATE TABLE public.shoir_organization_memberships (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (organization_id, username_lc)
 );
+CREATE UNIQUE INDEX shoir_org_memberships_one_owner
+    ON public.shoir_organization_memberships(organization_id)
+    WHERE role = 'owner';
 CREATE INDEX shoir_org_memberships_user_active
     ON public.shoir_organization_memberships(username_lc, status, organization_id);
 
@@ -210,6 +213,7 @@ DECLARE
     v_target text := lower(btrim(p_target_username_lc));
     v_role text := lower(btrim(p_role));
     v_actor_role text;
+    v_org_type text;
     v_id uuid;
 BEGIN
     IF p_organization_id IS NULL OR v_actor IS NULL OR v_actor = ''
@@ -219,6 +223,11 @@ BEGIN
        OR p_token_hash IS NULL OR p_token_hash !~ '^[0-9a-f]{64}$'
        OR p_expires_at <= now() OR p_expires_at > now() + interval '30 days' THEN
         RAISE EXCEPTION 'Invalid organization invitation input.' USING ERRCODE = '22023';
+    END IF;
+    SELECT org_type INTO v_org_type FROM public.shoir_organizations
+    WHERE organization_id = p_organization_id AND status = 'active';
+    IF v_org_type IS DISTINCT FROM 'team' THEN
+        RAISE EXCEPTION 'Invitations are available only for active team organizations.' USING ERRCODE = '42501';
     END IF;
     SELECT role INTO v_actor_role
     FROM public.shoir_organization_memberships
@@ -351,6 +360,59 @@ BEGIN
         jsonb_build_object('from', v_old_role, 'to', v_new_role)
     );
     RETURN jsonb_build_object('ok', true, 'role', v_new_role);
+END;
+$function$;
+
+
+CREATE OR REPLACE FUNCTION public.shoir_org_owner_transfer(
+    p_actor text, p_organization_id uuid, p_target_username_lc text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+DECLARE
+    v_actor text := lower(btrim(p_actor));
+    v_target text := lower(btrim(p_target_username_lc));
+    v_owner text;
+    v_target_role text;
+BEGIN
+    IF p_organization_id IS NULL OR v_actor IS NULL OR v_actor = ''
+       OR v_target IS NULL OR v_target = '' OR v_target = v_actor THEN
+        RAISE EXCEPTION 'Invalid organization owner transfer input.' USING ERRCODE = '22023';
+    END IF;
+    SELECT owner_username_lc INTO v_owner
+      FROM public.shoir_organizations
+     WHERE organization_id = p_organization_id AND org_type = 'team' AND status = 'active'
+     FOR UPDATE;
+    IF v_owner IS DISTINCT FROM v_actor THEN
+        RAISE EXCEPTION 'Only the current organization owner may transfer ownership.' USING ERRCODE = '42501';
+    END IF;
+    SELECT role INTO v_target_role
+      FROM public.shoir_organization_memberships
+     WHERE organization_id = p_organization_id
+       AND username_lc = v_target AND status = 'active'
+     FOR UPDATE;
+    IF v_target_role IS NULL OR v_target_role NOT IN ('admin','engineer','approver','viewer') THEN
+        RAISE EXCEPTION 'The new owner must be an active organization member.' USING ERRCODE = '42501';
+    END IF;
+    UPDATE public.shoir_organization_memberships
+       SET role = 'admin', updated_at = now()
+     WHERE organization_id = p_organization_id AND username_lc = v_actor AND role = 'owner';
+    UPDATE public.shoir_organization_memberships
+       SET role = 'owner', updated_at = now()
+     WHERE organization_id = p_organization_id AND username_lc = v_target AND status = 'active';
+    UPDATE public.shoir_organizations
+       SET owner_username_lc = v_target, updated_at = now()
+     WHERE organization_id = p_organization_id;
+    INSERT INTO public.shoir_organization_audit_events(
+        organization_id, actor_username_lc, subject_username_lc, event_type, payload_json
+    ) VALUES (
+        p_organization_id, v_actor, v_target, 'organization.owner_transferred',
+        jsonb_build_object('previous_owner', v_actor, 'new_owner', v_target)
+    );
+    RETURN jsonb_build_object('ok', true, 'previous_owner_role', 'admin', 'new_owner', v_target);
 END;
 $function$;
 
@@ -537,6 +599,7 @@ REVOKE ALL ON FUNCTION public.shoir_org_invitation_create(text,uuid,text,text,te
 REVOKE ALL ON FUNCTION public.shoir_org_invitation_accept(text,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_member_role_set(text,uuid,text,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_member_remove(text,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.shoir_org_owner_transfer(text,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_workspace_create(text,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_resolve_workspace(text,uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_resolve_legacy_workspace(text,text,text) FROM PUBLIC, anon, authenticated;
@@ -545,6 +608,7 @@ GRANT EXECUTE ON FUNCTION public.shoir_org_invitation_create(text,uuid,text,text
 GRANT EXECUTE ON FUNCTION public.shoir_org_invitation_accept(text,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_member_role_set(text,uuid,text,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_member_remove(text,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.shoir_org_owner_transfer(text,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_workspace_create(text,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_resolve_workspace(text,uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_resolve_legacy_workspace(text,text,text) TO service_role;
