@@ -258,3 +258,28 @@ def test_organization_workspace_migration_is_server_only_and_preserves_legacy_ke
     assert "update public.shoir_platform_events" not in normalized
     assert "update storage.objects" not in normalized
     assert "legacy_workspace_key" in normalized
+
+
+def test_organization_owner_and_invitation_lifecycle_is_fail_closed():
+    source = (
+        MIGRATIONS
+        / "20261106120000_shoir_organization_workspaces.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = " ".join(executable_sql.casefold().split())
+    assert "create unique index shoir_org_memberships_one_owner" in normalized
+    assert "where role = 'owner'" in normalized
+    assert "shoir_org_owner_transfer" in normalized
+    assert "only the current organization owner may transfer ownership" in normalized
+    assert "new owner must be an active organization member" in normalized
+    assert "invitations are available only for active team organizations" in normalized
+    assert "v_inv.target_username_lc <> v_actor" in normalized
+    assert "v_inv.expires_at <= now()" in normalized
+    assert "v_inv.used_at is not null" in normalized
+    assert "v_inv.revoked_at is not null" in normalized
+    assert "the organization account is inactive" in normalized
+    assert "new owner account is inactive" in normalized
+    assert "revoke all on function public.shoir_org_owner_transfer(text,uuid,text)" in normalized
+    assert "grant execute on function public.shoir_org_owner_transfer(text,uuid,text) to service_role" in normalized
