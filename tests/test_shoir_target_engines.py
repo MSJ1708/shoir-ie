@@ -2186,7 +2186,7 @@ def test_niosh_rnle_uses_worst_origin_destination_measurements():
     assert result["multipliers"]["Asymmetry multiplier (AM)"] == pytest.approx(1 - 0.0032 * 45)
     expected = 23 * 0.5 * 1 * (0.82 + 4.5 / 50) * (1 - 0.0032 * 45) * 0.8 * 0.9
     assert result["recommended_weight_limit"] == pytest.approx(expected)
-    assert result["status"] == "LI_AT_OR_BELOW_1"
+    assert result["status"] == "LI_ABOVE_1_REVIEW_REQUIRED"
 
 
 def test_niosh_rnle_imperial_ideal_case_and_required_table_sources():
