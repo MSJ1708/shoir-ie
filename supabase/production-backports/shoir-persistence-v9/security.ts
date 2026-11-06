@@ -185,6 +185,11 @@ export function corsHeadersForOrigin(
   return headers;
 }
 
+/** Only POST may dispatch API actions; OPTIONS is handled by the HTTP boundary. */
+export function isAllowedApiMethod(method: string): boolean {
+  return method.toUpperCase() === "POST";
+}
+
 /** Check the immutable reserved account record; this function has no write path. */
 export function hasCanonicalMasterAdminInvariant(
   account: Record<string, unknown>,
