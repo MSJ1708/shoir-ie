@@ -835,7 +835,8 @@ def test_workbench_runs_rcm_network_calibration_disruption_and_kpi_tools():
     network = at.session_state["shoir_tool_result_T060"]
     assert network["status"] == "OPTIMAL"
     assert network["data_provenance"] == "USER_ENTERED_UNVERIFIED"
-    assert network["metrics"]["unmet_demand"] == pytest.approx(0)
+    assert network["total_unmet_demand"] == pytest.approx(0)
+    assert network["total_units_shipped"] == pytest.approx(150)
 
     # T074: the sample is deliberately linear so the calibration fit is known.
     _open_tool_for_app_test(at, "T074 · Digital Twin Calibration Studio")
@@ -898,7 +899,7 @@ def test_workbench_plugin_contract_and_personal_backup_tools_are_not_fake_routes
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
     _open_tool_for_app_test(at, "T097 · API, SDK, and Plugin Toolkit")
-    at.selectbox(key="tool097_plugin").set_value("REST connector adapter")
+    at.selectbox(key="tool097_plugin").select("REST connector adapter")
     at.text_area(key="tool097_payload").set_value("{}")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
