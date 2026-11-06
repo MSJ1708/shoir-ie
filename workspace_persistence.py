@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import hmac
 import json
 import sqlite3
 from shoir_sqlite import ClosingSQLiteConnection
@@ -41,6 +42,7 @@ _EXACT_EXCLUDE = {
     "api_secret",
     "password",
     "password_hash",
+    "_shoir_persist_change_signature",
     "user_role",
     "user_tier",
     "user_email",
@@ -535,7 +537,7 @@ def verify_user_workspace_backup(
         canonical_envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
     expected_digest = hashlib.sha256(canonical).hexdigest()
-    if len(supplied_digest) != 64 or not hashlib.compare_digest(supplied_digest, expected_digest):
+    if len(supplied_digest) != 64 or not hmac.compare_digest(supplied_digest, expected_digest):
         raise ValueError("Workspace backup checksum is invalid; no state was restored.")
     forbidden = [str(key) for key in payload if _excluded(str(key))]
     if forbidden:
