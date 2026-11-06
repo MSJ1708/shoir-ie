@@ -486,7 +486,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: corsHeadersForOrigin(origin),
+      headers: corsHeadersForOrigin(origin, SUPABASE_URL),
     });
   }
   try {
