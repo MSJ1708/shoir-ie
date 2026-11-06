@@ -2395,3 +2395,94 @@ def test_kpi_alerts_resolve_breaches_and_reject_duplicate_rules():
             [rules[0], rules[0]], as_of="2026-11-06T17:01:00Z",
         )
 
+def test_recovery_snapshot_history_checkpoints_undoes_redoes_and_restores_revision():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    first = manage_recovery_snapshot_history(
+        None,
+        action="checkpoint",
+        new_snapshot={"asset_id": "P-101", "inspection_state": "PENDING"},
+    )
+    assert first["status"] == "SNAPSHOT_CREATED"
+    assert first["current_revision"] == 1
+    assert first["can_undo"] is False
+
+    second = manage_recovery_snapshot_history(
+        first["history_state"],
+        action="checkpoint",
+        new_snapshot={"asset_id": "P-101", "inspection_state": "COMPLETE"},
+    )
+    assert second["status"] == "SNAPSHOT_CHECKPOINTED"
+    assert second["current_revision"] == 2
+    assert second["can_undo"] is True
+
+    undone = manage_recovery_snapshot_history(second["history_state"], action="undo")
+    assert undone["status"] == "SNAPSHOT_UNDONE"
+    assert undone["current_snapshot"]["inspection_state"] == "PENDING"
+    assert undone["can_redo"] is True
+
+    redone = manage_recovery_snapshot_history(undone["history_state"], action="redo")
+    assert redone["status"] == "SNAPSHOT_REDONE"
+    assert redone["current_snapshot"]["inspection_state"] == "COMPLETE"
+
+    restored = manage_recovery_snapshot_history(
+        redone["history_state"],
+        action="restore",
+        target_revision=1,
+    )
+    assert restored["status"] == "REVISION_RESTORED"
+    assert restored["current_revision"] == 1
+    assert restored["current_snapshot"]["inspection_state"] == "PENDING"
+    assert restored["can_redo"] is True
+    assert "arbitrary edits in other" in " ".join(restored["limitations"])
+
+
+def test_recovery_snapshot_history_clears_redo_and_bounds_history():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    history = None
+    for revision in range(1, 5):
+        result = manage_recovery_snapshot_history(
+            history,
+            action="checkpoint",
+            new_snapshot={"revision": revision},
+            max_history=3,
+        )
+        history = result["history_state"]
+    assert result["revision_count"] == 3
+    assert result["current_snapshot"]["revision"] == 4
+    assert result["timeline"][0]["snapshot"]["revision"] == 2
+
+    undone = manage_recovery_snapshot_history(history, action="undo")
+    assert undone["can_redo"] is True
+    forked = manage_recovery_snapshot_history(
+        undone["history_state"],
+        action="checkpoint",
+        new_snapshot={"revision": 5},
+    )
+    assert forked["can_redo"] is False
+    assert forked["current_snapshot"]["revision"] == 5
+
+
+def test_recovery_snapshot_history_rejects_invalid_actions_data_and_revisions():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    with pytest.raises(ValueError, match="Recovery action"):
+        manage_recovery_snapshot_history(None, action="delete")
+    with pytest.raises(ValueError, match="JSON-compatible"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"bad": float("nan")})
+    with pytest.raises(ValueError, match="snapshot limit"):
+        manage_recovery_snapshot_history(
+            None, action="checkpoint", new_snapshot={"value": "x" * 500},
+            max_snapshot_bytes=256,
+        )
+    with pytest.raises(ValueError, match="No earlier snapshot"):
+        manage_recovery_snapshot_history(
+            None, action="undo"
+        )
+    current = manage_recovery_snapshot_history(
+        None, action="checkpoint", new_snapshot={"revision": 1}
+    )
+    with pytest.raises(ValueError, match="Target revision"):
+        manage_recovery_snapshot_history(current["history_state"], action="restore", target_revision=2)
+
