@@ -12,6 +12,9 @@ from shoir_target_engines import (
     monitor_forecast_drift,
     plan_two_sample_t_sample_size,
     solve_cutting_stock,
+    build_rcm_decision_support,
+    calibrate_simulation_outputs,
+    evaluate_kpi_alerts,
 )
 
 
@@ -2253,3 +2256,142 @@ def test_niosh_rnle_rejects_out_of_range_measurements_and_multipliers():
         calculate_niosh_revised_lifting_equation(**{**base, "asymmetry_destination": 140})
     with pytest.raises(ValueError, match="Frequency multiplier"):
         calculate_niosh_revised_lifting_equation(**{**base, "frequency_multiplier": 0})
+
+
+def test_rcm_decision_support_separates_task_candidates_from_specialist_review():
+    result = build_rcm_decision_support([
+        {
+            "asset": "P-101", "failure_mode": "Bearing wear",
+            "consequence": "operational", "severity": 5,
+            "detectable": True, "on_condition_applicable": True,
+            "evidence_reference": "inspection-2026-11",
+        },
+        {
+            "asset": "P-102", "failure_mode": "Guard failure",
+            "consequence": "safety", "severity": 10,
+            "detectable": True, "on_condition_applicable": True,
+        },
+        {
+            "asset": "PSV-1", "failure_mode": "Pressure trip fails",
+            "consequence": "hidden", "severity": 8,
+            "hidden_protective_function": True,
+            "failure_finding_applicable": True,
+        },
+    ])
+    assert result["status"] == "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL"
+    frame = result["decision_tree"].set_index("Failure mode")
+    assert frame.loc["Bearing wear", "Recommended task candidate"] == "ON_CONDITION_TASK_CANDIDATE"
+    assert frame.loc["Guard failure", "Recommended task candidate"] == "SPECIALIST_SAFETY_REVIEW"
+    assert frame.loc["Pressure trip fails", "Recommended task candidate"] == "FAILURE_FINDING_TASK_CANDIDATE"
+    assert result["specialist_review_count"] == 3
+    assert "not a certified RCM analysis" in result["warning"]
+
+
+def test_rcm_run_to_failure_requires_explicit_acceptance_and_cost_comparison():
+    accepted = build_rcm_decision_support([{
+        "asset": "A-1", "failure_mode": "Indicator lamp",
+        "consequence": "non_operational", "severity": 2,
+        "preventive_task_cost": 50, "consequence_cost": 10,
+        "run_to_failure_accepted": True,
+    }])
+    assert accepted["decision_tree"].iloc[0]["Recommended task candidate"] == "RUN_TO_FAILURE_CANDIDATE"
+    not_accepted = build_rcm_decision_support([{
+        "asset": "A-2", "failure_mode": "Cooling fan",
+        "consequence": "operational", "severity": 4,
+        "preventive_task_cost": 5, "consequence_cost": 50,
+        "run_to_failure_accepted": True,
+    }])
+    assert not_accepted["decision_tree"].iloc[0]["Recommended task candidate"] == "HUMAN_REVIEW_REQUIRED"
+    with pytest.raises(ValueError, match="whole number from 1 to 10"):
+        build_rcm_decision_support([{
+            "asset": "A-3", "failure_mode": "Invalid severity",
+            "consequence": "operational", "severity": 11,
+        }])
+
+
+def test_simulation_calibration_uses_chronological_holdout_without_leakage():
+    result = calibrate_simulation_outputs(
+        [1, 2, 3, 4, 5, 6],
+        [2.5, 4.5, 6.5, 8.5, 10.5, 12.5],
+        training_fraction=2 / 3,
+    )
+    assert result["status"] == "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT"
+    assert result["training_observations"] == 4
+    assert result["holdout_observations"] == 2
+    assert result["calibration_intercept"] == pytest.approx(0.5)
+    assert result["calibration_slope"] == pytest.approx(2.0)
+    assert result["training_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["holdout_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["residuals"].iloc[-1]["Segment"] == "HOLDOUT"
+    assert "not a physics-based digital-twin calibration" in result["warning"]
+
+
+def test_simulation_calibration_rejects_bad_series_and_slope_bounds():
+    with pytest.raises(ValueError, match="same number"):
+        calibrate_simulation_outputs([1, 2, 3, 4, 5], [1, 2, 3, 4])
+    with pytest.raises(ValueError, match="contain variation"):
+        calibrate_simulation_outputs([1, 1, 1, 1, 1], [2, 3, 4, 5, 6])
+    with pytest.raises(ValueError, match="outside the configured bounds"):
+        calibrate_simulation_outputs(
+            [1, 2, 3, 4, 5], [10, 20, 30, 40, 50],
+            min_slope=0, max_slope=2,
+        )
+
+
+def test_kpi_alerts_are_freshness_aware_and_deduplicate_open_alerts():
+    records = [
+        {
+            "kpi": "OEE", "value": 88.0, "unit": "%",
+            "observed_at": "2026-11-06T17:50:00Z", "source": "synthetic-test",
+        },
+        {
+            "kpi": "Throughput", "value": 20.0, "unit": "units/hour",
+            "observed_at": "2026-11-04T17:00:00Z", "source": "synthetic-test",
+        },
+    ]
+    rules = [
+        {"rule_id": "oee-min", "kpi": "OEE", "operator": "<", "threshold": 90, "severity": "CRITICAL"},
+        {"rule_id": "throughput-min", "kpi": "Throughput", "operator": "<", "threshold": 25},
+        {"rule_id": "scrap-max", "kpi": "Scrap", "operator": ">", "threshold": 3},
+    ]
+    first = evaluate_kpi_alerts(
+        records, rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+    )
+    rows = first["alerts"].set_index("Rule ID")
+    assert first["open_alert_count"] == 1
+    assert first["new_alert_count"] == 1
+    assert rows.loc["oee-min", "Event"] == "NEW"
+    assert rows.loc["throughput-min", "State"] == "STALE_DATA"
+    assert rows.loc["scrap-max", "State"] == "MISSING_DATA"
+
+    second = evaluate_kpi_alerts(
+        records, rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+        previous_open_alert_ids=first["next_open_alert_ids"],
+    )
+    assert second["new_alert_count"] == 0
+    assert second["continuing_alert_count"] == 1
+
+
+def test_kpi_alerts_resolve_breaches_and_reject_duplicate_rules():
+    rules = [{"rule_id": "temperature-high", "kpi": "Temperature", "operator": ">", "threshold": 80}]
+    active = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:01:00Z",
+    )
+    resolved = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-06T17:02:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:03:00Z",
+        previous_open_alert_ids=active["next_open_alert_ids"],
+    )
+    assert resolved["resolved_alert_count"] == 1
+    assert resolved["alerts"].iloc[0]["Event"] == "RESOLVED"
+    with pytest.raises(ValueError, match="unique"):
+        evaluate_kpi_alerts(
+            [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+            [rules[0], rules[0]], as_of="2026-11-06T17:01:00Z",
+        )
+
