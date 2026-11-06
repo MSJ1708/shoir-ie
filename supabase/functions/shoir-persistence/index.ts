@@ -134,7 +134,7 @@ function response(
 ) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: corsHeadersForOrigin(origin),
+    headers: corsHeadersForOrigin(origin, SUPABASE_URL),
   });
 }
 function hexToBytes(hex: string) {
@@ -472,7 +472,7 @@ async function platformWorkspaceKey(
 
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
-  if (!isAllowedBrowserOrigin(origin)) {
+  if (!isAllowedBrowserOrigin(origin, SUPABASE_URL)) {
     return new Response(JSON.stringify({ error: "Origin not allowed." }), {
       status: 403,
       headers: {
