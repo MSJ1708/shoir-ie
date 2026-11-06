@@ -192,9 +192,13 @@ BEGIN
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM public.shoir_accounts
-        WHERE username_lc = v_actor AND COALESCE(active, true)
+        WHERE username_lc = v_actor
+          AND COALESCE(active, true)
+          AND lower(COALESCE(tier, '')) LIKE '%enterprise%'
+          AND subscription_expires_at > now()
     ) THEN
-        RAISE EXCEPTION 'Active account is required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'An active Enterprise subscription is required to create a team organization.'
+            USING ERRCODE = '42501';
     END IF;
     INSERT INTO public.shoir_organizations(display_name, org_type, owner_username_lc)
     VALUES (v_name, 'team', v_actor)
@@ -263,11 +267,27 @@ BEGIN
        OR (v_role = 'admin' AND v_actor_role <> 'owner') THEN
         RAISE EXCEPTION 'Organization invitation permission denied.' USING ERRCODE = '42501';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.shoir_accounts
+        WHERE username_lc = v_target AND COALESCE(active, true)
+    ) THEN
+        RAISE EXCEPTION 'Target active account was not found.' USING ERRCODE = '22023';
+    END IF;
     IF EXISTS (
         SELECT 1 FROM public.shoir_organization_memberships
         WHERE organization_id = p_organization_id AND username_lc = v_target AND status = 'active'
     ) THEN
         RAISE EXCEPTION 'Target account is already an active member.' USING ERRCODE = '23505';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.shoir_organization_invitations
+        WHERE organization_id = p_organization_id
+          AND target_username_lc = v_target
+          AND used_at IS NULL AND revoked_at IS NULL
+          AND expires_at > now()
+    ) THEN
+        RAISE EXCEPTION 'A pending invitation already exists for this account.'
+            USING ERRCODE = '23505';
     END IF;
     INSERT INTO public.shoir_organization_invitations(
         organization_id, target_username_lc, role, token_hash,
@@ -298,11 +318,23 @@ DECLARE
     v_inv public.shoir_organization_invitations%ROWTYPE;
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM public.shoir_organizations
-        WHERE organization_id = (SELECT organization_id FROM public.shoir_organization_invitations WHERE token_hash = p_token_hash)
-          AND org_type = 'team' AND status = 'active'
+        SELECT 1
+        FROM public.shoir_organizations o
+        JOIN public.shoir_accounts owner
+          ON owner.username_lc = o.owner_username_lc
+        WHERE o.organization_id = (
+            SELECT invitation.organization_id
+            FROM public.shoir_organization_invitations invitation
+            WHERE invitation.token_hash = p_token_hash
+        )
+          AND o.org_type = 'team'
+          AND o.status = 'active'
+          AND COALESCE(owner.active, true)
+          AND lower(COALESCE(owner.tier, '')) LIKE '%enterprise%'
+          AND owner.subscription_expires_at > now()
     ) THEN
-        RAISE EXCEPTION 'Active team organization is required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'An active Enterprise organization owner is required.'
+            USING ERRCODE = '42501';
     END IF;
     IF v_actor IS NULL OR v_actor = '' OR p_token_hash IS NULL OR p_token_hash !~ '^[0-9a-f]{64}$' THEN
         RAISE EXCEPTION 'Invalid invitation acceptance input.' USING ERRCODE = '22023';
@@ -426,8 +458,15 @@ BEGIN
      WHERE organization_id = p_organization_id
        AND username_lc = v_target AND status = 'active'
      FOR UPDATE;
-    IF NOT EXISTS (SELECT 1 FROM public.shoir_accounts WHERE username_lc = v_target AND COALESCE(active, true)) THEN
-        RAISE EXCEPTION 'New owner account is inactive.' USING ERRCODE = '42501';
+    IF NOT EXISTS (
+        SELECT 1 FROM public.shoir_accounts
+        WHERE username_lc = v_target
+          AND COALESCE(active, true)
+          AND lower(COALESCE(tier, '')) LIKE '%enterprise%'
+          AND subscription_expires_at > now()
+    ) THEN
+        RAISE EXCEPTION 'New owner must have an active Enterprise subscription.'
+            USING ERRCODE = '42501';
     END IF;
     IF v_target_role IS NULL OR v_target_role NOT IN ('admin','engineer','approver','viewer') THEN
         RAISE EXCEPTION 'The new owner must be an active organization member.' USING ERRCODE = '42501';
@@ -551,6 +590,14 @@ BEGIN
         RAISE EXCEPTION 'Invalid organization invitation revocation input.'
             USING ERRCODE = '22023';
     END IF;
+    PERFORM 1
+      FROM public.shoir_organizations
+     WHERE organization_id = p_organization_id AND status = 'active'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Active organization was not found.'
+            USING ERRCODE = '42501';
+    END IF;
     SELECT role INTO v_role
       FROM public.shoir_organization_memberships
      WHERE organization_id = p_organization_id
@@ -664,6 +711,21 @@ BEGIN
         WHERE username_lc = lower(btrim(p_actor)) AND COALESCE(active, true)
     ) THEN
         RAISE EXCEPTION 'The organization account is inactive.' USING ERRCODE = '42501';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.shoir_organizations o
+        WHERE o.organization_id = p_organization_id
+          AND o.org_type = 'team'
+          AND NOT EXISTS (
+              SELECT 1 FROM public.shoir_accounts owner
+              WHERE owner.username_lc = o.owner_username_lc
+                AND COALESCE(owner.active, true)
+                AND lower(COALESCE(owner.tier, '')) LIKE '%enterprise%'
+                AND owner.subscription_expires_at > now()
+          )
+    ) THEN
+        RAISE EXCEPTION 'Organization owner Enterprise subscription is inactive or expired.'
+            USING ERRCODE = '42501';
     END IF;
     IF p_permission NOT IN ('read','write','approve','manage') THEN
         RAISE EXCEPTION 'Invalid workspace permission request.' USING ERRCODE = '22023';
