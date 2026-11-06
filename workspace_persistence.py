@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS workspace_states (
 _EXACT_EXCLUDE = {
     "authenticated",
     "current_user",
+    "remote_session_token",
+    "renewal_session_token",
+    "access_token",
+    "refresh_token",
+    "session_token",
+    "api_secret",
+    "password",
+    "password_hash",
     "user_role",
     "user_tier",
     "user_email",
@@ -52,6 +60,9 @@ _EXACT_EXCLUDE = {
 
 _PREFIX_EXCLUDE = (
     "signin_",
+    "token_",
+    "secret_",
+    "password_",
     "reg_",
     "payment_",
     "uploaded_",
@@ -434,6 +445,143 @@ def save_user_workspace(
     except Exception:
         # Workspace persistence should never crash the engineering application.
         return False
+
+
+_BACKUP_FORMAT = "shoir-ie-user-workspace-backup"
+_BACKUP_VERSION = 1
+_MAX_BACKUP_BYTES = 32 * 1024 * 1024
+
+
+def export_user_workspace_backup(
+    username: str,
+    session_state: MutableMapping[str, Any],
+) -> dict[str, Any]:
+    """Create a portable, integrity-checked backup of the current user's workspace.
+
+    Authentication/session secrets and transient controls are excluded by the
+    same allow-by-exclusion policy used for normal workspace persistence.
+    The SHA-256 digest detects accidental corruption; it is not a signature
+    and does not prove who created or modified a backup.
+    """
+    owner = str(username or "").strip().lower()
+    if not owner or owner == "guest visitor":
+        raise PermissionError("Sign in with a named account before exporting a workspace backup.")
+    payload = _snapshot(session_state)
+    envelope = {
+        "format": _BACKUP_FORMAT,
+        "version": _BACKUP_VERSION,
+        "owner_username_lc": owner,
+        "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "payload": payload,
+    }
+    canonical = json.dumps(
+        envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    envelope["sha256"] = digest
+    data = json.dumps(
+        envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    if len(data) > _MAX_BACKUP_BYTES:
+        raise ValueError(
+            f"Workspace backup exceeds the {_MAX_BACKUP_BYTES // (1024 * 1024)} MiB safety limit."
+        )
+    return {
+        "backup_bytes": data,
+        "sha256": digest,
+        "owner_username_lc": owner,
+        "created_at": envelope["created_at"],
+        "payload_key_count": len(payload),
+        "backup_size_bytes": len(data),
+        "warning": (
+            "This portable file may contain private engineering workspace data. Store it securely. "
+            "Its checksum detects accidental corruption but is not a cryptographic signature or encrypted backup."
+        ),
+    }
+
+
+def verify_user_workspace_backup(
+    backup_bytes: bytes | bytearray,
+    username: str,
+) -> dict[str, Any]:
+    """Verify format, digest, size and current-account target before restoring."""
+    owner = str(username or "").strip().lower()
+    if not owner or owner == "guest visitor":
+        raise PermissionError("Sign in with a named account before restoring a workspace backup.")
+    if not isinstance(backup_bytes, (bytes, bytearray)):
+        raise TypeError("Workspace backup must be uploaded as bytes.")
+    if not backup_bytes or len(backup_bytes) > _MAX_BACKUP_BYTES:
+        raise ValueError("Workspace backup is empty or exceeds the 32 MiB safety limit.")
+    try:
+        envelope = json.loads(bytes(backup_bytes).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Workspace backup is not valid UTF-8 JSON.") from exc
+    if not isinstance(envelope, dict):
+        raise ValueError("Workspace backup root must be a JSON object.")
+    if envelope.get("format") != _BACKUP_FORMAT or envelope.get("version") != _BACKUP_VERSION:
+        raise ValueError("Workspace backup format or version is not supported.")
+    if str(envelope.get("owner_username_lc", "")).strip().lower() != owner:
+        raise PermissionError("This backup belongs to a different account; restore was blocked.")
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Workspace backup payload must be a JSON object.")
+    supplied_digest = str(envelope.get("sha256", "")).strip().lower()
+    canonical_envelope = {
+        key: envelope[key]
+        for key in ("format", "version", "owner_username_lc", "created_at", "payload")
+        if key in envelope
+    }
+    canonical = json.dumps(
+        canonical_envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(canonical).hexdigest()
+    if len(supplied_digest) != 64 or not hashlib.compare_digest(supplied_digest, expected_digest):
+        raise ValueError("Workspace backup checksum is invalid; no state was restored.")
+    forbidden = [str(key) for key in payload if _excluded(str(key))]
+    if forbidden:
+        raise ValueError("Workspace backup contains excluded authentication or transient state.")
+    for key, value in payload.items():
+        if not isinstance(key, str):
+            raise ValueError("Workspace backup contains a non-string state key.")
+        json.dumps(value, ensure_ascii=False, allow_nan=False)
+    return {
+        "owner_username_lc": owner,
+        "created_at": str(envelope.get("created_at", "")),
+        "sha256": expected_digest,
+        "payload": payload,
+        "payload_key_count": len(payload),
+    }
+
+
+def restore_user_workspace_backup(
+    backup_bytes: bytes | bytearray,
+    username: str,
+    session_state: MutableMapping[str, Any],
+) -> dict[str, Any]:
+    """Restore only an already-verified same-account backup into current session state.
+
+    Persistence is a separate explicit step so callers can first save a copy of
+    the current session and roll back if the managed write fails.
+    """
+    verified = verify_user_workspace_backup(backup_bytes, username)
+    restored = 0
+    for key, value in verified["payload"].items():
+        if _excluded(str(key)):
+            continue
+        session_state[str(key)] = _unpack(value)
+        restored += 1
+    return {
+        "status": "WORKSPACE_BACKUP_RESTORED_IN_SESSION",
+        "owner_username_lc": verified["owner_username_lc"],
+        "source_created_at": verified["created_at"],
+        "source_sha256": verified["sha256"],
+        "restored_key_count": restored,
+        "warning": (
+            "The backup was restored in this session. The caller must save the restored state "
+            "to the configured managed persistence backend before treating it as durable."
+        ),
+    }
+
 
 def load_user_workspace(
     username: str,
