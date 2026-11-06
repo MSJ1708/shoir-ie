@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       PYTHONPATH: .
     steps:
@@ -20,20 +21,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile all Python modules
+        id: compile
         run: python -m compileall -q .
       - name: Run regression tests
+        id: regression
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTHONTRACEMALLOC: "5"
-        run: python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q tests
+        run: |
+          mkdir -p artifacts/test-results
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -q -ra --junitxml=artifacts/test-results/junit.xml tests
+      - name: Upload regression test results and skip/warning detail
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-regression-test-results
+          path: artifacts/test-results/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
       - name: Set up Deno
+        id: deno_setup
+        if: always() && steps.compile.outcome == 'success'
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - name: Type-check persistence Edge Function
+        if: always() && steps.deno_setup.outcome == 'success'
         run: deno check supabase/functions/shoir-persistence/index.ts
       - name: Run persistence Edge Function security tests
+        if: always() && steps.deno_setup.outcome == 'success'
         run: deno test supabase/functions/shoir-persistence/security_test.ts
       - name: Install PDF rendering tools for visual export acceptance
         if: always()
@@ -71,6 +88,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Parse required application modules
+        id: parse_modules
+        if: always() && steps.compile.outcome == 'success'
         run: |
           python - <<'PY'
           import ast
@@ -81,10 +100,16 @@ jobs:
           print("Required application modules parsed successfully.")
           PY
       - name: Execute application top-level import smoke test
+        id: import_smoke
+        if: always() && steps.compile.outcome == 'success'
         run: python scripts/runtime_import_smoke.py
       - name: Install Chromium for local runtime smoke
+        id: chromium
+        if: always() && steps.compile.outcome == 'success' && steps.import_smoke.outcome == 'success'
         run: python -m playwright install --with-deps chromium
       - name: Start local Streamlit application
+        id: streamlit_start
+        if: always() && steps.chromium.outcome == 'success'
         run: |
           mkdir -p artifacts/live-deployment-smoke
           nohup python -m streamlit run app.py \
@@ -110,11 +135,13 @@ jobs:
             exit 1
           fi
       - name: Browser-smoke the local app at desktop and mobile widths
+        id: browser_smoke
+        if: always() && steps.streamlit_start.outcome == 'success'
         env:
           SHOIR_LIVE_URL: http://127.0.0.1:8501/
         run: python scripts/live_deployment_smoke.py
       - name: Require desktop and mobile browser screenshots
-        if: success()
+        if: always() && steps.browser_smoke.outcome == 'success'
         run: |
           test -s artifacts/live-deployment-smoke/desktop.png
           test -s artifacts/live-deployment-smoke/mobile.png
