@@ -63,6 +63,9 @@ _PREFIX_EXCLUDE = (
     # The unified shell uses a consistent shoir_shell_* namespace for UI
     # controls and transient surface state; none of it belongs in persistence.
     "shoir_shell_",
+    # The active organization/workspace selector is request context, not
+    # personal workspace data to restore for a later sign-in.
+    "shoir_active_organization_",
     "shoir_global_module_",
     "upgrade_clean_",
     "upgrade_reset_",
