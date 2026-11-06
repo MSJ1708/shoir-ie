@@ -8,6 +8,7 @@ import pytest
 import pandas as pd
 
 from shoir_target_engines import (
+    calculate_niosh_revised_lifting_equation,
     monitor_forecast_drift,
     plan_two_sample_t_sample_size,
     solve_cutting_stock,
@@ -2135,3 +2136,120 @@ def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dat
         assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
     with pytest.raises(ValueError, match="between 1 and 5,000"):
         assess_capa_8d_records([])
+
+def test_niosh_rnle_metric_ideal_case_matches_load_constant():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=25,
+        vertical_hand_start=75,
+        vertical_travel_distance=25,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=1,
+        coupling_multiplier=1,
+        units="metric",
+        frequency_duration_category="Short (≤ 1 hour)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["recommended_weight_limit"] == pytest.approx(23.0)
+    assert result["lifting_index"] == pytest.approx(10 / 23)
+    assert result["status"] == "LI_AT_OR_BELOW_1"
+    assert result["horizontal_value_used"] == 25
+    assert result["asymmetry_value_used_degrees"] == 0
+
+
+def test_niosh_rnle_uses_worst_origin_destination_measurements():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=50,
+        vertical_hand_start=75,
+        vertical_travel_distance=50,
+        asymmetry_origin=10,
+        asymmetry_destination=45,
+        frequency_lifts_per_minute=2,
+        frequency_multiplier=0.8,
+        coupling_multiplier=0.9,
+        units="metric",
+        frequency_duration_category="Moderate (> 1 to 2 hours)",
+        coupling_quality="Fair",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["horizontal_value_used"] == 50
+    assert result["multipliers"]["Horizontal multiplier (HM)"] == pytest.approx(0.5)
+    assert result["asymmetry_value_used_degrees"] == 45
+    assert result["multipliers"]["Asymmetry multiplier (AM)"] == pytest.approx(1 - 0.0032 * 45)
+    expected = 23 * 0.5 * 1 * (0.82 + 4.5 / 50) * (1 - 0.0032 * 45) * 0.8 * 0.9
+    assert result["recommended_weight_limit"] == pytest.approx(expected)
+    assert result["status"] == "LI_AT_OR_BELOW_1"
+
+
+def test_niosh_rnle_imperial_ideal_case_and_required_table_sources():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=20,
+        horizontal_origin=10,
+        horizontal_destination=10,
+        vertical_hand_start=30,
+        vertical_travel_distance=10,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=1,
+        coupling_multiplier=1,
+        units="imperial",
+        frequency_duration_category="Long (> 2 to 8 hours)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["recommended_weight_limit"] == pytest.approx(51.0)
+    assert result["lifting_index"] == pytest.approx(20 / 51)
+    with pytest.raises(ValueError, match="official RNLE table/source"):
+        calculate_niosh_revised_lifting_equation(
+            load_weight=20,
+            horizontal_origin=10,
+            horizontal_destination=10,
+            vertical_hand_start=30,
+            vertical_travel_distance=10,
+            asymmetry_origin=0,
+            asymmetry_destination=0,
+            frequency_lifts_per_minute=1,
+            frequency_multiplier=1,
+            coupling_multiplier=1,
+            units="imperial",
+            frequency_duration_category="Long (> 2 to 8 hours)",
+            coupling_quality="Good",
+            frequency_multiplier_source="",
+            coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+        )
+
+
+def test_niosh_rnle_rejects_out_of_range_measurements_and_multipliers():
+    base = dict(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=25,
+        vertical_hand_start=75,
+        vertical_travel_distance=25,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=0.8,
+        coupling_multiplier=0.9,
+        units="metric",
+        frequency_duration_category="Short (≤ 1 hour)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH manual Table 5",
+        coupling_multiplier_source="NIOSH manual Table 7",
+    )
+    with pytest.raises(ValueError, match="Horizontal hand location exceeds"):
+        calculate_niosh_revised_lifting_equation(**{**base, "horizontal_origin": 70})
+    with pytest.raises(ValueError, match="asymmetry angles"):
+        calculate_niosh_revised_lifting_equation(**{**base, "asymmetry_destination": 140})
+    with pytest.raises(ValueError, match="Frequency multiplier"):
+        calculate_niosh_revised_lifting_equation(**{**base, "frequency_multiplier": 0})
