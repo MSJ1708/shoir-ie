@@ -825,7 +825,7 @@ def test_workbench_runs_rcm_network_calibration_disruption_and_kpi_tools():
     rcm = at.session_state["shoir_tool_result_T044"]
     assert rcm["status"] == "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL"
     assert rcm["task_candidate_count"] == 2
-    assert rcm["specialist_review_count"] == 2
+    assert rcm["specialist_review_count"] == 3
 
     # T060: deterministic transport optimization with explicit shortage reporting.
     _open_tool_for_app_test(at, "T060 · Supply Chain Network Planner")
@@ -924,4 +924,26 @@ def test_workbench_plugin_contract_and_personal_backup_tools_are_not_fake_routes
     assert governance["status"] == "PERSONAL_WORKSPACE_BACKUP_CREATED"
     assert backup.startswith(b"{")
     assert governance["backup_manifest"]["owner_username_lc"] == "plugin-governance-checker"
+
+def test_workbench_recovery_tool_applies_a_verified_revision_snapshot():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "recovery-tool-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    _open_tool_for_app_test(at, "T006 · Undo, Redo, and Recovery")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "RECOVERY_ACTION_APPLIED"
+    assert result["action"] == "snapshot"
+    assert result["current_state"]["dataset"] == "SYNTHETIC-example"
+    assert result["can_undo"] is False
+    assert len(result["history"]) == 1
 
