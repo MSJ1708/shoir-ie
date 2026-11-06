@@ -7,6 +7,7 @@ is migration-history integration evidence, not a hosted Supabase staging replay.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 from pathlib import Path
@@ -914,17 +915,13 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                         (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat(),
                     ),
                 )
-                cursor.execute(
-                    "SELECT public.shoir_org_invitation_revoke(%s,%s::uuid,%s::uuid);",
-                    (username, organization_id, cursor.fetchone()[0]["invitation_id"] if False else "00000000-0000-0000-0000-000000000001"),
+                pending_result = cursor.fetchone()[0]
+                pending_invitation = (
+                    pending_result
+                    if isinstance(pending_result, dict)
+                    else json.loads(pending_result)
                 )
-                # Revoke a known pending invitation and prove it cannot be accepted.
-                cursor.execute(
-                    "SELECT invitation_id FROM public.shoir_organization_invitations WHERE token_hash=%s;",
-                    ("b" * 64,),
-                )
-                pending_invitation_id = str(cursor.fetchone()[0])
-                # The previous revoke attempt is intentionally replaced by the real ID below.
+                pending_invitation_id = str(pending_invitation["invitation_id"])
                 cursor.execute(
                     "SELECT public.shoir_org_invitation_revoke(%s,%s::uuid,%s::uuid);",
                     (username, organization_id, pending_invitation_id),
