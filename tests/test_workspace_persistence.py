@@ -2,7 +2,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from workspace_persistence import load_user_workspace, save_user_workspace, _workspace_change_signature
+from workspace_persistence import (
+    _excluded,
+    _workspace_change_signature,
+    load_user_workspace,
+    save_user_workspace,
+)
+
+
+def test_organization_selection_is_not_saved_in_personal_workspace_state():
+    assert _excluded("shoir_active_organization_id")
+    assert _excluded("shoir_active_organization_workspace_id")
 
 
 def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
