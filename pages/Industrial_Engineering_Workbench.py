@@ -25,6 +25,7 @@ import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
+from shoir_remaining_tool_engines import get_tool_example_json, run_additional_tool
 from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
@@ -535,8 +536,23 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
                             spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
                             run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
+                        elif selected_tool["tool_id"] == "T006":
+                            st.caption(
+                                "Create, undo, redo or recover a verified revision in a supplied JSON history. The returned history must be saved to the authenticated workspace for durable cross-session recovery."
+                            )
+                            tool006_payload_json = st.text_area(
+                                "Revision history action (JSON object)",
+                                value=get_tool_example_json("T006"),
+                                key="tool006_payload",
+                            )
+                            run_method = st.form_submit_button(
+                                "Apply revision-history action",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool006_run",
+                            )
                         elif selected_tool["tool_id"] == "T039":
-                            st.caption("Structured 8D/CAPA record-completeness and due-date review. It tracks missing fields and closure evidence but does not certify the cause, action effectiveness or regulatory compliance.")
+                            st.caption("Structured 8D/CAPA record-completeness, due-date and controlled transition review. Closure requires approval and effectiveness evidence; this does not certify regulatory compliance.")
                             capa_records_json = st.text_area(
                                 "CAPA / 8D records (JSON list; edit or add records)",
                                 value=_TOOL039_EXAMPLE_RECORDS,
@@ -546,6 +562,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "Review date (YYYY-MM-DD; blank uses current date)",
                                 value="",
                                 key="tool039_as_of_date",
+                            )
+                            capa_transitions_json = st.text_area(
+                                "Optional controlled status transitions (JSON list)",
+                                value="[]",
+                                key="tool039_transitions",
                             )
                             run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
                         elif selected_tool["tool_id"] == "T040":
@@ -1617,8 +1638,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
                     elif selected_tool["tool_id"] == "T031":
                         current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
+                    elif selected_tool["tool_id"] == "T006":
+                        current_tool_inputs = {"payload_json": tool006_payload_json}
                     elif selected_tool["tool_id"] == "T039":
-                        current_tool_inputs = {"records_json": capa_records_json, "as_of_date": capa_as_of_date}
+                        current_tool_inputs = {"records_json": capa_records_json, "transitions_json": capa_transitions_json, "as_of_date": capa_as_of_date}
 
                     elif selected_tool["tool_id"] == "T040":
                         current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
@@ -1671,7 +1694,34 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         try:
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
-                            if selected_tool["tool_id"] == "T097":
+                            if selected_tool["tool_id"] == "T006":
+                                try:
+                                    additional_payload = json.loads(tool006_payload_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Revision-history input must be valid JSON.") from exc
+                                if not isinstance(additional_payload, dict):
+                                    raise ValueError("Revision-history input must be a JSON object.")
+                                result = run_additional_tool("T006", additional_payload)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if "SYNTHETIC" in tool006_payload_json else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T039":
+                                try:
+                                    parsed_capa_records = json.loads(capa_records_json)
+                                    parsed_capa_transitions = json.loads(capa_transitions_json or "[]")
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("CAPA/8D records and transitions must be valid JSON.") from exc
+                                if not isinstance(parsed_capa_records, list) or not isinstance(parsed_capa_transitions, list):
+                                    raise ValueError("CAPA/8D records and transitions must each be JSON lists.")
+                                result = run_additional_tool("T039", {
+                                    "records": parsed_capa_records,
+                                    "transitions": parsed_capa_transitions,
+                                    "as_of_date": capa_as_of_date.strip() or None,
+                                })
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T097":
                                 import json as _plugin_json
                                 from plugin_registry import plugin_manifest, get_plugin, validate_plugin_payload
                                 selected_plugin = get_plugin(plugin_name)
@@ -2430,7 +2480,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T097", "T099", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T097", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
