@@ -415,7 +415,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T097", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -1017,6 +1017,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
                             spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
                             run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
+                        elif selected_tool["tool_id"] == "T044":
+                            st.caption(
+                                "RCM first-pass task screening. Safety/environmental/high-severity and hidden protective-function cases are escalated; all outputs require a competent reliability review."
+                            )
+                            rcm_records_json = st.text_area(
+                                "Failure-mode records (JSON list)",
+                                value='[{"asset":"P-101","failure_mode":"Bearing wear","consequence":"operational","severity":5,"detectable":true,"on_condition_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"PSV-1","failure_mode":"Pressure trip fails","consequence":"hidden","severity":8,"hidden_protective_function":true,"failure_finding_applicable":true}]',
+                                key="tool044_records",
+                            )
+                            run_method = st.form_submit_button("Build RCM task candidates", type="primary", use_container_width=True, key="tool044_run")
                         elif selected_tool["tool_id"] == "T046":
                             st.caption(
                                 "Single-task, two-handed NIOSH Revised Lifting Equation screen. "
@@ -1148,6 +1158,100 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 use_container_width=True,
                                 key="tool046_run",
                             )
+                        elif selected_tool["tool_id"] == "T060":
+                            st.caption(
+                                "Single-period capacitated transportation optimization. Unmet demand remains visible; this is not a multi-period network design model."
+                            )
+                            supply_network_suppliers_json = st.text_area(
+                                "Suppliers (JSON list)",
+                                value='[{"supplier":"Supplier A","supply_capacity":100},{"supplier":"Supplier B","supply_capacity":60}]',
+                                key="tool060_suppliers",
+                            )
+                            supply_network_sites_json = st.text_area(
+                                "Demand sites (JSON list)",
+                                value='[{"site":"Plant 1","demand":80},{"site":"Plant 2","demand":70}]',
+                                key="tool060_sites",
+                            )
+                            supply_network_routes_json = st.text_area(
+                                "Available and disrupted routes (JSON list)",
+                                value='[{"supplier":"Supplier A","site":"Plant 1","unit_cost":2,"capacity":80,"available":true},{"supplier":"Supplier A","site":"Plant 2","unit_cost":3,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 1","unit_cost":4,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 2","unit_cost":1,"capacity":60,"available":true}]',
+                                key="tool060_routes",
+                            )
+                            supply_network_penalty = st.number_input(
+                                "Unmet-demand penalty per unit", min_value=0.01, value=1000.0, step=50.0, key="tool060_penalty"
+                            )
+                            supply_network_time_limit = st.number_input(
+                                "Solver time limit (seconds)", min_value=0.1, max_value=120.0, value=10.0, step=1.0, key="tool060_time_limit"
+                            )
+                            run_method = st.form_submit_button("Optimize supply chain network", type="primary", use_container_width=True, key="tool060_run")
+                        elif selected_tool["tool_id"] == "T074":
+                            st.caption(
+                                "Affine simulation-output calibration with a chronological holdout. It does not tune simulator physics or connect to live equipment."
+                            )
+                            calibration_simulated_text = st.text_input(
+                                "Simulated outputs (chronological, comma-separated)",
+                                "10, 20, 30, 40, 50, 60",
+                                key="tool074_simulated",
+                            )
+                            calibration_measured_text = st.text_input(
+                                "Measured outputs (same order and unit)",
+                                "21, 41, 61, 81, 101, 121",
+                                key="tool074_measured",
+                            )
+                            calibration_training_fraction = st.slider(
+                                "Training fraction", min_value=0.5, max_value=0.9, value=0.67, step=0.01, key="tool074_fraction"
+                            )
+                            run_method = st.form_submit_button("Fit and validate calibration", type="primary", use_container_width=True, key="tool074_run")
+                        elif selected_tool["tool_id"] == "T080":
+                            st.caption(
+                                "Synthetic Monte Carlo stress test with supplier outages, demand variation and capacity shocks. Outputs are scenario estimates, not live supply availability or a forecast."
+                            )
+                            disruption_suppliers_json = st.text_area(
+                                "Supplier baseline (JSON list)",
+                                value='[{"Supplier":"Supplier A","Capacity":100,"Unit Cost":2,"Lead Days":2,"Risk %":5,"Carbon kg/unit":0.5,"Local Share %":70},{"Supplier":"Supplier B","Capacity":70,"Unit Cost":3,"Lead Days":4,"Risk %":10,"Carbon kg/unit":0.7,"Local Share %":30}]',
+                                key="tool080_suppliers",
+                            )
+                            disruption_demands_json = st.text_area(
+                                "Demand baseline (JSON list)",
+                                value='[{"Destination":"Plant 1","Demand":80,"Priority":5,"Due Days":2},{"Destination":"Plant 2","Demand":70,"Priority":3,"Due Days":5}]',
+                                key="tool080_demands",
+                            )
+                            disruption_iterations = st.number_input(
+                                "Monte Carlo iterations", min_value=1, max_value=250, value=50, step=10, key="tool080_iterations"
+                            )
+                            disruption_seed = st.number_input(
+                                "Random seed", min_value=0, max_value=2147483647, value=17, step=1, key="tool080_seed"
+                            )
+                            disruption_outage_probability = st.slider(
+                                "Supplier outage probability", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_outage"
+                            )
+                            disruption_demand_cv = st.slider(
+                                "Demand coefficient of variation", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_demand_cv"
+                            )
+                            run_method = st.form_submit_button("Run disruption stress test", type="primary", use_container_width=True, key="tool080_run")
+                        elif selected_tool["tool_id"] == "T094":
+                            st.caption(
+                                "Freshness-aware KPI threshold evaluation. Enter authorized source values; rules are evaluated but no email, SMS or external notification is sent."
+                            )
+                            kpi_records_json = st.text_area(
+                                "KPI readings (JSON list: kpi, value, unit, observed_at, source)",
+                                value="[]",
+                                key="tool094_records",
+                            )
+                            kpi_rules_json = st.text_area(
+                                "Alert rules (JSON list: rule_id, kpi, operator, threshold, severity)",
+                                value="[]",
+                                key="tool094_rules",
+                            )
+                            kpi_as_of = st.text_input(
+                                "Evaluation timestamp (ISO 8601 UTC; blank uses current time)",
+                                "",
+                                key="tool094_as_of",
+                            )
+                            kpi_stale_hours = st.number_input(
+                                "Stale-data threshold (hours)", min_value=0.1, max_value=8760.0, value=24.0, step=1.0, key="tool094_stale"
+                            )
+                            run_method = st.form_submit_button("Evaluate KPI alerts", type="primary", use_container_width=True, key="tool094_run")
                         elif selected_tool["tool_id"] == "T047":
                             st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
                             hazard_json = st.text_area(
@@ -1425,6 +1529,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
                     elif selected_tool["tool_id"] == "T045":
                         current_tool_inputs = {"parts_json": spare_parts_json}
+                    elif selected_tool["tool_id"] == "T044":
+                        current_tool_inputs = {"failure_modes_json": rcm_records_json}
                     elif selected_tool["tool_id"] == "T046":
                         current_tool_inputs = {
                             "units": rnle_units,
@@ -1446,6 +1552,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         }
                     elif selected_tool["tool_id"] == "T047":
                         current_tool_inputs = {"hazards_json": hazard_json}
+                    elif selected_tool["tool_id"] == "T060":
+                        current_tool_inputs = {"suppliers_json": supply_network_suppliers_json, "sites_json": supply_network_sites_json, "routes_json": supply_network_routes_json, "unmet_demand_penalty": supply_network_penalty, "time_limit_seconds": supply_network_time_limit}
+                    elif selected_tool["tool_id"] == "T074":
+                        current_tool_inputs = {"simulated_values": calibration_simulated_text, "measured_values": calibration_measured_text, "training_fraction": calibration_training_fraction}
+                    elif selected_tool["tool_id"] == "T080":
+                        current_tool_inputs = {"suppliers_json": disruption_suppliers_json, "demands_json": disruption_demands_json, "iterations": int(disruption_iterations), "seed": int(disruption_seed), "outage_probability": disruption_outage_probability, "demand_cv": disruption_demand_cv}
+                    elif selected_tool["tool_id"] == "T094":
+                        current_tool_inputs = {"kpi_records_json": kpi_records_json, "alert_rules_json": kpi_rules_json, "as_of": kpi_as_of, "stale_after_hours": kpi_stale_hours}
                     elif selected_tool["tool_id"] == "T050":
                         current_tool_inputs = {"periods_json": safety_periods_json, "rate_base_hours": safety_rate_base}
                     elif selected_tool["tool_id"] == "T054":
@@ -1557,7 +1671,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
                                 calculate_niosh_revised_lifting_equation,
+                                build_rcm_decision_support,
+                                optimize_supply_chain_network,
+                                calibrate_simulation_outputs,
+                                evaluate_kpi_alerts,
                             )
+                            from shoir_resilience_suite import simulate_disruption_scenarios
                             if selected_tool["tool_id"] == "T007":
                                 result = classify_diagnostic(diagnostic_inspector_text)
                                 result["reported_subsystem"] = diagnostic_category
@@ -1878,6 +1997,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_parts, list):
                                     raise ValueError("Spare parts must be a JSON list of part objects.")
                                 result = analyze_spare_parts_criticality(parsed_parts)
+                            elif selected_tool["tool_id"] == "T044":
+                                parsed_rcm = json.loads(rcm_records_json)
+                                if not isinstance(parsed_rcm, list):
+                                    raise ValueError("RCM failure modes must be a JSON list.")
+                                result = build_rcm_decision_support(parsed_rcm)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T046":
                                 if rnle_duration == "Select duration":
                                     raise ValueError("Select the lifting-task duration from the NIOSH definitions.")
@@ -1901,6 +2026,76 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     coupling_multiplier_source=rnle_cm_source,
                                     task_description=rnle_task,
                                 )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T060":
+                                parsed_suppliers = json.loads(supply_network_suppliers_json)
+                                parsed_sites = json.loads(supply_network_sites_json)
+                                parsed_routes = json.loads(supply_network_routes_json)
+                                if not isinstance(parsed_suppliers, list) or not isinstance(parsed_sites, list) or not isinstance(parsed_routes, list):
+                                    raise ValueError("Suppliers, sites and routes must each be JSON lists.")
+                                result = optimize_supply_chain_network(
+                                    parsed_suppliers,
+                                    parsed_sites,
+                                    parsed_routes,
+                                    unmet_demand_penalty_per_unit=supply_network_penalty,
+                                    time_limit_seconds=supply_network_time_limit,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T074":
+                                try:
+                                    simulated_values = [float(x.strip()) for x in calibration_simulated_text.split(",") if x.strip()]
+                                    measured_values = [float(x.strip()) for x in calibration_measured_text.split(",") if x.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Simulated and measured outputs must be comma-separated numbers.") from exc
+                                result = calibrate_simulation_outputs(
+                                    simulated_values,
+                                    measured_values,
+                                    training_fraction=calibration_training_fraction,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T080":
+                                parsed_disruption_suppliers = json.loads(disruption_suppliers_json)
+                                parsed_disruption_demands = json.loads(disruption_demands_json)
+                                if not isinstance(parsed_disruption_suppliers, list) or not isinstance(parsed_disruption_demands, list):
+                                    raise ValueError("Disruption suppliers and demands must each be JSON lists.")
+                                supplier_frame = pd.DataFrame(parsed_disruption_suppliers)
+                                demand_frame = pd.DataFrame(parsed_disruption_demands)
+                                if supplier_frame.empty or demand_frame.empty:
+                                    raise ValueError("At least one supplier and one demand destination are required.")
+                                simulation_rows = simulate_disruption_scenarios(
+                                    supplier_frame,
+                                    demand_frame,
+                                    iterations=int(disruption_iterations),
+                                    seed=int(disruption_seed),
+                                    outage_probability=disruption_outage_probability,
+                                    demand_cv=disruption_demand_cv,
+                                )
+                                result = {
+                                    "status": "SYNTHETIC_DISRUPTION_STRESS_TEST",
+                                    "data_provenance": "USER_ENTERED_UNVERIFIED",
+                                    "iterations": len(simulation_rows),
+                                    "service_level_mean_pct": float(simulation_rows["Service %"].mean()),
+                                    "service_level_p05_pct": float(simulation_rows["Service %"].quantile(0.05)),
+                                    "service_level_p95_pct": float(simulation_rows["Service %"].quantile(0.95)),
+                                    "shortage_mean_units": float(simulation_rows["Shortage units"].mean()),
+                                    "simulation_results": simulation_rows,
+                                    "warning": "This is a stochastic supply-shock sensitivity run, not a calibrated forecast or live supplier availability signal.",
+                                }
+                            elif selected_tool["tool_id"] == "T094":
+                                parsed_kpis = json.loads(kpi_records_json)
+                                parsed_rules = json.loads(kpi_rules_json)
+                                if not isinstance(parsed_kpis, list) or not isinstance(parsed_rules, list):
+                                    raise ValueError("KPI readings and alert rules must each be JSON lists.")
+                                if not parsed_rules:
+                                    raise ValueError("Add at least one KPI alert rule.")
+                                result = evaluate_kpi_alerts(
+                                    parsed_kpis,
+                                    parsed_rules,
+                                    as_of=kpi_as_of.strip() or None,
+                                    stale_after_hours=kpi_stale_hours,
+                                    previous_open_alert_ids=st.session_state.get("shoir_kpi_open_alert_ids", []),
+                                )
+                                st.session_state["shoir_kpi_open_alert_ids"] = result["next_open_alert_ids"]
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T047":
                                 parsed_hazards = json.loads(hazard_json)
@@ -2141,7 +2336,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
