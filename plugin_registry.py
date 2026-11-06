@@ -106,6 +106,27 @@ def validate_plugin_payload(spec: PluginSpec, payload: Mapping[str, Any]) -> dic
     return dict(payload)
 
 
+def _validate_schema_definition(schema: Mapping[str, Any], path: str = "$") -> None:
+    if not isinstance(schema, Mapping):
+        raise ValueError(f"Plugin schema at {path} must be an object.")
+    expected_type = schema.get("type")
+    if expected_type is not None and expected_type not in _ALLOWED_SCHEMA_TYPES:
+        raise ValueError(f"Plugin schema at {path} uses an unsupported type.")
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        raise ValueError(f"Plugin schema properties at {path} must be an object.")
+    required = schema.get("required", [])
+    if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+        raise ValueError(f"Plugin schema required at {path} must be a string list.")
+    enum = schema.get("enum")
+    if enum is not None and (not isinstance(enum, list) or not enum):
+        raise ValueError(f"Plugin schema enum at {path} must be a non-empty list.")
+    if schema.get("items") is not None:
+        _validate_schema_definition(schema["items"], path + "[]")
+    for key, child in properties.items():
+        _validate_schema_definition(child, path + "." + str(key))
+
+
 def register_plugin(spec: PluginSpec, handler: Callable[..., Any] | None = None) -> None:
     if not isinstance(spec, PluginSpec):
         raise TypeError("Register a PluginSpec instance.")
@@ -122,9 +143,9 @@ def register_plugin(spec: PluginSpec, handler: Callable[..., Any] | None = None)
     ):
         raise ValueError("Plugin required_scopes must be a tuple of non-empty scope names.")
     if spec.input_schema:
-        _validate_schema(spec.input_schema, {})
+        _validate_schema_definition(spec.input_schema)
     if spec.output_schema:
-        _validate_schema(spec.output_schema, {})
+        _validate_schema_definition(spec.output_schema)
     _REGISTRY[spec.name] = spec
     if handler is None:
         _HANDLERS.pop(spec.name, None)
