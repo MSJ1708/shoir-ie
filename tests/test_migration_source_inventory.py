@@ -301,3 +301,27 @@ def test_organization_owner_and_invitation_lifecycle_is_fail_closed():
     assert "grant execute on function public.shoir_org_workspace_archive(text,uuid,uuid) to service_role" in normalized
     assert "revoke all on function public.shoir_org_owner_transfer(text,uuid,text)" in normalized
     assert "grant execute on function public.shoir_org_owner_transfer(text,uuid,text) to service_role" in normalized
+
+
+def test_protected_administrator_is_immutable_on_login_and_existing_sessions():
+    sources = (
+        ROOT / "supabase/functions/shoir-persistence/index.ts",
+        ROOT / "supabase/production-backports/shoir-persistence-v9/index.ts",
+    )
+    for path in sources:
+        source = path.read_text(encoding="utf-8")
+        normalized = " ".join(source.casefold().split())
+        session_start = normalized.find("async function getsession(")
+        session_end = normalized.find("async function adminsession(", session_start)
+        assert session_start >= 0 and session_end > session_start, path
+        session_guard = normalized[session_start:session_end]
+        assert "row.username_lc === \"sho\"" in session_guard, path
+        assert "hascanonicalmasteradmininvariant(row)" in session_guard, path
+        assert "administrator account requires manual security review" in session_guard, path
+        assert '"access-control-allow-origin": "*"' not in normalized, path
+        assert "const admintier = \"enterprise plus tier ($399)\"" not in normalized, path
+        assert not re.search(
+            r'from\("shoir_accounts"\)\s*\.update\(\{\s*tier\s*:\s*adminTier',
+            source,
+            flags=re.IGNORECASE,
+        ), path
