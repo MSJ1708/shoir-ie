@@ -176,6 +176,31 @@ def _edge_headers() -> dict[str, str]:
 def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     import requests
     body = dict(payload or {})
+    # Shared managed records/datasets use the selected organization workspace
+    # only in an explicitly configured staging environment. The Edge Function
+    # independently revalidates membership and role for every request.
+    shared_actions = {
+        "dataset_download_url",
+        "dataset_upload_create",
+        "dataset_version_finalize",
+        "dataset_version_register",
+        "platform_record_save",
+        "platform_record_list",
+    }
+    if APP_ENVIRONMENT == "staging" and action in shared_actions:
+        try:
+            organization_id = str(
+                st.session_state.get("shoir_active_organization_id") or ""
+            ).strip()
+            organization_workspace_id = str(
+                st.session_state.get("shoir_active_organization_workspace_id") or ""
+            ).strip()
+        except Exception:
+            organization_id = ""
+            organization_workspace_id = ""
+        if organization_id or organization_workspace_id:
+            body["organization_id"] = organization_id
+            body["organization_workspace_id"] = organization_workspace_id
     body["action"] = action
     resp = requests.post(
         SUPABASE_EDGE_URL,
@@ -197,6 +222,43 @@ def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[st
 
 def edge_backend_configured() -> bool:
     return bool(SUPABASE_EDGE_URL and SUPABASE_PUBLISHABLE_KEY)
+
+_ORGANIZATION_EDGE_ACTIONS = {
+    "org_list_session",
+    "org_create_session",
+    "org_workspace_list_session",
+    "org_member_list_session",
+    "org_invitation_create_session",
+    "org_invitation_accept_session",
+    "org_invitation_list_session",
+    "org_invitation_revoke_session",
+    "org_member_role_set_session",
+    "org_member_remove_session",
+    "org_owner_transfer_session",
+    "org_workspace_create_session",
+    "org_workspace_archive_session",
+    "org_audit_list_session",
+}
+
+
+def edge_organization_action(
+    action: str,
+    username: str,
+    token: str,
+    **payload: Any,
+) -> dict[str, Any]:
+    """Call one allow-listed, session-authenticated organization operation."""
+    if action not in _ORGANIZATION_EDGE_ACTIONS:
+        raise ValueError("Organization operation is not supported.")
+    actor = str(username or "").strip()
+    bearer = str(token or "")
+    if not actor or not bearer:
+        raise PermissionError("An authenticated organization session is required.")
+    return _edge_call(
+        action,
+        {"username": actor, "token": bearer, **payload},
+    )
+
 
 
 def database_url() -> str:
