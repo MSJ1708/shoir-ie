@@ -6119,10 +6119,12 @@ def assess_capa_8d_records(
 
 def calculate_niosh_revised_lifting_equation(
     load_weight: float,
-    horizontal_distance: float,
+    horizontal_origin: float,
+    horizontal_destination: float,
     vertical_hand_start: float,
     vertical_travel_distance: float,
-    asymmetry_angle: float,
+    asymmetry_origin: float,
+    asymmetry_destination: float,
     frequency_lifts_per_minute: float,
     frequency_multiplier: float,
     coupling_multiplier: float,
@@ -6134,20 +6136,26 @@ def calculate_niosh_revised_lifting_equation(
     coupling_multiplier_source: str = "",
     task_description: str = "",
 ) -> dict[str, Any]:
-    """Calculate a single-task NIOSH Revised Lifting Equation (RNLE) screen.
+    """Calculate a single-task, two-handed NIOSH RNLE screening estimate.
 
-    Frequency and coupling multipliers are explicit inputs taken by the user
-    from the official RNLE tables; they are not guessed or interpolated here.
-    This function does not calculate a multi-task composite lifting index.
+    The horizontal and asymmetry values are captured at both lift origin and
+    destination. The more demanding value is used. Frequency and coupling
+    multipliers must be looked up by the user in the applicable official NIOSH
+    tables and include source references; they are never inferred here.
+
+    This is not a multi-task Composite Lifting Index, and it is not applicable
+    to one-handed lifting, carrying, pushing, pulling or unstable loads.
     """
     unit_system = str(units or "").strip().casefold()
     if unit_system not in {"metric", "imperial"}:
         raise ValueError("Units must be either metric or imperial.")
     load = _finite_number(load_weight, "Load weight")
-    horizontal = _finite_number(horizontal_distance, "Horizontal hand location")
-    vertical = _finite_number(vertical_hand_start, "Vertical hand location")
+    h_origin = _finite_number(horizontal_origin, "Origin horizontal hand location")
+    h_destination = _finite_number(horizontal_destination, "Destination horizontal hand location")
+    vertical = _finite_number(vertical_hand_start, "Vertical hand location at lift origin")
     travel = _finite_number(vertical_travel_distance, "Vertical travel distance")
-    asymmetry = _finite_number(asymmetry_angle, "Asymmetry angle")
+    a_origin = _finite_number(asymmetry_origin, "Origin asymmetry angle")
+    a_destination = _finite_number(asymmetry_destination, "Destination asymmetry angle")
     frequency = _finite_number(frequency_lifts_per_minute, "Lift frequency")
     fm = _finite_number(frequency_multiplier, "Frequency multiplier")
     cm = _finite_number(coupling_multiplier, "Coupling multiplier")
@@ -6159,14 +6167,14 @@ def calculate_niosh_revised_lifting_equation(
 
     if load <= 0:
         raise ValueError("Load weight must be greater than zero.")
-    if horizontal <= 0:
-        raise ValueError("Horizontal hand location must be greater than zero.")
+    if h_origin <= 0 or h_destination <= 0:
+        raise ValueError("Horizontal hand locations at origin and destination must be greater than zero.")
     if vertical < 0:
         raise ValueError("Vertical hand location cannot be negative.")
     if travel <= 0:
         raise ValueError("Vertical travel distance must be greater than zero.")
-    if not 0 <= asymmetry <= 135:
-        raise ValueError("Asymmetry angle must be between 0 and 135 degrees.")
+    if not 0 <= a_origin <= 135 or not 0 <= a_destination <= 135:
+        raise ValueError("Origin and destination asymmetry angles must be between 0 and 135 degrees.")
     if not 0 < frequency <= 15:
         raise ValueError("Lift frequency must be greater than zero and no more than 15 lifts per minute.")
     if not 0 < fm <= 1:
@@ -6186,43 +6194,43 @@ def calculate_niosh_revised_lifting_equation(
         load_constant = 23.0
         unit = "kg"
         distance_unit = "cm"
-        horizontal_reference = 25.0
-        max_horizontal = 63.0
-        max_vertical = 175.0
-        min_travel = 25.0
-        horizontal_multiplier = min(1.0, horizontal_reference / horizontal)
-        vertical_multiplier = 1.0 - 0.003 * abs(vertical - 75.0)
-        distance_multiplier = 0.82 + 4.5 / max(travel, min_travel)
+        h_reference = 25.0
+        h_limit = 63.0
+        v_reference = 75.0
+        v_limit = 175.0
+        d_minimum = 25.0
+        d_limit = 175.0
+        hm = min(1.0, h_reference / max(h_origin, h_destination))
+        vm = max(0.0, 1.0 - 0.003 * abs(vertical - v_reference))
+        dm = 0.82 + 4.5 / max(travel, d_minimum)
     else:
         load_constant = 51.0
         unit = "lb"
         distance_unit = "in"
-        horizontal_reference = 10.0
-        max_horizontal = 25.0
-        max_vertical = 70.0
-        min_travel = 10.0
-        horizontal_multiplier = min(1.0, horizontal_reference / horizontal)
-        vertical_multiplier = 1.0 - 0.0075 * abs(vertical - 30.0)
-        distance_multiplier = 0.82 + 1.8 / max(travel, min_travel)
+        h_reference = 10.0
+        h_limit = 25.0
+        v_reference = 30.0
+        v_limit = 70.0
+        d_minimum = 10.0
+        d_limit = 70.0
+        hm = min(1.0, h_reference / max(h_origin, h_destination))
+        vm = max(0.0, 1.0 - 0.0075 * abs(vertical - v_reference))
+        dm = 0.82 + 1.8 / max(travel, d_minimum)
 
-    if horizontal > max_horizontal:
-        raise ValueError(
-            f"Horizontal hand location exceeds the RNLE limit of {max_horizontal:g} {distance_unit}."
-        )
-    if vertical > max_vertical:
-        raise ValueError(
-            f"Vertical hand location exceeds the RNLE limit of {max_vertical:g} {distance_unit}."
-        )
-    if travel > (175.0 if unit_system == "metric" else 70.0):
-        raise ValueError("Vertical travel distance is outside the RNLE application range.")
+    if max(h_origin, h_destination) > h_limit:
+        raise ValueError(f"Horizontal hand location exceeds the RNLE limit of {h_limit:g} {distance_unit}.")
+    if vertical > v_limit:
+        raise ValueError(f"Vertical hand location exceeds the RNLE limit of {v_limit:g} {distance_unit}.")
+    if travel > d_limit:
+        raise ValueError(f"Vertical travel distance exceeds the RNLE limit of {d_limit:g} {distance_unit}.")
 
-    vertical_multiplier = max(0.0, vertical_multiplier)
-    asymmetry_multiplier = 1.0 - 0.0032 * asymmetry
+    a_used = max(a_origin, a_destination)
+    am = max(0.0, 1.0 - 0.0032 * a_used)
     multipliers = {
-        "Horizontal multiplier (HM)": horizontal_multiplier,
-        "Vertical multiplier (VM)": vertical_multiplier,
-        "Distance multiplier (DM)": distance_multiplier,
-        "Asymmetry multiplier (AM)": asymmetry_multiplier,
+        "Horizontal multiplier (HM)": hm,
+        "Vertical multiplier (VM)": vm,
+        "Distance multiplier (DM)": dm,
+        "Asymmetry multiplier (AM)": am,
         "Frequency multiplier (FM)": fm,
         "Coupling multiplier (CM)": cm,
     }
@@ -6244,11 +6252,15 @@ def calculate_niosh_revised_lifting_equation(
         "units": unit_system,
         "load_weight": load,
         "load_unit": unit,
-        "horizontal_distance": horizontal,
+        "horizontal_origin": h_origin,
+        "horizontal_destination": h_destination,
+        "horizontal_value_used": max(h_origin, h_destination),
         "vertical_hand_start": vertical,
         "vertical_travel_distance": travel,
         "distance_unit": distance_unit,
-        "asymmetry_angle_degrees": asymmetry,
+        "asymmetry_origin_degrees": a_origin,
+        "asymmetry_destination_degrees": a_destination,
+        "asymmetry_value_used_degrees": a_used,
         "frequency_lifts_per_minute": frequency,
         "frequency_duration_category": duration,
         "coupling_quality": coupling,
@@ -6262,13 +6274,15 @@ def calculate_niosh_revised_lifting_equation(
         "coupling_multiplier_source": cm_source,
         "formula": "RWL = LC × HM × VM × DM × AM × FM × CM; LI = actual load / RWL",
         "assumptions": (
-            "Single-task, two-handed lifting only. FM and CM are user-supplied values "
-            "read from the applicable official RNLE tables for the task frequency, "
-            "duration, coupling and other table conditions."
+            "Single-task, two-handed lifting. H and A use the more demanding "
+            "origin/destination measurement. V is measured at the origin; D is "
+            "vertical travel distance. FM and CM are user-supplied lookups from "
+            "the applicable official RNLE tables for the frequency, duration "
+            "and coupling conditions."
         ),
         "warning": (
             "A lifting index at or below 1 is a screening goal, not proof of safety. "
-            "This calculation does not assess multi-task Composite Lifting Index, "
+            "This calculation does not assess a multi-task Composite Lifting Index, "
             "one-handed or seated lifting, carrying, pushing, pulling, unstable loads, "
             "or all workplace hazards. Confirm measurements and table lookups with a "
             "qualified ergonomics professional and assess the whole task and workforce."
