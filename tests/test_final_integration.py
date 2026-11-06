@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import json
 import pandas as pd
 
@@ -60,7 +61,7 @@ def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
     }
     did = platform.save_decision_card(card, "alice", db_path=db)
 
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         row = conn.execute(
             "SELECT decision_id,status,owner FROM experience_decisions WHERE decision_id=?",
             (did,),
@@ -87,7 +88,7 @@ def test_decision_outcome_persistence_and_variance(tmp_path, monkeypatch):
     import sqlite3
     import industrial_experience as exp
     db = str(tmp_path / "experience.db")
-    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite3.connect(db, timeout=30))
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(db, timeout=30))
     exp.ensure_experience_db(db)
     did = exp.create_decision("Test decision", "Testing", {"Throughput": 100}, {}, {}, "owner")
     oid = exp.record_decision_outcome(
@@ -126,7 +127,7 @@ def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
     import sqlite3
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         conn.execute("select 1")
     monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
     monkeypatch.setattr(ent, "_remote", lambda: False)
@@ -182,7 +183,7 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
     import sqlite3
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         conn.execute("create table t(x integer)")
         conn.execute("insert into t values(1)")
         conn.commit()
@@ -190,7 +191,7 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
     monkeypatch.setattr(ent, "_remote", lambda: False)
     tested = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", f"sqlite:///{db}", workspace="plant-a")
     schedule_id = ent.schedule_connector_sync("alice", tested["connector_id"], 60, "plant-a", enabled=True)
-    with sqlite3.connect(str(ent.DEFAULT_DB)) as conn:
+    with sqlite_connection(str(ent.DEFAULT_DB)) as conn:
         conn.execute("update shoir_ent_connector_schedules set next_run_at=? where schedule_id=?",
                      ("2000-01-01T00:00:00+00:00", schedule_id))
         conn.commit()
@@ -226,7 +227,7 @@ def test_decision_to_value_is_canonical_and_traceable(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     experience_db = str(tmp_path / "experience.db")
     enterprise_db = str(tmp_path / "enterprise.db")
-    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite3.connect(experience_db, timeout=30))
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(experience_db, timeout=30))
     monkeypatch.setattr(ent, "DEFAULT_DB", enterprise_db)
     monkeypatch.setattr(ent, "_remote", lambda: False)
     exp.ensure_experience_db(experience_db)
