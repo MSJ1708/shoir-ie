@@ -219,3 +219,52 @@ def test_inactive_test_account_is_required_and_restricted_to_disposable_prefix()
     assert "SHOIR_E2E_INACTIVE_PASSWORD" in required_line
     assert "SHOIR_E2E_INACTIVE_USERNAME" in account_prefix_line
     assert "shoir-e2e-*" in workflow
+
+
+
+def test_authenticated_gate_covers_two_tenant_organization_and_role_lifecycle():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    required = (
+        '("organization_create", "active")',
+        '("organization_create_second", "active")',
+        '("organization_workspace_create", "active")',
+        '("organization_invitation_create", "active")',
+        '("organization_invitation_accept", "second")',
+        '("organization_viewer_write_denied", "second")',
+        '("organization_invitation_replay_denied", "second")',
+        '("organization_cross_tenant_denied", "second")',
+        '("organization_admin_workspace_write", "second")',
+        '("organization_admin_self_promotion_denied", "second")',
+        '("organization_engineer_write_denied", "second")',
+        '("organization_approver_write_denied", "second")',
+        '("organization_removed_access_denied", "second")',
+        '("organization_revoked_invitation_denied", "second")',
+        '("organization_cleanup_org_1", "active")',
+        '("organization_cleanup_org_2", "active")',
+    )
+    for case in required:
+        assert case in script
+
+    assert "def verify_organization_lifecycle(" in script
+    assert '"org_create_session"' in script
+    assert '"org_invitation_create_session"' in script
+    assert '"org_invitation_accept_session"' in script
+    assert '"org_member_role_set_session"' in script
+    assert '"org_member_remove_session"' in script
+    assert '"org_workspace_list_session"' in script
+    assert '"org_close_session"' in script
+
+
+def test_authenticated_organization_gate_closes_only_created_orgs_before_session_revocation():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    finally_start = script.index("    finally:")
+    cleanup_start = script.index("for org_index in (1, 2):", finally_start)
+    session_revoke_start = script.index("for label, username, token in (", cleanup_start)
+    cleanup = script[cleanup_start:session_revoke_start]
+
+    assert "created_organization_ids" in cleanup
+    assert "org_close_session" in cleanup
+    assert "cleanup_result.get(\"status\") == \"closed\"" in cleanup
+    assert "manual staging cleanup is required" in cleanup
+    assert "for label, username, token in (" in script[session_revoke_start:]
+    assert "sho" not in script[cleanup_start:session_revoke_start].casefold()
