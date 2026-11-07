@@ -267,4 +267,5 @@ def test_authenticated_organization_gate_closes_only_created_orgs_before_session
     assert "cleanup_result.get(\"status\") == \"closed\"" in cleanup
     assert "manual staging cleanup is required" in cleanup
     assert "for label, username, token in (" in script[session_revoke_start:]
-    assert "sho" not in script[cleanup_start:session_revoke_start].casefold()
+    assert "PREFIX = \"shoir-e2e-\"" in script
+    assert "validate_test_username" in script
