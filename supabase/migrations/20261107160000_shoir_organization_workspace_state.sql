@@ -146,9 +146,10 @@ BEGIN
 
     INSERT INTO public.shoir_organization_workspace_states(
         workspace_key, state_json, revision, updated_by_username_lc, updated_at
-    ) VALUES (
-        v_workspace_key, p_state_json, 1, v_actor, now()
     )
+    SELECT
+        v_workspace_key, p_state_json, 1, v_actor, now()
+    WHERE p_expected_revision = 0
     ON CONFLICT (workspace_key) DO UPDATE
        SET state_json = EXCLUDED.state_json,
            revision = public.shoir_organization_workspace_states.revision + 1,
