@@ -2173,11 +2173,14 @@ Deno.serve(async (req) => {
         "workspace",
       );
       const organizationId = String(body.organization_id || "").trim();
-      const organizationWorkspaceId = String(body.organization_workspace_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
       if (organizationId || organizationWorkspaceId) {
         if (!organizationId || !organizationWorkspaceId) {
           return sendResponse({
-            error: "Both organization_id and organization_workspace_id are required.",
+            error:
+              "Both organization_id and organization_workspace_id are required.",
           }, 400);
         }
         const { data, error } = await supabase.rpc(
@@ -2192,7 +2195,9 @@ Deno.serve(async (req) => {
         const state = Array.isArray(data) ? data[0] : data;
         return sendResponse({
           ok: true,
-          state_json: typeof state?.state_json === "string" ? state.state_json : null,
+          state_json: typeof state?.state_json === "string"
+            ? state.state_json
+            : null,
           revision: Number.isSafeInteger(Number(state?.revision))
             ? Number(state.revision)
             : 0,
@@ -2220,11 +2225,14 @@ Deno.serve(async (req) => {
       // Validate before upsert so malformed/oversized state never replaces the last valid save.
       const workspaceState = normalizeWorkspaceStateJson(body.state_json);
       const organizationId = String(body.organization_id || "").trim();
-      const organizationWorkspaceId = String(body.organization_workspace_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
       if (organizationId || organizationWorkspaceId) {
         if (!organizationId || !organizationWorkspaceId) {
           return sendResponse({
-            error: "Both organization_id and organization_workspace_id are required.",
+            error:
+              "Both organization_id and organization_workspace_id are required.",
           }, 400);
         }
         const rawRevision = body.expected_revision;
@@ -2233,7 +2241,10 @@ Deno.serve(async (req) => {
         }
         const parsedRevision = Number(rawRevision);
         if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
-          return sendResponse({ error: "Workspace revision is invalid." }, 400);
+          return sendResponse(
+              { error: "Workspace revision is invalid." },
+              400,
+            );
         }
         const expectedRevision: number = parsedRevision;
         const { data, error } = await supabase.rpc(
@@ -2274,10 +2285,13 @@ Deno.serve(async (req) => {
         "workspace",
       );
       const organizationId = String(body.organization_id || "").trim();
-      const organizationWorkspaceId = String(body.organization_workspace_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
       if (!organizationId || !organizationWorkspaceId) {
         return sendResponse({
-          error: "Both organization_id and organization_workspace_id are required.",
+          error:
+              "Both organization_id and organization_workspace_id are required.",
         }, 400);
       }
       await resolveManagedWorkspaceKey(
