@@ -449,7 +449,7 @@ def save_user_workspace(
         # SQLite/PostgreSQL record, even when the change signature is unchanged.
         remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
         if raw_context is not None and not remote_mode:
-            raise RuntimeError("Shared organization workspaces require the authenticated managed staging backend.")
+            raise RuntimeError("Shared organization workspaces require the authenticated managed workspace service.")
         if raw_context is not None and session_state.get("_workspace_save_conflict"):
             session_state["_workspace_save_error"] = (
                 "A newer shared-workspace revision exists. Reload the workspace before saving."
@@ -511,11 +511,18 @@ def save_user_workspace(
         )
         if conflict and isinstance(session_state.get("shoir_active_organization_workspace"), dict):
             session_state["_workspace_save_conflict"] = True
-        session_state["_workspace_save_error"] = (
-            "A newer shared-workspace revision exists. Reload the workspace before saving."
-            if conflict
-            else "Workspace persistence failed. Your current in-session changes have not been confirmed as saved."
-        )
+        if conflict:
+            session_state["_workspace_save_error"] = (
+                "A newer shared-workspace revision exists. Reload the workspace before saving."
+            )
+        elif "shared organization workspaces require" in str(exc).casefold():
+            session_state["_workspace_save_error"] = (
+                "Shared organization workspaces require the authenticated managed workspace service to be configured."
+            )
+        else:
+            session_state["_workspace_save_error"] = (
+                "Workspace persistence failed. Your current in-session changes have not been confirmed as saved."
+            )
         return False
 
 
@@ -694,7 +701,7 @@ def load_user_workspace(
 
         remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
         if scope is not None and not remote_mode:
-            raise RuntimeError("Shared organization workspaces require the authenticated managed staging backend.")
+            raise RuntimeError("Shared organization workspaces require the authenticated managed workspace service.")
         if remote_mode:
             # A configured managed backend is authoritative. Do not fall back
             # to SQLite when the remote record is missing or temporarily empty;
@@ -734,9 +741,15 @@ def load_user_workspace(
     except Exception as exc:
         # Access denial and corrupted payloads fail closed; never load the
         # previous user's or previous organization's values as a fallback.
-        session_state["_workspace_load_error"] = (
-            "Shared workspace access could not be verified. Select another workspace or return to your personal workspace."
-            if "workspace" in str(exc).casefold() or "organization" in str(exc).casefold()
-            else "The saved workspace could not be loaded safely."
-        )
+        error_message = str(exc).casefold()
+        if "shared organization workspaces require" in error_message:
+            session_state["_workspace_load_error"] = (
+                "Shared organization workspaces require the authenticated managed workspace service to be configured."
+            )
+        else:
+            session_state["_workspace_load_error"] = (
+                "Shared workspace access could not be verified. Select another workspace or return to your personal workspace."
+                if "workspace" in error_message or "organization" in error_message
+                else "The saved workspace could not be loaded safely."
+            )
         return False
