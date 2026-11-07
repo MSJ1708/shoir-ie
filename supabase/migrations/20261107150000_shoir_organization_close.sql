@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.shoir_org_close(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = ''
 AS $function$
 DECLARE
     v_actor text := lower(btrim(p_actor));
@@ -89,6 +89,6 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.shoir_org_close(text, uuid)
-FROM PUBLIC, anon, authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_close(text, uuid)
 TO service_role;
