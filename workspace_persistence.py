@@ -79,6 +79,13 @@ _PREFIX_EXCLUDE = (
     # The active organization/workspace selector is request context, not
     # personal workspace data to restore for a later sign-in.
     "shoir_active_organization_",
+    "team_org_",
+    "team_workspace_",
+    "team_member_",
+    "team_invitation_",
+    "team_owner_",
+    "team_accept_",
+    "team_invite_",
     "shoir_global_module_",
     "upgrade_clean_",
     "upgrade_reset_",
