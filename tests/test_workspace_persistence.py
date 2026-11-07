@@ -3,6 +3,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import workspace_persistence as workspace_module
+
 from workspace_persistence import (
     _excluded,
     _workspace_change_signature,
@@ -179,3 +181,97 @@ def test_workspace_backup_detects_tampering_and_unsupported_payloads():
     with pytest.raises(PermissionError, match="Sign in"):
         export_user_workspace_backup("Guest Visitor", {})
 
+
+
+
+def test_personal_to_team_to_other_team_switch_clears_prior_workspace_values(monkeypatch, tmp_path: Path):
+    db = str(tmp_path / "personal-workspace.db")
+    personal = {"selection": "personal", "personal_only": "keep only in personal scope"}
+    assert save_user_workspace("Alice", personal, db)
+
+    remote_payloads = iter([
+        '{"selection":"team-one","team_one_only":"confidential team one"}',
+        '{"selection":"team-two","team_two_only":"confidential team two"}',
+    ])
+    monkeypatch.setattr(workspace_module, "durable_backend_configured", lambda: True)
+    monkeypatch.setattr(
+        workspace_module,
+        "load_remote_workspace",
+        lambda username: next(remote_payloads),
+    )
+
+    session = {"authenticated": True, "current_user": "Alice"}
+    assert load_user_workspace("Alice", session, db)
+    assert session["selection"] == "personal"
+    session["shoir_active_organization_workspace"] = {
+        "organization_id": "org-one",
+        "organization_workspace_id": "workspace-one",
+    }
+    assert load_user_workspace("Alice", session)
+    assert session["selection"] == "team-one"
+    assert "personal_only" not in session
+    assert "team_one_only" in session
+
+    session["shoir_active_organization_workspace"] = {
+        "organization_id": "org-two",
+        "organization_workspace_id": "workspace-two",
+    }
+    assert load_user_workspace("Alice", session)
+    assert session["selection"] == "team-two"
+    assert "team_one_only" not in session
+    assert "personal_only" not in session
+    assert "team_two_only" in session
+    assert session["_workspace_loaded_scope"] == ("org-two", "workspace-two")
+
+
+def test_shared_workspace_never_falls_back_to_personal_sqlite_when_managed_backend_is_missing(tmp_path: Path, monkeypatch):
+    db = str(tmp_path / "personal-workspace.db")
+    assert save_user_workspace("Alice", {"selection": "personal"}, db)
+    monkeypatch.setattr(workspace_module, "durable_backend_configured", lambda: False)
+
+    session = {
+        "authenticated": True,
+        "current_user": "Alice",
+        "shoir_active_organization_workspace": {
+            "organization_id": "org-one",
+            "organization_workspace_id": "workspace-one",
+        },
+    }
+    assert load_user_workspace("Alice", session) is False
+    assert "selection" not in session
+    assert "shared organization workspaces require" in session["_workspace_load_error"].casefold()
+
+    # The saver must check the shared-workspace backend requirement before
+    # the unchanged-signature fast path, and may not write to personal SQLite.
+    session["_shoir_persist_change_signature"] = workspace_module._workspace_change_signature(session)
+    assert save_user_workspace("Alice", session) is False
+    assert "shared organization workspaces require" in session["_workspace_save_error"].casefold()
+
+
+def test_clear_loaded_workspace_state_removes_only_hydrated_data():
+    session = {
+        "dataset": {"name": "shared"},
+        "selected_nav": "Workbench",
+        "remote_session_token": "live-session",
+        "authenticated": True,
+        "current_user": "Alice",
+        "shoir_active_organization_workspace": {
+            "organization_id": "org-one",
+            "organization_workspace_id": "workspace-one",
+        },
+        "_workspace_loaded_keys": ["dataset", "selected_nav"],
+        "_workspace_org_revision": 4,
+        "_shoir_persist_change_signature": "previous",
+    }
+
+    workspace_module.clear_loaded_workspace_state(session)
+
+    assert "dataset" not in session
+    assert "selected_nav" not in session
+    assert session["remote_session_token"] == "live-session"
+    assert session["authenticated"] is True
+    assert session["current_user"] == "Alice"
+    assert session["shoir_active_organization_workspace"]["organization_id"] == "org-one"
+    assert session["_workspace_loaded_keys"] == []
+    assert "_workspace_org_revision" not in session
+    assert "_shoir_persist_change_signature" not in session
