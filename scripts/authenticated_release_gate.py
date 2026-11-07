@@ -230,9 +230,9 @@ def verify_organization_lifecycle(
     member_username: str,
     member_token: str,
     starter_username: str,
+    created: list[str | None],
 ) -> list[str | None]:
     """Run multi-account organization/RBAC acceptance with safe close cleanup."""
-    created: list[str | None] = []
 
     def probe(
         case: str,
@@ -294,7 +294,7 @@ def verify_organization_lifecycle(
 
     if len(org_ids) != 2:
         for case, account_class in REQUIRED_CASES:
-            if case.startswith("organization_") and not any(
+            if case.startswith("organization_") and case not in {"organization_cleanup_org_1", "organization_cleanup_org_2"} and not any(
                 item["case"] == case and item["account_class"] == account_class
                 for item in RESULTS
             ):
@@ -765,6 +765,7 @@ def main() -> int:
     sentinel_key = "__shoir_e2e_release_probe__"
     sentinel_value = secrets.token_hex(16)
     created_organization_ids: list[str | None] = []
+    created_organization_ids: list[str | None] = []
 
     try:
         # Active account login and entitlement are checked without exposing its username.
@@ -799,13 +800,14 @@ def main() -> int:
                and str(data3.get("role") or "") != "Enterprise Admin",
                "Starter tier is returned for the dedicated Starter test identity." if (status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold() and str(data3.get("role") or "") != "Enterprise Admin") else login_failure_detail(status3, data3, "Starter account login failed"))
 
-        created_organization_ids = verify_organization_lifecycle(
+        verify_organization_lifecycle(
             api,
             active_user,
             active_token,
             second_user,
             second_token,
             starter_user,
+            created_organization_ids,
         )
 
         # An active non-admin must not invoke administrator APIs even with a valid token.
