@@ -287,3 +287,48 @@ def test_clear_loaded_workspace_state_removes_only_hydrated_data():
     assert "_workspace_org_revision" not in session
     assert "_shoir_persist_change_signature" not in session
     assert session["_workspace_loaded_for_user"] is None
+
+
+
+def test_shared_workspace_save_does_not_write_personal_domain_manifest(monkeypatch):
+    session = {
+        "selection": "shared-workspace-value",
+        "shoir_active_organization_workspace": {
+            "organization_id": "org-one",
+            "organization_workspace_id": "workspace-one",
+        },
+        "_workspace_org_revision": 2,
+    }
+    manifests = []
+    monkeypatch.setattr(workspace_module, "durable_backend_configured", lambda: True)
+    monkeypatch.setattr(workspace_module, "save_remote_workspace", lambda username, payload: True)
+    monkeypatch.setattr(
+        workspace_module,
+        "_persist_domain_manifest",
+        lambda *args: manifests.append(args),
+    )
+
+    assert save_user_workspace("Alice", session) is True
+    assert manifests == []
+    assert session["_workspace_loaded_keys"] == ["selection"]
+
+
+def test_shared_workspace_revision_conflict_is_not_marked_as_saved(monkeypatch):
+    session = {
+        "selection": "unsaved edit",
+        "shoir_active_organization_workspace": {
+            "organization_id": "org-one",
+            "organization_workspace_id": "workspace-one",
+        },
+        "_workspace_org_revision": 3,
+    }
+    monkeypatch.setattr(workspace_module, "durable_backend_configured", lambda: True)
+
+    def reject_stale_revision(username, payload):
+        raise RuntimeError("Shared workspace changed since it was loaded. Reload before saving.")
+
+    monkeypatch.setattr(workspace_module, "save_remote_workspace", reject_stale_revision)
+
+    assert save_user_workspace("Alice", session) is False
+    assert "newer shared-workspace revision" in session["_workspace_save_error"].casefold()
+    assert "_shoir_persist_change_signature" not in session
