@@ -463,6 +463,8 @@ def test_shared_workspace_edge_handlers_route_only_explicit_org_context_to_share
     assert "actor.username_lc" in save_block
     assert 'error?.code === "40001"' in save_block
     assert "SHARED_WORKSPACE_REVISION_CONFLICT" in save_block
+    assert "Workspace revision is required." in save_block
+    assert "rawRevision === undefined || rawRevision === null" in save_block
 
 
 def test_main_app_revalidates_and_clears_revoked_shared_workspace_before_loading():
