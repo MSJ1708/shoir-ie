@@ -17,6 +17,24 @@ CREATE TABLE public.shoir_organization_workspace_states (
 CREATE INDEX shoir_org_workspace_states_updated
     ON public.shoir_organization_workspace_states(updated_at DESC);
 
+-- Cover the organization audit/member/invitation/workspace foreign keys reported
+-- by the staging performance advisor. These indexes are separate from the
+-- organization-leading list indexes and support account deletion checks/joins.
+CREATE INDEX IF NOT EXISTS shoir_org_audit_actor_fk
+    ON public.shoir_organization_audit_events(actor_username_lc);
+CREATE INDEX IF NOT EXISTS shoir_org_audit_subject_fk
+    ON public.shoir_organization_audit_events(subject_username_lc);
+CREATE INDEX IF NOT EXISTS shoir_org_invitation_accepted_by_fk
+    ON public.shoir_organization_invitations(accepted_by_username_lc);
+CREATE INDEX IF NOT EXISTS shoir_org_invitation_created_by_fk
+    ON public.shoir_organization_invitations(created_by_username_lc);
+CREATE INDEX IF NOT EXISTS shoir_org_membership_invited_by_fk
+    ON public.shoir_organization_memberships(invited_by_username_lc);
+CREATE INDEX IF NOT EXISTS shoir_org_workspace_created_by_fk
+    ON public.shoir_organization_workspaces(created_by_username_lc);
+CREATE INDEX IF NOT EXISTS shoir_org_workspace_state_updated_by_fk
+    ON public.shoir_organization_workspace_states(updated_by_username_lc);
+
 ALTER TABLE public.shoir_organization_workspace_states ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.shoir_organization_workspace_states
 FROM PUBLIC, anon, authenticated;
