@@ -231,6 +231,10 @@ def test_authenticated_gate_covers_two_tenant_organization_and_role_lifecycle():
         '("organization_invitation_create", "active")',
         '("organization_invitation_accept", "second")',
         '("organization_viewer_write_denied", "second")',
+        '("organization_suspend_member", "active")',
+        '("organization_suspended_access_denied", "second")',
+        '("organization_restore_member", "active")',
+        '("organization_restored_access_allowed", "second")',
         '("organization_invitation_replay_denied", "second")',
         '("organization_cross_tenant_denied", "second")',
         '("organization_admin_workspace_write", "second")',
@@ -251,6 +255,8 @@ def test_authenticated_gate_covers_two_tenant_organization_and_role_lifecycle():
     assert '"org_invitation_accept_session"' in script
     assert '"org_member_role_set_session"' in script
     assert '"org_member_remove_session"' in script
+    assert '"org_member_suspend_session"' in script
+    assert '"org_member_restore_session"' in script
     assert '"org_workspace_list_session"' in script
     assert '"org_close_session"' in script
 
