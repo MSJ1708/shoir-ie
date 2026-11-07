@@ -2397,6 +2397,62 @@ def test_kpi_alerts_resolve_breaches_and_reject_duplicate_rules():
             [rules[0], rules[0]], as_of="2026-11-06T17:01:00Z",
         )
 
+
+def test_kpi_alerts_reject_empty_contracts_and_classify_unusable_readings():
+    with pytest.raises(ValueError, match="at least one KPI alert rule"):
+        evaluate_kpi_alerts([], [], as_of="2026-11-06T18:00:00Z")
+    with pytest.raises(ValueError, match="must be a list"):
+        evaluate_kpi_alerts("not-a-record-list", [
+            {"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85}
+        ])
+
+    rules = [
+        {"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85},
+        {"rule_id": "uptime-floor", "kpi": "Uptime", "operator": "<", "threshold": 95},
+        {"rule_id": "quality-floor", "kpi": "Quality", "operator": "<", "threshold": 99},
+        {"rule_id": "future-reading", "kpi": "Future", "operator": ">", "threshold": 1},
+    ]
+    result = evaluate_kpi_alerts(
+        [
+            {"kpi": "OEE", "value": 70, "unit": "%", "observed_at": "2026-11-06T17:50:00Z", "source": "test-sensor"},
+            {"kpi": "Uptime", "value": 90, "unit": "%", "observed_at": "2026-11-04T17:00:00Z", "source": "test-sensor"},
+            {"kpi": "Quality", "value": 98, "unit": "%", "observed_at": "invalid-date", "source": "test-sensor"},
+            {"kpi": "Future", "value": 2, "unit": "%", "observed_at": "2026-11-06T18:01:00Z", "source": "test-sensor"},
+        ],
+        rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+    )
+    states = result["alerts"].set_index("Rule ID")["State"].to_dict()
+    assert states == {
+        "oee-floor": "OPEN",
+        "uptime-floor": "STALE_DATA",
+        "quality-floor": "INVALID_TIMESTAMP",
+        "future-reading": "FUTURE_TIMESTAMP",
+    }
+    assert result["open_alert_count"] == 1
+    assert result["new_alert_count"] == 1
+    assert result["stale_or_missing_count"] == 3
+    assert result["data_provenance"] if "data_provenance" in result else True
+
+
+def test_kpi_alerts_reject_duplicate_casefolded_readings_and_nonfinite_thresholds():
+    with pytest.raises(ValueError, match="Duplicate KPI record"):
+        evaluate_kpi_alerts(
+            [
+                {"kpi": "OEE", "value": 80, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"},
+                {"kpi": "oee", "value": 81, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"},
+            ],
+            [{"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85}],
+            as_of="2026-11-06T18:00:00Z",
+        )
+    with pytest.raises(ValueError, match="finite number"):
+        evaluate_kpi_alerts(
+            [],
+            [{"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": float("nan")}],
+            as_of="2026-11-06T18:00:00Z",
+        )
+
 def test_recovery_snapshot_history_checkpoints_undoes_redoes_and_restores_revision():
     from shoir_target_engines import manage_recovery_snapshot_history
 
