@@ -398,80 +398,87 @@ def render_team_workspaces() -> None:
             and (is_owner or str(item.get("role") or "").casefold() != "admin")
         ]
         suspended_users = [str(item["username_lc"]) for item in suspended_members]
-        if can_manage and target_users:
-            allowed_roles = _MEMBER_ROLES if is_owner else ("engineer", "approver", "viewer")
-            with st.form("team_member_role_form"):
-                role_target = st.selectbox(
-                    "Member",
-                    options=target_users,
-                    key="team_member_role_target",
-                )
-                new_role = st.selectbox(
-                    "New role",
-                    options=list(allowed_roles),
-                    format_func=lambda value: _ROLE_LABELS[value],
-                    key="team_member_new_role",
-                )
-                change_role = st.form_submit_button("Update member role", key="team_member_role_submit")
-            if change_role:
-                try:
-                    _call(
-                        "org_member_role_set_session",
-                        username,
-                        token,
-                        organization_id=organization_id,
-                        target_username_lc=role_target,
-                        role=new_role,
+        if can_manage:
+            if target_users:
+                allowed_roles = _MEMBER_ROLES if is_owner else ("engineer", "approver", "viewer")
+                with st.form("team_member_role_form"):
+                    role_target = st.selectbox("Member", options=target_users, key="team_member_role_target")
+                    new_role = st.selectbox(
+                        "New role",
+                        options=list(allowed_roles),
+                        format_func=lambda value: _ROLE_LABELS[value],
+                        key="team_member_new_role",
                     )
-                    st.success("Member role updated.")
-                    st.rerun()
-                except Exception as exc:
-                    _error("Member role was not changed.", exc)
+                    change_role = st.form_submit_button("Update member role", key="team_member_role_submit")
+                if change_role:
+                    try:
+                        _call(
+                            "org_member_role_set_session",
+                            username,
+                            token,
+                            organization_id=organization_id,
+                            target_username_lc=role_target,
+                            role=new_role,
+                        )
+                        st.success("Member role updated.")
+                        st.rerun()
+                    except Exception as exc:
+                        _error("Member role was not changed.", exc)
 
-            with st.form("team_member_remove_form"):
-                remove_target = st.selectbox(
-                    "Member to remove",
-                    options=target_users,
-                    key="team_member_remove_target",
-                )
-                remove_member = st.form_submit_button("Remove member", key="team_member_remove_submit")
-            if remove_member:
-                try:
-                    _call(
-                        "org_member_remove_session",
-                        username,
-                        token,
-                        organization_id=organization_id,
-                        target_username_lc=remove_target,
-                    )
-                    st.success("Member removed from this organization.")
-                    st.rerun()
-                except Exception as exc:
-                    _error("Member removal was not completed.", exc)
+                with st.form("team_member_remove_form"):
+                    remove_target = st.selectbox("Member to remove", options=target_users, key="team_member_remove_target")
+                    remove_member = st.form_submit_button("Remove member", key="team_member_remove_submit")
+                if remove_member:
+                    try:
+                        _call(
+                            "org_member_remove_session",
+                            username,
+                            token,
+                            organization_id=organization_id,
+                            target_username_lc=remove_target,
+                        )
+                        st.success("Member removed from this organization.")
+                        st.rerun()
+                    except Exception as exc:
+                        _error("Member removal was not completed.", exc)
 
-            with st.form("team_member_suspend_form"):
-                suspend_target = st.selectbox(
-                    "Member to suspend",
-                    options=target_users,
-                    key="team_member_suspend_target",
-                )
-                suspend_member = st.form_submit_button(
-                    "Suspend member",
-                    key="team_member_suspend_submit",
-                )
-            if suspend_member:
-                try:
-                    _call(
-                        "org_member_suspend_session",
-                        username,
-                        token,
-                        organization_id=organization_id,
-                        target_username_lc=suspend_target,
-                    )
-                    st.success("Member suspended. Existing sessions no longer have organization access.")
-                    st.rerun()
-                except Exception as exc:
-                    _error("Member could not be suspended.", exc)
+                with st.form("team_member_suspend_form"):
+                    suspend_target = st.selectbox("Member to suspend", options=target_users, key="team_member_suspend_target")
+                    suspend_member = st.form_submit_button("Suspend member", key="team_member_suspend_submit")
+                if suspend_member:
+                    try:
+                        _call(
+                            "org_member_suspend_session",
+                            username,
+                            token,
+                            organization_id=organization_id,
+                            target_username_lc=suspend_target,
+                        )
+                        st.success("Member suspended. Existing sessions no longer have organization access.")
+                        st.rerun()
+                    except Exception as exc:
+                        _error("Member could not be suspended.", exc)
+
+                if is_owner:
+                    with st.form("team_owner_transfer_form"):
+                        new_owner = st.selectbox("Transfer ownership to", options=target_users, key="team_owner_transfer_target")
+                        transfer_owner = st.form_submit_button("Transfer ownership", key="team_owner_transfer_submit")
+                    if transfer_owner:
+                        try:
+                            _call(
+                                "org_owner_transfer_session",
+                                username,
+                                token,
+                                organization_id=organization_id,
+                                target_username_lc=new_owner,
+                            )
+                            st.success("Ownership transfer completed.")
+                            _clear_organization_cache()
+                            st.rerun()
+                        except Exception as exc:
+                            _error("Ownership transfer was not completed.", exc)
+            else:
+                st.caption("No active members are available for role, suspension or removal changes.")
 
             if suspended_users:
                 with st.form("team_member_restore_form"):
@@ -497,31 +504,8 @@ def render_team_workspaces() -> None:
                         st.rerun()
                     except Exception as exc:
                         _error("Member could not be restored.", exc)
-
-            if is_owner:
-                with st.form("team_owner_transfer_form"):
-                    new_owner = st.selectbox(
-                        "Transfer ownership to",
-                        options=target_users,
-                        key="team_owner_transfer_target",
-                    )
-                    transfer_owner = st.form_submit_button("Transfer ownership", key="team_owner_transfer_submit")
-                if transfer_owner:
-                    try:
-                        _call(
-                            "org_owner_transfer_session",
-                            username,
-                            token,
-                            organization_id=organization_id,
-                            target_username_lc=new_owner,
-                        )
-                        st.success("Ownership transfer completed.")
-                        _clear_organization_cache()
-                        st.rerun()
-                    except Exception as exc:
-                        _error("Ownership transfer was not completed.", exc)
-        elif can_manage:
-            st.caption("Add an active member by creating an invitation.")
+        else:
+            st.info("Member management requires an organization Owner or Admin role.")
 
     with invitation_tab:
         if can_manage:
