@@ -220,3 +220,76 @@ def test_shared_workspace_persistence_refuses_missing_session_token(monkeypatch)
     assert store.save_remote_workspace("shoir-e2e-owner", "{}") is False
     assert store.load_remote_workspace("shoir-e2e-owner") is None
     assert calls == []
+
+
+
+def test_active_shared_workspace_revalidates_session_and_role_every_call(monkeypatch):
+    session = {
+        "remote_session_token": "synthetic-session-token",
+        "shoir_active_organization_workspace": {
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+            "organization_workspace_id": "00000000-0000-4000-8000-000000000002",
+        },
+    }
+    monkeypatch.setattr(store, "st", SimpleNamespace(session_state=session))
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "edge_backend_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        store,
+        "_edge_call",
+        lambda action, payload: calls.append((action, dict(payload))) or {"ok": True},
+    )
+
+    assert store.validate_remote_organization_workspace_access("shoir-e2e-member") is True
+    assert calls == [(
+        "workspace_access_check",
+        {
+            "username": "shoir-e2e-member",
+            "token": "synthetic-session-token",
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+            "organization_workspace_id": "00000000-0000-4000-8000-000000000002",
+        },
+    )]
+
+
+def test_active_shared_workspace_access_check_fails_closed_when_membership_is_denied(monkeypatch):
+    session = {
+        "remote_session_token": "synthetic-session-token",
+        "shoir_active_organization_workspace": {
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+            "organization_workspace_id": "00000000-0000-4000-8000-000000000002",
+        },
+    }
+    monkeypatch.setattr(store, "st", SimpleNamespace(session_state=session))
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "edge_backend_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        store,
+        "_edge_call",
+        lambda action, payload: calls.append(action) or {"ok": False},
+    )
+
+    with pytest.raises(PermissionError, match="could not be verified"):
+        store.validate_remote_organization_workspace_access("shoir-e2e-member")
+    assert calls == ["workspace_access_check"]
+
+
+def test_shared_workspace_access_check_requires_explicit_staging_and_session(monkeypatch):
+    session = {
+        "remote_session_token": "synthetic-session-token",
+        "shoir_active_organization_workspace": {
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+            "organization_workspace_id": "00000000-0000-4000-8000-000000000002",
+        },
+    }
+    monkeypatch.setattr(store, "st", SimpleNamespace(session_state=session))
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "production")
+    monkeypatch.setattr(store, "edge_backend_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(store, "_edge_call", lambda *args, **kwargs: calls.append(args))
+
+    with pytest.raises(RuntimeError, match="outside the configured staging"):
+        store.validate_remote_organization_workspace_access("shoir-e2e-member")
+    assert calls == []
