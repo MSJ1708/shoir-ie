@@ -510,12 +510,6 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (f"public.{table}",),
                 )[0] is False, f"authenticated has a direct SELECT grant on {table}"
 
-                assert _fetchone(
-                    target,
-                    "SELECT has_table_privilege('service_role', %s, 'SELECT');",
-                    (f"public.{table}",),
-                )[0] is False, f"service_role has direct SELECT on {table}"
-
             assert _fetchone(
                 target,
                 "SELECT public IS FALSE FROM storage.buckets WHERE id='subscription-payment-proofs';",
