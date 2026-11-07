@@ -389,6 +389,12 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "shoir_subscription_requests",
                 "shoir_referrals",
                 "shoir_workspace_states",
+                "shoir_organizations",
+                "shoir_organization_memberships",
+                "shoir_organization_invitations",
+                "shoir_organization_workspaces",
+                "shoir_organization_audit_events",
+                "shoir_organization_workspace_states",
                 "shoir_login_throttle",
                 "shoir_platform_meta",
                 "shoir_platform_records",
@@ -414,6 +420,10 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "shoir_accounts": {"username_lc", "password_hash", "role", "tier", "subscription_expires_at"},
                 "shoir_subscription_requests": {"id", "request_type", "status", "approved_at", "terms_accepted", "terms_version", "accepted_at"},
                 "shoir_referrals": {"referrer_username_lc", "referred_username_lc", "referral_code", "status", "qualified_at"},
+                "shoir_organization_workspace_states": {
+                    "workspace_key", "state_json", "revision",
+                    "updated_by_username_lc", "updated_at",
+                },
             }
             for table, expected in required_columns.items():
                 columns = _fetchone(
@@ -474,8 +484,11 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (f"shoir_internal.{table}",),
                 )[0] is False, f"authenticated has a direct SELECT grant on shoir_internal.{table}"
 
-            for table in ("shoir_accounts", "shoir_pending_credentials", "shoir_sessions",
-                          "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states", "shoir_login_throttle"):
+            for table in (
+                "shoir_accounts", "shoir_pending_credentials", "shoir_sessions",
+                "shoir_subscription_requests", "shoir_referrals", "shoir_workspace_states",
+                "shoir_organization_workspace_states", "shoir_login_throttle",
+            ):
                 assert _fetchone(
                     target,
                     """
@@ -497,10 +510,51 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (f"public.{table}",),
                 )[0] is False, f"authenticated has a direct SELECT grant on {table}"
 
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', %s, 'SELECT');",
+                    (f"public.{table}",),
+                )[0] is False, f"service_role has direct SELECT on {table}"
+
             assert _fetchone(
                 target,
                 "SELECT public IS FALSE FROM storage.buckets WHERE id='subscription-payment-proofs';",
             )[0] is True, "Subscription payment proof bucket is not private after replay."
+
+            # Shared state has no direct Data API or service-role table
+            # grants. Only its authorization-checked RPCs are callable by Edge.
+            for function_name, identity_args in (
+                ("shoir_org_workspace_state_load", "p_actor text, p_organization_id uuid, p_workspace_id uuid"),
+                ("shoir_org_workspace_state_save", "p_actor text, p_organization_id uuid, p_workspace_id uuid, p_state_json text, p_expected_revision bigint"),
+            ):
+                function_acl = _fetchone(
+                    target,
+                    """
+                    SELECT p.prosecdef, p.proconfig,
+                           has_function_privilege('anon', p.oid, 'EXECUTE'),
+                           has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                           has_function_privilege('service_role', p.oid, 'EXECUTE')
+                    FROM pg_proc p
+                    JOIN pg_namespace n ON n.oid=p.pronamespace
+                    WHERE n.nspname='public'
+                      AND p.proname=%s
+                      AND pg_get_function_identity_arguments(p.oid)=%s;
+                    """,
+                    (function_name, identity_args),
+                )
+                assert function_acl is not None, f"Missing {function_name} after migration replay."
+                assert function_acl[0] is True, f"{function_name} must be SECURITY DEFINER."
+                assert function_acl[1], f"{function_name} must pin search_path."
+                assert function_acl[2] is False, f"anon can execute {function_name}."
+                assert function_acl[3] is False, f"authenticated can execute {function_name}."
+                assert function_acl[4] is True, f"service_role cannot execute {function_name}."
+
+            for operation in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_workspace_states', %s);",
+                    (operation,),
+                )[0] is False, f"service_role has direct {operation} on shared workspace state."
 
             dataset_version_signature = (
                 "public.shoir_platform_register_dataset_version("
