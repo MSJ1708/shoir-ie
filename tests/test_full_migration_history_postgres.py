@@ -866,14 +866,14 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     target,
                     "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'INSERT');",
                 )[0] is True
-                assert _fetchone(
-                    target,
-                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'UPDATE');",
-                )[0] is False
-                assert _fetchone(
-                    target,
-                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'DELETE');",
-                )[0] is False
+                for privilege in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', %s);",
+                        (privilege,),
+                    )[0] is False, (
+                        f"service_role unexpectedly has {privilege} on the append-only audit table"
+                    )
                 for browser_role in ("anon", "authenticated"):
                     for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
                         assert _fetchone(
