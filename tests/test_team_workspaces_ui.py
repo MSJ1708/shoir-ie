@@ -272,3 +272,21 @@ def test_application_keeps_existing_workspace_membership_renderer_and_adds_org_u
     assert route.count("render_industrial_module(") >= 2
     assert "from shoir_team_workspaces import render_team_workspaces" in route
     assert "else:" in route
+
+
+
+def test_active_shared_workspace_has_confirmed_latest_revision_reload_path():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "shoir_team_workspaces.py").read_text(encoding="utf-8")
+    start = source.index("def _render_active_workspace_return(")
+    end = source.index("def render_team_workspaces(", start)
+    block = source[start:end]
+
+    assert "Reloading discards unsaved changes" in block
+    assert "team_workspace_confirm_reload" in block
+    assert "team_workspace_reload_shared" in block
+    assert "disabled=not confirm_reload" in block
+    assert "clear_loaded_workspace_state(st.session_state)" in block
+    assert 'st.session_state.pop("_workspace_save_error", None)' in block
+    assert "st.rerun()" in block
