@@ -20,6 +20,7 @@ import streamlit as st
 from scipy import stats
 from scipy.optimize import minimize, linprog
 import pulp
+from shoir_forecasting import infer_datetime_frequency
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +427,7 @@ def forecast_series(
     y_test = test[target_col].to_numpy(dtype=float)
     residuals = y_test - test_pred
     sigma = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else float(np.std(train[target_col] - model.predict(x_train)))
-    future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon) + 1, freq=pd.infer_freq(d[date_col]) or "D")[1:]
+    future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon) + 1, freq=infer_datetime_frequency(d[date_col]))[1:]
     future_external = {c: np.repeat(float(d[c].iloc[-1]), int(horizon)) for c in ext}
     x_future = _forecast_features(future_dates, len(d), future_external)
     forecast = np.maximum(0, model.predict(x_future))

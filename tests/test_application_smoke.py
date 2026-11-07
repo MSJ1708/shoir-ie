@@ -47,13 +47,21 @@ def test_polished_results_surface_is_wired():
     assert "st.plotly_chart" in source
 
 
-def test_streamlit_application_starts_without_runtime_exception():
-    """Exercise the actual Streamlit script, not only imports and source checks."""
-    from streamlit.testing.v1 import AppTest
-    at = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=30)
-    at.run(timeout=30)
-    assert not at.exception, "\n".join(str(e.value) for e in at.exception)
+def test_streamlit_application_starts_without_runtime_exception(monkeypatch, tmp_path):
+    """Exercise the actual Streamlit script in isolated disposable storage."""
+    # app.py initialises several local SQLite stores and a payment_proofs
+    # directory relative to the working directory. Keep this test isolated
+    # from developer data and from other test fixtures.
+    monkeypatch.chdir(tmp_path)
 
+    from streamlit.testing.v1 import AppTest
+
+    app_path = Path(__file__).resolve().parents[1] / "app.py"
+    # A cold Streamlit run imports the complete engineering module catalogue.
+    # Keep the startup assertion bounded, but allow realistic CI cold-start time.
+    at = AppTest.from_file(app_path, default_timeout=120)
+    at.run(timeout=120)
+    assert not at.exception, "\n".join(str(e.value) for e in at.exception)
 
 
 def test_160_operating_system_route_is_wired():

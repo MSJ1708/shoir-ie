@@ -10,6 +10,7 @@ import io
 import math
 import re
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,7 +38,7 @@ def _workspace() -> str:
 
 
 def _db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH, timeout=30)
+    return sqlite3.connect(DB_PATH, timeout=30, factory=ClosingSQLiteConnection)
 
 
 def _slug(v: str) -> str:

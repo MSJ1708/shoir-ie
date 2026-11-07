@@ -416,7 +416,8 @@ def render_control_tower_extension() -> None:
     # Persist an explicit action queue so the tower supports intervention, not only observation.
     try:
         import sqlite3
-        with sqlite3.connect("enterprise_full_workspace.db") as con:
+        from shoir_sqlite import ClosingSQLiteConnection
+        with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
             con.execute(
                 "CREATE TABLE IF NOT EXISTS control_tower_actions("
                 "action_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,domain TEXT,action TEXT,owner TEXT,status TEXT,"
@@ -453,7 +454,7 @@ def render_control_tower_extension() -> None:
         if st.button("➕ Create control-tower action",type="primary",use_container_width=True,key="ct_action_create"):
             import uuid,sqlite3
             action_id="CTA-"+uuid.uuid4().hex[:10].upper()
-            with sqlite3.connect("enterprise_full_workspace.db") as con:
+            with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
                 con.execute(
                     "INSERT INTO control_tower_actions(action_id,workspace,domain,action,owner,status,notes,created_at,updated_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (action_id,workspace,action_domain,action_type,action_owner.strip() or username,action_status,action_notes.strip(),_now(),_now(),username)
@@ -474,7 +475,7 @@ def render_control_tower_extension() -> None:
             update_note=st.text_input("Update note",key="ct_action_update_note")
             if st.button("✅ Update selected action",use_container_width=True,key="ct_action_update"):
                 import sqlite3
-                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
                     con.execute("UPDATE control_tower_actions SET status=?,notes=?,updated_at=? WHERE action_id=? AND workspace=?",(new_status,update_note,_now(),selected_action,workspace))
                     con.commit()
                 st.success(f"{selected_action} updated.")
@@ -1374,7 +1375,7 @@ def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) 
 def _load_persisted_telemetry(limit: int = 500) -> pd.DataFrame:
     try:
         import sqlite3
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite3.connect("enterprise_full_workspace.db", timeout=10, factory=ClosingSQLiteConnection) as conn:
             data = pd.read_sql(
                 "SELECT asset_id AS Asset, ts AS Timestamp, metric AS Metric, value AS Value, source AS Source "
                 "FROM telemetry_events ORDER BY id DESC LIMIT ?",

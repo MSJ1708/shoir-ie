@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pulp
+from scipy.optimize import linprog
 from scipy.stats import f, nct, norm, t
 
 
@@ -135,11 +136,11 @@ def solve_cutting_stock(
     bins = range(total_items)
     choices = range(len(normalized))
     used = {
-        b: pulp.LpVariable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
+        b: model.add_variable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
         for b in bins
     }
     allocation = {
-        (i, b): pulp.LpVariable(
+        (i, b): model.add_variable(
             f"part_{i}_in_stock_{b}",
             lowBound=0,
             upBound=normalized[i]["quantity"],
@@ -163,7 +164,7 @@ def solve_cutting_stock(
             model += used[b] >= used[b + 1], f"symmetry_{b}"
 
     try:
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds)
+        solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit_seconds)
         if not solver.available():
             raise RuntimeError("PuLP's CBC solver is not available in this runtime.")
         model.solve(solver)
@@ -4490,11 +4491,11 @@ def optimize_supply_chain_network(
 
     model = pulp.LpProblem("shoir_single_period_supply_chain_transport", pulp.LpMinimize)
     shipment_vars = {
-        key: pulp.LpVariable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
+        key: model.add_variable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
         for i, (key, item) in enumerate(route_map.items(), start=1)
     }
     unmet_vars = {
-        site: pulp.LpVariable(f"unmet_{i}", lowBound=0)
+        site: model.add_variable(f"unmet_{i}", lowBound=0)
         for i, site in enumerate(demand, start=1)
     }
     model += pulp.lpSum(route_map[key]["unit_cost"] * shipment_vars[key] for key in route_map) + penalty * pulp.lpSum(unmet_vars.values())
@@ -4506,7 +4507,7 @@ def optimize_supply_chain_network(
         model += pulp.lpSum(
             var for (_, destination), var in shipment_vars.items() if destination == site
         ) + unmet_vars[site] == requested, f"site_demand_{list(demand).index(site)}"
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
+    solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit)
     try:
         model.solve(solver)
     except Exception as exc:
@@ -4911,7 +4912,7 @@ def run_solver_diagnostics(
         pulp.LpMinimize if direction_value in {"minimize", "min"} else pulp.LpMaximize,
     )
     variables = {
-        name: pulp.LpVariable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
+        name: problem.add_variable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
         for name, spec in normalized_specs.items()
     }
     problem += pulp.lpSum(coefficient * variables[name] for name, coefficient in objective.items()), "objective"
@@ -4925,7 +4926,7 @@ def run_solver_diagnostics(
             problem += expression == item["rhs"], item["name"]
 
     try:
-        solver_status_code = problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit))
+        solver_status_code = problem.solve(pulp.COIN_CMD(msg=False, timeLimit=time_limit))
     except Exception as exc:
         return {
             "status": "SOLVER_ERROR",
@@ -4941,6 +4942,67 @@ def run_solver_diagnostics(
     solver_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
     solution_status_code = getattr(problem, "sol_status", None)
     solution_status = pulp.LpSolution.get(solution_status_code, "UNKNOWN_SOLUTION_STATUS")
+    solver_backend = "PuLP COIN_CMD"
+    solver_message = ""
+
+    # CBC can return an Undefined status for a valid continuous LP termination
+    # on some CBC builds even when a definitive LP classification is possible.
+    # In that case, independently classify only continuous models with SciPy
+    # HiGHS. Never use the LP relaxation to claim a mixed-integer model is
+    # feasible or optimal.
+    if solver_status == "Undefined" and all(
+        spec["category"] == "continuous" for spec in normalized_specs.values()
+    ):
+        names = list(normalized_specs)
+        coefficient_vector = np.asarray(
+            [objective.get(name, 0.0) for name in names], dtype=float
+        )
+        if direction_value in {"maximize", "max"}:
+            coefficient_vector = -coefficient_vector
+
+        upper_rows: list[list[float]] = []
+        upper_rhs: list[float] = []
+        equality_rows: list[list[float]] = []
+        equality_rhs: list[float] = []
+        for item in normalized_constraints:
+            row = [float(item["coefficients"].get(name, 0.0)) for name in names]
+            if item["sense"] == pulp.LpConstraintLE:
+                upper_rows.append(row)
+                upper_rhs.append(float(item["rhs"]))
+            elif item["sense"] == pulp.LpConstraintGE:
+                upper_rows.append([-value for value in row])
+                upper_rhs.append(-float(item["rhs"]))
+            else:
+                equality_rows.append(row)
+                equality_rhs.append(float(item["rhs"]))
+
+        fallback = linprog(
+            coefficient_vector,
+            A_ub=np.asarray(upper_rows, dtype=float) if upper_rows else None,
+            b_ub=np.asarray(upper_rhs, dtype=float) if upper_rhs else None,
+            A_eq=np.asarray(equality_rows, dtype=float) if equality_rows else None,
+            b_eq=np.asarray(equality_rhs, dtype=float) if equality_rhs else None,
+            bounds=[(normalized_specs[name]["low"], normalized_specs[name]["up"]) for name in names],
+            method="highs",
+            options={"time_limit": time_limit},
+        )
+        solver_backend = "SciPy HiGHS continuous-LP fallback (CBC returned Undefined)"
+        solver_message = str(fallback.message)
+        if fallback.status == 0 and fallback.success:
+            solver_status = "Optimal"
+            solution_status = "OPTIMAL_SOLUTION_FOUND"
+            for name, value in zip(names, fallback.x):
+                variables[name].varValue = float(value)
+        elif fallback.status == 2:
+            solver_status = "Infeasible"
+            solution_status = "NO_SOLUTION_FOUND"
+        elif fallback.status == 3:
+            solver_status = "Unbounded"
+            solution_status = "NO_SOLUTION_FOUND"
+        elif fallback.status == 1:
+            solver_status = "Not Solved"
+            solution_status = "NO_SOLUTION_FOUND"
+
     variable_rows: list[dict[str, Any]] = []
     violations: list[str] = []
     all_values_assigned = True
@@ -5042,6 +5104,8 @@ def run_solver_diagnostics(
         "status": interpretation_status,
         "solver_status": solver_status,
         "solution_status": solution_status,
+        "solver_backend": solver_backend,
+        "solver_message": solver_message,
         "objective_direction": "minimize" if direction_value in {"minimize", "min"} else "maximize",
         "objective_value": objective_value,
         "variable_count": len(variables),
@@ -5425,11 +5489,11 @@ def optimize_facility_location_flow(
 
     model = pulp.LpProblem("ShoirIE_Facility_Location_Flow", pulp.LpMinimize)
     open_vars = {
-        i: pulp.LpVariable(f"facility_open_{i}", cat=pulp.LpBinary)
+        i: model.add_variable(f"facility_open_{i}", cat=pulp.LpBinary)
         for i in range(len(normalized_facilities))
     }
     flow_vars = {
-        r["index"] - 1: pulp.LpVariable(
+        r["index"] - 1: model.add_variable(
             f"route_flow_{r['index'] - 1}", lowBound=0, upBound=r["capacity"], cat=pulp.LpContinuous
         )
         for r in normalized_routes
@@ -5451,7 +5515,7 @@ def optimize_facility_location_flow(
         model += inbound == customer["demand"], f"customer_demand_{i}"
 
     try:
-        model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=limit))
+        model.solve(pulp.COIN_CMD(msg=False, timeLimit=limit))
     except pulp.PulpSolverError:
         return {
             "status": "SOLVER_UNAVAILABLE",
@@ -6052,3 +6116,675 @@ def assess_capa_8d_records(
         "warning": "This register checks record completeness and status only. It does not verify the truth of root-cause claims, action effectiveness, regulatory compliance or engineering safety.",
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
+
+def calculate_niosh_revised_lifting_equation(
+    load_weight: float,
+    horizontal_origin: float,
+    horizontal_destination: float,
+    vertical_hand_start: float,
+    vertical_travel_distance: float,
+    asymmetry_origin: float,
+    asymmetry_destination: float,
+    frequency_lifts_per_minute: float,
+    frequency_multiplier: float,
+    coupling_multiplier: float,
+    *,
+    units: str = "metric",
+    frequency_duration_category: str = "",
+    coupling_quality: str = "",
+    frequency_multiplier_source: str = "",
+    coupling_multiplier_source: str = "",
+    task_description: str = "",
+) -> dict[str, Any]:
+    """Calculate a single-task, two-handed NIOSH RNLE screening estimate.
+
+    The horizontal and asymmetry values are captured at both lift origin and
+    destination. The more demanding value is used. Frequency and coupling
+    multipliers must be looked up by the user in the applicable official NIOSH
+    tables and include source references; they are never inferred here.
+
+    This is not a multi-task Composite Lifting Index, and it is not applicable
+    to one-handed lifting, carrying, pushing, pulling or unstable loads.
+    """
+    unit_system = str(units or "").strip().casefold()
+    if unit_system not in {"metric", "imperial"}:
+        raise ValueError("Units must be either metric or imperial.")
+    load = _finite_number(load_weight, "Load weight")
+    h_origin = _finite_number(horizontal_origin, "Origin horizontal hand location")
+    h_destination = _finite_number(horizontal_destination, "Destination horizontal hand location")
+    vertical = _finite_number(vertical_hand_start, "Vertical hand location at lift origin")
+    travel = _finite_number(vertical_travel_distance, "Vertical travel distance")
+    a_origin = _finite_number(asymmetry_origin, "Origin asymmetry angle")
+    a_destination = _finite_number(asymmetry_destination, "Destination asymmetry angle")
+    frequency = _finite_number(frequency_lifts_per_minute, "Lift frequency")
+    fm = _finite_number(frequency_multiplier, "Frequency multiplier")
+    cm = _finite_number(coupling_multiplier, "Coupling multiplier")
+    duration = str(frequency_duration_category or "").strip()
+    coupling = str(coupling_quality or "").strip()
+    fm_source = str(frequency_multiplier_source or "").strip()
+    cm_source = str(coupling_multiplier_source or "").strip()
+    description = str(task_description or "").strip()
+
+    if load <= 0:
+        raise ValueError("Load weight must be greater than zero.")
+    if h_origin <= 0 or h_destination <= 0:
+        raise ValueError("Horizontal hand locations at origin and destination must be greater than zero.")
+    if vertical < 0:
+        raise ValueError("Vertical hand location cannot be negative.")
+    if travel <= 0:
+        raise ValueError("Vertical travel distance must be greater than zero.")
+    if not 0 <= a_origin <= 135 or not 0 <= a_destination <= 135:
+        raise ValueError("Origin and destination asymmetry angles must be between 0 and 135 degrees.")
+    if not 0 < frequency <= 15:
+        raise ValueError("Lift frequency must be greater than zero and no more than 15 lifts per minute.")
+    if not 0 < fm <= 1:
+        raise ValueError("Frequency multiplier must be greater than zero and no more than 1.")
+    if not 0 < cm <= 1:
+        raise ValueError("Coupling multiplier must be greater than zero and no more than 1.")
+    if duration not in {"Short (≤ 1 hour)", "Moderate (> 1 to 2 hours)", "Long (> 2 to 8 hours)"}:
+        raise ValueError("Select a valid RNLE lifting-duration category.")
+    if coupling not in {"Good", "Fair", "Poor"}:
+        raise ValueError("Select the observed coupling quality.")
+    if not fm_source:
+        raise ValueError("Provide the official RNLE table/source reference used for FM.")
+    if not cm_source:
+        raise ValueError("Provide the official RNLE table/source reference used for CM.")
+
+    if unit_system == "metric":
+        load_constant = 23.0
+        unit = "kg"
+        distance_unit = "cm"
+        h_reference = 25.0
+        h_limit = 63.0
+        v_reference = 75.0
+        v_limit = 175.0
+        d_minimum = 25.0
+        d_limit = 175.0
+        hm = min(1.0, h_reference / max(h_origin, h_destination))
+        vm = max(0.0, 1.0 - 0.003 * abs(vertical - v_reference))
+        dm = 0.82 + 4.5 / max(travel, d_minimum)
+    else:
+        load_constant = 51.0
+        unit = "lb"
+        distance_unit = "in"
+        h_reference = 10.0
+        h_limit = 25.0
+        v_reference = 30.0
+        v_limit = 70.0
+        d_minimum = 10.0
+        d_limit = 70.0
+        hm = min(1.0, h_reference / max(h_origin, h_destination))
+        vm = max(0.0, 1.0 - 0.0075 * abs(vertical - v_reference))
+        dm = 0.82 + 1.8 / max(travel, d_minimum)
+
+    if max(h_origin, h_destination) > h_limit:
+        raise ValueError(f"Horizontal hand location exceeds the RNLE limit of {h_limit:g} {distance_unit}.")
+    if vertical > v_limit:
+        raise ValueError(f"Vertical hand location exceeds the RNLE limit of {v_limit:g} {distance_unit}.")
+    if travel > d_limit:
+        raise ValueError(f"Vertical travel distance exceeds the RNLE limit of {d_limit:g} {distance_unit}.")
+
+    a_used = max(a_origin, a_destination)
+    am = max(0.0, 1.0 - 0.0032 * a_used)
+    multipliers = {
+        "Horizontal multiplier (HM)": hm,
+        "Vertical multiplier (VM)": vm,
+        "Distance multiplier (DM)": dm,
+        "Asymmetry multiplier (AM)": am,
+        "Frequency multiplier (FM)": fm,
+        "Coupling multiplier (CM)": cm,
+    }
+    rwl = load_constant
+    for multiplier in multipliers.values():
+        rwl *= multiplier
+    if not math.isfinite(rwl) or rwl <= 0:
+        raise ValueError("The calculated recommended weight limit is zero or invalid for these inputs.")
+    lifting_index = load / rwl
+    status = "LI_AT_OR_BELOW_1" if lifting_index <= 1.0 else "LI_ABOVE_1_REVIEW_REQUIRED"
+    table = pd.DataFrame([
+        {"Multiplier": name, "Value": value}
+        for name, value in multipliers.items()
+    ])
+    return {
+        "status": status,
+        "method": "NIOSH Revised Lifting Equation — single-task screening calculation",
+        "task_description": description or "NOT PROVIDED",
+        "units": unit_system,
+        "load_weight": load,
+        "load_unit": unit,
+        "horizontal_origin": h_origin,
+        "horizontal_destination": h_destination,
+        "horizontal_value_used": max(h_origin, h_destination),
+        "vertical_hand_start": vertical,
+        "vertical_travel_distance": travel,
+        "distance_unit": distance_unit,
+        "asymmetry_origin_degrees": a_origin,
+        "asymmetry_destination_degrees": a_destination,
+        "asymmetry_value_used_degrees": a_used,
+        "frequency_lifts_per_minute": frequency,
+        "frequency_duration_category": duration,
+        "coupling_quality": coupling,
+        "load_constant": load_constant,
+        "recommended_weight_limit": rwl,
+        "recommended_weight_limit_unit": unit,
+        "lifting_index": lifting_index,
+        "multipliers": multipliers,
+        "multiplier_table": table,
+        "frequency_multiplier_source": fm_source,
+        "coupling_multiplier_source": cm_source,
+        "formula": "RWL = LC × HM × VM × DM × AM × FM × CM; LI = actual load / RWL",
+        "assumptions": (
+            "Single-task, two-handed lifting. H and A use the more demanding "
+            "origin/destination measurement. V is measured at the origin; D is "
+            "vertical travel distance. FM and CM are user-supplied lookups from "
+            "the applicable official RNLE tables for the frequency, duration "
+            "and coupling conditions."
+        ),
+        "warning": (
+            "A lifting index at or below 1 is a screening goal, not proof of safety. "
+            "This calculation does not assess a multi-task Composite Lifting Index, "
+            "one-handed or seated lifting, carrying, pushing, pulling, unstable loads, "
+            "or all workplace hazards. Confirm measurements and table lookups with a "
+            "qualified ergonomics professional and assess the whole task and workforce."
+        ),
+    }
+
+
+def build_rcm_decision_support(
+    failure_modes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Create reviewable first-pass RCM task candidates from explicit failure data.
+
+    This is a decision-support screen, not a certified SAE JA1011/JA1012 RCM
+    analysis. Safety/environmental and hidden protective-function cases are
+    always escalated; no task is silently authorized for execution.
+    """
+    if isinstance(failure_modes, (str, bytes)) or not isinstance(failure_modes, Sequence) or not failure_modes:
+        raise ValueError("Provide at least one RCM failure-mode record.")
+    if len(failure_modes) > 2000:
+        raise ValueError("RCM screening is limited to 2,000 failure-mode records.")
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    consequences = {"safety", "environmental", "operational", "non_operational", "hidden"}
+    for index, raw in enumerate(failure_modes, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"RCM row {index} must be an object.")
+        asset = str(raw.get("asset", "")).strip()
+        mode = str(raw.get("failure_mode", "")).strip()
+        if not asset or not mode:
+            raise ValueError(f"RCM row {index} needs an asset and failure_mode.")
+        key = (asset + "::" + mode).casefold()
+        if key in seen:
+            raise ValueError(f"Duplicate RCM failure mode for {asset}: {mode}.")
+        seen.add(key)
+        consequence = str(raw.get("consequence", "")).strip().casefold().replace("-", "_").replace(" ", "_")
+        if consequence not in consequences:
+            raise ValueError(
+                f"RCM row {index} consequence must be one of: "
+                + ", ".join(sorted(consequences))
+                + "."
+            )
+        severity_value = _finite_number(raw.get("severity"), f"Severity for {asset} / {mode}")
+        if not severity_value.is_integer() or not 1 <= severity_value <= 10:
+            raise ValueError(f"Severity for {asset} / {mode} must be a whole number from 1 to 10.")
+        severity = int(severity_value)
+        booleans = (
+            "detectable",
+            "age_related",
+            "hidden_protective_function",
+            "on_condition_applicable",
+            "scheduled_restoration_applicable",
+            "scheduled_discard_applicable",
+            "failure_finding_applicable",
+            "run_to_failure_accepted",
+        )
+        flags: dict[str, bool] = {}
+        for field in booleans:
+            value = raw.get(field, False)
+            if not isinstance(value, bool):
+                raise ValueError(f"{field} for {asset} / {mode} must be true or false.")
+            flags[field] = value
+        task_cost = _finite_number(raw.get("preventive_task_cost", 0), f"Preventive task cost for {asset} / {mode}")
+        failure_cost = _finite_number(raw.get("consequence_cost", 0), f"Consequence cost for {asset} / {mode}")
+        if task_cost < 0 or failure_cost < 0:
+            raise ValueError("RCM task and consequence costs cannot be negative.")
+        interval = raw.get("interval_days")
+        if interval not in (None, ""):
+            interval_value = _finite_number(interval, f"Interval days for {asset} / {mode}")
+            if not interval_value.is_integer() or interval_value <= 0:
+                raise ValueError("An RCM task interval must be a positive whole number of days.")
+            interval = int(interval_value)
+        else:
+            interval = None
+        evidence = str(raw.get("evidence_reference", "")).strip()
+
+        chosen = "HUMAN_REVIEW_REQUIRED"
+        rationale = "No applicable maintenance task has been evidenced; review the failure mode and maintenance policy."
+        review = True
+        if consequence in {"safety", "environmental"} or severity >= 9:
+            chosen = "SPECIALIST_SAFETY_REVIEW"
+            rationale = "High-consequence or severity-9/10 failure: do not automate task selection; require a competent safety/reliability review."
+        elif flags["hidden_protective_function"] or consequence == "hidden":
+            if flags["failure_finding_applicable"]:
+                chosen = "FAILURE_FINDING_TASK_CANDIDATE"
+                rationale = "Hidden protective function: a documented failure-finding task is a candidate; define the proof-test interval and independence requirements."
+            else:
+                chosen = "HUMAN_REVIEW_REQUIRED"
+                rationale = "Hidden protective function has no evidenced failure-finding task; specialist review is required."
+        elif flags["detectable"] and flags["on_condition_applicable"]:
+            chosen = "ON_CONDITION_TASK_CANDIDATE"
+            rationale = "A detectable potential-failure condition and an applicable on-condition task were explicitly recorded."
+        elif flags["age_related"] and flags["scheduled_restoration_applicable"]:
+            chosen = "SCHEDULED_RESTORATION_CANDIDATE"
+            rationale = "An age-related failure pattern and an applicable scheduled-restoration task were explicitly recorded."
+        elif flags["age_related"] and flags["scheduled_discard_applicable"]:
+            chosen = "SCHEDULED_DISCARD_CANDIDATE"
+            rationale = "An age-related failure pattern and an applicable scheduled-discard task were explicitly recorded."
+        elif flags["run_to_failure_accepted"] and consequence in {"non_operational", "operational"}:
+            if task_cost > failure_cost:
+                chosen = "RUN_TO_FAILURE_CANDIDATE"
+                rationale = "The user accepted run-to-failure and entered a lower consequence cost than preventive-task cost; verify lifecycle, spare and safety impacts."
+            else:
+                chosen = "HUMAN_REVIEW_REQUIRED"
+                rationale = "Run-to-failure was accepted, but its entered consequence cost is not lower than preventive-task cost."
+        if chosen.endswith("_CANDIDATE"):
+            review = True
+        rows.append({
+            "Asset": asset,
+            "Failure mode": mode,
+            "Consequence": consequence.replace("_", " ").title(),
+            "Severity (1–10)": severity,
+            "Recommended task candidate": chosen,
+            "Review required": review,
+            "Suggested interval (days)": interval,
+            "Preventive task cost": task_cost,
+            "Consequence cost": failure_cost,
+            "Evidence reference": evidence or "NOT PROVIDED",
+            "Rationale": rationale,
+        })
+
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Review required", "Severity (1–10)", "Asset", "Failure mode"],
+        ascending=[False, False, True, True],
+        kind="stable",
+    ).reset_index(drop=True)
+    return {
+        "status": "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL",
+        "method": "First-pass failure-consequence and task-applicability screen",
+        "record_count": len(frame),
+        "specialist_review_count": int(frame["Review required"].sum()),
+        "task_candidate_count": int(frame["Recommended task candidate"].str.endswith("_CANDIDATE").sum()),
+        "decision_tree": frame,
+        "warning": (
+            "This is not a certified RCM analysis and does not establish SAE JA1011/JA1012 compliance. "
+            "Confirm functions, functional failures, failure effects, failure modes, consequence classes, "
+            "task applicability, intervals, cost assumptions and site safety controls with a competent "
+            "reliability engineer before approving a maintenance strategy."
+        ),
+    }
+
+
+def calibrate_simulation_outputs(
+    simulated_values: Sequence[float],
+    measured_values: Sequence[float],
+    *,
+    training_fraction: float = 0.75,
+    min_slope: float = 0.0,
+    max_slope: float = 10.0,
+) -> dict[str, Any]:
+    """Fit and chronologically hold out an affine calibration of simulation outputs.
+
+    Fits measured ~= intercept + slope * simulated on the first observations and
+    evaluates the unchanged fit on the final holdout observations. This calibrates
+    an output mapping only; it does not tune internal simulator physics or connect
+    to a live asset.
+    """
+    # Validate numeric inputs first, then report a shape mismatch before a
+    # minimum-length error so callers receive the actionable validation reason.
+    simulated = _finite_vector(simulated_values, "Simulated values", minimum=0)
+    measured = _finite_vector(measured_values, "Measured values", minimum=0)
+    if len(simulated) != len(measured):
+        raise ValueError("Simulated and measured series must contain the same number of observations.")
+    if len(simulated) < 5:
+        raise ValueError("Simulated and measured series must each contain at least 5 observations.")
+    fraction = _finite_number(training_fraction, "Training fraction")
+    lower = _finite_number(min_slope, "Minimum calibration slope")
+    upper = _finite_number(max_slope, "Maximum calibration slope")
+    if not 0.5 <= fraction <= 0.9:
+        raise ValueError("Training fraction must be between 0.5 and 0.9.")
+    if lower < 0 or upper <= lower:
+        raise ValueError("Calibration slope bounds must satisfy 0 <= min_slope < max_slope.")
+    split = int(math.floor(len(simulated) * fraction))
+    if split < 3 or len(simulated) - split < 2:
+        raise ValueError("Calibration needs at least three training and two holdout observations.")
+    x_train = np.asarray(simulated[:split], dtype=float)
+    y_train = np.asarray(measured[:split], dtype=float)
+    x_holdout = np.asarray(simulated[split:], dtype=float)
+    y_holdout = np.asarray(measured[split:], dtype=float)
+    if float(np.ptp(x_train)) <= 1e-12:
+        raise ValueError("Training simulated values must contain variation to identify a calibration slope.")
+    design = np.column_stack([np.ones(len(x_train)), x_train])
+    intercept, slope = np.linalg.lstsq(design, y_train, rcond=None)[0]
+    intercept = float(intercept)
+    slope = float(slope)
+    if not math.isfinite(intercept) or not math.isfinite(slope):
+        raise ValueError("Calibration produced a non-finite fit.")
+    if slope < lower or slope > upper:
+        raise ValueError("Fitted calibration slope is outside the configured bounds; revise the model or approved bounds.")
+    train_fit = intercept + slope * x_train
+    holdout_fit = intercept + slope * x_holdout
+
+    def metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
+        residual = actual - predicted
+        denominator = float(np.sum((actual - float(np.mean(actual))) ** 2))
+        r2_value = 1.0 - float(np.sum(residual ** 2)) / denominator if denominator > 1e-12 else float("nan")
+        return {
+            "mae": float(np.mean(np.abs(residual))),
+            "rmse": float(np.sqrt(np.mean(residual ** 2))),
+            "bias_measured_minus_calibrated": float(np.mean(residual)),
+            "r_squared": r2_value,
+        }
+
+    calibrated_all = intercept + slope * np.asarray(simulated, dtype=float)
+    holdout = metrics(y_holdout, holdout_fit)
+    train = metrics(y_train, train_fit)
+    residuals = pd.DataFrame({
+        "Observation": np.arange(1, len(simulated) + 1),
+        "Segment": ["TRAIN"] * split + ["HOLDOUT"] * (len(simulated) - split),
+        "Simulated": simulated,
+        "Measured": measured,
+        "Calibrated simulation": calibrated_all.tolist(),
+        "Residual (measured - calibrated)": (np.asarray(measured) - calibrated_all).tolist(),
+    })
+    return {
+        "status": "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT",
+        "method": "Affine output calibration: measured = intercept + slope × simulated",
+        "training_observations": split,
+        "holdout_observations": len(simulated) - split,
+        "training_fraction": fraction,
+        "calibration_intercept": intercept,
+        "calibration_slope": slope,
+        "calibration_equation": f"measured ≈ {intercept:.8g} + {slope:.8g} × simulated",
+        "training_metrics": train,
+        "holdout_metrics": holdout,
+        "residuals": residuals,
+        "warning": (
+            "This is an affine output correction with a chronological holdout, not a physics-based digital-twin calibration. "
+            "Check measurement traceability, sensor bias, operating regimes, residual structure, uncertainty and out-of-range behavior. "
+            "Do not deploy calibrated parameters to a live controller."
+        ),
+    }
+
+
+def evaluate_kpi_alerts(
+    kpi_records: Sequence[Mapping[str, Any]],
+    alert_rules: Sequence[Mapping[str, Any]],
+    *,
+    as_of: Any = None,
+    stale_after_hours: float = 24.0,
+    previous_open_alert_ids: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Evaluate freshness-aware KPI threshold rules and deduplicate alert identities."""
+    if isinstance(kpi_records, (str, bytes)) or not isinstance(kpi_records, Sequence):
+        raise ValueError("KPI records must be a list of objects.")
+    if isinstance(alert_rules, (str, bytes)) or not isinstance(alert_rules, Sequence) or not alert_rules:
+        raise ValueError("Provide at least one KPI alert rule.")
+    stale_hours = _finite_number(stale_after_hours, "Stale-data threshold")
+    if stale_hours <= 0 or stale_hours > 24 * 365:
+        raise ValueError("Stale-data threshold must be greater than zero and no more than one year.")
+    now = pd.Timestamp.now(tz="UTC") if as_of is None else pd.to_datetime(as_of, utc=True, errors="coerce")
+    if pd.isna(now):
+        raise ValueError("Alert evaluation as-of timestamp must be valid.")
+    prior = {str(value).strip() for value in previous_open_alert_ids if str(value).strip()}
+    by_name: dict[str, Mapping[str, Any]] = {}
+    for index, raw in enumerate(kpi_records, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"KPI record {index} must be an object.")
+        name = str(raw.get("kpi", "")).strip()
+        if not name:
+            raise ValueError(f"KPI record {index} needs a KPI name.")
+        key = name.casefold()
+        if key in by_name:
+            raise ValueError(f"Duplicate KPI record: {name}.")
+        by_name[key] = raw
+
+    rows: list[dict[str, Any]] = []
+    seen_rules: set[str] = set()
+    seen_active_ids: set[str] = set()
+    operators = {">", ">=", "<", "<=", "=="}
+    severities = {"INFO", "WARNING", "CRITICAL"}
+    for index, rule in enumerate(alert_rules, start=1):
+        if not isinstance(rule, Mapping):
+            raise ValueError(f"Alert rule {index} must be an object.")
+        rule_id = str(rule.get("rule_id", "")).strip()
+        name = str(rule.get("kpi", "")).strip()
+        operator = str(rule.get("operator", "")).strip()
+        severity = str(rule.get("severity", "WARNING")).strip().upper()
+        if not rule_id or len(rule_id) > 100 or rule_id.casefold() in seen_rules:
+            raise ValueError("Alert rule IDs must be non-empty, unique and no longer than 100 characters.")
+        seen_rules.add(rule_id.casefold())
+        if not name:
+            raise ValueError(f"Alert rule {rule_id} needs a KPI name.")
+        if operator not in operators:
+            raise ValueError(f"Alert rule {rule_id} has an unsupported operator.")
+        if severity not in severities:
+            raise ValueError(f"Alert rule {rule_id} severity must be INFO, WARNING or CRITICAL.")
+        threshold = _finite_number(rule.get("threshold"), f"Threshold for {rule_id}")
+        record = by_name.get(name.casefold())
+        state = "MISSING_DATA"
+        value: float | None = None
+        unit = ""
+        source = ""
+        observed = None
+        breached = False
+        if record is not None:
+            value = _finite_number(record.get("value"), f"KPI value for {name}")
+            unit = str(record.get("unit", "")).strip()
+            source = str(record.get("source", "")).strip()
+            observed = pd.to_datetime(record.get("observed_at"), utc=True, errors="coerce")
+            if pd.isna(observed):
+                state = "INVALID_TIMESTAMP"
+            elif observed > now:
+                state = "FUTURE_TIMESTAMP"
+            elif not source:
+                state = "SOURCE_NOT_IDENTIFIED"
+            elif (now - observed).total_seconds() > stale_hours * 3600:
+                state = "STALE_DATA"
+            else:
+                if operator == ">":
+                    breached = value > threshold
+                elif operator == ">=":
+                    breached = value >= threshold
+                elif operator == "<":
+                    breached = value < threshold
+                elif operator == "<=":
+                    breached = value <= threshold
+                else:
+                    breached = math.isclose(value, threshold, rel_tol=1e-9, abs_tol=1e-12)
+                state = "OPEN" if breached else "NORMAL"
+        alert_identity = rule_id + "::" + name.casefold()
+        import hashlib
+        alert_id = "ALT-" + hashlib.sha256(alert_identity.encode("utf-8")).hexdigest()[:20].upper()
+        event_state = (
+            "NEW" if breached and alert_id not in prior
+            else "CONTINUING" if breached
+            else "RESOLVED" if alert_id in prior and state == "NORMAL"
+            else state
+        )
+        if breached:
+            seen_active_ids.add(alert_id)
+        rows.append({
+            "Alert ID": alert_id,
+            "Rule ID": rule_id,
+            "KPI": name,
+            "Value": value,
+            "Operator": operator,
+            "Threshold": threshold,
+            "Unit": unit,
+            "Severity": severity,
+            "State": state,
+            "Event": event_state,
+            "Source": source or "NOT PROVIDED",
+            "Observed at": "" if observed is None or pd.isna(observed) else observed.isoformat(),
+        })
+    frame = pd.DataFrame(rows)
+    duplicate_count = int(frame["Alert ID"].duplicated().sum())
+    if duplicate_count:
+        raise RuntimeError("Internal KPI alert identity collision detected.")
+    return {
+        "status": "KPI_ALERT_RULES_EVALUATED",
+        "evaluated_at": now.isoformat(),
+        "rule_count": len(frame),
+        "open_alert_count": int((frame["State"] == "OPEN").sum()),
+        "new_alert_count": int((frame["Event"] == "NEW").sum()),
+        "continuing_alert_count": int((frame["Event"] == "CONTINUING").sum()),
+        "stale_or_missing_count": int(frame["State"].isin(["STALE_DATA", "MISSING_DATA", "INVALID_TIMESTAMP", "FUTURE_TIMESTAMP", "SOURCE_NOT_IDENTIFIED"]).sum()),
+        "resolved_alert_count": int((frame["Event"] == "RESOLVED").sum()),
+        "alerts": frame,
+        "next_open_alert_ids": sorted(seen_active_ids),
+        "warning": (
+            "This evaluation does not dispatch notifications or prove that KPI sources are live. "
+            "Persist rule definitions and alert state in an authorized workspace; validate source freshness and ownership before acting."
+        ),
+    }
+
+def manage_recovery_snapshot_history(
+    history_state: Mapping[str, Any] | None,
+    *,
+    action: str,
+    new_snapshot: Any = None,
+    target_revision: int | None = None,
+    max_history: int = 25,
+    max_snapshot_bytes: int = 32768,
+) -> dict[str, Any]:
+    """Checkpoint, undo, redo or restore bounded JSON snapshots for this tool only."""
+    import json
+
+    if isinstance(max_history, bool) or not isinstance(max_history, int) or not 2 <= max_history <= 100:
+        raise ValueError("max_history must be an integer from 2 to 100.")
+    if isinstance(max_snapshot_bytes, bool) or not isinstance(max_snapshot_bytes, int) or not 256 <= max_snapshot_bytes <= 1_000_000:
+        raise ValueError("max_snapshot_bytes must be an integer from 256 to 1,000,000.")
+
+    action_value = str(action or "").strip().lower()
+    aliases = {
+        "checkpoint": "checkpoint",
+        "create_checkpoint": "checkpoint",
+        "undo": "undo",
+        "redo": "redo",
+        "restore": "restore",
+        "restore_revision": "restore",
+    }
+    if action_value not in aliases:
+        raise ValueError("Recovery action must be checkpoint, undo, redo or restore.")
+    action_value = aliases[action_value]
+
+    def copy_snapshot(value: Any, field: str) -> Any:
+        try:
+            encoded = json.dumps(
+                value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"{field} must be valid JSON-compatible data without NaN or Infinity."
+            ) from exc
+        if len(encoded.encode("utf-8")) > max_snapshot_bytes:
+            raise ValueError(f"{field} exceeds the {max_snapshot_bytes}-byte snapshot limit.")
+        cloned = json.loads(encoded)
+        if not isinstance(cloned, (dict, list)):
+            raise ValueError(f"{field} must be a JSON object or array.")
+        return cloned
+
+    if history_state is None:
+        past: list[Any] = []
+        future: list[Any] = []
+        current: Any = None
+        has_current = False
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Recovery history state must be an object.")
+        past_raw = history_state.get("past", [])
+        future_raw = history_state.get("future", [])
+        has_current = history_state.get("has_current", "current" in history_state)
+        if (
+            not isinstance(past_raw, list)
+            or not isinstance(future_raw, list)
+            or not isinstance(has_current, bool)
+        ):
+            raise ValueError("Recovery history requires past/future lists and a Boolean has_current flag.")
+        past = [copy_snapshot(item, "Prior snapshot") for item in past_raw]
+        future = [copy_snapshot(item, "Redo snapshot") for item in future_raw]
+        current = (
+            copy_snapshot(history_state.get("current"), "Current snapshot")
+            if has_current else None
+        )
+        if len(past) + len(future) + int(has_current) > max_history:
+            raise ValueError(f"Recovery history exceeds the {max_history}-revision limit.")
+        if not has_current and (past or future):
+            raise ValueError("Recovery history cannot contain past/future snapshots without a current snapshot.")
+
+    if action_value == "checkpoint":
+        checkpoint = copy_snapshot(new_snapshot, "New snapshot")
+        if not has_current:
+            current, has_current, past, future = checkpoint, True, [], []
+            status = "SNAPSHOT_CREATED"
+        elif current == checkpoint:
+            status = "SNAPSHOT_UNCHANGED"
+        else:
+            past = (past + [current])[-(max_history - 1):]
+            current, future = checkpoint, []
+            status = "SNAPSHOT_CHECKPOINTED"
+    elif action_value == "undo":
+        if not has_current or not past:
+            raise ValueError("No earlier snapshot is available to undo.")
+        future.append(current)
+        current = past.pop()
+        status = "SNAPSHOT_UNDONE"
+    elif action_value == "redo":
+        if not has_current or not future:
+            raise ValueError("No undone snapshot is available to redo.")
+        past.append(current)
+        current = future.pop()
+        status = "SNAPSHOT_REDONE"
+    else:
+        if not has_current:
+            raise ValueError("No snapshot is available to restore.")
+        if isinstance(target_revision, bool) or not isinstance(target_revision, int):
+            raise ValueError("Target revision must be an integer using 1-based numbering.")
+        timeline_values = [*past, current, *reversed(future)]
+        if target_revision < 1 or target_revision > len(timeline_values):
+            raise ValueError(f"Target revision must be between 1 and {len(timeline_values)}.")
+        past = timeline_values[:target_revision - 1]
+        current = timeline_values[target_revision - 1]
+        future = list(reversed(timeline_values[target_revision:]))
+        status = "REVISION_RESTORED"
+
+    timeline_values = [*past, current, *reversed(future)] if has_current else []
+    timeline = [
+        {"revision": i + 1, "is_current": i == len(past), "snapshot": item}
+        for i, item in enumerate(timeline_values)
+    ]
+    updated_history = {
+        "past": past,
+        "current": current,
+        "future": future,
+        "has_current": has_current,
+        "max_history": max_history,
+    }
+    return {
+        "status": status,
+        "action": action_value,
+        "current_revision": len(past) + 1 if has_current else None,
+        "revision_count": len(timeline_values),
+        "can_undo": bool(has_current and past),
+        "can_redo": bool(has_current and future),
+        "current_snapshot": current if has_current else None,
+        "timeline": timeline,
+        "history_state": updated_history,
+        "limitations": [
+            "History covers only JSON snapshots explicitly entered into this recovery tool.",
+            "It does not intercept arbitrary edits in other Shoir-IE modules or roll back external-system side effects.",
+            "Authenticated managed-workspace persistence, re-login recovery and cross-workspace isolation require staging verification.",
+        ],
+    }
+

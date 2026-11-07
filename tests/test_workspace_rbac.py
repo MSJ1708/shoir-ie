@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import sqlite3
 import pandas as pd
 import pytest
@@ -167,7 +168,7 @@ def test_corrupt_legacy_membership_fails_closed(tmp_path, monkeypatch):
     db = str(tmp_path / "corrupt-members.db")
     # The historical table's primary key is case-sensitive, so old unsafe UI
     # writes could have created duplicate logical identities such as Alice/alice.
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         conn.execute(
             """CREATE TABLE workspace_members(
                 workspace TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL,
@@ -188,7 +189,7 @@ def test_corrupt_legacy_membership_fails_closed(tmp_path, monkeypatch):
 def test_case_colliding_legacy_workspace_names_fail_closed(tmp_path, monkeypatch):
     _session(monkeypatch, "alice")
     db = str(tmp_path / "workspace-name-collision.db")
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         conn.execute(
             """CREATE TABLE workspace_members(
                 workspace TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL,

@@ -1,0 +1,34 @@
+name: Production v9 compatibility security backport
+
+on:
+  pull_request:
+    branches: ["main", "staging-e2e-20261019", "feat/shoir-ie-release-hardening-20261105"]
+    paths:
+      - "supabase/production-backports/shoir-persistence-v9/**"
+      - ".github/workflows/production-v9-security-backport.yml"
+  push:
+    branches: ["feat/**", "fix/**", "staging-e2e-20261019"]
+    paths:
+      - "supabase/production-backports/shoir-persistence-v9/**"
+      - ".github/workflows/production-v9-security-backport.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-v9-security-backport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Format-check v9-compatible production backport
+        run: deno fmt --check supabase/production-backports/shoir-persistence-v9/index.ts supabase/production-backports/shoir-persistence-v9/security.ts supabase/production-backports/shoir-persistence-v9/security_test.ts
+      - name: Type-check v9-compatible Edge Function
+        run: deno check supabase/production-backports/shoir-persistence-v9/index.ts supabase/production-backports/shoir-persistence-v9/security_test.ts
+      - name: Run CORS and protected-admin regression tests
+        run: deno test supabase/production-backports/shoir-persistence-v9/security_test.ts

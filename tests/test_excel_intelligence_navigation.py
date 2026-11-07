@@ -115,7 +115,7 @@ def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
     route = platform.split('if module=="Excel Intelligence":', 1)[1].split(
         'if module=="Excel Data Cleaning & Import":', 1
     )[0]
-    assert 'st.session_state.get("authenticated") is not True' in route
+    assert '_industrial_platform_session_state().get("authenticated") is not True' in route
     assert 'actor.casefold() in {"", "guest", "guest visitor", "anonymous"}' in route
     assert 'session_actor.casefold() != actor.casefold()' in route
     assert 'Sign in with an active Shoir-IE account' in route

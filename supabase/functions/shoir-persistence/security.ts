@@ -141,38 +141,69 @@ export function normalizeWorkspaceStateJson(
 }
 
 /**
- * Browser origins allowed to call this function directly.
- *
- * Keep this list aligned with the Streamlit app host/origin allowlists. The
- * Python server-to-server caller normally sends no Origin header; that traffic
- * remains supported and must still satisfy action-level authentication.
+ * Browser origins are bound to the Supabase project, not shared between
+ * staging and production. Keep these exact origins aligned with the
+ * corresponding Streamlit deployment. The Python server-to-server caller
+ * normally sends no Origin header; it remains subject to action authentication.
  */
-const ALLOWED_BROWSER_ORIGINS = new Set<string>([
-  "https://shoir-ie-app.streamlit.app",
-  "https://shoirieverified.streamlit.app",
-  "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
-  "http://127.0.0.1:8501",
-  "http://localhost:8501",
-]);
+const BROWSER_ORIGINS_BY_PROJECT: Readonly<
+  Record<string, ReadonlySet<string>>
+> = {
+  hfhrosthswcybccepmak: new Set([
+    "https://shoirieverified.streamlit.app",
+    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app",
+    "http://127.0.0.1:8501",
+    "http://localhost:8501",
+  ]),
+  gcsamrdaeraxieaagsta: new Set([
+    "https://shoir-ie-app.streamlit.app",
+  ]),
+};
 
-/** Missing Origin is allowed for non-browser server-to-server clients only. */
-export function isAllowedBrowserOrigin(origin: string | null): boolean {
-  return origin === null || ALLOWED_BROWSER_ORIGINS.has(origin);
+function supabaseProjectRef(projectUrl: string): string | null {
+  try {
+    const parsed = new URL(projectUrl);
+    if (
+      parsed.protocol !== "https:" || parsed.port !== "" ||
+      parsed.username !== "" || parsed.password !== "" ||
+      parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== ""
+    ) {
+      return null;
+    }
+    const match = parsed.hostname.match(/^([a-z0-9-]+)\.supabase\.co$/i);
+    return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Missing Origin is allowed only for non-browser server-to-server clients. */
+export function isAllowedBrowserOrigin(
+  origin: string | null,
+  projectUrl: string,
+): boolean {
+  if (origin === null) return true;
+  const projectRef = supabaseProjectRef(projectUrl);
+  if (!projectRef) return false;
+  return BROWSER_ORIGINS_BY_PROJECT[projectRef]?.has(origin) ?? false;
 }
 
 /**
- * Return restrictive CORS headers. Never emit a wildcard origin; callers must
- * reject non-allowlisted Origin values before reaching this helper.
+ * Return project-bound CORS headers. Never emit wildcard or cross-environment
+ * origins; the request handler rejects non-allowlisted Origin values first.
  */
-export function corsHeadersForOrigin(origin: string | null): Headers {
+export function corsHeadersForOrigin(
+  origin: string | null,
+  projectUrl: string,
+): Headers {
   const headers = new Headers({
     "Content-Type": "application/json",
     "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
+      "authorization, x-client-info, apikey, content-type, x-retry-count, traceparent, tracestate, baggage",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   });
-  if (origin !== null && ALLOWED_BROWSER_ORIGINS.has(origin)) {
+  if (origin !== null && isAllowedBrowserOrigin(origin, projectUrl)) {
     headers.set("Access-Control-Allow-Origin", origin);
   }
   return headers;
@@ -254,6 +285,182 @@ export function sessionEntitlementFields(
   };
 }
 
+/**
+ * Match the application's package normalization rules at the API boundary.
+ * Research Pack is an add-on access state, not the Enterprise Plus tier.
+ */
+export function normalizePlatformTier(value: unknown): string {
+  const tier = String(value || "Starter").trim().toLowerCase();
+  if (tier.includes("research")) return "Research Pack";
+  if (
+    tier.includes("enterprise plus") || tier.includes("industrial enterprise")
+  ) {
+    return "Enterprise Plus";
+  }
+  if (tier.includes("enterprise")) return "Enterprise";
+  if (tier.includes("professional")) return "Professional";
+  if (tier.includes("pro")) return "Mid-Tier Pro";
+  return "Starter";
+}
+
+export function platformTierAllows(
+  currentValue: unknown,
+  requiredValue: string,
+): boolean {
+  const current = normalizePlatformTier(currentValue);
+  const required = normalizePlatformTier(requiredValue);
+  const order = [
+    "Starter",
+    "Mid-Tier Pro",
+    "Professional",
+    "Enterprise",
+    "Enterprise Plus",
+  ];
+  if (current === "Research Pack") {
+    return [
+      "Starter",
+      "Mid-Tier Pro",
+      "Professional",
+      "Enterprise",
+      "Research Pack",
+    ].includes(required);
+  }
+  if (required === "Research Pack") return current === "Research Pack";
+  return order.indexOf(current) >= order.indexOf(required);
+}
+
+export interface CsvShape {
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+}
+
+/**
+ * Inspect an already size-bounded UTF-8 CSV without materializing a DataFrame.
+ * Counts logical records (quoted newlines are not row separators) and rejects
+ * malformed quoting, duplicate/blank headers and invalid UTF-8.
+ */
+export function inspectCsvShape(bytes: Uint8Array): CsvShape {
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new PublicRequestError("Dataset CSV must be valid UTF-8.", 400);
+  }
+  if (source.startsWith("\uFEFF")) source = source.slice(1);
+  if (!source.length) {
+    throw new PublicRequestError("Dataset CSV is empty.", 400);
+  }
+
+  const headers: string[] = [];
+  let field = "";
+  let fieldHasContent = false;
+  let inQuotes = false;
+  let firstRecord = true;
+  let rowCount = 0;
+  let recordHasContent = false;
+  let columnCount = 0;
+
+  const finishHeader = () => {
+    headers.push(field);
+    if (headers.some((header) => !header.trim())) {
+      throw new PublicRequestError(
+        "Dataset CSV contains a blank column header.",
+        400,
+      );
+    }
+    if (new Set(headers).size !== headers.length) {
+      throw new PublicRequestError(
+        "Dataset CSV contains duplicate column headers.",
+        400,
+      );
+    }
+    columnCount = headers.length;
+    firstRecord = false;
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (inQuotes) {
+      if (character === '"') {
+        if (source[index + 1] === '"') {
+          if (firstRecord) field += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else if (firstRecord) {
+        field += character;
+      }
+      fieldHasContent = true;
+      recordHasContent = true;
+      continue;
+    }
+
+    if (character === '"') {
+      if (fieldHasContent) {
+        throw new PublicRequestError(
+          "Dataset CSV contains an invalid quote.",
+          400,
+        );
+      }
+      inQuotes = true;
+      fieldHasContent = true;
+      recordHasContent = true;
+      continue;
+    }
+    if (character === ",") {
+      if (firstRecord) headers.push(field);
+      field = "";
+      fieldHasContent = false;
+      recordHasContent = true;
+      continue;
+    }
+    if (character === "\n" || character === "\r") {
+      if (firstRecord) {
+        finishHeader();
+      } else if (recordHasContent) {
+        rowCount += 1;
+      }
+      field = "";
+      fieldHasContent = false;
+      recordHasContent = false;
+      if (character === "\r" && source[index + 1] === "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (firstRecord) field += character;
+    fieldHasContent = true;
+    recordHasContent = true;
+  }
+
+  if (inQuotes) {
+    throw new PublicRequestError(
+      "Dataset CSV contains an unterminated quoted field.",
+      400,
+    );
+  }
+  if (firstRecord) {
+    finishHeader();
+  } else if (recordHasContent) {
+    rowCount += 1;
+  }
+
+  if (columnCount < 1) {
+    throw new PublicRequestError(
+      "Dataset CSV must contain at least one column.",
+      400,
+    );
+  }
+  return { rowCount, columnCount, headers };
+}
+
+/** Only POST may dispatch API actions; OPTIONS is handled by the HTTP boundary. */
+export function isAllowedApiMethod(method: string): boolean {
+  return method.toUpperCase() === "POST";
+}
+
 export function publicErrorFor(
   error: unknown,
 ): { status: number; message: string } {
@@ -273,6 +480,9 @@ export function publicErrorFor(
   }
   if (message === "Admin authorization failed.") {
     return { status: 403, message };
+  }
+  if (message === "Administrator account requires manual security review.") {
+    return { status: 503, message };
   }
   if (message === "SUBSCRIPTION_EXPIRED") {
     return { status: 403, message: "SUBSCRIPTION_EXPIRED" };

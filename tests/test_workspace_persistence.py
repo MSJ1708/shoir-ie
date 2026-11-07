@@ -1,8 +1,22 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from workspace_persistence import load_user_workspace, save_user_workspace, _workspace_change_signature
+from workspace_persistence import (
+    _excluded,
+    _workspace_change_signature,
+    export_user_workspace_backup,
+    load_user_workspace,
+    restore_user_workspace_backup,
+    save_user_workspace,
+    verify_user_workspace_backup,
+)
+
+
+def test_organization_selection_is_not_saved_in_personal_workspace_state():
+    assert _excluded("shoir_active_organization_id")
+    assert _excluded("shoir_active_organization_workspace_id")
 
 
 def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
@@ -114,3 +128,54 @@ def test_workspace_change_signature_is_stable_for_unchanged_large_frame():
     state["large"] = df.copy()
     third = _workspace_change_signature(state)
     assert third != first
+
+
+def test_workspace_backup_round_trip_excludes_secrets_and_is_owner_scoped():
+    source = {
+        "authenticated": True,
+        "current_user": "Alice",
+        "remote_session_token": "do-not-export",
+        "renewal_session_token": "do-not-export-either",
+        "access_token": "secret",
+        "selected_nav": "Dashboard",
+        "demand": 42,
+        "df": pd.DataFrame({"SKU": ["A", "B"], "Demand": [10, 20]}),
+    }
+    exported = export_user_workspace_backup("Alice", source)
+    assert exported["payload_key_count"] >= 3
+    verified = verify_user_workspace_backup(exported["backup_bytes"], "Alice")
+    assert verified["owner_username_lc"] == "alice"
+    assert verified["sha256"] == exported["sha256"]
+
+    target = {"authenticated": True, "current_user": "Alice", "remote_session_token": "fresh-session"}
+    restored = restore_user_workspace_backup(exported["backup_bytes"], "Alice", target)
+    assert restored["status"] == "WORKSPACE_BACKUP_RESTORED_IN_SESSION"
+    assert target["authenticated"] is True
+    assert target["current_user"] == "Alice"
+    assert target["remote_session_token"] == "fresh-session"
+    assert target["selected_nav"] == "Dashboard"
+    assert target["demand"] == 42
+    pd.testing.assert_frame_equal(target["df"], source["df"])
+    assert "remote_session_token" not in verified["payload"]
+    assert "renewal_session_token" not in verified["payload"]
+    assert "access_token" not in verified["payload"]
+
+    with pytest.raises(PermissionError, match="different account"):
+        verify_user_workspace_backup(exported["backup_bytes"], "Bob")
+
+
+def test_workspace_backup_detects_tampering_and_unsupported_payloads():
+    import json
+
+    exported = export_user_workspace_backup("Alice", {"selected_nav": "Dashboard"})
+    envelope = json.loads(exported["backup_bytes"].decode("utf-8"))
+    envelope["payload"]["selected_nav"] = "Admin"
+    tampered = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+    with pytest.raises(ValueError, match="checksum is invalid"):
+        verify_user_workspace_backup(tampered, "Alice")
+
+    with pytest.raises(ValueError, match="not valid UTF-8 JSON"):
+        verify_user_workspace_backup(b"not-json", "Alice")
+    with pytest.raises(PermissionError, match="Sign in"):
+        export_user_workspace_backup("Guest Visitor", {})
+
