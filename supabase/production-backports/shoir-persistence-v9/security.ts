@@ -20,7 +20,7 @@ export async function readBoundedJsonObject(
 ): Promise<Record<string, unknown>> {
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
-    if (!/^\\d+$/.test(declaredLength)) {
+    if (!/^\d+$/.test(declaredLength)) {
       throw new PublicRequestError("Invalid Content-Length header.", 400);
     }
     if (Number(declaredLength) > maxBytes) {

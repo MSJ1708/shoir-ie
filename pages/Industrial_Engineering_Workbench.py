@@ -1238,7 +1238,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key="tool080_demands",
                             )
                             disruption_iterations = st.number_input(
-                                "Monte Carlo iterations", min_value=1, max_value=250, value=50, step=10, key="tool080_iterations"
+                                "Monte Carlo iterations", min_value=10, max_value=250, value=50, step=10, key="tool080_iterations"
                             )
                             disruption_seed = st.number_input(
                                 "Random seed", min_value=0, max_value=2147483647, value=17, step=1, key="tool080_seed"
