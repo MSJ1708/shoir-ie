@@ -331,6 +331,32 @@ def test_organization_close_rpc_preserves_audit_and_removes_active_access():
     assert "revoke all on function public.shoir_org_close(text, uuid) from public, anon, authenticated" in normalized
     assert "grant execute on function public.shoir_org_close(text, uuid) to service_role" in normalized
 
+
+def test_organization_member_suspend_restore_is_owner_admin_scoped_and_audited():
+    source = (
+        MIGRATIONS
+        / "20261107153000_shoir_organization_member_suspend_restore.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = " ".join(executable_sql.casefold().split())
+    assert "create or replace function public.shoir_org_member_suspend" in normalized
+    assert "create or replace function public.shoir_org_member_restore" in normalized
+    assert "security definer" in normalized
+    assert "set search_path = pg_catalog, public" in normalized
+    assert "v_actor_role not in ('owner','admin')" in normalized
+    assert "v_target_role = 'admin' and v_actor_role <> 'owner'" in normalized
+    assert "v_target_status is distinct from 'active'" in normalized
+    assert "v_target_status is distinct from 'suspended'" in normalized
+    assert "v_account_active is distinct from true" in normalized
+    assert "organization.member_suspended" in normalized
+    assert "organization.member_restored" in normalized
+    assert "revoke all on function public.shoir_org_member_suspend(text, uuid, text)" in normalized
+    assert "revoke all on function public.shoir_org_member_restore(text, uuid, text)" in normalized
+    assert "grant execute on function public.shoir_org_member_suspend(text, uuid, text) to service_role" in normalized
+    assert "grant execute on function public.shoir_org_member_restore(text, uuid, text) to service_role" in normalized
+
 def test_protected_administrator_is_immutable_on_login_and_existing_sessions():
     sources = (
         ROOT / "supabase/functions/shoir-persistence/index.ts",
