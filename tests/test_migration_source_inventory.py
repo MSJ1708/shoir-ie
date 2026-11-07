@@ -437,6 +437,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "create index if not exists shoir_org_membership_invited_by_fk" in normalized
     assert "create index if not exists shoir_org_workspace_created_by_fk" in normalized
     assert "create index if not exists shoir_org_workspace_state_updated_by_fk" in normalized
+    assert "revoke update, delete, truncate, references, trigger on table public.shoir_organization_audit_events from service_role" in normalized
 
 
 def test_shared_workspace_edge_handlers_route_only_explicit_org_context_to_shared_rpc():
