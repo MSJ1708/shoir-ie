@@ -411,6 +411,7 @@ def clear_loaded_workspace_state(
     session_state.pop("_workspace_org_updated_at", None)
     session_state["_workspace_loaded_owner"] = None
     session_state["_workspace_loaded_scope"] = None
+    session_state["_workspace_loaded_for_user"] = None
 
 
 def save_user_workspace(
