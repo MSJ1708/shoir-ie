@@ -52,3 +52,21 @@ Source baseline under review: `bb08df77b8b3f7f3eb14159f852d757e33834188`. The si
 | Production v9 security-backport verification | 42408321591 | queued |
 
 The hosted live-smoke sub-job in the validation workflow was skipped. The local desktop/mobile Streamlit smoke in CI is not authenticated staging acceptance. The current tool connection cannot dispatch the protected authenticated-release workflow; no bypass or customer/admin account was used. Earlier run IDs and earlier SHA results are historical only. The next valid evidence is the completed run output, job logs, skip/warning report and generated artifacts for the final exact candidate SHA.
+
+## Latest exact source/test commit check — 2026-11-07 19:58 UTC
+
+Functional source changes were last reviewed at `bb08df77b8b3f7f3eb14159f852d757e33834188`. The latest test and regression-assertion commit is `e19550222e6175d1d454b1169dc3a009185d1eea`.
+
+Workflows started for `e19550222e6175d1d454b1169dc3a009185d1eea`:
+
+| Workflow | Run | Last observed state |
+|---|---:|---|
+| Shoir-IE validation | 42408718226 | queued |
+| Clean PostgreSQL migration-history replay | 42408718288 | queued |
+| Edge Function verification | 42408718193 | queued |
+| Excel Intelligence | 42408718217 | queued |
+| Subscription transaction integration | 42408718177 | queued |
+| Production v9 compatibility security backport | 42408718191 | queued |
+| Engine Regression | 42408714750 | queued |
+
+GitHub also created duplicate validation and migration-replay runs `42408714711` and `42408714679` for the same head because of the workflow event triggers; these were queued as well. The validation workflow's `live-deployment-smoke` job was skipped. There is no exact-head pass or failure to report yet. These states are time-bounded and must be refreshed before deployment.
