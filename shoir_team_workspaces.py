@@ -86,11 +86,23 @@ def _clear_organization_cache() -> None:
 
 
 def _clear_active_organization_workspace() -> None:
+    # Clear team values before dropping the scope marker; otherwise the
+    # personal-workspace loader could mistake stale team state for personal state.
+    try:
+        from workspace_persistence import clear_loaded_workspace_state
+        clear_loaded_workspace_state(st.session_state)
+    except Exception:
+        # Clear only the known persisted key list as a fail-closed fallback.
+        prior_keys = st.session_state.get("_workspace_loaded_keys", [])
+        if isinstance(prior_keys, list):
+            for key in prior_keys:
+                if isinstance(key, str):
+                    st.session_state.pop(key, None)
+        st.session_state.pop("_shoir_persist_change_signature", None)
+        st.session_state.pop("_workspace_org_revision", None)
+        st.session_state.pop("_workspace_org_updated_at", None)
     st.session_state.pop(_STATE_PREFIX + "workspace", None)
-    st.session_state.pop("_shoir_persist_change_signature", None)
     st.session_state.pop("_workspace_loaded_scope", None)
-    st.session_state.pop("_workspace_org_revision", None)
-    st.session_state.pop("_workspace_org_updated_at", None)
 
 
 def _render_active_workspace_return(username: str) -> None:
