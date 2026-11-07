@@ -313,7 +313,7 @@ def test_shared_workspace_save_does_not_write_personal_domain_manifest(monkeypat
     assert session["_workspace_loaded_keys"] == ["selection"]
 
 
-def test_shared_workspace_revision_conflict_is_not_marked_as_saved(monkeypatch):
+def test_shared_workspace_revision_conflict_pauses_retries_until_explicit_reload(monkeypatch):
     session = {
         "selection": "unsaved edit",
         "shoir_active_organization_workspace": {
@@ -323,12 +323,43 @@ def test_shared_workspace_revision_conflict_is_not_marked_as_saved(monkeypatch):
         "_workspace_org_revision": 3,
     }
     monkeypatch.setattr(workspace_module, "durable_backend_configured", lambda: True)
+    calls = []
 
     def reject_stale_revision(username, payload):
-        raise RuntimeError("Shared workspace changed since it was loaded. Reload before saving.")
+        calls.append(payload)
+        raise RuntimeError("SHARED_WORKSPACE_REVISION_CONFLICT")
 
     monkeypatch.setattr(workspace_module, "save_remote_workspace", reject_stale_revision)
 
     assert save_user_workspace("Alice", session) is False
     assert "newer shared-workspace revision" in session["_workspace_save_error"].casefold()
+    assert session["_workspace_save_conflict"] is True
     assert "_shoir_persist_change_signature" not in session
+
+    # Streamlit reruns autosave repeatedly. A known conflict is not retried
+    # until the user explicitly reloads the server revision.
+    assert save_user_workspace("Alice", session) is False
+    assert len(calls) == 1
+
+    workspace_module.clear_loaded_workspace_state(session)
+    assert "_workspace_save_conflict" not in session
+
+
+
+def test_malformed_organization_context_is_rejected_before_noop_save_shortcut(monkeypatch):
+    session = {
+        "selection": "unchanged",
+        "shoir_active_organization_workspace": {"organization_id": "org-one"},
+    }
+    monkeypatch.setattr(workspace_module, "durable_backend_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        workspace_module,
+        "save_remote_workspace",
+        lambda *args: calls.append(args) or True,
+    )
+    session["_shoir_persist_change_signature"] = workspace_module._workspace_change_signature(session)
+
+    assert save_user_workspace("Alice", session) is False
+    assert "both organization and workspace ids" in session["_workspace_save_error"].casefold()
+    assert calls == []
