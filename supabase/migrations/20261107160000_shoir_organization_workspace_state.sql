@@ -35,6 +35,12 @@ CREATE INDEX IF NOT EXISTS shoir_org_workspace_created_by_fk
 CREATE INDEX IF NOT EXISTS shoir_org_workspace_state_updated_by_fk
     ON public.shoir_organization_workspace_states(updated_by_username_lc);
 
+-- Row triggers cannot stop TRUNCATE. Keep the service key limited to reading
+-- and appending audit history; also remove unneeded table-level privileges.
+REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+ON TABLE public.shoir_organization_audit_events
+FROM service_role;
+
 ALTER TABLE public.shoir_organization_workspace_states ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.shoir_organization_workspace_states
 FROM PUBLIC, anon, authenticated, service_role;
