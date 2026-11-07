@@ -487,7 +487,10 @@ def save_user_workspace(
         # non-secret diagnostic in the application shell.
         session_state["_workspace_save_error"] = (
             "A newer shared-workspace revision exists. Reload the workspace before saving."
-            if "changed since it was loaded" in str(exc).casefold()
+            if (
+                "changed since it was loaded" in str(exc).casefold()
+                or "shared_workspace_revision_conflict" in str(exc).casefold()
+            )
             else "Workspace persistence failed. Your current in-session changes have not been confirmed as saved."
         )
         return False
