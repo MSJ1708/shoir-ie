@@ -752,6 +752,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "shoir_org_audit_subject_fk",
                     "shoir_org_invitation_accepted_by_fk",
                     "shoir_org_invitation_created_by_fk",
+                    "shoir_org_invitation_organization_fk",
                     "shoir_org_membership_invited_by_fk",
                     "shoir_org_workspace_created_by_fk",
                     "shoir_org_workspace_state_updated_by_fk",
