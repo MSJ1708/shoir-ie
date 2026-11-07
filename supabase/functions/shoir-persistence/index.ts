@@ -2167,11 +2167,42 @@ Deno.serve(async (req) => {
     }
 
     if (action === "workspace_load") {
-      await getSession(String(body.token), String(body.username));
+      const actor = await getSession(
+        String(body.token),
+        String(body.username),
+        "workspace",
+      );
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(body.organization_workspace_id || "").trim();
+      if (organizationId || organizationWorkspaceId) {
+        if (!organizationId || !organizationWorkspaceId) {
+          return sendResponse({
+            error: "Both organization_id and organization_workspace_id are required.",
+          }, 400);
+        }
+        const { data, error } = await supabase.rpc(
+          "shoir_org_workspace_state_load",
+          {
+            p_actor: actor.username_lc,
+            p_organization_id: organizationId,
+            p_workspace_id: organizationWorkspaceId,
+          },
+        );
+        if (error) throw error;
+        const state = Array.isArray(data) ? data[0] : data;
+        return sendResponse({
+          ok: true,
+          state_json: typeof state?.state_json === "string" ? state.state_json : null,
+          revision: Number.isSafeInteger(Number(state?.revision))
+            ? Number(state.revision)
+            : 0,
+          updated_at: state?.updated_at || null,
+        });
+      }
       const { data, error } = await supabase.from("shoir_workspace_states")
         .select("state_json,updated_at").eq(
           "username_lc",
-          String(body.username).trim().toLowerCase(),
+          actor.username_lc,
         ).maybeSingle();
       if (error) throw error;
       return sendResponse({
@@ -2181,11 +2212,50 @@ Deno.serve(async (req) => {
       });
     }
     if (action === "workspace_save") {
-      await getSession(String(body.token), String(body.username));
+      const actor = await getSession(
+        String(body.token),
+        String(body.username),
+        "workspace",
+      );
       // Validate before upsert so malformed/oversized state never replaces the last valid save.
       const workspaceState = normalizeWorkspaceStateJson(body.state_json);
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(body.organization_workspace_id || "").trim();
+      if (organizationId || organizationWorkspaceId) {
+        if (!organizationId || !organizationWorkspaceId) {
+          return sendResponse({
+            error: "Both organization_id and organization_workspace_id are required.",
+          }, 400);
+        }
+        const rawRevision = body.expected_revision;
+        let expectedRevision: number | null = null;
+        if (rawRevision !== undefined && rawRevision !== null) {
+          const parsedRevision = Number(rawRevision);
+          if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
+            return sendResponse({ error: "Workspace revision is invalid." }, 400);
+          }
+          expectedRevision = parsedRevision;
+        }
+        const { data, error } = await supabase.rpc(
+          "shoir_org_workspace_state_save",
+          {
+            p_actor: actor.username_lc,
+            p_organization_id: organizationId,
+            p_workspace_id: organizationWorkspaceId,
+            p_state_json: workspaceState,
+            p_expected_revision: expectedRevision,
+          },
+        );
+        if (error) throw error;
+        const saved = Array.isArray(data) ? data[0] : data;
+        return sendResponse({
+          ok: true,
+          revision: Number(saved?.revision || 0),
+          updated_at: saved?.updated_at || null,
+        });
+      }
       const { error } = await supabase.from("shoir_workspace_states").upsert({
-        username_lc: String(body.username).trim().toLowerCase(),
+        username_lc: actor.username_lc,
         state_json: workspaceState,
         updated_at: new Date().toISOString(),
       }, { onConflict: "username_lc" });
