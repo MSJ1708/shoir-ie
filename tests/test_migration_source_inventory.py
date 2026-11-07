@@ -435,6 +435,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "create index if not exists shoir_org_audit_subject_fk" in normalized
     assert "create index if not exists shoir_org_invitation_accepted_by_fk" in normalized
     assert "create index if not exists shoir_org_invitation_created_by_fk" in normalized
+    assert "create index if not exists shoir_org_invitation_organization_fk" in normalized
     assert "create index if not exists shoir_org_membership_invited_by_fk" in normalized
     assert "create index if not exists shoir_org_workspace_created_by_fk" in normalized
     assert "create index if not exists shoir_org_workspace_state_updated_by_fk" in normalized
