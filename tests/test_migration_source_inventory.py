@@ -357,6 +357,34 @@ def test_organization_member_suspend_restore_is_owner_admin_scoped_and_audited()
     assert "grant execute on function public.shoir_org_member_suspend(text, uuid, text) to service_role" in normalized
     assert "grant execute on function public.shoir_org_member_restore(text, uuid, text) to service_role" in normalized
 
+
+def test_mutating_organization_edge_actions_require_server_session_and_scoped_membership():
+    source = (
+        ROOT / "supabase/functions/shoir-persistence/index.ts"
+    ).read_text(encoding="utf-8")
+    actions = {
+        "org_create_session": "shoir_org_create",
+        "org_workspace_create_session": "shoir_org_workspace_create",
+        "org_workspace_archive_session": "shoir_org_workspace_archive",
+        "org_invitation_create_session": "shoir_org_invitation_create",
+        "org_invitation_accept_session": "shoir_org_invitation_accept",
+        "org_invitation_revoke_session": "shoir_org_invitation_revoke",
+        "org_member_role_set_session": "shoir_org_member_role_set",
+        "org_member_remove_session": "shoir_org_member_remove",
+        "org_member_suspend_session": "shoir_org_member_suspend",
+        "org_member_restore_session": "shoir_org_member_restore",
+        "org_owner_transfer_session": "shoir_org_owner_transfer",
+        "org_close_session": "shoir_org_close",
+    }
+    for action, rpc in actions.items():
+        marker = f'if (action === "{action}")'
+        start = source.index(marker)
+        following = source.find('if (action === "', start + len(marker))
+        block = source[start:following if following >= 0 else len(source)]
+        assert "await getSession(" in block, action
+        assert "organizationForActor(" in block, action
+        assert f'"{rpc}"' in block, action
+
 def test_protected_administrator_is_immutable_on_login_and_existing_sessions():
     sources = (
         ROOT / "supabase/functions/shoir-persistence/index.ts",
