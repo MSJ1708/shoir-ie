@@ -2246,6 +2246,11 @@ Deno.serve(async (req) => {
             p_expected_revision: expectedRevision,
           },
         );
+        if (error?.code === "40001") {
+          return sendResponse({
+            error: "SHARED_WORKSPACE_REVISION_CONFLICT",
+          }, 409);
+        }
         if (error) throw error;
         const saved = Array.isArray(data) ? data[0] : data;
         return sendResponse({
