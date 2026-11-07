@@ -877,8 +877,9 @@ def test_workbench_runs_rcm_network_calibration_disruption_and_kpi_tools():
         '[{"rule_id":"oee-floor","kpi":"OEE","operator":"<","threshold":85,"severity":"WARNING"}]'
     )
     at.text_input(key="tool094_as_of").set_value("2026-11-06T18:00:00Z")
-    at.run(timeout=90)
-    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    # These controls are inside a Streamlit form. Submit the form before
+    # triggering a separate rerun; an intermediate AppTest rerun resets
+    # unsubmitted form values to their defaults.
     at.button(key="tool094_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
