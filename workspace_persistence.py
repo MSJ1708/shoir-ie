@@ -422,6 +422,7 @@ def save_user_workspace(
             ok = bool(save_remote_workspace(username, payload))
             if ok:
                 session_state["_shoir_persist_change_signature"] = change_signature
+                session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
                 _persist_domain_manifest(username, session_state, db_path)
             return ok
 
@@ -442,6 +443,7 @@ def save_user_workspace(
             )
             conn.commit()
         session_state["_shoir_persist_change_signature"] = change_signature
+        session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
         _persist_domain_manifest(username, session_state, db_path)
         return True
     except Exception:
@@ -593,6 +595,35 @@ def load_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
+        owner = str(username).strip().lower()
+        context = session_state.get("shoir_active_organization_workspace")
+        if isinstance(context, dict):
+            scope = (
+                str(context.get("organization_id") or ""),
+                str(context.get("organization_workspace_id") or ""),
+            )
+        else:
+            scope = None
+
+        # A session can switch from personal state to a team workspace, between
+        # two team workspaces, or between accounts. Remove only values loaded
+        # from the previous durable workspace; credentials and active UI state
+        # are excluded from the snapshot and are never cleared here.
+        prior_owner = session_state.get("_workspace_loaded_owner")
+        prior_scope = session_state.get("_workspace_loaded_scope")
+        if prior_owner != owner or prior_scope != scope:
+            prior_keys = session_state.get("_workspace_loaded_keys", [])
+            if isinstance(prior_keys, list):
+                for key in prior_keys:
+                    if isinstance(key, str) and not _excluded(key):
+                        session_state.pop(key, None)
+            session_state.pop("_shoir_persist_change_signature", None)
+            session_state["_workspace_loaded_keys"] = []
+            session_state["_workspace_loaded_owner"] = owner
+            session_state["_workspace_loaded_scope"] = scope
+            session_state.pop("_workspace_org_revision", None)
+            session_state.pop("_workspace_org_updated_at", None)
+
         remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
         if remote_mode:
             # A configured managed backend is authoritative. Do not fall back
@@ -600,6 +631,7 @@ def load_user_workspace(
             # doing so can resurrect stale cross-user/local state after a restart.
             remote_payload = load_remote_workspace(username)
             if not remote_payload:
+                session_state["_workspace_loaded_keys"] = []
                 return False
             payload = json.loads(remote_payload)
         else:
@@ -607,17 +639,28 @@ def load_user_workspace(
             with sqlite3.connect(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
                 row = conn.execute(
                     "SELECT state_json FROM workspace_states WHERE username = ?",
-                    (username.strip().lower(),),
+                    (owner,),
                 ).fetchone()
             if not row or not row[0]:
+                session_state["_workspace_loaded_keys"] = []
                 return False
             payload = json.loads(row[0])
+
+        if not isinstance(payload, dict):
+            raise ValueError("Persisted workspace state must be a JSON object.")
+        loaded_keys: list[str] = []
         for key, value in payload.items():
             if _excluded(str(key)):
                 continue
             # Load persisted workspace values before module widgets are rendered.
-            # This intentionally replaces initial defaults on first login.
+            # This intentionally replaces defaults for the selected workspace.
             session_state[key] = _unpack(value)
+            loaded_keys.append(str(key))
+        session_state["_workspace_loaded_keys"] = loaded_keys
+        session_state["_workspace_loaded_owner"] = owner
+        session_state["_workspace_loaded_scope"] = scope
         return True
     except Exception:
+        # Access denial and corrupted payloads fail closed; never load the
+        # previous user's or previous organization's values as a fallback.
         return False
