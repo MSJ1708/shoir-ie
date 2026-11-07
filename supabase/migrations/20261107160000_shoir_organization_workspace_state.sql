@@ -159,6 +159,22 @@ BEGIN
             USING ERRCODE = '40001';
     END IF;
 
+    INSERT INTO public.shoir_organization_audit_events(
+        organization_id,
+        actor_username_lc,
+        event_type,
+        payload_json
+    ) VALUES (
+        p_organization_id,
+        v_actor,
+        'organization.workspace_state_saved',
+        jsonb_build_object(
+            'workspace_id', p_workspace_id,
+            'revision', v_revision,
+            'state_bytes', octet_length(p_state_json)
+        )
+    );
+
     RETURN jsonb_build_object(
         'ok', true,
         'revision', v_revision,
