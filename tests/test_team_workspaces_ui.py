@@ -266,9 +266,13 @@ def test_application_keeps_existing_workspace_membership_renderer_and_adds_org_u
     route = source[start:end]
 
     assert "render_industrial_module(" in route
-    assert "Legacy local membership metadata only" in route
-    assert "do not grant or revoke" in route
     assert "Organization-managed teams (staging)" in route
+    legacy_source = (Path(__file__).resolve().parents[1] / "industrial_platform.py").read_text(encoding="utf-8")
+    legacy_start = legacy_source.index('elif module=="Team Workspaces & RBAC":')
+    legacy_end = legacy_source.index('elif module=="Executive Report Center":', legacy_start)
+    legacy_block = legacy_source[legacy_start:legacy_end]
+    assert "Legacy local membership metadata only" in legacy_block
+    assert "do not grant or revoke" in legacy_block
     assert "Organization-managed teams (staging)" in route
     assert "APP_ENVIRONMENT" in route
     assert route.count("render_industrial_module(") >= 2
