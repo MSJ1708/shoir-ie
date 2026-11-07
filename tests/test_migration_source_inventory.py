@@ -30,7 +30,7 @@ EXPECTED_VERSIONS = [
     "20261104192857",
     "20261105101231",
     "20261105111832",
-    "20261106120000",
+    "20261107120637",
 ]
 
 
@@ -225,7 +225,7 @@ def test_private_rls_advisory_migration_adds_explicit_client_deny_policies_only(
 def test_organization_workspace_migration_is_server_only_and_preserves_legacy_keys():
     source = (
         MIGRATIONS
-        / "20261106120000_shoir_organization_workspaces.sql"
+        / "20261107120637_shoir_organization_workspaces.sql"
     ).read_text(encoding="utf-8")
     executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
@@ -270,7 +270,7 @@ def test_organization_workspace_migration_is_server_only_and_preserves_legacy_ke
 def test_organization_owner_and_invitation_lifecycle_is_fail_closed():
     source = (
         MIGRATIONS
-        / "20261106120000_shoir_organization_workspaces.sql"
+        / "20261107120637_shoir_organization_workspaces.sql"
     ).read_text(encoding="utf-8")
     executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
