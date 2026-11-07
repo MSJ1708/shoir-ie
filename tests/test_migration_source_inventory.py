@@ -430,6 +430,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "grant execute on function public.shoir_org_workspace_state_load(text, uuid, uuid) to service_role" in normalized
     assert "grant execute on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint) to service_role" in normalized
     assert "delete from public.shoir_organization_workspace_states" not in normalized
+    assert "create index if not exists shoir_org_owner_username_fk on public.shoir_organizations(owner_username_lc)" in normalized
     assert "create index if not exists shoir_org_audit_actor_fk" in normalized
     assert "create index if not exists shoir_org_audit_subject_fk" in normalized
     assert "create index if not exists shoir_org_invitation_accepted_by_fk" in normalized
