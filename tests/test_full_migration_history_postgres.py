@@ -884,6 +884,15 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                             f"{browser_role} unexpectedly has {privilege} on "
                             "the organization audit table"
                         )
+                for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege('service_role', 'public.shoir_organization_workspace_states', %s);",
+                        (privilege,),
+                    )[0] is False, (
+                        f"service_role unexpectedly has direct {privilege} on "
+                        "shared organization workspace state"
+                    )
                 # Every privileged organization RPC is callable only by
                 # the server-side service role, never by browser-facing roles.
                 for signature in (
@@ -898,6 +907,8 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "public.shoir_org_workspace_archive(text,uuid,uuid)",
                     "public.shoir_org_resolve_workspace(text,uuid,uuid,text)",
                     "public.shoir_org_resolve_legacy_workspace(text,text,text)",
+                    "public.shoir_org_workspace_state_load(text,uuid,uuid)",
+                    "public.shoir_org_workspace_state_save(text,uuid,uuid,text,bigint)",
                 ):
                     assert _fetchone(
                         target,
@@ -974,6 +985,69 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 viewer_membership = cursor.fetchone()[0]
                 assert viewer_membership["role"] == "viewer"
 
+                # Owner creates the first shared workbook revision.
+                cursor.execute(
+                    """
+                    SELECT public.shoir_org_workspace_state_save(
+                        %s, %s::uuid, %s::uuid, %s, %s
+                    );
+                    """,
+                    (
+                        username,
+                        organization_id,
+                        general_workspace_id,
+                        '{"dataset":"synthetic-workbook","quantity":120}',
+                        0,
+                    ),
+                )
+                first_shared_result = cursor.fetchone()[0]
+                first_shared_save = (
+                    first_shared_result
+                    if isinstance(first_shared_result, dict)
+                    else json.loads(first_shared_result)
+                )
+                assert first_shared_save["revision"] == 1
+
+                # An active Viewer can read the exact same shared state but
+                # cannot write it through the database RPC.
+                cursor.execute(
+                    """
+                    SELECT public.shoir_org_workspace_state_load(
+                        %s, %s::uuid, %s::uuid
+                    );
+                    """,
+                    ("e2e-org-viewer", organization_id, general_workspace_id),
+                )
+                viewer_load_result = cursor.fetchone()[0]
+                viewer_shared_state = (
+                    viewer_load_result
+                    if isinstance(viewer_load_result, dict)
+                    else json.loads(viewer_load_result)
+                )
+                assert viewer_shared_state["revision"] == 1
+                assert viewer_shared_state["state_json"] == (
+                    '{"dataset":"synthetic-workbook","quantity":120}'
+                )
+
+                cursor.execute("SAVEPOINT shoir_org_viewer_shared_state_write;")
+                with pytest.raises(psycopg2.Error) as viewer_state_write:
+                    cursor.execute(
+                        """
+                        SELECT public.shoir_org_workspace_state_save(
+                            %s, %s::uuid, %s::uuid, %s, %s
+                        );
+                        """,
+                        (
+                            "e2e-org-viewer",
+                            organization_id,
+                            general_workspace_id,
+                            '{"dataset":"viewer-overwrite"}',
+                            1,
+                        ),
+                    )
+                assert viewer_state_write.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_viewer_shared_state_write;")
+
                 cursor.execute(
                     "SELECT organization_id, workspace_id, workspace_key, member_role "
                     "FROM public.shoir_org_resolve_workspace(%s,%s::uuid,%s::uuid,%s);",
@@ -1019,6 +1093,101 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     ("e2e-org-viewer", organization_id, general_workspace_id, "write"),
                 )
                 assert cursor.fetchone()[0] == "engineer"
+
+                # The promoted Engineer can update the shared workbook.
+                cursor.execute(
+                    """
+                    SELECT public.shoir_org_workspace_state_save(
+                        %s, %s::uuid, %s::uuid, %s, %s
+                    );
+                    """,
+                    (
+                        "e2e-org-viewer",
+                        organization_id,
+                        general_workspace_id,
+                        '{"dataset":"synthetic-workbook","quantity":125}',
+                        1,
+                    ),
+                )
+                second_shared_result = cursor.fetchone()[0]
+                second_shared_save = (
+                    second_shared_result
+                    if isinstance(second_shared_result, dict)
+                    else json.loads(second_shared_result)
+                )
+                assert second_shared_save["revision"] == 2
+
+                # A second member cannot overwrite revision 2 using a stale
+                # revision 1 token; this is an explicit conflict, not LWW.
+                cursor.execute("SAVEPOINT shoir_org_stale_shared_revision;")
+                with pytest.raises(psycopg2.Error) as stale_shared_revision:
+                    cursor.execute(
+                        """
+                        SELECT public.shoir_org_workspace_state_save(
+                            %s, %s::uuid, %s::uuid, %s, %s
+                        );
+                        """,
+                        (
+                            username,
+                            organization_id,
+                            general_workspace_id,
+                            '{"dataset":"stale-overwrite"}',
+                            1,
+                        ),
+                    )
+                assert stale_shared_revision.value.pgcode == "40001"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_stale_shared_revision;")
+
+                cursor.execute(
+                    """
+                    SELECT public.shoir_org_workspace_state_load(
+                        %s, %s::uuid, %s::uuid
+                    );
+                    """,
+                    (username, organization_id, general_workspace_id),
+                )
+                latest_shared_result = cursor.fetchone()[0]
+                latest_shared_state = (
+                    latest_shared_result
+                    if isinstance(latest_shared_result, dict)
+                    else json.loads(latest_shared_result)
+                )
+                assert latest_shared_state["revision"] == 2
+                assert latest_shared_state["state_json"] == (
+                    '{"dataset":"synthetic-workbook","quantity":125}'
+                )
+
+                state_audit = _fetchone(
+                    target,
+                    """
+                    SELECT count(*),
+                           bool_and(payload_json ? 'state_bytes'),
+                           bool_and(NOT (payload_json ? 'state_json'))
+                    FROM public.shoir_organization_audit_events
+                    WHERE organization_id=%s::uuid
+                      AND event_type='organization.workspace_state_saved';
+                    """,
+                    (organization_id,),
+                )
+                assert state_audit == (2, True, True)
+
+                cursor.execute("SAVEPOINT shoir_org_missing_shared_revision;")
+                with pytest.raises(psycopg2.Error) as missing_shared_revision:
+                    cursor.execute(
+                        """
+                        SELECT public.shoir_org_workspace_state_save(
+                            %s, %s::uuid, %s::uuid, %s, NULL
+                        );
+                        """,
+                        (
+                            username,
+                            organization_id,
+                            general_workspace_id,
+                            '{"dataset":"no-revision"}',
+                        ),
+                    )
+                assert missing_shared_revision.value.pgcode == "22023"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_missing_shared_revision;")
 
                 cursor.execute(
                     "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
