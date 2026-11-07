@@ -101,6 +101,7 @@ def _clear_active_organization_workspace() -> None:
         st.session_state.pop("_shoir_persist_change_signature", None)
         st.session_state.pop("_workspace_org_revision", None)
         st.session_state.pop("_workspace_org_updated_at", None)
+        st.session_state["_workspace_loaded_for_user"] = None
     st.session_state.pop(_STATE_PREFIX + "workspace", None)
     st.session_state.pop("_workspace_loaded_scope", None)
 
