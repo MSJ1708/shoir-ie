@@ -143,6 +143,7 @@ def render_team_workspaces() -> None:
                 "Create organization",
                 type="primary",
                 use_container_width=True,
+                key="team_org_create_submit",
             )
         if create_org:
             try:
@@ -178,6 +179,7 @@ def render_team_workspaces() -> None:
                 "Accept invitation",
                 type="primary",
                 use_container_width=True,
+                key="team_org_accept_submit",
             )
         if accept_invitation:
             try:
@@ -263,7 +265,7 @@ def render_team_workspaces() -> None:
                     max_chars=120,
                     key="team_workspace_create_name",
                 )
-                create_workspace = st.form_submit_button("Create workspace")
+                create_workspace = st.form_submit_button("Create workspace", key="team_workspace_create_submit")
             if create_workspace:
                 try:
                     _call(
@@ -294,7 +296,7 @@ def render_team_workspaces() -> None:
                         ),
                         key="team_workspace_archive_id",
                     )
-                    archive_workspace = st.form_submit_button("Archive workspace")
+                    archive_workspace = st.form_submit_button("Archive workspace", key="team_workspace_archive_submit")
                 if archive_workspace:
                     try:
                         _call(
@@ -362,7 +364,7 @@ def render_team_workspaces() -> None:
                     format_func=lambda value: _ROLE_LABELS[value],
                     key="team_member_new_role",
                 )
-                change_role = st.form_submit_button("Update member role")
+                change_role = st.form_submit_button("Update member role", key="team_member_role_submit")
             if change_role:
                 try:
                     _call(
@@ -384,7 +386,7 @@ def render_team_workspaces() -> None:
                     options=target_users,
                     key="team_member_remove_target",
                 )
-                remove_member = st.form_submit_button("Remove member")
+                remove_member = st.form_submit_button("Remove member", key="team_member_remove_submit")
             if remove_member:
                 try:
                     _call(
@@ -406,7 +408,7 @@ def render_team_workspaces() -> None:
                         options=target_users,
                         key="team_owner_transfer_target",
                     )
-                    transfer_owner = st.form_submit_button("Transfer ownership")
+                    transfer_owner = st.form_submit_button("Transfer ownership", key="team_owner_transfer_submit")
                 if transfer_owner:
                     try:
                         _call(
@@ -446,7 +448,7 @@ def render_team_workspaces() -> None:
                     step=1,
                     key="team_invitation_lifetime",
                 )
-                create_invite = st.form_submit_button("Create invitation")
+                create_invite = st.form_submit_button("Create invitation", key="team_invitation_create_submit")
             if create_invite:
                 try:
                     response = _call(
@@ -527,7 +529,7 @@ def render_team_workspaces() -> None:
                         ),
                         key="team_invitation_revoke_id",
                     )
-                    revoke_invite = st.form_submit_button("Revoke invitation")
+                    revoke_invite = st.form_submit_button("Revoke invitation", key="team_invitation_revoke_submit")
                 if revoke_invite:
                     try:
                         _call(
