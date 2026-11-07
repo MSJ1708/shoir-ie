@@ -1153,6 +1153,28 @@ def _active_organization_workspace_context() -> Optional[dict[str, str]]:
 
 
 
+
+def validate_remote_organization_workspace_access(username: str) -> bool:
+    """Revalidate the active shared workspace before each authenticated app rerun."""
+    context = _active_organization_workspace_context()
+    if context is None:
+        return True
+    if APP_ENVIRONMENT != "staging" or not edge_backend_configured() or st is None:
+        raise RuntimeError("Shared workspace access cannot be validated outside the configured staging Edge Function.")
+    token = str(st.session_state.get("remote_session_token") or "")
+    actor = str(username or "").strip()
+    if not actor or not token:
+        raise PermissionError("An active Shoir-IE session is required for shared workspace access.")
+    result = _edge_call(
+        "workspace_access_check",
+        {"username": actor, "token": token, **context},
+    )
+    if result.get("ok") is not True:
+        raise PermissionError("Shared workspace access could not be verified.")
+    return True
+
+
+
 def save_remote_workspace(username: str, state_json: str) -> bool:
     """Persist serialized Streamlit workspace state in managed Supabase."""
     if edge_backend_configured():
