@@ -19,6 +19,17 @@ from workspace_persistence import (
 def test_organization_selection_is_not_saved_in_personal_workspace_state():
     assert _excluded("shoir_active_organization_id")
     assert _excluded("shoir_active_organization_workspace_id")
+    for widget_key in (
+        "team_org_create_name",
+        "team_workspace_create_name",
+        "team_workspace_open_id",
+        "team_member_role_target",
+        "team_invitation_target_username",
+        "team_owner_transfer_target",
+        "team_accept_token",
+        "team_invite_email",
+    ):
+        assert _excluded(widget_key)
 
 
 def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
@@ -275,3 +286,4 @@ def test_clear_loaded_workspace_state_removes_only_hydrated_data():
     assert session["_workspace_loaded_keys"] == []
     assert "_workspace_org_revision" not in session
     assert "_shoir_persist_change_signature" not in session
+    assert session["_workspace_loaded_for_user"] is None
