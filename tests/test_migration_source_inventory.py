@@ -385,7 +385,12 @@ def test_mutating_organization_edge_actions_require_server_session_and_scoped_me
         following = source.find('if (action === "', start + len(marker))
         block = source[start:following if following >= 0 else len(source)]
         assert "await getSession(" in block, action
-        assert "organizationForActor(" in block, action
+        if action == "org_create_session":
+            # Creating a new organization is account-scoped, not scoped to
+            # an organization that does not exist yet.
+            assert "requireOrganizationTier(actor as Record<string, unknown>)" in block
+        else:
+            assert "organizationForActor(" in block, action
         assert f'"{rpc}"' in block, action
 
 
@@ -461,7 +466,12 @@ def test_shared_workspace_edge_handlers_route_only_explicit_org_context_to_share
 
     assert '"shoir_org_workspace_state_load"' in load_block
     assert '"shoir_org_workspace_state_save"' in save_block
-    assert '"shoir_org_resolve_workspace"' in access_block
+    assert "await resolveManagedWorkspaceKey(" in access_block
+    resolver_start = source.index("async function resolveManagedWorkspaceKey(")
+    resolver_end = source.index("return key;", resolver_start) + len("return key;")
+    resolver_block = source[resolver_start:resolver_end]
+    assert "organizationForActor(" in resolver_block
+    assert 'supabase.rpc("shoir_org_resolve_workspace"' in resolver_block
     assert "actor.username_lc" in load_block
     assert "actor.username_lc" in save_block
     assert 'error?.code === "40001"' in save_block
