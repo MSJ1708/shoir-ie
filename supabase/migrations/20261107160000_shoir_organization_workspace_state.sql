@@ -34,6 +34,9 @@ CREATE INDEX IF NOT EXISTS shoir_org_invitation_accepted_by_fk
     ON public.shoir_organization_invitations(accepted_by_username_lc);
 CREATE INDEX IF NOT EXISTS shoir_org_invitation_created_by_fk
     ON public.shoir_organization_invitations(created_by_username_lc);
+
+CREATE INDEX IF NOT EXISTS shoir_org_invitation_organization_fk
+    ON public.shoir_organization_invitations(organization_id);
 CREATE INDEX IF NOT EXISTS shoir_org_membership_invited_by_fk
     ON public.shoir_organization_memberships(invited_by_username_lc);
 CREATE INDEX IF NOT EXISTS shoir_org_workspace_created_by_fk
