@@ -85,6 +85,51 @@ def _clear_organization_cache() -> None:
         st.session_state.pop(key, None)
 
 
+def _clear_active_organization_workspace() -> None:
+    st.session_state.pop(_STATE_PREFIX + "workspace", None)
+    st.session_state.pop("_shoir_persist_change_signature", None)
+    st.session_state.pop("_workspace_loaded_scope", None)
+    st.session_state.pop("_workspace_org_revision", None)
+    st.session_state.pop("_workspace_org_updated_at", None)
+
+
+def _render_active_workspace_return(username: str) -> None:
+    context = st.session_state.get(_STATE_PREFIX + "workspace")
+    if not isinstance(context, dict):
+        return
+    st.info(
+        "The application is currently using the shared organization workspace "
+        f"'{context.get('display_name') or context.get('organization_workspace_id')}'."
+    )
+    save_col, discard_col = st.columns(2)
+    with save_col:
+        if st.button(
+            "Save and return to personal workspace",
+            key="team_workspace_return_personal",
+            use_container_width=True,
+        ):
+            try:
+                from workspace_persistence import save_user_workspace
+                if not save_user_workspace(username, st.session_state):
+                    st.error(
+                        "The current shared workspace could not be confirmed as saved. "
+                        "Your active workspace has not been switched."
+                    )
+                else:
+                    _clear_active_organization_workspace()
+                    st.rerun()
+            except Exception as exc:
+                _error("Could not save the active shared workspace.", exc)
+    with discard_col:
+        if st.button(
+            "Disconnect without saving shared changes",
+            key="team_workspace_disconnect_personal",
+            use_container_width=True,
+        ):
+            _clear_active_organization_workspace()
+            st.rerun()
+
+
 def render_team_workspaces() -> None:
     """Render team collaboration inside the existing application module."""
     st.title("Team Workspaces & RBAC")
@@ -113,6 +158,8 @@ def render_team_workspaces() -> None:
     if "enterprise" not in tier.casefold():
         st.warning("Team organizations require an active Enterprise subscription.")
         return
+
+    _render_active_workspace_return(username)
 
     state_key = _STATE_PREFIX + "organizations"
     loaded_key = _STATE_PREFIX + "loaded_for"
@@ -258,6 +305,53 @@ def render_team_workspaces() -> None:
                 use_container_width=True,
                 hide_index=True,
             )
+
+            openable_workspaces = [
+                item for item in workspaces
+                if isinstance(item, dict)
+                and item.get("workspace_id")
+                and item.get("status") == "active"
+            ]
+            if openable_workspaces:
+                with st.form("team_workspace_open_form"):
+                    workspace_to_open = st.selectbox(
+                        "Shared workspace to activate in the Shoir-IE workbook",
+                        options=[str(item["workspace_id"]) for item in openable_workspaces],
+                        format_func=lambda value: next(
+                            str(item.get("display_name") or value)
+                            for item in openable_workspaces
+                            if str(item["workspace_id"]) == value
+                        ),
+                        key="team_workspace_open_id",
+                    )
+                    open_workspace = st.form_submit_button(
+                        "Open as active workspace",
+                        type="primary",
+                        key="team_workspace_open_submit",
+                    )
+                if open_workspace:
+                    try:
+                        from workspace_persistence import save_user_workspace
+                        if not save_user_workspace(username, st.session_state):
+                            st.error(
+                                "The current workspace was not confirmed as saved. "
+                                "The active workspace has not been changed."
+                            )
+                        else:
+                            selected_workspace = next(
+                                item for item in openable_workspaces
+                                if str(item["workspace_id"]) == workspace_to_open
+                            )
+                            st.session_state[_STATE_PREFIX + "workspace"] = {
+                                "organization_id": organization_id,
+                                "organization_workspace_id": workspace_to_open,
+                                "display_name": str(selected_workspace.get("display_name") or "Shared workspace"),
+                            }
+                            st.session_state.pop("_shoir_persist_change_signature", None)
+                            st.session_state.pop("_workspace_loaded_scope", None)
+                            st.rerun()
+                    except Exception as exc:
+                        _error("The active workspace could not be switched safely.", exc)
         except Exception as exc:
             workspaces = []
             _error("Workspace list could not be loaded.", exc)
