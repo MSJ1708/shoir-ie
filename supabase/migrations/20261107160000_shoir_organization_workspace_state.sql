@@ -5,7 +5,7 @@ CREATE TABLE public.shoir_organization_workspace_states (
         REFERENCES public.shoir_organization_workspaces(workspace_key) ON DELETE RESTRICT,
     state_json text NOT NULL
         CHECK (
-            octet_length(state_json) <= 1048576
+            octet_length(state_json) <= 8388608
             AND jsonb_typeof(state_json::jsonb) = 'object'
         ),
     revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
