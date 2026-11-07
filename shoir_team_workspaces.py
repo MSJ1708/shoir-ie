@@ -384,7 +384,20 @@ def render_team_workspaces() -> None:
             and item.get("username_lc")
             and str(item.get("role") or "").casefold() != "owner"
         ]
-        target_users = [str(item["username_lc"]) for item in active_members]
+        manageable_members = [
+            item for item in active_members
+            if is_owner or str(item.get("role") or "").casefold() != "admin"
+        ]
+        target_users = [str(item["username_lc"]) for item in manageable_members]
+        suspended_members = [
+            item for item in members
+            if isinstance(item, dict)
+            and item.get("status") == "suspended"
+            and item.get("username_lc")
+            and str(item.get("role") or "").casefold() != "owner"
+            and (is_owner or str(item.get("role") or "").casefold() != "admin")
+        ]
+        suspended_users = [str(item["username_lc"]) for item in suspended_members]
         if can_manage and target_users:
             allowed_roles = _MEMBER_ROLES if is_owner else ("engineer", "approver", "viewer")
             with st.form("team_member_role_form"):
@@ -435,6 +448,55 @@ def render_team_workspaces() -> None:
                     st.rerun()
                 except Exception as exc:
                     _error("Member removal was not completed.", exc)
+
+            with st.form("team_member_suspend_form"):
+                suspend_target = st.selectbox(
+                    "Member to suspend",
+                    options=target_users,
+                    key="team_member_suspend_target",
+                )
+                suspend_member = st.form_submit_button(
+                    "Suspend member",
+                    key="team_member_suspend_submit",
+                )
+            if suspend_member:
+                try:
+                    _call(
+                        "org_member_suspend_session",
+                        username,
+                        token,
+                        organization_id=organization_id,
+                        target_username_lc=suspend_target,
+                    )
+                    st.success("Member suspended. Existing sessions no longer have organization access.")
+                    st.rerun()
+                except Exception as exc:
+                    _error("Member could not be suspended.", exc)
+
+            if suspended_users:
+                with st.form("team_member_restore_form"):
+                    restore_target = st.selectbox(
+                        "Suspended member to restore",
+                        options=suspended_users,
+                        key="team_member_restore_target",
+                    )
+                    restore_member = st.form_submit_button(
+                        "Restore member access",
+                        key="team_member_restore_submit",
+                    )
+                if restore_member:
+                    try:
+                        _call(
+                            "org_member_restore_session",
+                            username,
+                            token,
+                            organization_id=organization_id,
+                            target_username_lc=restore_target,
+                        )
+                        st.success("Member restored. Organization access is active again.")
+                        st.rerun()
+                    except Exception as exc:
+                        _error("Member could not be restored.", exc)
 
             if is_owner:
                 with st.form("team_owner_transfer_form"):
