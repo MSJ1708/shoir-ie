@@ -20,6 +20,12 @@ CREATE INDEX shoir_org_workspace_states_updated
 -- Cover the organization audit/member/invitation/workspace foreign keys reported
 -- by the staging performance advisor. These indexes are separate from the
 -- organization-leading list indexes and support account deletion checks/joins.
+-- Include team owners as well as the partial personal-owner index. A partial index
+-- cannot cover the complete owner foreign key when an account is referenced by
+-- a team organization.
+CREATE INDEX IF NOT EXISTS shoir_org_owner_username_fk
+    ON public.shoir_organizations(owner_username_lc);
+
 CREATE INDEX IF NOT EXISTS shoir_org_audit_actor_fk
     ON public.shoir_organization_audit_events(actor_username_lc);
 CREATE INDEX IF NOT EXISTS shoir_org_audit_subject_fk
