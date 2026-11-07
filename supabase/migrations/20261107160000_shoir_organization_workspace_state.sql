@@ -38,8 +38,6 @@ CREATE INDEX IF NOT EXISTS shoir_org_workspace_state_updated_by_fk
 ALTER TABLE public.shoir_organization_workspace_states ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.shoir_organization_workspace_states
 FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT, INSERT, UPDATE ON TABLE public.shoir_organization_workspace_states
-TO service_role;
 
 CREATE OR REPLACE FUNCTION public.shoir_org_workspace_state_load(
     p_actor text,
@@ -96,7 +94,7 @@ CREATE OR REPLACE FUNCTION public.shoir_org_workspace_state_save(
     p_organization_id uuid,
     p_workspace_id uuid,
     p_state_json text,
-    p_expected_revision bigint DEFAULT NULL
+    p_expected_revision bigint
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -113,7 +111,7 @@ BEGIN
     IF p_organization_id IS NULL OR p_workspace_id IS NULL
        OR v_actor IS NULL OR v_actor = '' OR length(v_actor) > 128
        OR p_state_json IS NULL OR octet_length(p_state_json) > 8388608
-       OR (p_expected_revision IS NOT NULL AND p_expected_revision < 0) THEN
+       OR p_expected_revision IS NULL OR p_expected_revision < 0 THEN
         RAISE EXCEPTION 'Invalid organization workspace save input.' USING ERRCODE = '22023';
     END IF;
 
@@ -150,8 +148,7 @@ BEGIN
            revision = public.shoir_organization_workspace_states.revision + 1,
            updated_by_username_lc = EXCLUDED.updated_by_username_lc,
            updated_at = now()
-     WHERE p_expected_revision IS NULL
-        OR public.shoir_organization_workspace_states.revision = p_expected_revision
+     WHERE public.shoir_organization_workspace_states.revision = p_expected_revision
     RETURNING revision, updated_at INTO v_revision, v_updated_at;
 
     IF NOT FOUND THEN
