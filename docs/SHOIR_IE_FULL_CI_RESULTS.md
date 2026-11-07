@@ -37,3 +37,18 @@ Inspect current JUnit XML after completion; reconcile every skip and warning; fi
 A read-only inspection of the deployed production persistence Edge Function v9 found a response header hard-coded as `Access-Control-Allow-Origin: *`. The deployed staging v13 helper uses an explicit allowlist, but its previous source allowlist included production and staging hosts together. The candidate now binds allowed origins to the exact Supabase project ref: production permits only `https://shoir-ie-app.streamlit.app`; staging permits the configured staging Streamlit hosts and local development origins; an unknown project fails closed; origin-less server-to-server requests remain supported and still require session/action authentication. Cross-environment CORS regression tests were added.
 
 Dedicated Edge Function verification [run #42251683171](https://github.com/MSJ1708/shoir-ie/actions/runs/42251683171) on SHA `cf806aad170916f7e1003a3ef92ffbda2195899c` passed: Deno format checked 3 files, Deno type-check passed, and the security test suite reported **13 passed, 0 failed**. This source fix is not deployed. Production remains on v9 and continues to return wildcard CORS until a reviewed coordinated production rollout is explicitly approved. Do not treat this as a production remediation already applied.
+
+## Live exact-head recheck — 2026-11-07
+
+Source baseline under review: `bb08df77b8b3f7f3eb14159f852d757e33834188`. The six workflows triggered for this source baseline were still queued at the latest check; none is a completed pass or failure:
+
+| Workflow | Run | Last observed state |
+|---|---:|---|
+| Shoir-IE validation | 42408321586 | queued |
+| Clean PostgreSQL migration-history replay | 42408321582 | queued |
+| Edge Function verification | 42408321617 | queued |
+| Excel Intelligence | 42408321580 | queued |
+| Subscription transaction integration | 42408321585 | queued |
+| Production v9 security-backport verification | 42408321591 | queued |
+
+The hosted live-smoke sub-job in the validation workflow was skipped. The local desktop/mobile Streamlit smoke in CI is not authenticated staging acceptance. The current tool connection cannot dispatch the protected authenticated-release workflow; no bypass or customer/admin account was used. Earlier run IDs and earlier SHA results are historical only. The next valid evidence is the completed run output, job logs, skip/warning report and generated artifacts for the final exact candidate SHA.
