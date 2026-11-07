@@ -2388,10 +2388,28 @@ if not st.session_state.get("current_user"):
 # =====================================================================
 if st.session_state.get("current_user") and st.session_state.get("authenticated"):
     _workspace_user = st.session_state["current_user"]
-    if st.session_state.get("_workspace_loaded_for_user") != _workspace_user:
+    _active_org_workspace = st.session_state.get("shoir_active_organization_workspace")
+    if isinstance(_active_org_workspace, dict):
+        _workspace_scope = (
+            str(_active_org_workspace.get("organization_id") or ""),
+            str(_active_org_workspace.get("organization_workspace_id") or ""),
+        )
+    else:
+        _workspace_scope = None
+    if (
+        st.session_state.get("_workspace_loaded_for_user") != _workspace_user
+        or st.session_state.get("_workspace_loaded_scope") != _workspace_scope
+    ):
         ensure_workspace_state_db()
         load_user_workspace(_workspace_user, st.session_state)
         st.session_state["_workspace_loaded_for_user"] = _workspace_user
+        st.session_state["_workspace_loaded_scope"] = _workspace_scope
+    _workspace_load_notice = st.session_state.pop("_workspace_load_error", None)
+    if _workspace_load_notice:
+        st.warning(_workspace_load_notice)
+    _workspace_save_notice = st.session_state.pop("_workspace_save_error", None)
+    if _workspace_save_notice:
+        st.error(_workspace_save_notice)
 
 # =====================================================================
 # WORKSPACE STATUS RIBBON — durable state + autosave visibility
