@@ -43,7 +43,7 @@ from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run, log_copilot_action, benchmark_duration
 from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
-from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
+from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace, clear_loaded_workspace_state
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
@@ -2389,6 +2389,24 @@ if not st.session_state.get("current_user"):
 if st.session_state.get("current_user") and st.session_state.get("authenticated"):
     _workspace_user = st.session_state["current_user"]
     _active_org_workspace = st.session_state.get("shoir_active_organization_workspace")
+    if isinstance(_active_org_workspace, dict):
+        try:
+            _durable_account_store.validate_remote_organization_workspace_access(
+                _workspace_user
+            )
+        except Exception:
+            # Membership, workspace status and subscription are revalidated on
+            # every app rerun. On denial or service uncertainty, drop the active
+            # shared context and all previously hydrated team data before
+            # falling back to the user's own personal workspace.
+            clear_loaded_workspace_state(st.session_state)
+            st.session_state.pop("shoir_active_organization_workspace", None)
+            st.session_state.pop("_workspace_loaded_scope", None)
+            st.warning(
+                "Shared workspace access could not be revalidated. "
+                "The shared data has been cleared from this session and your personal workspace is being restored."
+            )
+            _active_org_workspace = None
     if isinstance(_active_org_workspace, dict):
         _workspace_scope = (
             str(_active_org_workspace.get("organization_id") or ""),
