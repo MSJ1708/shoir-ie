@@ -2228,14 +2228,14 @@ Deno.serve(async (req) => {
           }, 400);
         }
         const rawRevision = body.expected_revision;
-        let expectedRevision: number | null = null;
-        if (rawRevision !== undefined && rawRevision !== null) {
-          const parsedRevision = Number(rawRevision);
-          if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
-            return sendResponse({ error: "Workspace revision is invalid." }, 400);
-          }
-          expectedRevision = parsedRevision;
+        if (rawRevision === undefined || rawRevision === null) {
+          return sendResponse({ error: "Workspace revision is required." }, 400);
         }
+        const parsedRevision = Number(rawRevision);
+        if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
+          return sendResponse({ error: "Workspace revision is invalid." }, 400);
+        }
+        const expectedRevision: number = parsedRevision;
         const { data, error } = await supabase.rpc(
           "shoir_org_workspace_state_save",
           {
