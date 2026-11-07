@@ -30,3 +30,13 @@ A read-only inspection of the deployed production persistence Edge Function v9 f
 Dedicated Edge Function verification [run #42251683171](https://github.com/MSJ1708/shoir-ie/actions/runs/42251683171) on SHA `cf806aad170916f7e1003a3ef92ffbda2195899c` passed: Deno format checked 3 files, Deno type-check passed, and the security test suite reported **13 passed, 0 failed**. This source fix is not deployed. Production remains on v9 and continues to return wildcard CORS until a reviewed coordinated production rollout is explicitly approved. Do not treat this as a production remediation already applied.
 
 **CORS release blocker:** Production's wildcard CORS is a P0 deployment blocker. Deploy only through the coordinated, reviewed release bundle after staging and rollback gates; do not hot-deploy from this candidate.
+
+## Current security position — 2026-11-07
+
+- Staging organization tables exist (base migration `20261107120637`), RLS is enabled, and the checked 11 organization RPCs are callable only by `service_role`. Anon/authenticated have no direct SELECT on those tables. This is schema-level evidence, not hosted browser/tenant acceptance.
+- Staging Edge Function is v14; the deployed `index.ts` is behind the candidate source and lacks the candidate's suspend/restore, close and shared-workspace revision handlers. Candidate deployment is pending CI, migration replay and backup/rollback checks.
+- Staging advisors currently report no security or health lints; the Performance Advisor reports six unindexed organization foreign keys. Catalog inspection also found the organisation owner FK lacked a full index. Candidate migration `20261107160000` now adds the seven supporting account-reference indexes plus a shared-state index; it is not yet applied.
+- Production remains on v9 with wildcard CORS. The candidate v9-compatible security backport is un-deployed; production is untouched and remains a release blocker.
+- The protected Enterprise Admin aggregate invariant is preserved; that account was not used for tests or modified.
+
+No authenticated staging role/tenant acceptance, OIDC/MFA provider acceptance, full production CORS remediations, backup/restore rehearsal or independent security sign-off is claimed. Continue NO-GO.
