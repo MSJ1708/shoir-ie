@@ -51,6 +51,30 @@ REQUIRED_CASES = frozenset({
     ("workspace_save", "active"),
     ("workspace_relogin_restore", "active"),
     ("workspace_restore", "active"),
+    ("organization_create", "active"),
+    ("organization_create_second", "active"),
+    ("organization_workspace_create", "active"),
+    ("organization_invitation_create", "active"),
+    ("organization_invitation_accept", "second"),
+    ("organization_member_read", "active"),
+    ("organization_viewer_workspace_read", "second"),
+    ("organization_viewer_write_denied", "second"),
+    ("organization_invitation_replay_denied", "second"),
+    ("organization_cross_tenant_denied", "second"),
+    ("organization_admin_role_set", "active"),
+    ("organization_admin_workspace_write", "second"),
+    ("organization_admin_invitation_create", "second"),
+    ("organization_admin_self_promotion_denied", "second"),
+    ("organization_engineer_role_set", "active"),
+    ("organization_engineer_write_denied", "second"),
+    ("organization_approver_role_set", "active"),
+    ("organization_approver_write_denied", "second"),
+    ("organization_member_remove", "active"),
+    ("organization_removed_access_denied", "second"),
+    ("organization_invitation_revoke", "active"),
+    ("organization_revoked_invitation_denied", "second"),
+    ("organization_cleanup_org_1", "active"),
+    ("organization_cleanup_org_2", "active"),
     ("expired_login_renewal_only", "expired"),
     ("expired_workspace_load_denied", "expired"),
     ("expired_workspace_save_denied", "expired"),
@@ -192,6 +216,383 @@ def verify_session_revocation(api: EdgeAPI, username: str, token: str) -> tuple[
 
     return True, "Logout revoked the dedicated session; reuse of the same token was rejected with HTTP 401."
 
+
+
+
+def verify_organization_lifecycle(
+    api: EdgeAPI,
+    owner_username: str,
+    owner_token: str,
+    member_username: str,
+    member_token: str,
+    starter_username: str,
+) -> list[str]:
+    """Run multi-account organization/RBAC acceptance with safe close cleanup."""
+    created: list[str] = []
+
+    def probe(
+        case: str,
+        account_class: str,
+        status: int | None,
+        data: dict[str, Any],
+        *,
+        expected_success: bool,
+        detail: str,
+    ) -> bool:
+        passed = (
+            status == 200
+            and data.get("ok") is True
+            and not data.get("error")
+        ) if expected_success else (
+            status is not None and status >= 400 and bool(data.get("error"))
+        )
+        record(case, account_class, passed, detail if passed else f"{detail} (HTTP {status}).")
+        return passed
+
+    if not owner_token or not member_token:
+        for case, account_class in REQUIRED_CASES:
+            if case.startswith("organization_") and not any(
+                item["case"] == case and item["account_class"] == account_class
+                for item in RESULTS
+            ):
+                record(case, account_class, None, "Skipped because the required disposable owner/member session was unavailable.")
+        return created
+
+    nonce = secrets.token_hex(6)
+    org_ids: list[str] = []
+    for index in (1, 2):
+        status, data = safe_call(
+            api,
+            f"organization_create_{index}",
+            "active",
+            "org_create_session",
+            {
+                "username": owner_username,
+                "token": owner_token,
+                "display_name": f"Shoir E2E Org {index} {nonce}",
+            },
+        )
+        organization = data.get("organization") if isinstance(data.get("organization"), dict) else {}
+        organization_id = str(organization.get("organization_id") or "")
+        passed = status == 200 and bool(organization_id) and data.get("ok") is True
+        record(
+            "organization_create" if index == 1 else "organization_create_second",
+            "active",
+            passed,
+            "A disposable team organization was created under the authenticated Enterprise owner."
+            if passed else f"Team organization creation failed (HTTP {status}); response details suppressed.",
+        )
+        if passed:
+            org_ids.append(organization_id)
+            created.append(organization_id)
+
+    if len(org_ids) != 2:
+        for case, account_class in REQUIRED_CASES:
+            if case.startswith("organization_") and not any(
+                item["case"] == case and item["account_class"] == account_class
+                for item in RESULTS
+            ):
+                record(case, account_class, None, "Skipped because two disposable team organizations were not created.")
+        return created
+
+    first_org, second_org = org_ids
+    status, data = safe_call(
+        api, "organization_workspace_create_probe", "active",
+        "org_workspace_create_session",
+        {
+            "username": owner_username,
+            "token": owner_token,
+            "organization_id": first_org,
+            "display_name": f"Acceptance Workspace {nonce}",
+        },
+    )
+    workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
+    workspace_created = status == 200 and data.get("ok") is True and bool(workspace.get("workspace_id"))
+    record(
+        "organization_workspace_create", "active", workspace_created,
+        "Owner created a team workspace." if workspace_created else f"Owner workspace creation failed (HTTP {status}).",
+    )
+
+    status, data = safe_call(
+        api, "organization_invitation_create_probe", "active",
+        "org_invitation_create_session",
+        {
+            "username": owner_username,
+            "token": owner_token,
+            "organization_id": first_org,
+            "target_username_lc": member_username,
+            "role": "viewer",
+            "lifetime_days": 7,
+        },
+    )
+    invitation = data.get("invitation") if isinstance(data.get("invitation"), dict) else {}
+    invitation_token = str(data.get("invitation_token") or "")
+    invitation_id = str(invitation.get("invitation_id") or "")
+    invite_created = status == 200 and data.get("ok") is True and bool(invitation_token) and bool(invitation_id)
+    record(
+        "organization_invitation_create", "active", invite_created,
+        "Owner created a single-use invitation for the disposable second account."
+        if invite_created else f"Invitation creation failed (HTTP {status}).",
+    )
+
+    accepted = False
+    if invite_created:
+        accept_status, accept_data = safe_call(
+            api, "organization_accept_probe", "second",
+            "org_invitation_accept_session",
+            {
+                "username": member_username,
+                "token": member_token,
+                "invitation_token": invitation_token,
+            },
+        )
+        accepted = accept_status == 200 and accept_data.get("ok") is True and bool(accept_data.get("membership"))
+        record(
+            "organization_invitation_accept", "second", accepted,
+            "The invited account accepted its own single-use invitation."
+            if accepted else f"Invitation acceptance failed (HTTP {accept_status}).",
+        )
+    else:
+        record("organization_invitation_accept", "second", None, "Skipped because no invitation token was issued.")
+
+    if accepted:
+        member_status, member_data = safe_call(
+            api, "organization_member_list_probe", "active",
+            "org_member_list_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org},
+        )
+        members = member_data.get("members") if isinstance(member_data.get("members"), list) else []
+        member_row = next(
+            (item for item in members if str(item.get("username_lc", "")).casefold() == member_username.casefold()),
+            {},
+        )
+        record(
+            "organization_member_read", "active",
+            member_status == 200 and str(member_row.get("role") or "") == "viewer" and member_row.get("status") == "active",
+            "Owner can see the invited member with its assigned Viewer role."
+            if member_status == 200 and str(member_row.get("role") or "") == "viewer" and member_row.get("status") == "active"
+            else f"Member list/role verification failed (HTTP {member_status}).",
+        )
+
+        read_status, read_data = safe_call(
+            api, "organization_viewer_workspace_read_probe", "second",
+            "org_workspace_list_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org},
+        )
+        probe(
+            "organization_viewer_workspace_read", "second", read_status, read_data,
+            expected_success=True,
+            detail="Viewer can read only the team workspace it was invited into.",
+        )
+
+        write_status, write_data = safe_call(
+            api, "organization_viewer_workspace_write_probe", "second",
+            "org_workspace_create_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org, "display_name": "Forbidden Viewer Workspace"},
+        )
+        probe(
+            "organization_viewer_write_denied", "second", write_status, write_data,
+            expected_success=False,
+            detail="Viewer workspace creation was denied by the backend.",
+        )
+
+        replay_status, replay_data = safe_call(
+            api, "organization_invitation_replay_probe", "second",
+            "org_invitation_accept_session",
+            {"username": member_username, "token": member_token, "invitation_token": invitation_token},
+        )
+        probe(
+            "organization_invitation_replay_denied", "second", replay_status, replay_data,
+            expected_success=False,
+            detail="Replaying an accepted single-use invitation was rejected.",
+        )
+
+        cross_status, cross_data = safe_call(
+            api, "organization_cross_tenant_probe", "second",
+            "org_workspace_list_session",
+            {"username": member_username, "token": member_token, "organization_id": second_org},
+        )
+        probe(
+            "organization_cross_tenant_denied", "second", cross_status, cross_data,
+            expected_success=False,
+            detail="A member of organization one cannot list organization two workspaces.",
+        )
+
+        role_status, role_data = safe_call(
+            api, "organization_set_admin_probe", "active",
+            "org_member_role_set_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org,
+             "target_username_lc": member_username, "role": "admin"},
+        )
+        probe(
+            "organization_admin_role_set", "active", role_status, role_data,
+            expected_success=True,
+            detail="Owner promoted the member to Admin.",
+        )
+
+        admin_write_status, admin_write_data = safe_call(
+            api, "organization_admin_workspace_write_probe", "second",
+            "org_workspace_create_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org,
+             "display_name": f"Admin Workspace {nonce}"},
+        )
+        probe(
+            "organization_admin_workspace_write", "second", admin_write_status, admin_write_data,
+            expected_success=True,
+            detail="Admin can create a workspace through the authorized backend.",
+        )
+
+        admin_invite_status, admin_invite_data = safe_call(
+            api, "organization_admin_invitation_create_probe", "second",
+            "org_invitation_create_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org,
+             "target_username_lc": starter_username, "role": "viewer", "lifetime_days": 7},
+        )
+        admin_invitation = admin_invite_data.get("invitation") if isinstance(admin_invite_data.get("invitation"), dict) else {}
+        admin_invitation_id = str(admin_invitation.get("invitation_id") or "")
+        admin_invite_ok = (
+            admin_invite_status == 200
+            and admin_invite_data.get("ok") is True
+            and bool(admin_invitation_id)
+            and bool(admin_invite_data.get("invitation_token"))
+        )
+        record(
+            "organization_admin_invitation_create", "second", admin_invite_ok,
+            "Admin created a Viewer invitation for the third disposable account."
+            if admin_invite_ok else f"Admin invitation creation failed (HTTP {admin_invite_status}).",
+        )
+
+        self_promote_status, self_promote_data = safe_call(
+            api, "organization_admin_self_promotion_probe", "second",
+            "org_member_role_set_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org,
+             "target_username_lc": member_username, "role": "admin"},
+        )
+        probe(
+            "organization_admin_self_promotion_denied", "second", self_promote_status, self_promote_data,
+            expected_success=False,
+            detail="Admin cannot self-promote or mutate its own privileged membership.",
+        )
+
+        role_status, role_data = safe_call(
+            api, "organization_set_engineer_probe", "active",
+            "org_member_role_set_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org,
+             "target_username_lc": member_username, "role": "engineer"},
+        )
+        probe(
+            "organization_engineer_role_set", "active", role_status, role_data,
+            expected_success=True,
+            detail="Owner changed the member role to Engineer.",
+        )
+        engineer_write_status, engineer_write_data = safe_call(
+            api, "organization_engineer_workspace_write_probe", "second",
+            "org_workspace_create_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org,
+             "display_name": "Forbidden Engineer Workspace"},
+        )
+        probe(
+            "organization_engineer_write_denied", "second", engineer_write_status, engineer_write_data,
+            expected_success=False,
+            detail="Engineer cannot create a team workspace without Owner/Admin permission.",
+        )
+
+        role_status, role_data = safe_call(
+            api, "organization_set_approver_probe", "active",
+            "org_member_role_set_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org,
+             "target_username_lc": member_username, "role": "approver"},
+        )
+        probe(
+            "organization_approver_role_set", "active", role_status, role_data,
+            expected_success=True,
+            detail="Owner changed the member role to Approver.",
+        )
+        approver_write_status, approver_write_data = safe_call(
+            api, "organization_approver_workspace_write_probe", "second",
+            "org_workspace_create_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org,
+             "display_name": "Forbidden Approver Workspace"},
+        )
+        probe(
+            "organization_approver_write_denied", "second", approver_write_status, approver_write_data,
+            expected_success=False,
+            detail="Approver cannot create a team workspace without Owner/Admin permission.",
+        )
+
+        remove_status, remove_data = safe_call(
+            api, "organization_member_remove_probe", "active",
+            "org_member_remove_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org,
+             "target_username_lc": member_username},
+        )
+        probe(
+            "organization_member_remove", "active", remove_status, remove_data,
+            expected_success=True,
+            detail="Owner removed the invited member from organization one.",
+        )
+        removed_status, removed_data = safe_call(
+            api, "organization_removed_member_access_probe", "second",
+            "org_workspace_list_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org},
+        )
+        probe(
+            "organization_removed_access_denied", "second", removed_status, removed_data,
+            expected_success=False,
+            detail="Removed member can no longer access organization one.",
+        )
+    else:
+        for case, account_class in REQUIRED_CASES:
+            if case.startswith("organization_") and not any(
+                item["case"] == case and item["account_class"] == account_class
+                for item in RESULTS
+            ):
+                record(case, account_class, None, "Skipped because invitation acceptance did not complete.")
+
+    revoked_invitation_token = ""
+    if invitation_id:
+        # The accepted invitation is immutable history. A fresh pending invitation
+        # in organization two verifies revocation and refusal to consume a revoked token.
+        revoke_create_status, revoke_create_data = safe_call(
+            api, "organization_revocation_invitation_create_probe", "active",
+            "org_invitation_create_session",
+            {"username": owner_username, "token": owner_token, "organization_id": second_org,
+             "target_username_lc": member_username, "role": "viewer", "lifetime_days": 7},
+        )
+        revoke_row = revoke_create_data.get("invitation") if isinstance(revoke_create_data.get("invitation"), dict) else {}
+        revoke_id = str(revoke_row.get("invitation_id") or "")
+        revoked_invitation_token = str(revoke_create_data.get("invitation_token") or "")
+        revoke_created = revoke_create_status == 200 and revoke_create_data.get("ok") is True and bool(revoke_id) and bool(revoked_invitation_token)
+        if revoke_created:
+            revoke_status, revoke_data = safe_call(
+                api, "organization_invitation_revoke_probe", "active",
+                "org_invitation_revoke_session",
+                {"username": owner_username, "token": owner_token, "organization_id": second_org,
+                 "invitation_id": revoke_id},
+            )
+            probe(
+                "organization_invitation_revoke", "active", revoke_status, revoke_data,
+                expected_success=True,
+                detail="Owner revoked a pending invitation in organization two.",
+            )
+            revoked_accept_status, revoked_accept_data = safe_call(
+                api, "organization_revoked_invitation_accept_probe", "second",
+                "org_invitation_accept_session",
+                {"username": member_username, "token": member_token, "invitation_token": revoked_invitation_token},
+            )
+            probe(
+                "organization_revoked_invitation_denied", "second", revoked_accept_status, revoked_accept_data,
+                expected_success=False,
+                detail="A revoked invitation token cannot be accepted.",
+            )
+        else:
+            record("organization_invitation_revoke", "active", False, f"Pending invitation for revocation could not be created (HTTP {revoke_create_status}).")
+            record("organization_revoked_invitation_denied", "second", None, "Skipped because no revocable invitation token was issued.")
+    else:
+        record("organization_invitation_revoke", "active", None, "Skipped because the initial invitation was not created.")
+        record("organization_revoked_invitation_denied", "second", None, "Skipped because the initial invitation was not created.")
+
+    return created
 
 def main() -> int:
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
