@@ -198,3 +198,59 @@ def test_team_owner_must_confirm_before_closing_organization(monkeypatch, tmp_pa
     app.run()
     assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
     assert any(action == "org_close_session" for action, _ in calls)
+
+
+
+def test_owner_can_suspend_and_restore_member_with_backend_enforcement(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    membership_status = {"value": "active"}
+    calls = []
+
+    def fake_action(action, username, token, **payload):
+        calls.append(action)
+        if action == "org_list_session":
+            return {"ok": True, "organizations": [{
+                "organization_id": ORG_ID,
+                "display_name": "Synthetic Lifecycle",
+                "org_type": "team",
+                "role": "owner",
+            }]}
+        if action == "org_workspace_list_session":
+            return {"ok": True, "role": "owner", "workspaces": []}
+        if action == "org_member_list_session":
+            return {"ok": True, "role": "owner", "members": [
+                {"username_lc": "shoir-e2e-owner", "role": "owner", "status": "active"},
+                {"username_lc": "shoir-e2e-member", "role": "viewer", "status": membership_status["value"]},
+            ]}
+        if action == "org_invitation_list_session":
+            return {"ok": True, "invitations": []}
+        if action == "org_audit_list_session":
+            return {"ok": True, "events": []}
+        if action == "org_member_suspend_session":
+            assert payload["target_username_lc"] == "shoir-e2e-member"
+            membership_status["value"] = "suspended"
+            return {"ok": True, "result": {"status": "suspended"}}
+        if action == "org_member_restore_session":
+            assert payload["target_username_lc"] == "shoir-e2e-member"
+            membership_status["value"] = "active"
+            return {"ok": True, "result": {"status": "active"}}
+        raise AssertionError(f"Unexpected action in membership lifecycle test: {action}")
+
+    monkeypatch.setattr(store, "edge_organization_action", fake_action)
+    app = _app(tmp_path)
+    app.run()
+    assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
+    assert app.button(key="team_member_suspend_submit").disabled is False
+
+    app.button(key="team_member_suspend_submit").click()
+    app.run()
+    assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
+    assert membership_status["value"] == "suspended"
+    assert "org_member_suspend_session" in calls
+    assert not app.button(key="team_member_restore_submit").disabled
+
+    app.button(key="team_member_restore_submit").click()
+    app.run()
+    assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
+    assert membership_status["value"] == "active"
+    assert "org_member_restore_session" in calls
