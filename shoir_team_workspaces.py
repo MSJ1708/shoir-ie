@@ -80,6 +80,7 @@ def _clear_organization_cache() -> None:
         _STATE_PREFIX + "audit",
         _STATE_PREFIX + "invite_once",
         _STATE_PREFIX + "accept_token",
+        _STATE_PREFIX + "confirm_close",
     ):
         st.session_state.pop(key, None)
 
@@ -315,6 +316,37 @@ def render_team_workspaces() -> None:
                         _error("Workspace could not be archived.", exc)
         else:
             st.caption("Workspace changes require an Owner or Admin role.")
+
+        if is_owner and str(organization.get("org_type") or "").casefold() == "team":
+            with st.expander("Close this team organization", expanded=False):
+                st.warning(
+                    "Closing the organization revokes pending invitations, archives its workspaces, "
+                    "removes active memberships and preserves the immutable audit history. "
+                    "This cannot be undone from the application."
+                )
+                confirm_close = st.checkbox(
+                    "I understand this closes the organization for all members.",
+                    key=_STATE_PREFIX + "confirm_close",
+                )
+                if st.button(
+                    "Close organization",
+                    type="secondary",
+                    disabled=not confirm_close,
+                    key="team_org_close_submit",
+                    use_container_width=True,
+                ):
+                    try:
+                        _call(
+                            "org_close_session",
+                            username,
+                            token,
+                            organization_id=organization_id,
+                        )
+                        st.success("Organization closed. Audit history has been retained.")
+                        _clear_organization_cache()
+                        st.rerun()
+                    except Exception as exc:
+                        _error("Organization could not be closed.", exc)
 
     with member_tab:
         try:
