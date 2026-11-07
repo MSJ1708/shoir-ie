@@ -743,6 +743,18 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             try:
                 with target.cursor() as cursor:
                     cursor.execute("SET ROLE service_role;")
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'UPDATE');",
+                    )[0] is False, "service_role can update immutable audit events"
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'DELETE');",
+                    )[0] is False, "service_role can delete immutable audit events"
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'TRUNCATE');",
+                    )[0] is False, "service_role can truncate immutable audit events"
                 # Assert the clean replay created complete indexes for every
                 # account FK, including team owners (the personal-owner unique
                 # index is partial and cannot cover the complete FK).
