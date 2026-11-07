@@ -304,6 +304,32 @@ def test_organization_owner_and_invitation_lifecycle_is_fail_closed():
     assert "grant execute on function public.shoir_org_owner_transfer(text,uuid,text) to service_role" in normalized
 
 
+
+def test_organization_close_rpc_preserves_audit_and_removes_active_access():
+    source = (
+        MIGRATIONS
+        / "20261107150000_shoir_organization_close.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = " ".join(executable_sql.casefold().split())
+    assert "create or replace function public.shoir_org_close" in normalized
+    assert "security definer" in normalized
+    assert "set search_path = pg_catalog, public" in normalized
+    assert "only the current organization owner may close the organization" in normalized
+    assert "org_type = 'team'" in normalized
+    assert "status = 'closed'" in normalized
+    assert "status = 'archived'" in normalized
+    assert "status = 'removed'" in normalized
+    assert "revoked_at = now()" in normalized
+    assert "organization.closed" in normalized
+    assert "public.shoir_organization_audit_events" in normalized
+    assert "delete from public.shoir_organization_audit_events" not in normalized
+    assert "update public.shoir_organization_audit_events" not in normalized
+    assert "revoke all on function public.shoir_org_close(text, uuid) from public, anon, authenticated" in normalized
+    assert "grant execute on function public.shoir_org_close(text, uuid) to service_role" in normalized
+
 def test_protected_administrator_is_immutable_on_login_and_existing_sessions():
     sources = (
         ROOT / "supabase/functions/shoir-persistence/index.ts",
