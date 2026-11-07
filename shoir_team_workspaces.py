@@ -114,6 +114,30 @@ def _render_active_workspace_return(username: str) -> None:
         "The application is currently using the shared organization workspace "
         f"'{context.get('display_name') or context.get('organization_workspace_id')}'."
     )
+    with st.expander("Reload the latest shared revision", expanded=False):
+        st.warning(
+            "Reloading discards unsaved changes in this browser session and restores "
+            "the latest saved shared workspace revision."
+        )
+        confirm_reload = st.checkbox(
+            "I understand that unsaved shared changes will be discarded.",
+            key="team_workspace_confirm_reload",
+        )
+        if st.button(
+            "Reload from shared workspace",
+            disabled=not confirm_reload,
+            key="team_workspace_reload_shared",
+            use_container_width=True,
+        ):
+            try:
+                from workspace_persistence import clear_loaded_workspace_state
+                clear_loaded_workspace_state(st.session_state)
+                st.session_state.pop("_workspace_save_error", None)
+                st.session_state.pop("_workspace_load_error", None)
+                st.rerun()
+            except Exception as exc:
+                _error("The shared workspace could not be reloaded safely.", exc)
+
     save_col, discard_col = st.columns(2)
     with save_col:
         if st.button(
