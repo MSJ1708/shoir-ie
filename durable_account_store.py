@@ -1132,6 +1132,27 @@ def sync_durable_accounts(db_path: str = "enterprise_full_workspace.db") -> bool
     return True
 
 
+
+def _active_organization_workspace_context() -> Optional[dict[str, str]]:
+    """Return the explicitly selected organization workspace, or None for personal state."""
+    if st is None:
+        return None
+    raw = st.session_state.get("shoir_active_organization_workspace")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("Active organization workspace context is invalid.")
+    organization_id = str(raw.get("organization_id") or "").strip()
+    workspace_id = str(raw.get("organization_workspace_id") or "").strip()
+    if not organization_id or not workspace_id:
+        raise ValueError("Both organization and workspace IDs are required for shared persistence.")
+    return {
+        "organization_id": organization_id,
+        "organization_workspace_id": workspace_id,
+    }
+
+
+
 def save_remote_workspace(username: str, state_json: str) -> bool:
     """Persist serialized Streamlit workspace state in managed Supabase."""
     if edge_backend_configured():
@@ -1140,10 +1161,31 @@ def save_remote_workspace(username: str, state_json: str) -> bool:
         token = str(st.session_state.get("remote_session_token") or "")
         if not token:
             return False
-        _edge_call("workspace_save", {
-            "username": username, "token": token, "state_json": state_json,
-        })
+        organization_context = _active_organization_workspace_context()
+        payload = {
+            "username": username,
+            "token": token,
+            "state_json": state_json,
+        }
+        if organization_context is not None:
+            if APP_ENVIRONMENT != "staging":
+                raise RuntimeError("Shared organization persistence is restricted to the authorized staging environment.")
+            revision = st.session_state.get("_workspace_org_revision", 0)
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+                raise ValueError("Shared workspace revision state is invalid.")
+            payload.update(organization_context)
+            payload["expected_revision"] = revision
+            result = _edge_call("workspace_save", payload)
+            saved_revision = result.get("revision")
+            if isinstance(saved_revision, bool) or not isinstance(saved_revision, int) or saved_revision < 1:
+                raise RuntimeError("The shared workspace save did not return a valid revision.")
+            st.session_state["_workspace_org_revision"] = saved_revision
+            st.session_state["_workspace_org_updated_at"] = result.get("updated_at")
+            return True
+        _edge_call("workspace_save", payload)
         return True
+    if st is not None and _active_organization_workspace_context() is not None:
+        raise RuntimeError("Shared organization workspaces require the authenticated staging Edge Function.")
     if not durable_backend_configured():
         return False
     ensure_remote_schema()
@@ -1181,8 +1223,23 @@ def load_remote_workspace(username: str) -> Optional[str]:
         token = str(st.session_state.get("remote_session_token") or "")
         if not token:
             return None
-        result = _edge_call("workspace_load", {"username": username, "token": token})
+        organization_context = _active_organization_workspace_context()
+        payload = {"username": username, "token": token}
+        if organization_context is not None:
+            if APP_ENVIRONMENT != "staging":
+                raise RuntimeError("Shared organization persistence is restricted to the authorized staging environment.")
+            payload.update(organization_context)
+            result = _edge_call("workspace_load", payload)
+            revision = result.get("revision", 0)
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+                raise RuntimeError("The shared workspace load returned an invalid revision.")
+            st.session_state["_workspace_org_revision"] = revision
+            st.session_state["_workspace_org_updated_at"] = result.get("updated_at")
+            return result.get("state_json")
+        result = _edge_call("workspace_load", payload)
         return result.get("state_json")
+    if st is not None and _active_organization_workspace_context() is not None:
+        raise RuntimeError("Shared organization workspaces require the authenticated staging Edge Function.")
     if not durable_backend_configured():
         return None
     ensure_remote_schema()
