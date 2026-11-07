@@ -10422,6 +10422,12 @@ else:
                     "Organization-managed teams (staging)",
                 ])
                 with legacy_tab:
+                    st.warning(
+                        "Legacy local membership metadata only. These rows are stored in the "
+                        "application-local compatibility database and do not grant or revoke "
+                        "access to organization workspaces, shared workbook data, files or APIs. "
+                        "Use the Organization-managed teams tab for server-enforced organization roles."
+                    )
                     try:
                         render_industrial_module(
                             mod,
