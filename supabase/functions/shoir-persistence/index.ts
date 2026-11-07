@@ -1435,6 +1435,60 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "org_member_suspend_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_member_suspend", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_member_restore_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_member_restore", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
     if (action === "org_owner_transfer_session") {
       const actor = await getSession(
         String(body.token || ""),
