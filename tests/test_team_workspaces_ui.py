@@ -266,7 +266,9 @@ def test_application_keeps_existing_workspace_membership_renderer_and_adds_org_u
     route = source[start:end]
 
     assert "render_industrial_module(" in route
-    assert "Existing workspace membership" in route
+    assert "Legacy local membership metadata only" in route
+    assert "do not grant or revoke" in route
+    assert "Organization-managed teams (staging)" in route
     assert "Organization-managed teams (staging)" in route
     assert "APP_ENVIRONMENT" in route
     assert route.count("render_industrial_module(") >= 2
