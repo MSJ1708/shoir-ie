@@ -318,7 +318,7 @@ def test_organization_close_rpc_preserves_audit_and_removes_active_access():
     normalized = " ".join(executable_sql.casefold().split())
     assert "create or replace function public.shoir_org_close" in normalized
     assert "security definer" in normalized
-    assert "set search_path = pg_catalog, public" in normalized
+    assert "set search_path = ''" in normalized
     assert "only the current organization owner may close the organization" in normalized
     assert "org_type = 'team'" in normalized
     assert "status = 'closed'" in normalized
@@ -345,7 +345,7 @@ def test_organization_member_suspend_restore_is_owner_admin_scoped_and_audited()
     assert "create or replace function public.shoir_org_member_suspend" in normalized
     assert "create or replace function public.shoir_org_member_restore" in normalized
     assert "security definer" in normalized
-    assert "set search_path = pg_catalog, public" in normalized
+    assert "set search_path = ''" in normalized
     assert "v_actor_role not in ('owner','admin')" in normalized
     assert "v_target_role = 'admin' and v_actor_role <> 'owner'" in normalized
     assert "v_target_status is distinct from 'active'" in normalized
@@ -402,7 +402,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "octet_length(state_json) <= 8388608" in normalized
     assert "revision bigint not null default 1" in normalized
     assert "enable row level security" in normalized
-    assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated" in normalized
+    assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated, service_role" in normalized
     assert "revoke delete on table public.shoir_organization_workspace_states from service_role" in normalized
     assert "create or replace function public.shoir_org_workspace_state_load" in normalized
     assert "create or replace function public.shoir_org_workspace_state_save" in normalized
@@ -417,6 +417,13 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "grant execute on function public.shoir_org_workspace_state_load(text, uuid, uuid) to service_role" in normalized
     assert "grant execute on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint) to service_role" in normalized
     assert "delete from public.shoir_organization_workspace_states" not in normalized
+    assert "create index if not exists shoir_org_audit_actor_fk" in normalized
+    assert "create index if not exists shoir_org_audit_subject_fk" in normalized
+    assert "create index if not exists shoir_org_invitation_accepted_by_fk" in normalized
+    assert "create index if not exists shoir_org_invitation_created_by_fk" in normalized
+    assert "create index if not exists shoir_org_membership_invited_by_fk" in normalized
+    assert "create index if not exists shoir_org_workspace_created_by_fk" in normalized
+    assert "create index if not exists shoir_org_workspace_state_updated_by_fk" in normalized
 
 
 def test_shared_workspace_edge_handlers_route_only_explicit_org_context_to_shared_rpc():
