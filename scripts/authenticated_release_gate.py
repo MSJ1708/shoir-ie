@@ -226,9 +226,9 @@ def verify_organization_lifecycle(
     member_username: str,
     member_token: str,
     starter_username: str,
-) -> list[str]:
+) -> list[str | None]:
     """Run multi-account organization/RBAC acceptance with safe close cleanup."""
-    created: list[str] = []
+    created: list[str | None] = []
 
     def probe(
         case: str,
@@ -251,7 +251,7 @@ def verify_organization_lifecycle(
 
     if not owner_token or not member_token:
         for case, account_class in REQUIRED_CASES:
-            if case.startswith("organization_") and not any(
+            if case.startswith("organization_") and case not in {"organization_cleanup_org_1", "organization_cleanup_org_2"} and not any(
                 item["case"] == case and item["account_class"] == account_class
                 for item in RESULTS
             ):
@@ -285,6 +285,8 @@ def verify_organization_lifecycle(
         if passed:
             org_ids.append(organization_id)
             created.append(organization_id)
+        else:
+            created.append(None)
 
     if len(org_ids) != 2:
         for case, account_class in REQUIRED_CASES:
@@ -712,6 +714,7 @@ def main() -> int:
     restore_expected = "{}"
     sentinel_key = "__shoir_e2e_release_probe__"
     sentinel_value = secrets.token_hex(16)
+    created_organization_ids: list[str | None] = []
 
     try:
         # Active account login and entitlement are checked without exposing its username.
@@ -745,6 +748,15 @@ def main() -> int:
                status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold()
                and str(data3.get("role") or "") != "Enterprise Admin",
                "Starter tier is returned for the dedicated Starter test identity." if (status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold() and str(data3.get("role") or "") != "Enterprise Admin") else login_failure_detail(status3, data3, "Starter account login failed"))
+
+        created_organization_ids = verify_organization_lifecycle(
+            api,
+            active_user,
+            active_token,
+            second_user,
+            second_token,
+            starter_user,
+        )
 
         # An active non-admin must not invoke administrator APIs even with a valid token.
         if active_token:
@@ -905,6 +917,48 @@ def main() -> int:
             record("inactive_account_denied", "inactive", None, "Skipped: configure a dedicated inactive test account to verify the server guard.")
 
     finally:
+        # Close only the two organizations created by this run. The close RPC
+        # preserves immutable audit events and does not delete account data.
+        for org_index in (1, 2):
+            cleanup_case = f"organization_cleanup_org_{org_index}"
+            organization_id = (
+                created_organization_ids[org_index - 1]
+                if len(created_organization_ids) >= org_index
+                else None
+            )
+            if organization_id and active_token:
+                cleanup_status, cleanup_data = safe_call(
+                    api,
+                    cleanup_case,
+                    "active",
+                    "org_close_session",
+                    {
+                        "username": active_user,
+                        "token": active_token,
+                        "organization_id": organization_id,
+                    },
+                )
+                cleanup_result = cleanup_data.get("result") if isinstance(cleanup_data.get("result"), dict) else {}
+                cleanup_ok = (
+                    cleanup_status == 200
+                    and cleanup_data.get("ok") is True
+                    and cleanup_result.get("status") == "closed"
+                )
+                record(
+                    cleanup_case,
+                    "active",
+                    cleanup_ok,
+                    "Disposable organization closed; workspaces archived, memberships removed and audit history preserved."
+                    if cleanup_ok else f"Disposable organization cleanup failed (HTTP {cleanup_status}); manual staging cleanup is required.",
+                )
+            else:
+                record(
+                    cleanup_case,
+                    "active",
+                    None,
+                    "Skipped because this run did not create the corresponding disposable organization.",
+                )
+
         # Restore the original dedicated test workspace before revoking the
         # session needed to perform a retry. Never use a production/customer user.
         if write_started and workspace_was_loaded:
