@@ -399,7 +399,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "create table public.shoir_organization_workspace_states" in normalized
     assert "workspace_key text primary key" in normalized
     assert "jsonb_typeof(state_json::jsonb) = 'object'" in normalized
-    assert "octet_length(state_json) <= 1048576" in normalized
+    assert "octet_length(state_json) <= 8388608" in normalized
     assert "revision bigint not null default 1" in normalized
     assert "enable row level security" in normalized
     assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated" in normalized
