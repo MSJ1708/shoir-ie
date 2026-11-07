@@ -967,6 +967,29 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 assert null_invite_expiry.value.pgcode == "22023"
                 cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_null_invite_expiry;")
 
+                # A validly-created invitation that has since expired must
+                # be rejected at acceptance, even with an otherwise valid account.
+                cursor.execute(
+                    """
+                    INSERT INTO public.shoir_organization_invitations(
+                        organization_id, target_username_lc, role, token_hash,
+                        created_by_username_lc, created_at, expires_at
+                    ) VALUES (
+                        %s::uuid, %s, 'viewer', %s, %s,
+                        now() - interval '2 days', now() - interval '1 day'
+                    );
+                    """,
+                    (organization_id, "e2e-org-pending", "e" * 64, username),
+                )
+                cursor.execute("SAVEPOINT shoir_org_expired_invitation;")
+                with pytest.raises(psycopg2.Error) as expired_invitation:
+                    cursor.execute(
+                        "SELECT public.shoir_org_invitation_accept(%s,%s);",
+                        ("e2e-org-pending", "e" * 64),
+                    )
+                assert expired_invitation.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_expired_invitation;")
+
                 cursor.execute(
                     "SELECT public.shoir_org_invitation_create(%s,%s::uuid,%s,%s,%s,%s::timestamptz);",
                     (
