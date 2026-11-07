@@ -402,6 +402,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "workspace_key text primary key" in normalized
     assert "jsonb_typeof(state_json::jsonb) = 'object'" in normalized
     assert "octet_length(state_json) <= 8388608" in normalized
+    assert "octet_length(p_state_json) > 8388608" in normalized
     assert "revision bigint not null default 1" in normalized
     assert "enable row level security" in normalized
     assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated, service_role" in normalized
@@ -419,7 +420,9 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "state_bytes', octet_length(p_state_json)" in normalized
     assert "insert into public.shoir_organization_audit_events" in normalized
     assert "revoke all on function public.shoir_org_workspace_state_load(text, uuid, uuid)" in normalized
+    assert "revoke all on function public.shoir_org_workspace_state_load(text, uuid, uuid) from public, anon, authenticated, service_role" in normalized
     assert "revoke all on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint)" in normalized
+    assert "revoke all on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint) from public, anon, authenticated, service_role" in normalized
     assert "grant execute on function public.shoir_org_workspace_state_load(text, uuid, uuid) to service_role" in normalized
     assert "grant execute on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint) to service_role" in normalized
     assert "delete from public.shoir_organization_workspace_states" not in normalized
