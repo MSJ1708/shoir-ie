@@ -10376,6 +10376,20 @@ else:
             with st.expander("Technical diagnostic"):
                 st.code(f"{type(exc).__name__}: {exc}")
     # New unified industrial platform modules render through the existing service layer.
+    elif mod == "Team Workspaces & RBAC":
+        # Organization management is wired to the session-authenticated Edge API
+        # and remains staging-only until the hosted multi-tenant acceptance gate passes.
+        if platform_tier_allows(tier_val, "Enterprise"):
+            try:
+                from shoir_team_workspaces import render_team_workspaces
+                render_team_workspaces()
+            except Exception as exc:
+                st.error("Team Workspaces could not be loaded safely. Personal workspaces remain available.")
+                with st.expander("Team Workspace diagnostic"):
+                    st.code(f"{type(exc).__name__}: {exc}")
+        else:
+            st.warning("Team Workspaces & RBAC requires an Enterprise subscription.")
+        _shoir_module_stop()
     elif mod in {x["name"] for x in PLATFORM_CATALOG}:
         try:
             render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
