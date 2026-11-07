@@ -254,3 +254,21 @@ def test_owner_can_suspend_and_restore_member_with_backend_enforcement(monkeypat
     assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
     assert membership_status["value"] == "active"
     assert "org_member_restore_session" in calls
+
+
+
+def test_application_keeps_existing_workspace_membership_renderer_and_adds_org_ui_only_in_staging():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
+    start = source.index('elif mod == "Team Workspaces & RBAC":')
+    end = source.index('elif mod in {x["name"] for x in PLATFORM_CATALOG}:', start)
+    route = source[start:end]
+
+    assert "render_industrial_module(" in route
+    assert "Existing workspace membership" in route
+    assert "Organization-managed teams (staging)" in route
+    assert "APP_ENVIRONMENT" in route
+    assert route.count("render_industrial_module(") >= 2
+    assert "from shoir_team_workspaces import render_team_workspaces" in route
+    assert "else:" in route
