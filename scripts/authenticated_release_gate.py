@@ -150,6 +150,8 @@ class EdgeAPI:
             data = response.json()
         except Exception:
             data = {}
+        if not isinstance(data, dict):
+            data = {"error": "The staging API returned a non-object JSON response."}
         return response.status_code, data
 
 
@@ -800,15 +802,23 @@ def main() -> int:
                and str(data3.get("role") or "") != "Enterprise Admin",
                "Starter tier is returned for the dedicated Starter test identity." if (status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold() and str(data3.get("role") or "") != "Enterprise Admin") else login_failure_detail(status3, data3, "Starter account login failed"))
 
-        verify_organization_lifecycle(
-            api,
-            active_user,
-            active_token,
-            second_user,
-            second_token,
-            starter_user,
-            created_organization_ids,
-        )
+        try:
+            verify_organization_lifecycle(
+                api,
+                active_user,
+                active_token,
+                second_user,
+                second_token,
+                starter_user,
+                created_organization_ids,
+            )
+        except Exception as exc:
+            record(
+                "organization_lifecycle_unhandled_error",
+                "active",
+                False,
+                f"Organization acceptance aborted safely ({type(exc).__name__}); response details suppressed.",
+            )
 
         # An active non-admin must not invoke administrator APIs even with a valid token.
         if active_token:
