@@ -329,7 +329,7 @@ def test_organization_close_rpc_preserves_audit_and_removes_active_access():
     assert "public.shoir_organization_audit_events" in normalized
     assert "delete from public.shoir_organization_audit_events" not in normalized
     assert "update public.shoir_organization_audit_events" not in normalized
-    assert "revoke all on function public.shoir_org_close(text, uuid) from public, anon, authenticated" in normalized
+    assert "revoke all on function public.shoir_org_close(text, uuid) from public, anon, authenticated, service_role" in normalized
     assert "grant execute on function public.shoir_org_close(text, uuid) to service_role" in normalized
 
 
@@ -355,6 +355,8 @@ def test_organization_member_suspend_restore_is_owner_admin_scoped_and_audited()
     assert "organization.member_restored" in normalized
     assert "revoke all on function public.shoir_org_member_suspend(text, uuid, text)" in normalized
     assert "revoke all on function public.shoir_org_member_restore(text, uuid, text)" in normalized
+    assert "revoke all on function public.shoir_org_member_suspend(text, uuid, text) from public, anon, authenticated, service_role" in normalized
+    assert "revoke all on function public.shoir_org_member_restore(text, uuid, text) from public, anon, authenticated, service_role" in normalized
     assert "grant execute on function public.shoir_org_member_suspend(text, uuid, text) to service_role" in normalized
     assert "grant execute on function public.shoir_org_member_restore(text, uuid, text) to service_role" in normalized
 
@@ -392,7 +394,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
         MIGRATIONS
         / "20261107160000_shoir_organization_workspace_state.sql"
     ).read_text(encoding="utf-8")
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
     normalized = " ".join(executable_sql.casefold().split())
@@ -403,7 +405,6 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "revision bigint not null default 1" in normalized
     assert "enable row level security" in normalized
     assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated, service_role" in normalized
-    assert "revoke delete on table public.shoir_organization_workspace_states from service_role" in normalized
     assert "create or replace function public.shoir_org_workspace_state_load" in normalized
     assert "create or replace function public.shoir_org_workspace_state_save" in normalized
     assert "for share" in normalized
