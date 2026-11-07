@@ -1461,6 +1461,32 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "org_close_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      if (membership.role !== "owner") {
+        return sendResponse({
+          error: "Only the organization owner may close the organization.",
+        }, 403);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_close", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
     if (action === "org_workspace_create_session") {
       const actor = await getSession(
         String(body.token || ""),
