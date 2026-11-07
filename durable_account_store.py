@@ -235,6 +235,7 @@ _ORGANIZATION_EDGE_ACTIONS = {
     "org_member_role_set_session",
     "org_member_remove_session",
     "org_owner_transfer_session",
+    "org_close_session",
     "org_workspace_create_session",
     "org_workspace_archive_session",
     "org_audit_list_session",
