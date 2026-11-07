@@ -263,6 +263,7 @@ def test_clear_loaded_workspace_state_removes_only_hydrated_data():
     session = {
         "dataset": {"name": "shared"},
         "selected_nav": "Workbench",
+        "unsaved_shared_new_key": {"new": "uncommitted team-only value"},
         "remote_session_token": "live-session",
         "authenticated": True,
         "current_user": "Alice",
@@ -279,6 +280,7 @@ def test_clear_loaded_workspace_state_removes_only_hydrated_data():
 
     assert "dataset" not in session
     assert "selected_nav" not in session
+    assert "unsaved_shared_new_key" not in session
     assert session["remote_session_token"] == "live-session"
     assert session["authenticated"] is True
     assert session["current_user"] == "Alice"
@@ -363,3 +365,19 @@ def test_malformed_organization_context_is_rejected_before_noop_save_shortcut(mo
     assert save_user_workspace("Alice", session) is False
     assert "both organization and workspace ids" in session["_workspace_save_error"].casefold()
     assert calls == []
+
+
+
+def test_clear_loaded_workspace_state_does_not_clear_untracked_personal_state():
+    session = {
+        "current_personal_value": "preserve",
+        "remote_session_token": "live-session",
+        "_workspace_loaded_keys": [],
+        "_workspace_loaded_owner": "alice",
+        "_workspace_loaded_scope": None,
+    }
+
+    workspace_module.clear_loaded_workspace_state(session)
+
+    assert session["current_personal_value"] == "preserve"
+    assert session["remote_session_token"] == "live-session"
