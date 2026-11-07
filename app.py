@@ -10377,16 +10377,32 @@ else:
                 st.code(f"{type(exc).__name__}: {exc}")
     # New unified industrial platform modules render through the existing service layer.
     elif mod == "Team Workspaces & RBAC":
-        # Organization management is wired to the session-authenticated Edge API
-        # and remains staging-only until the hosted multi-tenant acceptance gate passes.
+        # Preserve the established workspace-membership editor and export path.
+        # The organization-backed collaboration surface is additive and staging-only.
         if platform_tier_allows(tier_val, "Enterprise"):
             try:
-                from shoir_team_workspaces import render_team_workspaces
-                render_team_workspaces()
+                render_industrial_module(
+                    mod,
+                    tier_val,
+                    st.session_state.get("current_user", "unknown"),
+                )
             except Exception as exc:
-                st.error("Team Workspaces could not be loaded safely. Personal workspaces remain available.")
-                with st.expander("Team Workspace diagnostic"):
+                st.error("The existing Team Workspaces module could not be loaded.")
+                with st.expander("Existing workspace diagnostic"):
                     st.code(f"{type(exc).__name__}: {exc}")
+
+            if str(_durable_account_store.APP_ENVIRONMENT).casefold() == "staging":
+                with st.expander(
+                    "Organization-managed team workspaces (staging acceptance)",
+                    expanded=False,
+                ):
+                    try:
+                        from shoir_team_workspaces import render_team_workspaces
+                        render_team_workspaces()
+                    except Exception as exc:
+                        st.error("Organization-managed workspaces could not be loaded safely.")
+                        with st.expander("Organization service diagnostic"):
+                            st.code(f"{type(exc).__name__}: {exc}")
         else:
             st.warning("Team Workspaces & RBAC requires an Enterprise subscription.")
         _shoir_module_stop()
