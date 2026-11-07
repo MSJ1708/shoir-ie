@@ -61,7 +61,8 @@ The authenticated workflow currently requires an explicit manual `workflow_dispa
 4. Run the authenticated release gate manually against the verified staging app and staging Edge endpoint with the dedicated disposable credentials already configured in GitHub Actions. Do not use `sho`, production identities or customer data.
 5. Verify that cleanup closes both disposable organizations and that no invitation, active workspace, membership or open test session is left behind. Retain immutable audit records as designed.
 6. Run hosted suspend/restore acceptance, add expired-invitation acceptance, and verify role-specific access to platform records, datasets, files, jobs, exports, Copilot and Digital Thread.
-7. Capture the actual staging app URL, Edge Function version and SHA, migration ledger, authenticated run URL, test report and screenshots.
-8. Have the authorized owner review the evidence. Keep PR #232 open and draft until approval; do not merge, deploy production, remove BETA or change the protected administrator.
+7. Integrate the selected organization workspace with the existing workbook and persistence layer. At present the new renderer lists, creates and archives organization workspaces but does not yet select a team workspace as the active data/persistence context or prove that two members see the same saved data. Verify save, reload, exports, digital-thread links, and removal/suspension isolation across these artifacts before claiming shared-workspace functionality.
+8. Capture the actual staging app URL, Edge Function version and SHA, migration ledger, authenticated run URL, test report and screenshots.
+9. Have the authorized owner review the evidence. Keep PR #232 open and draft until approval; do not merge, deploy production, remove BETA or change the protected administrator.
 
 Until these steps are complete, Team Workspaces & RBAC is **implemented in the release branch but not verified for hosted commercial use**. Do not advertise it as production-ready enterprise collaboration.
