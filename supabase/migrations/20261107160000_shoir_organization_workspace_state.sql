@@ -37,11 +37,9 @@ CREATE INDEX IF NOT EXISTS shoir_org_workspace_state_updated_by_fk
 
 ALTER TABLE public.shoir_organization_workspace_states ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.shoir_organization_workspace_states
-FROM PUBLIC, anon, authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.shoir_organization_workspace_states
 TO service_role;
-REVOKE DELETE ON TABLE public.shoir_organization_workspace_states
-FROM service_role;
 
 CREATE OR REPLACE FUNCTION public.shoir_org_workspace_state_load(
     p_actor text,
@@ -51,7 +49,7 @@ CREATE OR REPLACE FUNCTION public.shoir_org_workspace_state_load(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = ''
 AS $function$
 DECLARE
     v_actor text := lower(btrim(p_actor));
@@ -103,7 +101,7 @@ CREATE OR REPLACE FUNCTION public.shoir_org_workspace_state_save(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = ''
 AS $function$
 DECLARE
     v_actor text := lower(btrim(p_actor));
@@ -173,7 +171,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.shoir_org_workspace_state_load(text, uuid, uuid)
 FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint)
-FROM PUBLIC, anon, authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_workspace_state_load(text, uuid, uuid)
 TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint)
