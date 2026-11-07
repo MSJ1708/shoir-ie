@@ -408,10 +408,17 @@ def clear_loaded_workspace_state(
 ) -> None:
     """Remove only persisted workspace values currently hydrated into this session."""
     prior_keys = session_state.get("_workspace_loaded_keys", [])
-    if isinstance(prior_keys, list):
-        for key in prior_keys:
-            if isinstance(key, str) and not _excluded(key):
-                session_state.pop(key, None)
+    keys_to_clear = {
+        key for key in prior_keys
+        if isinstance(key, str) and not _excluded(key)
+    } if isinstance(prior_keys, list) else set()
+    if isinstance(session_state.get("shoir_active_organization_workspace"), dict):
+        # Include values created since the last confirmed autosave. A disconnect
+        # or revoked-membership path must not leave new team-only keys behind.
+        keys_to_clear.update(_snapshot(session_state).keys())
+    for key in keys_to_clear:
+        if not _excluded(key):
+            session_state.pop(key, None)
     session_state["_workspace_loaded_keys"] = []
     session_state.pop("_shoir_persist_change_signature", None)
     session_state.pop("_workspace_org_revision", None)
