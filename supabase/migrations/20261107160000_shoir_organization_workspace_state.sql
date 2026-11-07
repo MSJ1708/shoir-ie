@@ -112,7 +112,7 @@ DECLARE
 BEGIN
     IF p_organization_id IS NULL OR p_workspace_id IS NULL
        OR v_actor IS NULL OR v_actor = '' OR length(v_actor) > 128
-       OR p_state_json IS NULL OR octet_length(p_state_json) > 1048576
+       OR p_state_json IS NULL OR octet_length(p_state_json) > 8388608
        OR (p_expected_revision IS NOT NULL AND p_expected_revision < 0) THEN
         RAISE EXCEPTION 'Invalid organization workspace save input.' USING ERRCODE = '22023';
     END IF;
@@ -185,7 +185,7 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.shoir_org_workspace_state_load(text, uuid, uuid)
-FROM PUBLIC, anon, authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint)
 FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_workspace_state_load(text, uuid, uuid)
