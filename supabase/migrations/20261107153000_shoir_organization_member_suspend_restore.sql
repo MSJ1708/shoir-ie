@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.shoir_org_member_suspend(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = ''
 AS $function$
 DECLARE
     v_actor text := lower(btrim(p_actor));
@@ -84,7 +84,7 @@ CREATE OR REPLACE FUNCTION public.shoir_org_member_restore(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = ''
 AS $function$
 DECLARE
     v_actor text := lower(btrim(p_actor));
@@ -159,9 +159,9 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.shoir_org_member_suspend(text, uuid, text)
-FROM PUBLIC, anon, authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.shoir_org_member_restore(text, uuid, text)
-FROM PUBLIC, anon, authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_member_suspend(text, uuid, text)
 TO service_role;
 GRANT EXECUTE ON FUNCTION public.shoir_org_member_restore(text, uuid, text)
