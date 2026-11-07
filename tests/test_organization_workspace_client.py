@@ -75,3 +75,29 @@ def test_organization_action_uses_only_allowlisted_actions_and_preserves_session
             "Synthetic-User",
             "synthetic-session-token",
         )
+
+
+def test_organization_close_uses_the_allowlisted_staging_session_action(monkeypatch):
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "edge_backend_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        store,
+        "_edge_call",
+        lambda action, payload: calls.append((action, payload)) or {"ok": True},
+    )
+    result = store.edge_organization_action(
+        "org_close_session",
+        "Synthetic-Owner",
+        "synthetic-session-token",
+        organization_id="00000000-0000-4000-8000-000000000001",
+    )
+    assert result == {"ok": True}
+    assert calls == [(
+        "org_close_session",
+        {
+            "username": "Synthetic-Owner",
+            "token": "synthetic-session-token",
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+        },
+    )]
