@@ -416,6 +416,7 @@ def clear_loaded_workspace_state(
     session_state.pop("_shoir_persist_change_signature", None)
     session_state.pop("_workspace_org_revision", None)
     session_state.pop("_workspace_org_updated_at", None)
+    session_state.pop("_workspace_save_conflict", None)
     session_state["_workspace_loaded_owner"] = None
     session_state["_workspace_loaded_scope"] = None
     session_state["_workspace_loaded_for_user"] = None
@@ -432,11 +433,21 @@ def save_user_workspace(
         raw_context = session_state.get("shoir_active_organization_workspace")
         if raw_context is not None and not isinstance(raw_context, dict):
             raise ValueError("Active organization workspace context is invalid.")
+        if raw_context is not None and (
+            not str(raw_context.get("organization_id") or "").strip()
+            or not str(raw_context.get("organization_workspace_id") or "").strip()
+        ):
+            raise ValueError("Both organization and workspace IDs are required for shared persistence.")
         # A shared organization workspace must never fall back to a per-user
         # SQLite/PostgreSQL record, even when the change signature is unchanged.
         remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
         if raw_context is not None and not remote_mode:
             raise RuntimeError("Shared organization workspaces require the authenticated managed staging backend.")
+        if raw_context is not None and session_state.get("_workspace_save_conflict"):
+            session_state["_workspace_save_error"] = (
+                "A newer shared-workspace revision exists. Reload the workspace before saving."
+            )
+            return False
         # Most Streamlit interactions rerun the script without changing the
         # durable workspace. Avoid serializing large Excel-backed DataFrames on
         # those no-op reruns (chart filters, tab switches, UI interactions).
@@ -457,6 +468,7 @@ def save_user_workspace(
                 if raw_context is None:
                     _persist_domain_manifest(username, session_state, db_path)
                 session_state.pop("_workspace_save_error", None)
+                session_state.pop("_workspace_save_conflict", None)
             return ok
 
         # Local development fallback only. A deployed Streamlit instance should
@@ -480,17 +492,21 @@ def save_user_workspace(
         if raw_context is None:
             _persist_domain_manifest(username, session_state, db_path)
         session_state.pop("_workspace_save_error", None)
+        session_state.pop("_workspace_save_conflict", None)
         return True
     except Exception as exc:
         # Do not fall back to SQLite or the personal workspace when a shared
         # organization save fails. Keep the in-session edits and surface a
         # non-secret diagnostic in the application shell.
+        conflict = (
+            "changed since it was loaded" in str(exc).casefold()
+            or "shared_workspace_revision_conflict" in str(exc).casefold()
+        )
+        if conflict and isinstance(session_state.get("shoir_active_organization_workspace"), dict):
+            session_state["_workspace_save_conflict"] = True
         session_state["_workspace_save_error"] = (
             "A newer shared-workspace revision exists. Reload the workspace before saving."
-            if (
-                "changed since it was loaded" in str(exc).casefold()
-                or "shared_workspace_revision_conflict" in str(exc).casefold()
-            )
+            if conflict
             else "Workspace persistence failed. Your current in-session changes have not been confirmed as saved."
         )
         return False
