@@ -396,6 +396,23 @@ def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
                 parts.append(f"V|{key}|{type(value).__name__}")
     return hashlib.sha1("\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
 
+def clear_loaded_workspace_state(
+    session_state: MutableMapping[str, Any],
+) -> None:
+    """Remove only persisted workspace values currently hydrated into this session."""
+    prior_keys = session_state.get("_workspace_loaded_keys", [])
+    if isinstance(prior_keys, list):
+        for key in prior_keys:
+            if isinstance(key, str) and not _excluded(key):
+                session_state.pop(key, None)
+    session_state["_workspace_loaded_keys"] = []
+    session_state.pop("_shoir_persist_change_signature", None)
+    session_state.pop("_workspace_org_revision", None)
+    session_state.pop("_workspace_org_updated_at", None)
+    session_state["_workspace_loaded_owner"] = None
+    session_state["_workspace_loaded_scope"] = None
+
+
 def save_user_workspace(
     username: str,
     session_state: MutableMapping[str, Any],
@@ -404,6 +421,14 @@ def save_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
+        raw_context = session_state.get("shoir_active_organization_workspace")
+        if raw_context is not None and not isinstance(raw_context, dict):
+            raise ValueError("Active organization workspace context is invalid.")
+        # A shared organization workspace must never fall back to a per-user
+        # SQLite/PostgreSQL record, even when the change signature is unchanged.
+        remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        if raw_context is not None and not remote_mode:
+            raise RuntimeError("Shared organization workspaces require the authenticated managed staging backend.")
         # Most Streamlit interactions rerun the script without changing the
         # durable workspace. Avoid serializing large Excel-backed DataFrames on
         # those no-op reruns (chart filters, tab switches, UI interactions).
@@ -413,9 +438,7 @@ def save_user_workspace(
             return True
         payload = json.dumps(_snapshot(session_state), ensure_ascii=False, separators=(",", ":"))
         # A custom db_path is used by local/regression tests and intentionally
-        # bypasses the remote backend. The deployed application uses the default
-        # enterprise_full_workspace.db path and therefore uses Supabase.
-        remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        # bypasses the remote backend. It is never a valid target for shared state.
         if remote_mode:
             # In durable mode, never silently persist to shared/ephemeral SQLite.
             # A failed cloud write must stay a failed cloud write.
@@ -423,7 +446,9 @@ def save_user_workspace(
             if ok:
                 session_state["_shoir_persist_change_signature"] = change_signature
                 session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
-                _persist_domain_manifest(username, session_state, db_path)
+                if raw_context is None:
+                    _persist_domain_manifest(username, session_state, db_path)
+                session_state.pop("_workspace_save_error", None)
             return ok
 
         # Local development fallback only. A deployed Streamlit instance should
@@ -444,7 +469,9 @@ def save_user_workspace(
             conn.commit()
         session_state["_shoir_persist_change_signature"] = change_signature
         session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
-        _persist_domain_manifest(username, session_state, db_path)
+        if raw_context is None:
+            _persist_domain_manifest(username, session_state, db_path)
+        session_state.pop("_workspace_save_error", None)
         return True
     except Exception as exc:
         # Do not fall back to SQLite or the personal workspace when a shared
@@ -632,6 +659,8 @@ def load_user_workspace(
             session_state.pop("_workspace_org_updated_at", None)
 
         remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        if scope is not None and not remote_mode:
+            raise RuntimeError("Shared organization workspaces require the authenticated managed staging backend.")
         if remote_mode:
             # A configured managed backend is authoritative. Do not fall back
             # to SQLite when the remote record is missing or temporarily empty;
@@ -666,6 +695,7 @@ def load_user_workspace(
         session_state["_workspace_loaded_keys"] = loaded_keys
         session_state["_workspace_loaded_owner"] = owner
         session_state["_workspace_loaded_scope"] = scope
+        session_state.pop("_workspace_load_error", None)
         return True
     except Exception as exc:
         # Access denial and corrupted payloads fail closed; never load the
