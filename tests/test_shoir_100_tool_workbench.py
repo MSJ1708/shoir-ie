@@ -882,6 +882,17 @@ def test_workbench_runs_rcm_network_calibration_disruption_and_kpi_tools():
     at.button(key="tool094_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    # The focused-tool handler deliberately catches calculation errors and
+    # displays them in the UI. Check that channel before reading the result;
+    # otherwise a genuine T094 failure is obscured by a secondary KeyError.
+    displayed_errors = [str(element.value) for element in at.error]
+    assert not displayed_errors, (
+        "T094 execution displayed an application error despite no uncaught "
+        "Streamlit exception:\\n" + "\\n".join(displayed_errors)
+    )
+    assert "shoir_tool_result_T094" in at.session_state, (
+        "T094 completed without raising but did not persist its result."
+    )
     alerts = at.session_state["shoir_tool_result_T094"]
     assert alerts["open_alert_count"] == 1
     assert alerts["new_alert_count"] == 1
