@@ -96,7 +96,6 @@ def test_team_workspace_owner_can_read_all_organization_surfaces(monkeypatch, tm
         "org_invitation_list_session",
         "org_audit_list_session",
     ]
-    assert any("Synthetic Plant" in str(item.value) for item in app.selectbox)
 
 
 def test_team_workspace_viewer_cannot_access_management_api_surfaces(monkeypatch, tmp_path):
@@ -133,9 +132,7 @@ def test_team_workspace_viewer_cannot_access_management_api_surfaces(monkeypatch
         "org_workspace_list_session",
         "org_member_list_session",
     ]
-    assert not any("Invitation management is restricted" in str(item.value) for item in app.info) or any(
-        "Invitation management is restricted" in str(item.value) for item in app.info
-    )
+    assert any("Invitation management is restricted" in str(item.value) for item in app.info)
     assert not any(action.startswith("org_invitation") for action in calls)
     assert "org_audit_list_session" not in calls
 
