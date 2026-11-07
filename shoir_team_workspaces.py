@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 
 import durable_account_store as account_store
@@ -77,6 +78,8 @@ def _clear_organization_cache() -> None:
         _STATE_PREFIX + "members",
         _STATE_PREFIX + "invitations",
         _STATE_PREFIX + "audit",
+        _STATE_PREFIX + "invite_once",
+        _STATE_PREFIX + "accept_token",
     ):
         st.session_state.pop(key, None)
 
@@ -173,7 +176,7 @@ def render_team_workspaces() -> None:
                 "Invitation token",
                 type="password",
                 max_chars=64,
-                key="team_org_accept_token",
+                key=_STATE_PREFIX + "accept_token",
             )
             accept_invitation = st.form_submit_button(
                 "Accept invitation",
@@ -243,14 +246,14 @@ def render_team_workspaces() -> None:
                 raise RuntimeError("The organization service returned an invalid workspace list.")
             st.session_state[_STATE_PREFIX + "workspaces"] = workspaces
             st.dataframe(
-                [
+                pd.DataFrame([
                     {
                         "Workspace": item.get("display_name", ""),
                         "Status": item.get("status", ""),
                         "Created": item.get("created_at", ""),
                     }
                     for item in workspaces if isinstance(item, dict)
-                ],
+                ]),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -326,7 +329,7 @@ def render_team_workspaces() -> None:
                 raise RuntimeError("The organization service returned an invalid member list.")
             st.session_state[_STATE_PREFIX + "members"] = members
             st.dataframe(
-                [
+                pd.DataFrame([
                     {
                         "Username": item.get("username_lc", ""),
                         "Role": _ROLE_LABELS.get(str(item.get("role") or "").casefold(), item.get("role", "")),
@@ -334,7 +337,7 @@ def render_team_workspaces() -> None:
                         "Joined": item.get("joined_at", ""),
                     }
                     for item in members if isinstance(item, dict)
-                ],
+                ]),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -493,7 +496,7 @@ def render_team_workspaces() -> None:
                     raise RuntimeError("The organization service returned an invalid invitation list.")
                 st.session_state[_STATE_PREFIX + "invitations"] = invitations
                 st.dataframe(
-                    [
+                    pd.DataFrame([
                         {
                             "Username": item.get("target_username_lc", ""),
                             "Role": _ROLE_LABELS.get(str(item.get("role") or "").casefold(), item.get("role", "")),
@@ -502,7 +505,7 @@ def render_team_workspaces() -> None:
                             "Revoked": bool(item.get("revoked_at")),
                         }
                         for item in invitations if isinstance(item, dict)
-                    ],
+                    ]),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -560,7 +563,7 @@ def render_team_workspaces() -> None:
                 if not isinstance(events, list):
                     raise RuntimeError("The organization service returned an invalid audit list.")
                 st.dataframe(
-                    [
+                    pd.DataFrame([
                         {
                             "Event": item.get("event_type", ""),
                             "Actor": item.get("actor_username_lc", ""),
@@ -568,7 +571,7 @@ def render_team_workspaces() -> None:
                             "When": item.get("created_at", ""),
                         }
                         for item in events if isinstance(item, dict)
-                    ],
+                    ]),
                     use_container_width=True,
                     hide_index=True,
                 )
