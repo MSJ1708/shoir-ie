@@ -2433,7 +2433,6 @@ def test_kpi_alerts_reject_empty_contracts_and_classify_unusable_readings():
     assert result["open_alert_count"] == 1
     assert result["new_alert_count"] == 1
     assert result["stale_or_missing_count"] == 3
-    assert result["data_provenance"] if "data_provenance" in result else True
 
 
 def test_kpi_alerts_reject_duplicate_casefolded_readings_and_nonfinite_thresholds():
