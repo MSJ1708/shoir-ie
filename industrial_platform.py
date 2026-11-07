@@ -2638,6 +2638,12 @@ def render_module(module: str, tier: str, username: str):
         render_export_bar(module,[("Scenario Inputs",base),("Persisted Scenarios",saved)],tier,username)
     elif module=="Team Workspaces & RBAC":
         st.subheader("👥 Team Workspace & Role-Based Access")
+        st.warning(
+            "Legacy local membership metadata only. These rows are stored in the "
+            "application-local compatibility database and do not grant or revoke "
+            "access to organization workspaces, shared workbook data, files or APIs. "
+            "Use Organization-managed teams for server-enforced organization roles."
+        )
         st.caption("Membership changes are checked server-side. Only current workspace Owners/Admins can edit members; membership and role values are validated before persistence.")
         ws=st.text_input("Workspace name","Plant-01 Engineering",key="workspace_name")
         try:
