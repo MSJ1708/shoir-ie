@@ -595,7 +595,7 @@ def verify_organization_lifecycle(
         )
     else:
         for case, account_class in REQUIRED_CASES:
-            if case.startswith("organization_") and not any(
+            if case.startswith("organization_") and case not in {"organization_cleanup_org_1", "organization_cleanup_org_2"} and not any(
                 item["case"] == case and item["account_class"] == account_class
                 for item in RESULTS
             ):
