@@ -59,6 +59,10 @@ REQUIRED_CASES = frozenset({
     ("organization_member_read", "active"),
     ("organization_viewer_workspace_read", "second"),
     ("organization_viewer_write_denied", "second"),
+    ("organization_suspend_member", "active"),
+    ("organization_suspended_access_denied", "second"),
+    ("organization_restore_member", "active"),
+    ("organization_restored_access_allowed", "second"),
     ("organization_invitation_replay_denied", "second"),
     ("organization_cross_tenant_denied", "second"),
     ("organization_admin_role_set", "active"),
@@ -396,6 +400,52 @@ def verify_organization_lifecycle(
             "organization_viewer_write_denied", "second", write_status, write_data,
             expected_success=False,
             detail="Viewer workspace creation was denied by the backend.",
+        )
+
+        suspend_status, suspend_data = safe_call(
+            api, "organization_suspend_member_probe", "active",
+            "org_member_suspend_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org,
+             "target_username_lc": member_username},
+        )
+        probe(
+            "organization_suspend_member", "active", suspend_status, suspend_data,
+            expected_success=True,
+            detail="Owner suspended the member without revoking the member's global login session.",
+        )
+        suspended_access_status, suspended_access_data = safe_call(
+            api, "organization_suspended_access_probe", "second",
+            "org_workspace_list_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org},
+        )
+        probe(
+            "organization_suspended_access_denied", "second",
+            suspended_access_status, suspended_access_data,
+            expected_success=False,
+            detail="The still-valid member session is denied organization access while membership is suspended.",
+        )
+
+        restore_status, restore_data = safe_call(
+            api, "organization_restore_member_probe", "active",
+            "org_member_restore_session",
+            {"username": owner_username, "token": owner_token, "organization_id": first_org,
+             "target_username_lc": member_username},
+        )
+        probe(
+            "organization_restore_member", "active", restore_status, restore_data,
+            expected_success=True,
+            detail="Owner restored the active account's suspended organization membership.",
+        )
+        restored_access_status, restored_access_data = safe_call(
+            api, "organization_restored_access_probe", "second",
+            "org_workspace_list_session",
+            {"username": member_username, "token": member_token, "organization_id": first_org},
+        )
+        probe(
+            "organization_restored_access_allowed", "second",
+            restored_access_status, restored_access_data,
+            expected_success=True,
+            detail="The member can access the organization again after restoration.",
         )
 
         replay_status, replay_data = safe_call(
