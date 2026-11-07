@@ -403,14 +403,18 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "jsonb_typeof(state_json::jsonb) = 'object'" in normalized
     assert "octet_length(state_json) <= 8388608" in normalized
     assert "octet_length(p_state_json) > 8388608" in normalized
+    assert "p_expected_revision bigint" in normalized
+    assert "p_expected_revision is null or p_expected_revision < 0" in normalized
     assert "revision bigint not null default 1" in normalized
     assert "enable row level security" in normalized
     assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated, service_role" in normalized
+    assert "grant select, insert, update on table public.shoir_organization_workspace_states" not in normalized
     assert "create or replace function public.shoir_org_workspace_state_load" in normalized
     assert "create or replace function public.shoir_org_workspace_state_save" in normalized
     assert "for share" in normalized
     assert "shoir_org_resolve_workspace" in normalized
     assert "public.shoir_organization_workspace_states.revision = p_expected_revision" in normalized
+    assert "p_expected_revision is null or" not in normalized
     assert "revision = public.shoir_organization_workspace_states.revision + 1" in normalized
     assert "shared workspace changed since it was loaded" in normalized
     assert "using errcode = '40001'" in normalized
