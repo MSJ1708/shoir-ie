@@ -413,6 +413,11 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "revision = public.shoir_organization_workspace_states.revision + 1" in normalized
     assert "shared workspace changed since it was loaded" in normalized
     assert "using errcode = '40001'" in normalized
+    assert "organization.workspace_state_saved" in normalized
+    assert "workspace_id', p_workspace_id" in normalized
+    assert "revision', v_revision" in normalized
+    assert "state_bytes', octet_length(p_state_json)" in normalized
+    assert "insert into public.shoir_organization_audit_events" in normalized
     assert "revoke all on function public.shoir_org_workspace_state_load(text, uuid, uuid)" in normalized
     assert "revoke all on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint)" in normalized
     assert "grant execute on function public.shoir_org_workspace_state_load(text, uuid, uuid) to service_role" in normalized
