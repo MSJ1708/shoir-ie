@@ -407,7 +407,8 @@ def test_dataset_download_edge_action_is_session_and_workspace_scoped():
     assert '.eq("record_type", recordType)' in action
     assert '.eq("entity_key", entityKey)' in action
     assert 'datasetId + ":v" + requestedVersion' in action
-    assert 'datasetEntitlementDenial(' in action
+    assert 'datasetEntitlementDenialForRequest(' in action
+    assert 'resolveManagedWorkspaceKey(' in action
     assert '.createSignedUrl(storageKey, 300, { download: true })' in action
     assert 'expectedPrefix = workspaceKey + "/" + datasetId + "/"' in action
 
@@ -539,21 +540,35 @@ def test_every_dataset_edge_action_enforces_server_side_professional_entitlement
         next_action = action.find('if (action === "')
         action = action[:next_action] if next_action >= 0 else action
         assert "getSession(" in action, action_name
-        assert "datasetEntitlementDenial(" in action, action_name
+        assert "datasetEntitlementDenialForRequest(" in action, action_name
+        assert "resolveManagedWorkspaceKey(" in action, action_name
 
     save = source.split('if (action === "platform_record_save") {', 1)[1].split(
         'if (action === "platform_record_list") {', 1
     )[0]
     assert 'recordType === "dataset"' in save
     assert 'recordType === "dataset_version"' in save
-    assert "datasetEntitlementDenial(" in save
+    assert "datasetEntitlementDenialForRequest(" in save
 
     listing = source.split('if (action === "platform_record_list") {', 1)[1].split(
         'if (action === "workspace_load") {', 1
     )[0]
     assert 'recordType === "dataset"' in listing
     assert 'recordType === "dataset_version"' in listing
-    assert "datasetEntitlementDenial(" in listing
+    assert "datasetEntitlementDenialForRequest(" in listing
+
+    personal_tier_guard = source.split(
+        "function datasetEntitlementDenied(", 1
+    )[1].split("\n}", 1)[0]
+    assert 'platformTierAllows(row.tier, "Professional")' in personal_tier_guard
+
+    request_guard = source.split(
+        "async function datasetEntitlementDenialForRequest(", 1
+    )[1].split("\n}", 1)[0]
+    assert "if (organizationId || workspaceId)" in request_guard
+    assert "if (!organizationId || !workspaceId)" in request_guard
+    assert "await organizationForActor(" in request_guard
+    assert "return datasetEntitlementDenial(row)" in request_guard
 
 
 

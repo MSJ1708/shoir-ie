@@ -130,6 +130,8 @@ TO service_role;
 -- role may read and append events, but cannot update or delete history.
 GRANT SELECT, INSERT ON TABLE public.shoir_organization_audit_events
 TO service_role;
+REVOKE UPDATE, DELETE ON TABLE public.shoir_organization_audit_events
+FROM service_role;
 
 CREATE OR REPLACE FUNCTION public.shoir_org_audit_events_immutable()
 RETURNS trigger

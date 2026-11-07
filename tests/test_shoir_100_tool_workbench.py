@@ -826,6 +826,7 @@ def test_workbench_runs_rcm_network_calibration_disruption_and_kpi_tools():
     assert rcm["status"] == "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL"
     assert rcm["task_candidate_count"] == 2
     assert rcm["specialist_review_count"] == 3
+    assert "SPECIALIST_SAFETY_REVIEW" in rcm["decision_tree"]["Recommended task candidate"].tolist()
 
     # T060: deterministic transport optimization with explicit shortage reporting.
     _open_tool_for_app_test(at, "T060 · Supply Chain Network Planner")

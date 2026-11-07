@@ -809,6 +809,10 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 cursor.execute("SET ROLE service_role;")
                 assert _fetchone(
                     target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'SELECT');",
+                )[0] is True
+                assert _fetchone(
+                    target,
                     "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'INSERT');",
                 )[0] is True
                 assert _fetchone(
@@ -819,6 +823,16 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     target,
                     "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'DELETE');",
                 )[0] is False
+                for browser_role in ("anon", "authenticated"):
+                    for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                        assert _fetchone(
+                            target,
+                            "SELECT has_table_privilege(%s, 'public.shoir_organization_audit_events', %s);",
+                            (browser_role, privilege),
+                        )[0] is False, (
+                            f"{browser_role} unexpectedly has {privilege} on "
+                            "the organization audit table"
+                        )
                 # Every privileged organization RPC is callable only by
                 # the server-side service role, never by browser-facing roles.
                 for signature in (

@@ -2329,6 +2329,8 @@ def test_simulation_calibration_uses_chronological_holdout_without_leakage():
 def test_simulation_calibration_rejects_bad_series_and_slope_bounds():
     with pytest.raises(ValueError, match="same number"):
         calibrate_simulation_outputs([1, 2, 3, 4, 5], [1, 2, 3, 4])
+    with pytest.raises(ValueError, match="at least 5 observations"):
+        calibrate_simulation_outputs([1, 2, 3, 4], [2, 4, 6, 8])
     with pytest.raises(ValueError, match="contain variation"):
         calibrate_simulation_outputs([1, 1, 1, 1, 1], [2, 3, 4, 5, 6])
     with pytest.raises(ValueError, match="outside the configured bounds"):

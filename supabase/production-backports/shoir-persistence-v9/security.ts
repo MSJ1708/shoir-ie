@@ -1,6 +1,5 @@
 /** Production v9 CORS allowlist and reserved-administrator invariant. */
 
-
 export const MAX_REQUEST_BODY_BYTES = 12 * 1024 * 1024;
 export const MAX_WORKSPACE_STATE_BYTES = 8 * 1024 * 1024;
 
@@ -133,7 +132,9 @@ export function normalizeWorkspaceStateJson(
   }
   return serialized;
 }
-const BROWSER_ORIGINS_BY_PROJECT: Readonly<Record<string, ReadonlySet<string>>> = {
+const BROWSER_ORIGINS_BY_PROJECT: Readonly<
+  Record<string, ReadonlySet<string>>
+> = {
   gcsamrdaeraxieaagsta: new Set([
     "https://shoir-ie-app.streamlit.app",
   ]),

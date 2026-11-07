@@ -2,8 +2,8 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   inspectCsvShape,
-  isAllowedBrowserOrigin,
   isAllowedApiMethod,
+  isAllowedBrowserOrigin,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
   normalizePlatformTier,
@@ -17,9 +17,15 @@ import {
 
 Deno.test("only POST may dispatch persistence API actions", () => {
   assert(isAllowedApiMethod("POST"), "POST must be accepted.");
-  assert(isAllowedApiMethod("post"), "HTTP method comparison must be case-insensitive.");
+  assert(
+    isAllowedApiMethod("post"),
+    "HTTP method comparison must be case-insensitive.",
+  );
   for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
-    assert(!isAllowedApiMethod(method), `${method} must not dispatch API actions.`);
+    assert(
+      !isAllowedApiMethod(method),
+      `${method} must not dispatch API actions.`,
+    );
   }
 });
 

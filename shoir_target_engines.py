@@ -6440,10 +6440,14 @@ def calibrate_simulation_outputs(
     an output mapping only; it does not tune internal simulator physics or connect
     to a live asset.
     """
-    simulated = _finite_vector(simulated_values, "Simulated values", minimum=5)
-    measured = _finite_vector(measured_values, "Measured values", minimum=5)
+    # Validate numeric inputs first, then report a shape mismatch before a
+    # minimum-length error so callers receive the actionable validation reason.
+    simulated = _finite_vector(simulated_values, "Simulated values", minimum=0)
+    measured = _finite_vector(measured_values, "Measured values", minimum=0)
     if len(simulated) != len(measured):
         raise ValueError("Simulated and measured series must contain the same number of observations.")
+    if len(simulated) < 5:
+        raise ValueError("Simulated and measured series must each contain at least 5 observations.")
     fraction = _finite_number(training_fraction, "Training fraction")
     lower = _finite_number(min_slope, "Minimum calibration slope")
     upper = _finite_number(max_slope, "Maximum calibration slope")

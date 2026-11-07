@@ -1044,7 +1044,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             rcm_records_json = st.text_area(
                                 "Failure-mode records (JSON list)",
-                                value='[{"asset":"P-101","failure_mode":"Bearing wear","consequence":"operational","severity":5,"detectable":true,"on_condition_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"PSV-1","failure_mode":"Pressure trip fails","consequence":"hidden","severity":8,"hidden_protective_function":true,"failure_finding_applicable":true}]',
+                                value='[{"asset":"P-101","failure_mode":"Bearing wear","consequence":"operational","severity":5,"detectable":true,"on_condition_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"PSV-1","failure_mode":"Pressure trip fails","consequence":"hidden","severity":8,"hidden_protective_function":true,"failure_finding_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"ESD-1","failure_mode":"Emergency shutdown fails on demand","consequence":"safety","severity":9,"evidence_reference":"synthetic-example"}]',
                                 key="tool044_records",
                             )
                             run_method = st.form_submit_button("Build RCM task candidates", type="primary", use_container_width=True, key="tool044_run")

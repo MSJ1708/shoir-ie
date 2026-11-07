@@ -4,8 +4,8 @@ import {
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   inspectCsvShape,
-  isAllowedBrowserOrigin,
   isAllowedApiMethod,
+  isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
   platformTierAllows,
   publicErrorFor,
@@ -262,7 +262,7 @@ async function getSession(
   return row;
 }
 function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
-  return !platformTierAllows(row.tier, "Enterprise");
+  return !platformTierAllows(row.tier, "Professional");
 }
 
 function datasetEntitlementDenial(
@@ -274,8 +274,8 @@ function datasetEntitlementDenial(
 } | null {
   if (!datasetEntitlementDenied(row)) return null;
   return {
-    error: "FEATURE_REQUIRES_ENTERPRISE",
-    required_tier: "Enterprise",
+    error: "FEATURE_REQUIRES_PROFESSIONAL",
+    required_tier: "Professional",
     current_tier: String(row.tier || "Starter"),
   };
 }
@@ -283,11 +283,13 @@ function datasetEntitlementDenial(
 async function datasetEntitlementDenialForRequest(
   row: Record<string, unknown>,
   body: Record<string, unknown>,
-): Promise<{
-  error: string;
-  required_tier: string;
-  current_tier: string;
-} | null> {
+): Promise<
+  {
+    error: string;
+    required_tier: string;
+    current_tier: string;
+  } | null
+> {
   const organizationId = String(body.organization_id || "").trim();
   const workspaceId = String(body.organization_workspace_id || "").trim();
   if (organizationId || workspaceId) {
@@ -524,15 +526,21 @@ function validatedOrganizationId(value: unknown): string {
 
 function requireOrganizationTier(row: Record<string, unknown>): void {
   if (!platformTierAllows(row.tier, "Enterprise")) {
-    throw new Error("Organization workspaces require an active Enterprise subscription.");
+    throw new Error(
+      "Organization workspaces require an active Enterprise subscription.",
+    );
   }
   if (
     row.active !== true ||
-    isExpired(typeof row.subscription_expires_at === "string"
-      ? row.subscription_expires_at
-      : null)
+    isExpired(
+      typeof row.subscription_expires_at === "string"
+        ? row.subscription_expires_at
+        : null,
+    )
   ) {
-    throw new Error("The organization owner subscription is inactive or expired.");
+    throw new Error(
+      "The organization owner subscription is inactive or expired.",
+    );
   }
 }
 
@@ -566,7 +574,9 @@ async function organizationForActor(
     throw new Error("Organization management permission is required.");
   }
   if (organization.org_type === "team") {
-    const owner = await getAccount(String(organization.owner_username_lc || ""));
+    const owner = await getAccount(
+      String(organization.owner_username_lc || ""),
+    );
     if (!owner) throw new Error("Organization owner account was not found.");
     requireOrganizationTier(owner as Record<string, unknown>);
   }
@@ -587,7 +597,9 @@ async function resolveManagedWorkspaceKey(
     );
   }
   if (!organizationId || !workspaceId) {
-    throw new Error("Both organization_id and organization_workspace_id are required.");
+    throw new Error(
+      "Both organization_id and organization_workspace_id are required.",
+    );
   }
   const organization = await organizationForActor(
     String(row.username_lc || ""),
@@ -1105,8 +1117,14 @@ Deno.serve(async (req) => {
 
     if (action === "org_list_session") {
       const username = String(body.username || "").trim();
-      const actor = await getSession(String(body.token || ""), username, "workspace");
-      const { data, error } = await supabase.from("shoir_organization_memberships")
+      const actor = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const { data, error } = await supabase.from(
+        "shoir_organization_memberships",
+      )
         .select("organization_id,role,status,joined_at")
         .eq("username_lc", actor.username_lc)
         .eq("status", "active")
@@ -1114,10 +1132,14 @@ Deno.serve(async (req) => {
       if (error) throw error;
       const memberships = data || [];
       const organizationIds = memberships.map((item) => item.organization_id);
-      if (!organizationIds.length) return sendResponse({ ok: true, organizations: [] });
+      if (!organizationIds.length) {
+        return sendResponse({ ok: true, organizations: [] });
+      }
       const { data: organizations, error: organizationError } = await supabase
         .from("shoir_organizations")
-        .select("organization_id,display_name,org_type,owner_username_lc,status")
+        .select(
+          "organization_id,display_name,org_type,owner_username_lc,status",
+        )
         .in("organization_id", organizationIds)
         .eq("status", "active")
         .order("display_name", { ascending: true });
@@ -1143,28 +1165,45 @@ Deno.serve(async (req) => {
 
     if (action === "org_create_session") {
       const username = String(body.username || "").trim();
-      const actor = await getSession(String(body.token || ""), username, "workspace");
+      const actor = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
       requireOrganizationTier(actor as Record<string, unknown>);
       const displayName = String(body.display_name || "").trim();
       if (displayName.length < 2 || displayName.length > 120) {
-        return sendResponse({ error: "Organization name must contain 2 to 120 characters." }, 400);
+        return sendResponse({
+          error: "Organization name must contain 2 to 120 characters.",
+        }, 400);
       }
       const { data, error } = await supabase.rpc("shoir_org_create", {
         p_actor: actor.username_lc,
         p_display_name: displayName,
       });
       if (error) throw error;
-      return sendResponse({ ok: true, organization: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        organization: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_workspace_list_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
       const membership = await organizationForActor(
         actor.username_lc,
         body.organization_id,
       );
-      const { data, error } = await supabase.from("shoir_organization_workspaces")
-        .select("workspace_id,display_name,name_key,status,created_at,updated_at")
+      const { data, error } = await supabase.from(
+        "shoir_organization_workspaces",
+      )
+        .select(
+          "workspace_id,display_name,name_key,status,created_at,updated_at",
+        )
         .eq("organization_id", String(membership.organization.organization_id))
         .eq("status", "active")
         .order("display_name", { ascending: true });
@@ -1177,80 +1216,135 @@ Deno.serve(async (req) => {
     }
 
     if (action === "org_member_list_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
       const membership = await organizationForActor(
         actor.username_lc,
         body.organization_id,
       );
-      const { data, error } = await supabase.from("shoir_organization_memberships")
+      const { data, error } = await supabase.from(
+        "shoir_organization_memberships",
+      )
         .select("username_lc,role,status,joined_at,created_at,updated_at")
         .eq("organization_id", String(membership.organization.organization_id))
         .eq("status", "active")
         .order("role", { ascending: true })
         .order("username_lc", { ascending: true });
       if (error) throw error;
-      return sendResponse({ ok: true, role: membership.role, members: data || [] });
+      return sendResponse({
+        ok: true,
+        role: membership.role,
+        members: data || [],
+      });
     }
 
     if (action === "org_invitation_create_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
       if (membership.organization.org_type !== "team") {
-        return sendResponse({ error: "Invitations are available only for team organizations." }, 403);
+        return sendResponse({
+          error: "Invitations are available only for team organizations.",
+        }, 403);
       }
       const target = String(body.target_username_lc || "").trim().toLowerCase();
       const role = String(body.role || "viewer").trim().toLowerCase();
-      if (!target || target.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(target)) {
+      if (
+        !target || target.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(target)
+      ) {
         return sendResponse({ error: "Invitation username is invalid." }, 400);
       }
       if (!["admin", "engineer", "approver", "viewer"].includes(role)) {
         return sendResponse({ error: "Invitation role is invalid." }, 400);
       }
       const lifetimeDays = Number(body.lifetime_days ?? 7);
-      if (!Number.isInteger(lifetimeDays) || lifetimeDays < 1 || lifetimeDays > 30) {
-        return sendResponse({ error: "Invitation lifetime must be between 1 and 30 days." }, 400);
+      if (
+        !Number.isInteger(lifetimeDays) || lifetimeDays < 1 || lifetimeDays > 30
+      ) {
+        return sendResponse({
+          error: "Invitation lifetime must be between 1 and 30 days.",
+        }, 400);
       }
       const tokenBytes = new Uint8Array(32);
       crypto.getRandomValues(tokenBytes);
       const invitationToken = bytesToHex(tokenBytes);
       const tokenHash = await sha256Hex(invitationToken);
-      const expiresAt = new Date(Date.now() + lifetimeDays * 24 * 60 * 60 * 1000).toISOString();
-      const { data, error } = await supabase.rpc("shoir_org_invitation_create", {
-        p_actor: actor.username_lc,
-        p_organization_id: String(membership.organization.organization_id),
-        p_target_username_lc: target,
-        p_role: role,
-        p_token_hash: tokenHash,
-        p_expires_at: expiresAt,
-      });
+      const expiresAt = new Date(
+        Date.now() + lifetimeDays * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const { data, error } = await supabase.rpc(
+        "shoir_org_invitation_create",
+        {
+          p_actor: actor.username_lc,
+          p_organization_id: String(membership.organization.organization_id),
+          p_target_username_lc: target,
+          p_role: role,
+          p_token_hash: tokenHash,
+          p_expires_at: expiresAt,
+        },
+      );
       if (error) throw error;
       return sendResponse({
         ok: true,
         invitation: Array.isArray(data) ? data[0] : data,
         invitation_token: invitationToken,
-        token_notice: "Copy this token now. It is stored only as a SHA-256 hash and cannot be retrieved again.",
+        token_notice:
+          "Copy this token now. It is stored only as a SHA-256 hash and cannot be retrieved again.",
       });
     }
 
     if (action === "org_invitation_accept_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const invitationToken = String(body.invitation_token || "").trim().toLowerCase();
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const invitationToken = String(body.invitation_token || "").trim()
+        .toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(invitationToken)) {
         return sendResponse({ error: "Invitation token is invalid." }, 400);
       }
-      const { data, error } = await supabase.rpc("shoir_org_invitation_accept", {
-        p_actor: actor.username_lc,
-        p_token_hash: await sha256Hex(invitationToken),
-      });
+      const { data, error } = await supabase.rpc(
+        "shoir_org_invitation_accept",
+        {
+          p_actor: actor.username_lc,
+          p_token_hash: await sha256Hex(invitationToken),
+        },
+      );
       if (error) throw error;
-      return sendResponse({ ok: true, membership: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        membership: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_invitation_list_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
-      const { data, error } = await supabase.from("shoir_organization_invitations")
-        .select("invitation_id,target_username_lc,role,created_by_username_lc,expires_at,used_at,revoked_at,accepted_by_username_lc,created_at")
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.from(
+        "shoir_organization_invitations",
+      )
+        .select(
+          "invitation_id,target_username_lc,role,created_by_username_lc,expires_at,used_at,revoked_at,accepted_by_username_lc,created_at",
+        )
         .eq("organization_id", String(membership.organization.organization_id))
         .order("created_at", { ascending: false })
         .limit(100);
@@ -1259,26 +1353,48 @@ Deno.serve(async (req) => {
     }
 
     if (action === "org_invitation_revoke_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
       const invitationId = validatedOrganizationId(body.invitation_id);
-      const { data, error } = await supabase.rpc("shoir_org_invitation_revoke", {
-        p_actor: actor.username_lc,
-        p_organization_id: String(membership.organization.organization_id),
-        p_invitation_id: invitationId,
-      });
+      const { data, error } = await supabase.rpc(
+        "shoir_org_invitation_revoke",
+        {
+          p_actor: actor.username_lc,
+          p_organization_id: String(membership.organization.organization_id),
+          p_invitation_id: invitationId,
+        },
+      );
       if (error) throw error;
-      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_member_role_set_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
       const target = String(body.target_username_lc || "").trim().toLowerCase();
       const newRole = String(body.role || "").trim().toLowerCase();
       if (!target || target.length > 128) {
         return sendResponse({ error: "Member username is invalid." }, 400);
       }
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
       const { data, error } = await supabase.rpc("shoir_org_member_role_set", {
         p_actor: actor.username_lc,
         p_organization_id: String(membership.organization.organization_id),
@@ -1286,47 +1402,81 @@ Deno.serve(async (req) => {
         p_role: newRole,
       });
       if (error) throw error;
-      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_member_remove_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
       const target = String(body.target_username_lc || "").trim().toLowerCase();
       if (!target || target.length > 128) {
         return sendResponse({ error: "Member username is invalid." }, 400);
       }
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
       const { data, error } = await supabase.rpc("shoir_org_member_remove", {
         p_actor: actor.username_lc,
         p_organization_id: String(membership.organization.organization_id),
         p_target_username_lc: target,
       });
       if (error) throw error;
-      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_owner_transfer_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
       const target = String(body.target_username_lc || "").trim().toLowerCase();
       if (!target || target.length > 128) {
         return sendResponse({ error: "New owner username is invalid." }, 400);
       }
-      const membership = await organizationForActor(actor.username_lc, body.organization_id);
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
       const { data, error } = await supabase.rpc("shoir_org_owner_transfer", {
         p_actor: actor.username_lc,
         p_organization_id: String(membership.organization.organization_id),
         p_target_username_lc: target,
       });
       if (error) throw error;
-      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_workspace_create_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
       const displayName = String(body.display_name || "").trim();
       if (!displayName || displayName.length > 120) {
-        return sendResponse({ error: "Workspace name must contain 1 to 120 characters." }, 400);
+        return sendResponse({
+          error: "Workspace name must contain 1 to 120 characters.",
+        }, 400);
       }
       const { data, error } = await supabase.rpc("shoir_org_workspace_create", {
         p_actor: actor.username_lc,
@@ -1334,31 +1484,64 @@ Deno.serve(async (req) => {
         p_display_name: displayName,
       });
       if (error) throw error;
-      return sendResponse({ ok: true, workspace: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        workspace: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_workspace_archive_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
-      const workspaceId = validatedOrganizationId(body.organization_workspace_id);
-      const { data, error } = await supabase.rpc("shoir_org_workspace_archive", {
-        p_actor: actor.username_lc,
-        p_organization_id: String(membership.organization.organization_id),
-        p_workspace_id: workspaceId,
-      });
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const workspaceId = validatedOrganizationId(
+        body.organization_workspace_id,
+      );
+      const { data, error } = await supabase.rpc(
+        "shoir_org_workspace_archive",
+        {
+          p_actor: actor.username_lc,
+          p_organization_id: String(membership.organization.organization_id),
+          p_workspace_id: workspaceId,
+        },
+      );
       if (error) throw error;
-      return sendResponse({ ok: true, result: Array.isArray(data) ? data[0] : data });
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
     }
 
     if (action === "org_audit_list_session") {
-      const actor = await getSession(String(body.token || ""), String(body.username || ""), "workspace");
-      const membership = await organizationForActor(actor.username_lc, body.organization_id, true);
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
       const limit = Number(body.limit ?? 100);
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
-        return sendResponse({ error: "Audit event page size must be between 1 and 200." }, 400);
+        return sendResponse({
+          error: "Audit event page size must be between 1 and 200.",
+        }, 400);
       }
-      const { data, error } = await supabase.from("shoir_organization_audit_events")
-        .select("event_id,actor_username_lc,subject_username_lc,event_type,payload_json,created_at")
+      const { data, error } = await supabase.from(
+        "shoir_organization_audit_events",
+      )
+        .select(
+          "event_id,actor_username_lc,subject_username_lc,event_type,payload_json,created_at",
+        )
         .eq("organization_id", String(membership.organization.organization_id))
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -1374,9 +1557,9 @@ Deno.serve(async (req) => {
         "workspace",
       );
       const entitlementResponse = await datasetEntitlementDenialForRequest(
-          row as unknown as Record<string, unknown>,
-          body,
-        );
+        row as unknown as Record<string, unknown>,
+        body,
+      );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1458,9 +1641,9 @@ Deno.serve(async (req) => {
         "workspace",
       );
       const entitlementResponse = await datasetEntitlementDenialForRequest(
-          row as unknown as Record<string, unknown>,
-          body,
-        );
+        row as unknown as Record<string, unknown>,
+        body,
+      );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1506,9 +1689,9 @@ Deno.serve(async (req) => {
         "workspace",
       );
       const entitlementResponse = await datasetEntitlementDenialForRequest(
-          row as unknown as Record<string, unknown>,
-          body,
-        );
+        row as unknown as Record<string, unknown>,
+        body,
+      );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
@@ -1709,9 +1892,9 @@ Deno.serve(async (req) => {
         "workspace",
       );
       const entitlementResponse = await datasetEntitlementDenialForRequest(
-          row as unknown as Record<string, unknown>,
-          body,
-        );
+        row as unknown as Record<string, unknown>,
+        body,
+      );
       if (entitlementResponse) return sendResponse(entitlementResponse, 403);
       const workspaceKey = await resolveManagedWorkspaceKey(
         row as Record<string, unknown>,
