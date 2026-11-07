@@ -152,3 +152,49 @@ def test_team_workspace_ui_requires_authenticated_remote_session(monkeypatch, tm
     assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
     assert calls == []
     assert any("Sign in with an active Shoir-IE account" in str(item.value) for item in app.warning)
+
+
+def test_team_owner_must_confirm_before_closing_organization(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    calls = []
+
+    def fake_action(action, username, token, **payload):
+        calls.append((action, payload))
+        if action == "org_list_session":
+            return {"ok": True, "organizations": [{
+                "organization_id": ORG_ID,
+                "display_name": "Synthetic Close Test",
+                "org_type": "team",
+                "role": "owner",
+            }]}
+        if action == "org_workspace_list_session":
+            return {"ok": True, "role": "owner", "workspaces": []}
+        if action == "org_member_list_session":
+            return {"ok": True, "role": "owner", "members": [
+                {"username_lc": "shoir-e2e-owner", "role": "owner", "status": "active"}
+            ]}
+        if action == "org_invitation_list_session":
+            return {"ok": True, "invitations": []}
+        if action == "org_audit_list_session":
+            return {"ok": True, "events": []}
+        if action == "org_close_session":
+            assert payload["organization_id"] == ORG_ID
+            return {"ok": True, "result": {"status": "closed"}}
+        raise AssertionError(f"Unexpected action in close test: {action}")
+
+    monkeypatch.setattr(store, "edge_organization_action", fake_action)
+    app = _app(tmp_path)
+    app.run()
+    assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
+
+    close_button = app.button(key="team_org_close_submit")
+    assert close_button.disabled
+    app.checkbox(key="shoir_active_organization_confirm_close").set_value(True)
+    app.run()
+    assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
+    assert not app.button(key="team_org_close_submit").disabled
+
+    app.button(key="team_org_close_submit").click()
+    app.run()
+    assert not app.exception, "\\n".join(str(item.value) for item in app.exception)
+    assert any(action == "org_close_session" for action, _ in calls)
