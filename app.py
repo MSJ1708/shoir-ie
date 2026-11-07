@@ -10380,22 +10380,23 @@ else:
         # Preserve the established workspace-membership editor and export path.
         # The organization-backed collaboration surface is additive and staging-only.
         if platform_tier_allows(tier_val, "Enterprise"):
-            try:
-                render_industrial_module(
-                    mod,
-                    tier_val,
-                    st.session_state.get("current_user", "unknown"),
-                )
-            except Exception as exc:
-                st.error("The existing Team Workspaces module could not be loaded.")
-                with st.expander("Existing workspace diagnostic"):
-                    st.code(f"{type(exc).__name__}: {exc}")
-
             if str(_durable_account_store.APP_ENVIRONMENT).casefold() == "staging":
-                with st.expander(
-                    "Organization-managed team workspaces (staging acceptance)",
-                    expanded=False,
-                ):
+                legacy_tab, organization_tab = st.tabs([
+                    "Existing workspace membership",
+                    "Organization-managed teams (staging)",
+                ])
+                with legacy_tab:
+                    try:
+                        render_industrial_module(
+                            mod,
+                            tier_val,
+                            st.session_state.get("current_user", "unknown"),
+                        )
+                    except Exception as exc:
+                        st.error("The existing Team Workspaces module could not be loaded.")
+                        with st.expander("Existing workspace diagnostic"):
+                            st.code(f"{type(exc).__name__}: {exc}")
+                with organization_tab:
                     try:
                         from shoir_team_workspaces import render_team_workspaces
                         render_team_workspaces()
@@ -10403,6 +10404,17 @@ else:
                         st.error("Organization-managed workspaces could not be loaded safely.")
                         with st.expander("Organization service diagnostic"):
                             st.code(f"{type(exc).__name__}: {exc}")
+            else:
+                try:
+                    render_industrial_module(
+                        mod,
+                        tier_val,
+                        st.session_state.get("current_user", "unknown"),
+                    )
+                except Exception as exc:
+                    st.error("The existing Team Workspaces module could not be loaded.")
+                    with st.expander("Existing workspace diagnostic"):
+                        st.code(f"{type(exc).__name__}: {exc}")
         else:
             st.warning("Team Workspaces & RBAC requires an Enterprise subscription.")
         _shoir_module_stop()
