@@ -310,7 +310,7 @@ def test_organization_close_rpc_preserves_audit_and_removes_active_access():
         MIGRATIONS
         / "20261107150000_shoir_organization_close.sql"
     ).read_text(encoding="utf-8")
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
     normalized = " ".join(executable_sql.casefold().split())
