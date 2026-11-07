@@ -446,8 +446,15 @@ def save_user_workspace(
         session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
         _persist_domain_manifest(username, session_state, db_path)
         return True
-    except Exception:
-        # Workspace persistence should never crash the engineering application.
+    except Exception as exc:
+        # Do not fall back to SQLite or the personal workspace when a shared
+        # organization save fails. Keep the in-session edits and surface a
+        # non-secret diagnostic in the application shell.
+        session_state["_workspace_save_error"] = (
+            "A newer shared-workspace revision exists. Reload the workspace before saving."
+            if "changed since it was loaded" in str(exc).casefold()
+            else "Workspace persistence failed. Your current in-session changes have not been confirmed as saved."
+        )
         return False
 
 
@@ -660,7 +667,12 @@ def load_user_workspace(
         session_state["_workspace_loaded_owner"] = owner
         session_state["_workspace_loaded_scope"] = scope
         return True
-    except Exception:
+    except Exception as exc:
         # Access denial and corrupted payloads fail closed; never load the
         # previous user's or previous organization's values as a fallback.
+        session_state["_workspace_load_error"] = (
+            "Shared workspace access could not be verified. Select another workspace or return to your personal workspace."
+            if "workspace" in str(exc).casefold() or "organization" in str(exc).casefold()
+            else "The saved workspace could not be loaded safely."
+        )
         return False
