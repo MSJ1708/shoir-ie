@@ -386,6 +386,76 @@ def test_mutating_organization_edge_actions_require_server_session_and_scoped_me
         assert "organizationForActor(" in block, action
         assert f'"{rpc}"' in block, action
 
+
+def test_organization_workspace_state_rpc_is_transactional_and_revision_checked():
+    source = (
+        MIGRATIONS
+        / "20261107160000_shoir_organization_workspace_state.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = " ".join(executable_sql.casefold().split())
+    assert "create table public.shoir_organization_workspace_states" in normalized
+    assert "workspace_key text primary key" in normalized
+    assert "jsonb_typeof(state_json::jsonb) = 'object'" in normalized
+    assert "octet_length(state_json) <= 1048576" in normalized
+    assert "revision bigint not null default 1" in normalized
+    assert "enable row level security" in normalized
+    assert "revoke all on table public.shoir_organization_workspace_states from public, anon, authenticated" in normalized
+    assert "revoke delete on table public.shoir_organization_workspace_states from service_role" in normalized
+    assert "create or replace function public.shoir_org_workspace_state_load" in normalized
+    assert "create or replace function public.shoir_org_workspace_state_save" in normalized
+    assert "for share" in normalized
+    assert "shoir_org_resolve_workspace" in normalized
+    assert "public.shoir_organization_workspace_states.revision = p_expected_revision" in normalized
+    assert "revision = public.shoir_organization_workspace_states.revision + 1" in normalized
+    assert "shared workspace changed since it was loaded" in normalized
+    assert "using errcode = '40001'" in normalized
+    assert "revoke all on function public.shoir_org_workspace_state_load(text, uuid, uuid)" in normalized
+    assert "revoke all on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint)" in normalized
+    assert "grant execute on function public.shoir_org_workspace_state_load(text, uuid, uuid) to service_role" in normalized
+    assert "grant execute on function public.shoir_org_workspace_state_save(text, uuid, uuid, text, bigint) to service_role" in normalized
+    assert "delete from public.shoir_organization_workspace_states" not in normalized
+
+
+def test_shared_workspace_edge_handlers_route_only_explicit_org_context_to_shared_rpc():
+    source = (
+        ROOT / "supabase/functions/shoir-persistence/index.ts"
+    ).read_text(encoding="utf-8")
+    load_start = source.index('if (action === "workspace_load")')
+    save_start = source.index('if (action === "workspace_save")')
+    access_start = source.index('if (action === "workspace_access_check")')
+    renewal_start = source.index('if (action === "renew_request")')
+    load_block = source[load_start:save_start]
+    save_block = source[save_start:access_start]
+    access_block = source[access_start:renewal_start]
+
+    for block in (load_block, save_block, access_block):
+        assert "await getSession(" in block
+        assert "organization_id" in block
+        assert "organization_workspace_id" in block
+
+    assert '"shoir_org_workspace_state_load"' in load_block
+    assert '"shoir_org_workspace_state_save"' in save_block
+    assert '"shoir_org_resolve_workspace"' in access_block
+    assert "actor.username_lc" in load_block
+    assert "actor.username_lc" in save_block
+
+
+def test_main_app_revalidates_and_clears_revoked_shared_workspace_before_loading():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    marker = 'if st.session_state.get("current_user") and st.session_state.get("authenticated"):'
+    start = source.index(marker)
+    end = source.index("# WORKSPACE STATUS RIBBON", start)
+    block = source[start:end]
+    validate = block.index("validate_remote_organization_workspace_access")
+    clear = block.index("clear_loaded_workspace_state")
+    drop = block.index('st.session_state.pop("shoir_active_organization_workspace", None)')
+    load = block.index("load_user_workspace(")
+    assert validate < clear < drop < load
+    assert "_workspace_loaded_scope" in block
+
 def test_protected_administrator_is_immutable_on_login_and_existing_sessions():
     sources = (
         ROOT / "supabase/functions/shoir-persistence/index.ts",
