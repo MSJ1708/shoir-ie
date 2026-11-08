@@ -416,7 +416,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T097", "T099", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -1250,6 +1250,58 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "Demand coefficient of variation", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_demand_cv"
                             )
                             run_method = st.form_submit_button("Run disruption stress test", type="primary", use_container_width=True, key="tool080_run")
+                        elif selected_tool["tool_id"] == "T096":
+                            st.caption(
+                                "Inspect server-side connector configuration without making network requests. "
+                                "Live verification is a separate, explicitly confirmed, staging-only HTTPS read; "
+                                "provider credentials must remain in server-side secrets."
+                            )
+                            integration_action = st.selectbox(
+                                "Integration action",
+                                [
+                                    "Inspect configured connector settings",
+                                    "Verify approved REST connector (staging only)",
+                                ],
+                                key="tool096_action",
+                            )
+                            integration_profiles_json = st.text_area(
+                                "Connector profiles (JSON object with a profiles list)",
+                                value=get_tool_example_json("T096"),
+                                key="tool096_profiles",
+                            )
+                            integration_live_profile_json = st.text_area(
+                                "Single approved REST profile for a live staging read (JSON object)",
+                                value='{"name":"Plant REST API","protocol":"REST","endpoint_env":"SHOIR_CONNECTOR_PLANT_ENDPOINT","credential_env":"SHOIR_CONNECTOR_PLANT_TOKEN"}',
+                                key="tool096_live_profile",
+                                disabled=integration_action != "Verify approved REST connector (staging only)",
+                            )
+                            integration_confirm_live = st.checkbox(
+                                "I confirm this sends a read-only HTTPS request to the server-configured staging connector.",
+                                value=False,
+                                key="tool096_confirm_live",
+                                disabled=integration_action != "Verify approved REST connector (staging only)",
+                            )
+                            run_method = st.form_submit_button(
+                                "Run Integration Management check",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool096_run",
+                            )
+                        elif selected_tool["tool_id"] == "T098":
+                            st.caption(
+                                "Configuration inspection only. This does not start an OIDC login, activate MFA, "
+                                "or prove that an identity provider is connected."
+                            )
+                            st.info(
+                                "Provider-backed SSO/MFA remains unavailable until the staging identity provider, "
+                                "verified claims, secure session handling and audit acceptance are configured."
+                            )
+                            run_method = st.form_submit_button(
+                                "Check identity and audit configuration",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool098_run",
+                            )
                         elif selected_tool["tool_id"] == "T097":
                             from plugin_registry import plugin_manifest
                             plugin_options = [item["name"] for item in plugin_manifest()]
@@ -1614,8 +1666,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"suppliers_json": disruption_suppliers_json, "demands_json": disruption_demands_json, "iterations": int(disruption_iterations), "seed": int(disruption_seed), "outage_probability": disruption_outage_probability, "demand_cv": disruption_demand_cv}
                     elif selected_tool["tool_id"] == "T094":
                         current_tool_inputs = {"kpi_records_json": kpi_records_json, "alert_rules_json": kpi_rules_json, "as_of": kpi_as_of, "stale_after_hours": kpi_stale_hours}
+                    elif selected_tool["tool_id"] == "T096":
+                        current_tool_inputs = {
+                            "action": integration_action,
+                            "profiles_json": integration_profiles_json,
+                            "live_profile_json": integration_live_profile_json,
+                            "confirm_live": integration_confirm_live,
+                        }
                     elif selected_tool["tool_id"] == "T097":
                         current_tool_inputs = {"plugin_name": plugin_name, "payload_json": plugin_payload_json}
+                    elif selected_tool["tool_id"] == "T098":
+                        current_tool_inputs = {"configuration_check": True}
                     elif selected_tool["tool_id"] == "T099":
                         current_tool_inputs = {"action": governance_action, "backup_filename": governance_backup_upload.name if governance_backup_upload is not None else ""}
                     elif selected_tool["tool_id"] == "T050":
@@ -1721,6 +1782,41 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
                                     else "USER_ENTERED_UNVERIFIED"
                                 )
+                            elif selected_tool["tool_id"] == "T096":
+                                if integration_action == "Inspect configured connector settings":
+                                    try:
+                                        integration_payload = json.loads(integration_profiles_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Connector profiles must be valid JSON.") from exc
+                                    if not isinstance(integration_payload, dict):
+                                        raise ValueError("Connector profiles input must be a JSON object.")
+                                    if not isinstance(integration_payload.get("profiles"), list):
+                                        raise ValueError("Connector profiles input must contain a profiles JSON list.")
+                                    result = run_additional_tool("T096", integration_payload)
+                                    result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
+                                else:
+                                    if not integration_confirm_live:
+                                        raise PermissionError("Confirm the staging-only read-only connector request before running it.")
+                                    try:
+                                        live_profile = json.loads(integration_live_profile_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("The approved REST connector profile must be valid JSON.") from exc
+                                    if not isinstance(live_profile, dict):
+                                        raise ValueError("The approved REST connector profile must be a JSON object.")
+                                    result = run_additional_tool("T096", {
+                                        "action": "verify_rest_read",
+                                        "profile": live_profile,
+                                        "include_sample_data": False,
+                                    })
+                                    result["data_provenance"] = "EXPLICIT_STAGING_READ_ONLY_CONNECTOR_TEST"
+                                    result["warning"] = (
+                                        str(result.get("warning") or "")
+                                        + " Sample payload preview is disabled in the Workbench; "
+                                        "only redacted connection/data-retrieval metadata is retained."
+                                    )
+                            elif selected_tool["tool_id"] == "T098":
+                                result = run_additional_tool("T098", {})
+                                result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
                             elif selected_tool["tool_id"] == "T097":
                                 import json as _plugin_json
                                 from plugin_registry import plugin_manifest, get_plugin, validate_plugin_payload
@@ -2480,7 +2576,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T097", "T099", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T096", "T097", "T098", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
