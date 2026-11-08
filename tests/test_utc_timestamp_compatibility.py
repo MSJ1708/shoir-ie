@@ -12,8 +12,20 @@ def test_legacy_sqlalchemy_datetime_default_is_naive_utc():
     assert value.tzinfo is None
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     assert abs((now_utc - value).total_seconds()) < 5
-    assert PasscodeDB.__table__.c.created_at.default.arg is _utcnow_naive
-    assert SimulationLogDB.__table__.c.executed_at.default.arg is _utcnow_naive
+    # The test suite may import the same source module under distinct
+    # module names; compare the callable contract rather than Python object
+    # identity across duplicate module loads.
+    for default in (
+        PasscodeDB.__table__.c.created_at.default.arg,
+        SimulationLogDB.__table__.c.executed_at.default.arg,
+    ):
+        assert callable(default)
+        assert default.__name__ == _utcnow_naive.__name__
+        assert default.__module__.endswith("database")
+        generated = default()
+        assert isinstance(generated, datetime)
+        assert generated.tzinfo is None
+        assert abs((datetime.now(timezone.utc).replace(tzinfo=None) - generated).total_seconds()) < 5
 
 
 def test_enterprise_audit_decorator_supports_synchronous_operations():
