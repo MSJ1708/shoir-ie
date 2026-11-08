@@ -578,6 +578,11 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
         if not isinstance(profile, dict):
             raise ValueError("profile must be a JSON object for the approved REST connector.")
         _require_connector_operator()
+        # Validate the request shape before checking the target environment.
+        # This does not perform network access or weaken the staging-only gate.
+        include_sample_data = payload.get("include_sample_data", False)
+        if not isinstance(include_sample_data, bool):
+            raise ValueError("include_sample_data must be a JSON boolean.")
         # A live connector test is a stateful outbound operation. Keep it out
         # of production until the full provider/security/cutover gates have
         # passed and an explicit release authorization exists.
@@ -592,9 +597,6 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
             raise PermissionError(
                 "Live connector verification is available only in the authorized staging environment."
             )
-        include_sample_data = payload.get("include_sample_data", False)
-        if not isinstance(include_sample_data, bool):
-            raise ValueError("include_sample_data must be a JSON boolean.")
         return verify_readonly_rest_connector(
             profile,
             include_sample_data=include_sample_data,
