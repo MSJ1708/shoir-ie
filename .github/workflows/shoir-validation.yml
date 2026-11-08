@@ -153,7 +153,7 @@ jobs:
           from pathlib import Path
           import re
           roots = [Path("app.py"), Path("industrial_platform.py"), Path("industrial_experience.py")]
-          pattern = re.compile(r'(?i)(api[_-]?key|secret|password)\\s*=\\s*["\\'][^"\\']{12,}["\\']')
+          pattern = re.compile(r"""(?i)(api[_-]?key|secret|password)\s*=\s*["'][^"']{12,}["']""")
           hits = [str(path) for path in roots if pattern.search(path.read_text(encoding="utf-8"))]
           if hits:
               raise SystemExit("Potential hard-coded credential pattern found: " + ", ".join(hits))
