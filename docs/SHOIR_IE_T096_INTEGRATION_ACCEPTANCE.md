@@ -1,9 +1,30 @@
 # Shoir-IE T096 Integration Management Centre Acceptance
 
-Assessment date: 2026-11-06. Status: **foundation only / external configuration required**.
+Assessment date: 2026-11-08. Status: **generic read-only REST adapter implemented; provider configuration and hosted acceptance remain open**.
 
-`shoir_erp_connectors.py` defines explicit SAP S/4HANA Public/Private, SAP ECC, Oracle Fusion ERP, Oracle Fusion SCM and Oracle EBS product profiles; a read-only GET transport protocol; and canonical mapping contracts. Its own module documentation states there is no HTTP implementation or token handling and requires injected server-side authorization/transport. The 22-row `docs/integrations/ERP_ACCEPTANCE_MATRIX.csv` was marked NOT RUN in the inspected source.
+## Verified repository implementation
 
-Missing: provider auth/OAuth and secret resolution; production HTTP transport with TLS/DNS/IP pinning/allowlists/redirect rejection/timeouts/size and rate bounds; durable connector UI/health registry; hosted acceptance; SAP and Oracle sandbox credentials.
+The generic HTTPS REST path is now more than a metadata stub:
 
-Complete in order: (1) keep connector state unconfigured until verified; (2) add controlled-server security tests for SSRF, DNS rebinding, redirects, TLS and response limits; (3) implement server-side provider-aware secret resolution and GET-only transport; (4) wire the existing Integration Management Centre; (5) obtain exact product sandbox and least-privilege read-only credentials; (6) execute live auth, expiry/revocation, rate-limit and schema-drift tests; (7) prove sanitization and lineage; (8) attach evidence per exact supported product. Mocks do not count as live SAP/Oracle acceptance.
+- `shoir_remaining_tool_engines.py` exposes `integration_configuration_status`. Inspection is the default and performs no DNS or HTTP operation. A live read requires the explicit `verify_rest_read` action, an authenticated entitled Enterprise administrator and a server-configured profile.
+- `shoir_rest_connector.py` supports HTTPS + Bearer token only. It resolves credentials from server environment/Streamlit secrets, requires an exact hostname/port allowlist, pins a validated DNS address for the socket connection, verifies TLS against the original hostname, rejects redirects, bounds response bytes and timeouts, and redacts sensitive fields from optional previews.
+- `tests/test_shoir_rest_connector.py` covers disabled/missing configuration, endpoint allowlisting, metadata and private-network blocking, authorization/tier checks, response limits, redirect handling, malformed responses, secret redaction and no-network configuration inspection. These tests use controlled mocks; they are not proof of a real provider connection.
+- `shoir_erp_connectors.py` defines SAP S/4HANA Public/Private, SAP ECC, Oracle Fusion ERP, Oracle Fusion SCM and Oracle EBS product/resource contracts, canonical mapping, GET-only transport protocol and server-side authorization contract. It intentionally has no provider HTTP implementation or provider token handling.
+
+## What is not verified
+
+No SAP, Oracle or other customer ERP sandbox endpoint, provider tenant, least-privilege credential, API scope or network route has been configured for a live test. The generic adapter is not a vendor-specific SAP/Oracle adapter. The provider-specific transport interface still requires an independently reviewed implementation that resolves the opaque credential reference server-side.
+
+The 22-row `docs/integrations/ERP_ACCEPTANCE_MATRIX.csv` remains NOT RUN for live product acceptance. No live connection, data import, ongoing sync or external ERP persistence is claimed.
+
+## Required completion sequence
+
+1. Select one supported product and exact read-only API resource with an authorized customer/provider owner.
+2. Provision the staging-only service identity and secret in the approved secret store; never place credentials in a browser, workbook, source file or chat.
+3. Add the exact endpoint hostname/port to the allowlist and, only where required, the precise approved private CIDR. Reject broad wildcard/network access.
+4. For SAP/Oracle, implement the provider-specific OAuth/token and pagination layer behind the GET-only contract; retain TLS verification, DNS/IP pinning, redirect rejection, bounded timeouts/bytes/pages/rates and sanitized diagnostics.
+5. Run live staging health/read tests with synthetic or approved non-personal data; verify 401/403, token expiry/revocation, rate limits, schema drift, pagination, duplicate/conflicting IDs, field/unit/currency mapping and lineage hashes.
+6. Prove that no write method exists, no network call occurs at import/configuration-inspection time, and secrets or personal data cannot appear in logs/previews.
+7. Capture exact endpoint profile (without secret values), source SHA, CI run, redacted output, provider/API version and customer owner sign-off. Only then mark that specific connector verified.
+
+Mocks and product profile metadata do not count as live SAP/Oracle acceptance. T096 remains **EXTERNAL_CONFIGURATION_REQUIRED** until an actual provider-backed test is completed.
