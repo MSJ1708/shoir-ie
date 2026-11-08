@@ -989,9 +989,13 @@ def test_workbench_exposes_and_runs_t096_and_t098_configuration_checks():
     assert integration["status"] == "CONFIGURATION_INSPECTED"
     assert integration["connected_count"] == 0
     assert all(
-        item["status"] == "NOT_CONNECTED_CONFIGURATION_INCOMPLETE"
+        item["status"] in {
+            "NOT_CONNECTED_CONFIGURATION_INCOMPLETE",
+            "READY_FOR_AUTHORIZED_STAGING_TEST",
+        }
         for item in integration["profile_records"]
     )
+    assert all(item["last_test_at"] is None for item in integration["profile_records"])
 
     inspector = at.selectbox(key="shoir_100_tool_inspector")
     inspector.select("T098 · Enterprise Identity and Audit Center")
@@ -1004,6 +1008,9 @@ def test_workbench_exposes_and_runs_t096_and_t098_configuration_checks():
     identity = at.session_state.get("shoir_tool_result_T098")
     assert identity is not None
     assert identity["tool_id"] == "T098"
-    assert identity["status"] in {"NOT_CONFIGURED", "CONFIGURATION_INVALID"}
     assert identity["provider"].startswith("OIDC-compatible identity provider")
+    assert identity["sso_active"] is False
+    assert identity["mfa_active"] is False
+    assert identity["provider_authentication_tested"] is False
+    assert identity["provider_mfa_evidence_verified"] is False
     assert all(row["value_exposed"] is False for row in identity["environment_variables"].to_dict("records"))
