@@ -432,7 +432,7 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "where workspace_key = v_workspace_key and revision = p_expected_revision" in normalized
     # A missing/negative expected revision must fail closed before any write.
     assert "or p_expected_revision is null or p_expected_revision < 0 then" in normalized
-    assert "revision = public.shoir_organization_workspace_states.revision + 1" in normalized
+    assert "revision = revision + 1" in normalized
     assert "shared workspace changed since it was loaded" in normalized
     assert "using errcode = '40001'" in normalized
     assert "organization.workspace_state_saved" in normalized
