@@ -1,9 +1,23 @@
 # Shoir-IE T098 Identity and Audit Acceptance
 
-Assessment date: 2026-11-06. Status: **draft implementation; provider not configured**.
+Assessment date: 2026-11-08. Status: **provider-backed OIDC/MFA remains unconfigured; independent acceptance is outstanding**.
 
-PR #223, [T098 provider-backed OIDC and append-only security audit](https://github.com/MSJ1708/shoir-ie/pull/223), remains draft. Its description records optional OIDC login, server JWT validation, exact verified-email mapping, optional MFA-claim enforcement and server-only audit insertion. It explicitly states no real provider tenant, issuer, client ID/secret, cookie secret, JWKS configuration, verified-email behavior or MFA claim has been supplied.
+## Current repository / pull request state
 
-Required: exact-head Deno and SQL replay results; independent review of signature/issuer/audience/algorithm/JWKS rotation/state/nonce/replay/session rollback; staging IdP config; live success/failure/expired/replay/inactive/ambiguous identity/MFA tests; append-only audit insert/read/retention and actor-attribution acceptance.
+PR #223 ([provider-backed OIDC and append-only security audit](https://github.com/MSJ1708/shoir-ie/pull/223)) remains open and draft. Last inspected head: `86cf0102f47c9a6e33269f7019a259158144453d`.
 
-Complete by reviewing PR #223, configuring a staging-only provider, verifying exact issuer/audience/key rotation/claims, enforcing actual MFA at the provider, running disposable-account hosted tests, proving audit failure fails closed, testing revocation and account deactivation, then attaching exact-SHA evidence. A UI setting or database flag is not proof of OIDC/MFA connectivity.
+The proposal contains optional OIDC login, server-side JWT validation, exact verified-email mapping, optional MFA-claim enforcement and server-only audit insertion. The repository and PR description do not establish that a real identity provider tenant is configured.
+
+No verified issuer, audience/client ID, client secret, cookie secret, JWKS endpoint/key rotation, verified-email behavior or MFA claim has been supplied for staging. A setting, mock JWT or database flag is not evidence of SSO/MFA connectivity.
+
+## Required before acceptance
+
+1. Review PR #223 as a separate security-sensitive change and reconcile it with the current PR #232 release candidate; do not merge the divergent branch wholesale.
+2. Configure a staging-only IdP application and redirect URLs. Store client/cookie secrets in the approved server-side secret store.
+3. Verify signature, allowed algorithm, issuer, audience, key rotation/JWKS cache, state, nonce, PKCE where applicable, clock skew, expiry, replay rejection and exact account/email mapping.
+4. Confirm the provider supplies an actually verified email claim and an MFA-authentication claim with the required assurance level. Do not infer MFA from a local account flag.
+5. Exercise success, invalid signature, wrong issuer/audience, missing/unverified email, unknown/ambiguous account, expired token, replay, inactive account, session revocation and provider outage using disposable staging identities.
+6. Verify audit writes are server-side and append-only, attribute the real actor, fail closed when a mandatory audit write fails, and enforce retention/access/export controls.
+7. Attach exact-SHA CI, SQL replay, hosted success/failure evidence, sanitized audit rows and independent security review.
+
+No OIDC provider acceptance, MFA assurance, or complete enterprise identity coverage is claimed. T098 remains **EXTERNAL_CONFIGURATION_REQUIRED** until a real staging IdP and its security tests pass.
