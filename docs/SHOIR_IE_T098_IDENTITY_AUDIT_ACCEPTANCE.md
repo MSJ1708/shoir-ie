@@ -21,3 +21,8 @@ No verified issuer, audience/client ID, client secret, cookie secret, JWKS endpo
 7. Attach exact-SHA CI, SQL replay, hosted success/failure evidence, sanitized audit rows and independent security review.
 
 No OIDC provider acceptance, MFA assurance, or complete enterprise identity coverage is claimed. T098 remains **EXTERNAL_CONFIGURATION_REQUIRED** until a real staging IdP and its security tests pass.
+
+## Workbench route added — 2026-11-08
+
+The existing Workbench now exposes a focused T098 configuration-readiness check using server-side configuration names and status flags only. It explicitly reports `sso_active=false`, `mfa_active=false` and untested provider evidence; it does not start login, activate MFA, or display secret values. A Workbench AppTest exercises the route. Real IdP configuration and browser acceptance remain outstanding.
+
