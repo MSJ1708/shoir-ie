@@ -97,7 +97,8 @@ def test_active_module_identity_renders_before_optional_header_diagnostics_and_h
 def test_manual_release_gate_runbook_targets_the_unmerged_candidate_branch():
     docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
     assert "select the branch containing the release-candidate commit" in docs
-    assert "select `staging-e2e-20261019` (PR #165)" in docs
+    assert "select `feat/shoir-ie-release-hardening-20261105`" in docs
+    assert "Do not select `staging-e2e-20261019` (the PR base)" in docs
     assert "choosing `main` would test the older base revision" in docs
 
 
