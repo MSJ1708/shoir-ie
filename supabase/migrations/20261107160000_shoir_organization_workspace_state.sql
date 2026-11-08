@@ -153,19 +153,28 @@ BEGIN
           v_actor, p_organization_id, p_workspace_id, 'write'
       );
 
-    INSERT INTO public.shoir_organization_workspace_states(
-        workspace_key, state_json, revision, updated_by_username_lc, updated_at
-    )
-    SELECT
-        v_workspace_key, p_state_json, 1, v_actor, now()
-    WHERE p_expected_revision = 0
-    ON CONFLICT (workspace_key) DO UPDATE
-       SET state_json = EXCLUDED.state_json,
-           revision = public.shoir_organization_workspace_states.revision + 1,
-           updated_by_username_lc = EXCLUDED.updated_by_username_lc,
-           updated_at = now()
-     WHERE public.shoir_organization_workspace_states.revision = p_expected_revision
-    RETURNING revision, updated_at INTO v_revision, v_updated_at;
+    -- A missing state accepts only revision 0. Existing state accepts only
+    -- the exact revision loaded by the caller. Keep the two paths separate:
+    -- an INSERT ... SELECT with a revision predicate would emit no source row
+    -- for revisions greater than zero and could never reach ON CONFLICT.
+    IF p_expected_revision = 0 THEN
+        INSERT INTO public.shoir_organization_workspace_states(
+            workspace_key, state_json, revision, updated_by_username_lc, updated_at
+        ) VALUES (
+            v_workspace_key, p_state_json, 1, v_actor, now()
+        )
+        ON CONFLICT (workspace_key) DO NOTHING
+        RETURNING revision, updated_at INTO v_revision, v_updated_at;
+    ELSE
+        UPDATE public.shoir_organization_workspace_states
+           SET state_json = p_state_json,
+               revision = revision + 1,
+               updated_by_username_lc = v_actor,
+               updated_at = now()
+         WHERE workspace_key = v_workspace_key
+           AND revision = p_expected_revision
+        RETURNING revision, updated_at INTO v_revision, v_updated_at;
+    END IF;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Shared workspace changed since it was loaded. Reload before saving.'
