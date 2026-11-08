@@ -191,6 +191,7 @@ def _expected_accounts() -> list[dict[str, str]]:
         ("expired", "shoir-e2e-expired", STARTER_TIER),
         ("module", "shoir-e2e-module", ACTIVE_TIER),
         ("research_module", "shoir-e2e-research", RESEARCH_TIER),
+        ("inactive", "shoir-e2e-inactive", STARTER_TIER),
     ]
     result = []
     for key, username, tier in specs:
@@ -261,12 +262,13 @@ def provision() -> int:
         expected_names = {
             "shoir-e2e-active", "shoir-e2e-second", "shoir-e2e-starter",
             "shoir-e2e-expired", "shoir-e2e-module", "shoir-e2e-research",
+            "shoir-e2e-inactive",
         }
         if not isinstance(candidate_accounts, list) or {
             str(a.get("username", "")).casefold() for a in candidate_accounts
             if isinstance(a, dict)
         } != expected_names:
-            raise RuntimeError("The existing credential file does not contain exactly the six expected staging identities.")
+            raise RuntimeError("The existing credential file does not contain exactly the seven expected staging identities.")
         safe_resume_statuses = {"NOT_STARTED", "REGISTRATION_FAILED"}
         for account in candidate_accounts:
             if not isinstance(account, dict) or account.get("status") not in safe_resume_statuses or "request_id" in account:
@@ -306,8 +308,8 @@ def provision() -> int:
         raise ValueError("Administrator password cannot be empty.")
 
     accounts = existing_document["accounts"] if existing_document is not None else _expected_accounts()
-    print("This will create six disposable staging identities through registration and admin approval.")
-    print("It refuses to reuse matching identities. The expired account is a synthetic test fixture.")
+    print("This will create seven disposable staging identities through registration and admin approval.")
+    print("It refuses to reuse matching identities. The expired and disabled accounts are synthetic test fixtures.")
     confirmation_phrase = (
         f"RESUME SHOIR STAGING E2E ACCOUNTS {STAGING_PROJECT_REF}"
         if resume_existing
@@ -346,6 +348,7 @@ def provision() -> int:
                 "expired": ["SHOIR_E2E_EXPIRED_USERNAME", "SHOIR_E2E_EXPIRED_PASSWORD"],
                 "module": ["SHOIR_E2E_MODULE_USERNAME", "SHOIR_E2E_MODULE_PASSWORD"],
                 "research_module": ["SHOIR_E2E_RESEARCH_MODULE_USERNAME", "SHOIR_E2E_RESEARCH_MODULE_PASSWORD"],
+                "inactive": ["SHOIR_E2E_INACTIVE_USERNAME", "SHOIR_E2E_INACTIVE_PASSWORD"],
             },
             "results": [],
         }
@@ -402,15 +405,49 @@ def provision() -> int:
         expired["status"] = "EXPIRED_FIXTURE_SET"
         _write_private_json(OUTPUT_PATH, document)
 
-        # Validate the login/tier contract for the five active accounts and the
-        # renewal-only contract for the intentionally expired account.
+        # Disable only the dedicated inactive fixture. This is a staging-only
+        # server-key mutation against one exact allowlisted test username; the
+        # account itself was created and approved through the normal lifecycle.
+        inactive = next(account for account in accounts if account["secret_prefix"] == "inactive")
+        inactive_filter = quote(inactive["username"], safe="")
+        inactive_status, inactive_rows = rest_call(
+            service_key,
+            "PATCH",
+            f"shoir_accounts?username_lc=eq.{inactive_filter}",
+            {"active": False, "updated_at": datetime.now(timezone.utc).isoformat()},
+        )
+        if (
+            inactive_status not in (200, 204)
+            or not isinstance(inactive_rows, list)
+            or len(inactive_rows) != 1
+            or inactive_rows[0].get("username_lc") != inactive["username"]
+            or inactive_rows[0].get("role") != "User"
+            or inactive_rows[0].get("active") is not False
+        ):
+            _set_status(document, inactive, "INACTIVE_FIXTURE_FAILED")
+            raise RuntimeError("Could not confirm the dedicated inactive staging fixture; inspect staging before retrying.")
+        inactive["status"] = "INACTIVE_FIXTURE_SET"
+        _write_private_json(OUTPUT_PATH, document)
+
+        # Validate five enabled, non-expired accounts, the expired renewal-only
+        # account, and the disabled-account denial contract.
         for account in accounts:
             login_status, auth = edge_call(
                 publishable_key,
                 "login",
                 {"username": account["username"], "password": account["password"]},
             )
-            if account["secret_prefix"] == "expired":
+            if account["secret_prefix"] == "inactive":
+                valid = (
+                    login_status == 401
+                    and auth.get("error") == "Invalid username or password."
+                    and not auth.get("token")
+                )
+                if not valid:
+                    _set_status(document, account, "INACTIVE_LOGIN_VALIDATION_FAILED")
+                    raise RuntimeError("Inactive-account login denial failed in staging; inspect the evidence.")
+                account["status"] = "VERIFIED_INACTIVE_DENIED"
+            elif account["secret_prefix"] == "expired":
                 valid = (
                     login_status == 403
                     and auth.get("error") == "SUBSCRIPTION_EXPIRED"
@@ -462,7 +499,7 @@ def provision() -> int:
             OUTPUT_PATH.chmod(0o600)
         except OSError:
             pass
-        print("PASS: six staging identities were created through registration/approval and their login/expiry contracts were verified.")
+        print("PASS: seven staging identities were created through registration/approval and their active/expired/inactive login contracts were verified.")
         print(f"Private credentials file written: {OUTPUT_PATH.resolve()}")
         print("No password, token, key, or response body was printed.")
         print("Copy username/password values into the mapped GitHub Actions secrets, then keep or securely delete the file.")
