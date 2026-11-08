@@ -297,8 +297,11 @@ def test_explicit_live_action_checks_authorization_before_adapter(monkeypatch):
 
 
 def test_explicit_live_action_routes_approved_profile_to_adapter(monkeypatch):
+    import durable_account_store
+
     observed = {}
     monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
 
     def fake_adapter(profile, include_sample_data=False):
         observed["profile"] = profile
@@ -314,6 +317,23 @@ def test_explicit_live_action_routes_approved_profile_to_adapter(monkeypatch):
     assert out["status"] == "DATA_RETRIEVAL_VERIFIED"
     assert observed["profile"] == _profile()
     assert observed["include_sample_data"] is True
+
+
+def test_live_t096_rest_verification_is_denied_outside_staging(monkeypatch):
+    import durable_account_store
+
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "production")
+    monkeypatch.setattr(
+        engines,
+        "verify_readonly_rest_connector",
+        lambda *a, **k: pytest.fail("Production must not make outbound connector requests."),
+    )
+    with pytest.raises(PermissionError, match="only in the authorized staging environment"):
+        engines.integration_configuration_status({
+            "action": "verify_rest_read",
+            "profile": _profile(),
+        })
 
 
 def test_live_rest_adapter_rejects_non_token_credentials(monkeypatch):
