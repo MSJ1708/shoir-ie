@@ -426,7 +426,10 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "create or replace function public.shoir_org_workspace_state_save" in normalized
     assert "for share" in normalized
     assert "shoir_org_resolve_workspace" in normalized
-    assert "public.shoir_organization_workspace_states.revision = p_expected_revision" in normalized
+    assert "if p_expected_revision = 0 then" in normalized
+    assert "on conflict (workspace_key) do nothing" in normalized
+    assert "update public.shoir_organization_workspace_states" in normalized
+    assert "where workspace_key = v_workspace_key and revision = p_expected_revision" in normalized
     # A missing/negative expected revision must fail closed before any write.
     assert "or p_expected_revision is null or p_expected_revision < 0 then" in normalized
     assert "revision = public.shoir_organization_workspace_states.revision + 1" in normalized
