@@ -739,7 +739,8 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             # by the Edge Function, not as the postgres migration owner.
             username = "shoir-e2e-replay"
             password_hash = ("a" * 32) + "$" + ("b" * 64)
-            # psycopg2 connections default to autocommit=False; keep the current transaction mode.
+            # Keep one live cursor for the service-role transaction. The
+            # helper _fetchone opens independent cursors on the same connection.
             try:
                 with target.cursor() as cursor:
                     cursor.execute("SET ROLE service_role;")
@@ -755,26 +756,29 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                         target,
                         "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'TRUNCATE');",
                     )[0] is False, "service_role can truncate immutable audit events"
-                # Assert the clean replay created complete indexes for every
-                # account FK, including team owners (the personal-owner unique
-                # index is partial and cannot cover the complete FK).
-                expected_fk_indexes = (
-                    "shoir_org_owner_username_fk",
-                    "shoir_org_audit_actor_fk",
-                    "shoir_org_audit_subject_fk",
-                    "shoir_org_invitation_accepted_by_fk",
-                    "shoir_org_invitation_created_by_fk",
-                    "shoir_org_invitation_organization_fk",
-                    "shoir_org_membership_invited_by_fk",
-                    "shoir_org_workspace_created_by_fk",
-                    "shoir_org_workspace_state_updated_by_fk",
-                )
-                for index_name in expected_fk_indexes:
-                    assert _fetchone(
-                        target,
-                        "SELECT to_regclass(%s) IS NOT NULL;",
-                        (f"public.{index_name}",),
-                    )[0] is True, f"Missing full FK-supporting index {index_name}"
+
+                    # Assert the clean replay created complete indexes for every
+                    # account FK, including team owners (the personal-owner unique
+                    # index is partial and cannot cover the complete FK).
+                    expected_fk_indexes = (
+                        "shoir_org_owner_username_fk",
+                        "shoir_org_audit_actor_fk",
+                        "shoir_org_audit_subject_fk",
+                        "shoir_org_invitation_accepted_by_fk",
+                        "shoir_org_invitation_created_by_fk",
+                        "shoir_org_invitation_organization_fk",
+                        "shoir_org_membership_invited_by_fk",
+                        "shoir_org_workspace_created_by_fk",
+                        "shoir_org_workspace_state_updated_by_fk",
+                    )
+                    for index_name in expected_fk_indexes:
+                        assert _fetchone(
+                            target,
+                            "SELECT to_regclass(%s) IS NOT NULL;",
+                            (f"public.{index_name}",),
+                        )[0] is True, f"Missing full FK-supporting index {index_name}"
+
+                    # Perform one synthetic registration after all index checks.
                     cursor.execute(
                         """
                         SELECT public.shoir_create_registration_request(
