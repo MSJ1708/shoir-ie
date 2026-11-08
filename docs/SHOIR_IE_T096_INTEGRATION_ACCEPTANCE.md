@@ -28,3 +28,8 @@ The 22-row `docs/integrations/ERP_ACCEPTANCE_MATRIX.csv` remains NOT RUN for liv
 7. Capture exact endpoint profile (without secret values), source SHA, CI run, redacted output, provider/API version and customer owner sign-off. Only then mark that specific connector verified.
 
 Mocks and product profile metadata do not count as live SAP/Oracle acceptance. T096 remains **EXTERNAL_CONFIGURATION_REQUIRED** until an actual provider-backed test is completed.
+
+## Workbench route added — 2026-11-08
+
+The existing Workbench now exposes a focused T096 form. It provides configuration inspection without outbound network access and a separate confirmed live-read action. The latter is guarded by the server-resolved application environment and refuses to run unless it is exactly `staging`; credentials remain referenced only by server-side environment/Streamlit secret names. A new AppTest exercises the inspection route, and connector unit coverage asserts that production is denied before the adapter can make a network request. This UI/test addition does not replace provider-specific SAP/Oracle implementation or a live provider acceptance run.
+
