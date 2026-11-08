@@ -514,8 +514,8 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 d.metric("Runtime", runtime["engine"])
                 fig = guaranteed_figure(df, f"{module} · Universal Quick Analyze")
                 if fig is not None:
-                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
-                st.dataframe(df.head(500), use_container_width=True, hide_index=True)
+                    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "responsive": True})
+                st.dataframe(df.head(500), width="stretch", hide_index=True)
                 if st.button("📝 Record analysis snapshot", key="uie_record_analysis_" + hashlib.sha1(module.encode()).hexdigest()[:8]):
                     record_action("analysis_snapshot", {"module": module, "source": choice, "readiness": ready}, username)
                     st.success("Analysis snapshot added to the Industrial Black Box.")
@@ -537,10 +537,10 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 if rows and vals:
                     try:
                         pvt = pivot_table(df, rows, vals, pivot_cols, agg)
-                        st.dataframe(pvt, use_container_width=True, hide_index=True)
+                        st.dataframe(pvt, width="stretch", hide_index=True)
                         fig = guaranteed_figure(pvt, f"{module} · Industrial Pivot")
                         if fig is not None:
-                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
                         if st.button("💾 Save pivot to workspace", key="uie_pivot_save_" + hashlib.sha1(module.encode()).hexdigest()[:8]):
                             st.session_state["universal_pivot_result_df"] = pvt.copy(deep=True)
                             record_action("pivot_saved", {"module": module, "rows": list(rows), "values": list(vals), "aggregation": agg}, username)
@@ -558,7 +558,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 numeric = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
                 metric = st.selectbox("Number / KPI", numeric or [str(df.columns[0])], key="uie_explain_metric_" + hashlib.sha1(module.encode()).hexdigest()[:8])
                 explanation = explain_number(module, choice, df, metric)
-                st.dataframe(pd.DataFrame([explanation]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame([explanation]), width="stretch", hide_index=True)
                 formulas = {}
                 try:
                     import streamlit as st
@@ -573,7 +573,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 nodes, edges = dependency_graph(module, formulas=formulas, semantic_map=sem, source_tables=[choice])
                 fig = dependency_figure(nodes, edges, f"{module} · Explainable dependency graph")
                 if fig is not None:
-                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
                 st.caption("Every explanation is explicitly labelled with source, assumptions, uncertainty and dependencies; absent evidence is shown rather than invented.")
 
         with tabs[3]:
@@ -583,7 +583,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 r1, r2 = st.columns(2)
                 r1.metric("Routed agent", route["agent"])
                 r2.metric("Routing confidence", f"{100 * route['confidence']:.0f}%")
-                st.dataframe(pd.DataFrame([{"Agent": k, "Keyword hits": v} for k, v in route["scores"].items()]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame([{"Agent": k, "Keyword hits": v} for k, v in route["scores"].items()]), width="stretch", hide_index=True)
                 if st.button("🧭 Record agent route", key="uie_agent_record"):
                     record_action("agent_route", route, username)
                     st.success("Route recorded. Execution remains in the existing governed Copilot/orchestration layer.")
@@ -592,13 +592,13 @@ def _render_ui(module: str, tier: str, username: str) -> None:
             actions = st.session_state.get("shoir_universal_action_log", [])
             st.write(f"Recorded actions: **{len(actions)}**")
             if actions:
-                st.dataframe(pd.DataFrame(actions).drop(columns=["payload"], errors="ignore"), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(actions).drop(columns=["payload"], errors="ignore"), width="stretch", hide_index=True)
                 st.download_button(
                     "📜 Export replay script",
                     data=build_script(actions).encode("utf-8"),
                     file_name="shoir_ie_universal_replay.py",
                     mime="text/x-python",
-                    use_container_width=True,
+                    width="stretch",
                     key="uie_replay_export",
                 )
             action = st.selectbox("Permission level", ENGINE_ACTION_LEVELS, key="uie_action_level")
@@ -615,7 +615,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                     st.warning("Action was not recorded because its governance gate is not satisfied.")
 
         with tabs[5]:
-            st.dataframe(trust_snapshot(username, tier), use_container_width=True, hide_index=True)
+            st.dataframe(trust_snapshot(username, tier), width="stretch", hide_index=True)
             st.caption("Trust Center complements the existing enterprise security, audit, connector and persistence layers; it is intentionally read-only.")
 
         with tabs[6]:
