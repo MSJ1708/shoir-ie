@@ -515,6 +515,14 @@ def save_user_workspace(
             session_state["_workspace_save_error"] = (
                 "A newer shared-workspace revision exists. Reload the workspace before saving."
             )
+        elif isinstance(exc, ValueError) and str(exc) == "Both organization and workspace IDs are required for shared persistence.":
+            session_state["_workspace_save_error"] = (
+                "Both organization and workspace IDs are required for shared persistence."
+            )
+        elif isinstance(exc, ValueError) and str(exc) == "Active organization workspace context is invalid.":
+            session_state["_workspace_save_error"] = (
+                "Active organization workspace context is invalid."
+            )
         elif "shared organization workspaces require" in str(exc).casefold():
             session_state["_workspace_save_error"] = (
                 "Shared organization workspaces require the authenticated managed workspace service to be configured."
