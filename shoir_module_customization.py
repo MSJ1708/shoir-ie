@@ -312,7 +312,7 @@ def render_module_customization(
                 st.caption("These are presentation-only aliases. The original column names stay intact for calculations, import mappings and integrations.")
                 mapping_edited = st.data_editor(
                     mapping,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     disabled=["Source field"],
                     key=widget + "_field_map",
@@ -322,7 +322,7 @@ def render_module_customization(
 
             notes = st.text_area("Team instructions / assumptions", value=profile["notes"], height=90, key=widget + "_notes", max_chars=3000)
             decimal_places = st.slider("Numeric display precision", min_value=0, max_value=6, value=int(profile["decimal_places"]), key=widget + "_precision")
-            submitted = st.form_submit_button("💾 Save module profile", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save module profile", type="primary", width="stretch")
 
         if submitted:
             field_labels = {}
