@@ -32,7 +32,7 @@ class StagingE2ECredentialRecoveryTests(unittest.TestCase):
     def test_recovery_targets_only_seven_fixed_test_accounts(self) -> None:
         usernames = [row["username"] for row in recovery.ACCOUNT_SPECS]
         self.assertEqual(len(usernames), 7)
-        self.assertEqual(len(set(usernames)), 6)
+        self.assertEqual(len(set(usernames)), 7)
         self.assertTrue(all(name.startswith("shoir-e2e-") for name in usernames))
         self.assertNotIn("sho", usernames)
         self.assertEqual(recovery.STAGING_PROJECT_REF, "hfhrosthswcybccepmak")
