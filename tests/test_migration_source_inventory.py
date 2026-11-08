@@ -389,6 +389,14 @@ def test_mutating_organization_edge_actions_require_server_session_and_scoped_me
             # Creating a new organization is account-scoped, not scoped to
             # an organization that does not exist yet.
             assert "requireOrganizationTier(actor as Record<string, unknown>)" in block
+        elif action == "org_invitation_accept_session":
+            # An invitee is not a member until this RPC succeeds. Authenticate
+            # the actor, validate the one-time token and pass only its hash;
+            # requiring existing organization membership would block valid invites.
+            assert '"workspace"' in block
+            assert "^[0-9a-f]{64}$" in block
+            assert "sha256Hex(invitationToken)" in block
+            assert "p_actor: actor.username_lc" in block
         else:
             assert "organizationForActor(" in block, action
         assert f'"{rpc}"' in block, action
@@ -419,7 +427,8 @@ def test_organization_workspace_state_rpc_is_transactional_and_revision_checked(
     assert "for share" in normalized
     assert "shoir_org_resolve_workspace" in normalized
     assert "public.shoir_organization_workspace_states.revision = p_expected_revision" in normalized
-    assert "p_expected_revision is null or" not in normalized
+    # A missing/negative expected revision must fail closed before any write.
+    assert "or p_expected_revision is null or p_expected_revision < 0 then" in normalized
     assert "revision = public.shoir_organization_workspace_states.revision + 1" in normalized
     assert "shared workspace changed since it was loaded" in normalized
     assert "using errcode = '40001'" in normalized
