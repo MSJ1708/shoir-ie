@@ -14,6 +14,8 @@ Provision these distinct accounts in the approved staging environment through th
 | Second | Enabled, non-admin, distinct from Active | Prove a valid session cannot read or overwrite another account's workspace |
 | Starter | Enabled, non-admin, Starter tier | Confirm tier returned by the authoritative auth service and deny administrator API access |
 | Expired | Enabled, non-admin, subscription expiry in the past | Confirm renewal-only login, deny workspace read/write, and reject renewal submission without a payment reference |
+| Module | Enabled, non-admin, Enterprise Plus tier | Exercise the 96-module rendering/default-state matrix |
+| Research module | Enabled, non-admin, Research Pack add-on | Exercise Research Pack-only module routes |
 | Inactive | Disabled non-admin test account with valid credentials and a future subscription expiry | Confirm inactive login does not issue a session |
 
 The Active test workspace should be a small JSON object and contain no real customer or business data. During the round-trip probe, the script records its prior serialized state, writes a unique temporary marker, logs in again to read that marker, and restores the original state before revoking test sessions. A workspace that is not a JSON object or exceeds 1 MB is not overwritten. Review the JSON evidence artifact for any `FAIL` result or restore warning.
