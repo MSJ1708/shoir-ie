@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Recover credentials for the six existing Shoir-IE staging E2E accounts.
+"""Recover credentials for the seven existing Shoir-IE staging E2E accounts.
 
 This fail-closed helper is pinned to the staging Supabase project. It never
 creates or deletes accounts, never touches the production project, and never
 prints or writes passwords, password hashes, API keys, or session tokens.
 
-The six passwords are generated in memory, reset for the matching existing
+The seven passwords are generated in memory, reset for the matching existing
 staging rows, and synchronized to GitHub Actions secrets. If it is interrupted,
-rerunning is safe: it resets those same six identities again and synchronizes
+rerunning is safe: it resets those same seven identities again and synchronizes
 their secrets rather than attempting to provision duplicate accounts.
 """
 from __future__ import annotations
