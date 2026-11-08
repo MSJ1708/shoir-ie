@@ -960,3 +960,50 @@ def test_workbench_recovery_tool_applies_a_verified_revision_snapshot():
     assert result["can_undo"] is False
     assert len(result["history"]) == 1
 
+
+
+def test_workbench_exposes_and_runs_t096_and_t098_configuration_checks():
+    """T096/T098 must have real focused UI routes without fake live integrations."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.session_state["user_role"] = "Enterprise Admin"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T096 · Integration Management Center")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.selectbox(key="tool096_action").value == "Inspect configured connector settings"
+    at.button(key="tool096_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    integration = at.session_state.get("shoir_tool_result_T096")
+    assert integration is not None
+    assert integration["status"] == "CONFIGURATION_INSPECTED"
+    assert integration["connected_count"] == 0
+    assert all(
+        item["status"] == "NOT_CONNECTED_CONFIGURATION_INCOMPLETE"
+        for item in integration["profile_records"]
+    )
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T098 · Enterprise Identity and Audit Center")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool098_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    identity = at.session_state.get("shoir_tool_result_T098")
+    assert identity is not None
+    assert identity["tool_id"] == "T098"
+    assert identity["status"] in {"NOT_CONFIGURED", "CONFIGURATION_INVALID"}
+    assert identity["provider"].startswith("OIDC-compatible identity provider")
+    assert all(row["value_exposed"] is False for row in identity["environment_variables"].to_dict("records"))
