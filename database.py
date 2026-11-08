@@ -43,7 +43,7 @@ class SimulationLogDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     engine_name = Column(String, nullable=False)  # AEGIS, NEXUS, or PHOENIX
-    executed_at = Column(DateTime, default=datetime.utcnow)
+    executed_at = Column(DateTime, default=_utcnow_naive)
     parameters_json = Column(Text, nullable=False)
     results_json = Column(Text, nullable=False)
 
