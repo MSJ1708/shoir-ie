@@ -85,6 +85,13 @@ def _fetchone(conn, sql: str, args=()):
         return cursor.fetchone()
 
 
+def _execute(conn, sql: str, args=()):
+    """Execute one statement with an owned cursor and return its first row, if any."""
+    with conn.cursor() as cursor:
+        cursor.execute(sql, args)
+        return cursor.fetchone() if cursor.description is not None else None
+
+
 SAFE_MIGRATION_TARGET_DATABASE = "shoir_safe_referral_preservation_test"
 
 
@@ -739,11 +746,99 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             # by the Edge Function, not as the postgres migration owner.
             username = "shoir-e2e-replay"
             password_hash = ("a" * 32) + "$" + ("b" * 64)
-            # Keep one live cursor for the service-role transaction. The
-            # helper _fetchone opens independent cursors on the same connection.
+            # Use short-lived cursors for each statement. This avoids retaining a
+            # cursor across nested helper calls while preserving one transaction
+            # and the service_role identity for the complete RPC exercise.
             try:
-                with target.cursor() as cursor:
-                    cursor.execute("SET ROLE service_role;")
+                _execute(target, "SET ROLE service_role;")
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'UPDATE');",
+                )[0] is False, "service_role can update immutable audit events"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'DELETE');",
+                )[0] is False, "service_role can delete immutable audit events"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'TRUNCATE');",
+                )[0] is False, "service_role can truncate immutable audit events"
+
+                # Assert the clean replay created complete indexes for every
+                # account FK, including team owners (the personal-owner unique
+                # index is partial and cannot cover the complete FK).
+                expected_fk_indexes = (
+                    "shoir_org_owner_username_fk",
+                    "shoir_org_audit_actor_fk",
+                    "shoir_org_audit_subject_fk",
+                    "shoir_org_invitation_accepted_by_fk",
+                    "shoir_org_invitation_created_by_fk",
+                    "shoir_org_invitation_organization_fk",
+                    "shoir_org_membership_invited_by_fk",
+                    "shoir_org_workspace_created_by_fk",
+                    "shoir_org_workspace_state_updated_by_fk",
+                )
+                for index_name in expected_fk_indexes:
+                    assert _fetchone(
+                        target,
+                        "SELECT to_regclass(%s) IS NOT NULL;",
+                        (f"public.{index_name}",),
+                    )[0] is True, f"Missing full FK-supporting index {index_name}"
+
+                # Perform one synthetic registration after all index checks.
+                request_result = _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_create_registration_request(
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    );
+                    """,
+                    (
+                        username,
+                        username.lower(),
+                        password_hash,
+                        "migration-replay@example.invalid",
+                        "Starter Tier ($29)",
+                        "STC Pay (QR)",
+                        "SYNTHETIC-REPLAY-REFERENCE",
+                        "storage://subscription-payment-proofs/renewals/synthetic.png",
+                    ),
+                )[0]
+                replay_request = request_result if isinstance(request_result, dict) else json.loads(request_result)
+                replay_request_id = int(replay_request["request_id"])
+                _execute(target, "SAVEPOINT shoir_missing_consent_approval")
+                with pytest.raises(psycopg2.Error) as blocked_approval:
+                    _execute(
+                        target,
+                        "UPDATE public.shoir_subscription_requests SET status='Approved' WHERE id=%s;",
+                        (replay_request_id,),
+                    )
+                assert blocked_approval.value.pgcode == "23514"
+                _execute(target, "ROLLBACK TO SAVEPOINT shoir_missing_consent_approval")
+                _execute(
+                    target,
+                    """
+                    UPDATE public.shoir_subscription_requests
+                       SET terms_accepted=TRUE,
+                           terms_version='2026-10-21-beta-v1',
+                           privacy_policy_version='2026-10-21-v1',
+                           refund_policy_version='2026-10-23-v2',
+                           cookie_policy_version='2026-10-21-v1',
+                           accepted_at=NOW()
+                     WHERE id=%s;
+                    """,
+                    (replay_request_id,),
+                )
+                approval_result = _fetchone(
+                    target,
+                    "SELECT public.shoir_finalize_subscription_request(%s, 'Approved');",
+                    (replay_request_id,),
+                )[0]
+                _execute(target, "RESET ROLE;")
+                target.commit()
+            except Exception:
+                target.rollback()
+                raise
                     assert _fetchone(
                         target,
                         "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'UPDATE');",
@@ -825,11 +920,6 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                         (replay_request_id,),
                     )
                     approval_result = cursor.fetchone()[0]
-                    cursor.execute("RESET ROLE;")
-                target.commit()
-            except Exception:
-                target.rollback()
-                raise
             if isinstance(request_result, str):
                 request_result = json.loads(request_result)
             assert request_result.get("ok") is True
