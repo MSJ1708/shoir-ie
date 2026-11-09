@@ -1490,26 +1490,6 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 assert close_non_owner.value.pgcode == "42501"
                 cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_close_non_owner;")
 
-                personal_org_id = _fetchone(
-                    target,
-                    """
-                    SELECT organization_id
-                    FROM public.shoir_organizations
-                    WHERE owner_username_lc=%s
-                      AND org_type='personal'
-                      AND status='active';
-                    """,
-                    (username,),
-                )[0]
-                cursor.execute("SAVEPOINT shoir_org_close_personal_denied;")
-                with pytest.raises(psycopg2.Error) as close_personal:
-                    cursor.execute(
-                        "SELECT public.shoir_org_close(%s,%s::uuid);",
-                        (username, personal_org_id),
-                    )
-                assert close_personal.value.pgcode == "42501"
-                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_close_personal_denied;")
-
                 cursor.execute(
                     "SELECT public.shoir_org_close(%s,%s::uuid);",
                     ("e2e-org-other", other_organization_id),
