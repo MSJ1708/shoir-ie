@@ -61,3 +61,50 @@ The earlier sections in this report contain historical staging/CI details. The v
 - Production remains untouched: migration ledger `20261019140600`, persistence Edge v9. No legal columns or organization tables were applied to production.
 
 **Decision remains NO-GO.** Do not apply the pending staging migrations or deploy the new staging Edge Function until clean migration replay and exact-head CI pass and a staging backup/rollback point is confirmed. Do not deploy production. Keep BETA.
+
+## Live execution recheck — 2026-11-09
+
+This addendum supersedes any older environment/version statements above where they conflict. Read-only verification was performed against the connected GitHub and Supabase projects.
+
+### Exact candidate and CI
+
+- PR #232 remains **open and draft**, targeting `staging-e2e-20261019`.
+- Candidate HEAD observed: `4ac0dcddd46efa42fa6c0bc80f59958195ecf430`.
+- Clean PostgreSQL 17 migration-history replay: run [#42629230716](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230716) — **SUCCESS**.
+- Candidate Edge Function verification: run [#42629230535](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230535) — **SUCCESS**.
+- Production-compatible security backport verification: run [#42629230440](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230440) — **SUCCESS**.
+- Subscription transaction integration: run [#42629230405](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230405) — **SUCCESS**.
+- Excel Intelligence: run [#42629230399](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230399) — **SUCCESS**.
+- Main validation: run [#42629230631](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230631) was still running its regression-test step at inspection. Its separate `live-deployment-smoke` job was **SKIPPED**, not passed.
+- No exact-head full validation pass is claimed until that run finishes and its reports are inspected.
+
+### Current staging facts
+
+- Project: `hfhrosthswcybccepmak`; PostgreSQL 17.11; `ACTIVE_HEALTHY`.
+- Remote migration ledger: 24 versions, ending at `20261107120637`.
+- Persistence Edge Function: active v14; deployed source hash `c4befd44dadd08d6e451026bdbc0039a6613c6505715d4e7c20f3ae5a20fa500`.
+- The three candidate migrations `20261107150000`, `20261107153000` and `20261107160000` remain unapplied.
+- The Performance Advisor still reports six unindexed organization foreign keys. Migration `20261107160000` contains the covering indexes for those references, the complete organization-owner FK and the shared-state updater FK. This is a known, unremediated staging finding until the migration is safely applied and the Advisor is rechecked.
+- Security and Health Advisors returned no lints. The Performance Advisor also reports unused indexes; those are informational and must not be dropped without workload evidence.
+- Live read-only counts: 9 organizations, 0 team workspaces, 0 invitations and 0 organization audit events. This does not prove team-collaboration acceptance.
+- The seven named disposable staging identities (`shoir-e2e-active`, `second`, `starter`, `expired`, `module`, `research`, `inactive`) already exist with the expected broad tier/active/expiry categories. An additional `shoir-e2e-staging-001` identity also exists. Do not provision duplicates. Credentials and GitHub Actions secret values were not read or exposed.
+
+### Current production facts
+
+- Project: `gcsamrdaeraxieaagsta`; PostgreSQL 17.6; `ACTIVE_HEALTHY`.
+- Remote migration ledger: 14 versions, ending at `20261019140600`.
+- Persistence Edge Function: active v10; deployed source hash `4708c87c43ca805536bb1c5decc0205527f400f06496d25a002a6d29d0898d0f`.
+- Security and Health Advisors returned no lints; Performance Advisor reports unused indexes only.
+- Production schema remains behind staging and does not have the staging legal-acceptance/organization changes. No production DDL, Edge deployment, Streamlit deployment or customer/account mutation was performed.
+
+### Protected administrator invariant
+
+Read-only queries in both projects returned exactly one `sho` row with role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, active `true`, and expiry `2099-01-01T00:00:00Z`. It was not used for testing or modified.
+
+### Release decision and next safe action
+
+**NO-GO — RELEASE NOT AUTHORISED.**
+
+The exact-head clean migration replay and five focused integration/verification workflows have passed, but the full regression workflow remains in progress, hosted authenticated staging acceptance has not been run, and the three organization migrations are not deployed. The connected controls do not provide a database backup/PITR snapshot inspection or GitHub workflow-dispatch action. Therefore no migration or new staging Edge deployment is being performed without a separately confirmed staging recovery point and the required authenticated acceptance path.
+
+Next sequence: finish and inspect exact-head validation; verify an actual recoverable staging backup/restore point; apply the three migrations in timestamp order to staging only; recheck schema, grants, RLS and Performance Advisor; deploy the exact candidate Edge source to staging and verify its version/hash; run the authenticated gate with the existing disposable accounts and configured Actions secrets; then complete browser, engineering, dataset/Digital Thread, export, integration and legal acceptance. Keep PR #232 draft and keep BETA. Do not deploy or migrate production.
