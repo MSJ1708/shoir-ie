@@ -22,7 +22,7 @@ def test_legacy_sqlalchemy_datetime_default_is_naive_utc():
         assert callable(default)
         assert default.__name__ == _utcnow_naive.__name__
         assert default.__module__.endswith("database")
-        generated = default()
+        generated = default(None)
         assert isinstance(generated, datetime)
         assert generated.tzinfo is None
         assert abs((datetime.now(timezone.utc).replace(tzinfo=None) - generated).total_seconds()) < 5
