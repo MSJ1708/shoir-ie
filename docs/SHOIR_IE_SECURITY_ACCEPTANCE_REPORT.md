@@ -40,3 +40,46 @@ Dedicated Edge Function verification [run #42251683171](https://github.com/MSJ17
 - The protected Enterprise Admin aggregate invariant is preserved; that account was not used for tests or modified.
 
 No authenticated staging role/tenant acceptance, OIDC/MFA provider acceptance, full production CORS remediations, backup/restore rehearsal or independent security sign-off is claimed. Continue NO-GO.
+
+## Live security recheck — 2026-11-09
+
+This addendum supersedes prior version statements where they conflict. Both Supabase projects were inspected read-only through the connected project interface.
+
+| Control | Staging | Production |
+|---|---|---|
+| Project ref | `hfhrosthswcybccepmak` | `gcsamrdaeraxieaagsta` |
+| PostgreSQL | 17.11 | 17.6 |
+| Applied migrations | 24; latest `20261107120637` | 14; latest `20261019140600` |
+| Persistence Edge Function | v14; SHA-256 `c4befd44dadd08d6e451026bdbc0039a6613c6505715d4e7c20f3ae5a20fa500` | v10; SHA-256 `4708c87c43ca805536bb1c5decc0205527f400f06496d25a002a6d29d0898d0f` |
+| Security Advisor | No lints | No lints |
+| Health Advisor | No lints | No lints |
+
+### Production CORS correction status
+
+The deployed production v10 source was read directly from Supabase. Its deployed `security.ts`:
+
+- does not emit wildcard `Access-Control-Allow-Origin: *`;
+- adds `Access-Control-Allow-Origin` only when the supplied origin is permitted for the exact Supabase project reference;
+- sets `Vary: Origin`;
+- limits browser API methods to POST, with OPTIONS handled at the HTTP boundary;
+- keeps origin-less server-to-server requests possible, while session/action authentication remains required in the request handler.
+
+The v10 deployed function hash is the value in the table above. This corrects the older statements in this report that production remains on v9 with wildcard CORS. The v9-compatible security-backport workflow also passed on candidate SHA `4ac0dcddd46efa42fa6c0bc80f59958195ecf430` (run [#42629230440](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230440)). A separate live browser-origin/HTTP probe was not performed in this inspection, so source and deployment-hash verification must not be described as a completed external HTTP acceptance test.
+
+### Staging organisation hardening status
+
+Staging has the base organization schema, RLS-enabled organization tables and service-role-only organization RPCs. The three candidate organization migrations remain unapplied:
+
+- `20261107150000_shoir_organization_close.sql`
+- `20261107153000_shoir_organization_member_suspend_restore.sql`
+- `20261107160000_shoir_organization_workspace_state.sql`
+
+The current staging Performance Advisor reports six unindexed organization foreign keys. The last migration adds covering indexes for those foreign keys plus the organization owner and shared-state updater references. This finding remains open until the migration is applied safely and the Advisor is rechecked. Security/Health Advisors report no lints. The unused-index notices are informational; no index was removed.
+
+The candidate Edge source contains session-authenticated handlers for member suspend/restore, organization close and optimistic shared-workspace load/save. The currently deployed staging v14 source does not contain those candidate handlers; do not declare them live before deploying and hashing the exact candidate after the matching migrations are applied.
+
+### Protected identity and change boundary
+
+Read-only queries in both projects returned exactly one protected `sho` account with the required role, tier, active status and 2099 expiry. It was not used for testing or modified. No production migrations, Edge deployment, application deployment, customer-data mutation or administrator mutation occurred during this recheck.
+
+**Security release position: staging integration and hosted acceptance remain open; production remains NO-GO.** Production v10 CORS/method hardening is deployed, but production schema parity, legal acceptance columns, organization capabilities, backup/restore evidence, authenticated cross-tenant tests, provider-backed OIDC/MFA, independent review and coordinated release approval remain outstanding.
