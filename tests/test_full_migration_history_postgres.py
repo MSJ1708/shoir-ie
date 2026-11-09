@@ -1363,6 +1363,219 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 assert cross_tenant.value.pgcode == "42501"
                 cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_cross_tenant;")
 
+                # Exercise member suspension and restoration against the real
+                # SECURITY DEFINER RPCs, including authorization while suspended.
+                cursor.execute(
+                    "SELECT public.shoir_org_member_suspend(%s,%s::uuid,%s);",
+                    (username, organization_id, "e2e-org-viewer"),
+                )
+                suspended_result = cursor.fetchone()[0]
+                suspended_member = (
+                    suspended_result
+                    if isinstance(suspended_result, dict)
+                    else json.loads(suspended_result)
+                )
+                assert suspended_member["status"] == "suspended"
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT status FROM public.shoir_organization_memberships
+                    WHERE organization_id=%s::uuid AND username_lc=%s;
+                    """,
+                    (organization_id, "e2e-org-viewer"),
+                )[0] == "suspended"
+
+                cursor.execute("SAVEPOINT shoir_org_suspended_member_read;")
+                with pytest.raises(psycopg2.Error) as suspended_member_read:
+                    cursor.execute(
+                        """
+                        SELECT * FROM public.shoir_org_resolve_workspace(
+                            %s,%s::uuid,%s::uuid,%s
+                        );
+                        """,
+                        ("e2e-org-viewer", organization_id, general_workspace_id, "read"),
+                    )
+                assert suspended_member_read.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_suspended_member_read;")
+
+                # A suspended member cannot restore their own membership.
+                cursor.execute("SAVEPOINT shoir_org_suspended_self_restore;")
+                with pytest.raises(psycopg2.Error) as suspended_self_restore:
+                    cursor.execute(
+                        "SELECT public.shoir_org_member_restore(%s,%s::uuid,%s);",
+                        ("e2e-org-viewer", organization_id, "e2e-org-viewer"),
+                    )
+                assert suspended_self_restore.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_suspended_self_restore;")
+
+                cursor.execute(
+                    "SELECT public.shoir_org_member_restore(%s,%s::uuid,%s);",
+                    (username, organization_id, "e2e-org-viewer"),
+                )
+                restored_result = cursor.fetchone()[0]
+                restored_member = (
+                    restored_result
+                    if isinstance(restored_result, dict)
+                    else json.loads(restored_result)
+                )
+                assert restored_member["status"] == "active"
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT status FROM public.shoir_organization_memberships
+                    WHERE organization_id=%s::uuid AND username_lc=%s;
+                    """,
+                    (organization_id, "e2e-org-viewer"),
+                )[0] == "active"
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT count(*)
+                    FROM public.shoir_organization_audit_events
+                    WHERE organization_id=%s::uuid
+                      AND event_type IN (
+                        'organization.member_suspended',
+                        'organization.member_restored'
+                      );
+                    """,
+                    (organization_id,),
+                )[0] == 2
+
+                # Closing an organisation is owner-only and team-only. Use the
+                # separate synthetic organisation created above so the primary
+                # organisation can continue through the ownership-transfer test.
+                cursor.execute(
+                    "SELECT public.shoir_org_workspace_create(%s,%s::uuid,%s);",
+                    ("e2e-org-other", other_organization_id, "Close Test Workspace"),
+                )
+                close_workspace_result = cursor.fetchone()[0]
+                close_workspace = (
+                    close_workspace_result
+                    if isinstance(close_workspace_result, dict)
+                    else json.loads(close_workspace_result)
+                )
+                close_workspace_id = str(close_workspace["workspace_id"])
+                cursor.execute(
+                    """
+                    SELECT public.shoir_org_invitation_create(
+                        %s,%s::uuid,%s,%s,%s,%s::timestamptz
+                    );
+                    """,
+                    (
+                        "e2e-org-other",
+                        other_organization_id,
+                        "e2e-org-pending",
+                        "viewer",
+                        "f" * 64,
+                        (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat(),
+                    ),
+                )
+                close_invitation_result = cursor.fetchone()[0]
+                close_invitation = (
+                    close_invitation_result
+                    if isinstance(close_invitation_result, dict)
+                    else json.loads(close_invitation_result)
+                )
+                close_invitation_id = str(close_invitation["invitation_id"])
+
+                cursor.execute("SAVEPOINT shoir_org_close_non_owner;")
+                with pytest.raises(psycopg2.Error) as close_non_owner:
+                    cursor.execute(
+                        "SELECT public.shoir_org_close(%s,%s::uuid);",
+                        ("e2e-org-viewer", other_organization_id),
+                    )
+                assert close_non_owner.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_close_non_owner;")
+
+                personal_org_id = _fetchone(
+                    target,
+                    """
+                    SELECT organization_id
+                    FROM public.shoir_organizations
+                    WHERE owner_username_lc=%s
+                      AND org_type='personal'
+                      AND status='active';
+                    """,
+                    (username,),
+                )[0]
+                cursor.execute("SAVEPOINT shoir_org_close_personal_denied;")
+                with pytest.raises(psycopg2.Error) as close_personal:
+                    cursor.execute(
+                        "SELECT public.shoir_org_close(%s,%s::uuid);",
+                        (username, personal_org_id),
+                    )
+                assert close_personal.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_close_personal_denied;")
+
+                cursor.execute(
+                    "SELECT public.shoir_org_close(%s,%s::uuid);",
+                    ("e2e-org-other", other_organization_id),
+                )
+                close_result = cursor.fetchone()[0]
+                closed_organization = (
+                    close_result
+                    if isinstance(close_result, dict)
+                    else json.loads(close_result)
+                )
+                assert closed_organization == {
+                    "ok": True,
+                    "status": "closed",
+                    "revoked_invitations": 1,
+                    "archived_workspaces": 2,
+                    "removed_memberships": 1,
+                }
+                assert _fetchone(
+                    target,
+                    "SELECT status FROM public.shoir_organizations WHERE organization_id=%s::uuid;",
+                    (other_organization_id,),
+                )[0] == "closed"
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT count(*) FROM public.shoir_organization_workspaces
+                    WHERE organization_id=%s::uuid AND status='archived';
+                    """,
+                    (other_organization_id,),
+                )[0] == 2
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT count(*) FROM public.shoir_organization_memberships
+                    WHERE organization_id=%s::uuid AND status='active';
+                    """,
+                    (other_organization_id,),
+                )[0] == 0
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT revoked_at IS NOT NULL
+                    FROM public.shoir_organization_invitations
+                    WHERE invitation_id=%s::uuid;
+                    """,
+                    (close_invitation_id,),
+                )[0] is True
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT count(*) FROM public.shoir_organization_audit_events
+                    WHERE organization_id=%s::uuid
+                      AND event_type='organization.closed';
+                    """,
+                    (other_organization_id,),
+                )[0] == 1
+                cursor.execute("SAVEPOINT shoir_org_closed_access_denied;")
+                with pytest.raises(psycopg2.Error) as closed_access:
+                    cursor.execute(
+                        """
+                        SELECT * FROM public.shoir_org_resolve_workspace(
+                            %s,%s::uuid,%s::uuid,%s
+                        );
+                        """,
+                        ("e2e-org-other", other_organization_id, close_workspace_id, "read"),
+                    )
+                assert closed_access.value.pgcode == "42501"
+                cursor.execute("ROLLBACK TO SAVEPOINT shoir_org_closed_access_denied;")
+
                 # Transfer can happen only to an active Enterprise account which
                 # is already a member. Invite and accept the successor first.
                 cursor.execute(
