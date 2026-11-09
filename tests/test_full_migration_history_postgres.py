@@ -954,6 +954,9 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "public.shoir_org_resolve_legacy_workspace(text,text,text)",
                     "public.shoir_org_workspace_state_load(text,uuid,uuid)",
                     "public.shoir_org_workspace_state_save(text,uuid,uuid,text,bigint)",
+                    "public.shoir_org_close(text,uuid)",
+                    "public.shoir_org_member_suspend(text,uuid,text)",
+                    "public.shoir_org_member_restore(text,uuid,text)",
                 ):
                     assert _fetchone(
                         target,
