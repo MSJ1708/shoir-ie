@@ -556,7 +556,19 @@ def calculate_exchange_value(
         "avoided_alternative_purchase_cost", "buyer_treatment_cost",
         "buyer_transport_cost", "buyer_testing_cost", "buyer_additional_operating_cost",
     )
-    values = {name: _number(locals()[name], name, minimum=0) for name in names}
+    input_values = {
+        "avoided_disposal_cost": avoided_disposal_cost,
+        "supplier_sale_revenue": supplier_sale_revenue,
+        "supplier_preparation_cost": supplier_preparation_cost,
+        "supplier_testing_cost": supplier_testing_cost,
+        "supplier_handling_delivery_cost": supplier_handling_delivery_cost,
+        "avoided_alternative_purchase_cost": avoided_alternative_purchase_cost,
+        "buyer_treatment_cost": buyer_treatment_cost,
+        "buyer_transport_cost": buyer_transport_cost,
+        "buyer_testing_cost": buyer_testing_cost,
+        "buyer_additional_operating_cost": buyer_additional_operating_cost,
+    }
+    values = {name: _number(input_values[name], name, minimum=0) for name in names}
     currency_code = _text(currency, "currency").upper()
     if len(currency_code) != 3 or not currency_code.isalpha():
         raise ResourceValidationError("currency must be a three-letter currency code.")
