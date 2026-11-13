@@ -671,11 +671,26 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 treatment_cost = r5.text_input("Treatment cost / unit (enter 0 only if confirmed)")
                 route_currency = st.text_input("Cost currency (3-letter code, e.g. SAR)", key="sri_route_currency")
                 route_capacity = st.text_input("Confirmed maximum physical route quantity (required)")
+                route_confirmed = st.checkbox(
+                    "A physical transfer route has been confirmed by current survey / transport evidence",
+                    value=False,
+                    key="sri_route_connection_confirmed",
+                )
+                route_connection_reference = st.text_input(
+                    "Physical route / transport evidence reference (required)",
+                    key="sri_route_connection_reference",
+                )
                 add_route = st.form_submit_button("Add exchange candidate")
             if add_route:
                 try:
+                    if route_confirmed is not True:
+                        raise ValueError("Confirm a real physical route before adding an optimizer-eligible exchange candidate.")
+                    if not route_connection_reference.strip():
+                        raise ValueError("Enter the current route survey, transport quote or physical connection evidence reference.")
                     route = {
                         "supply_id": supply_choice, "demand_id": demand_choice,
+                        "connection_confirmed": True,
+                        "connection_evidence_reference": route_connection_reference.strip(),
                         "unit_cost": _finite_float(route_cost, "Resource unit cost", minimum=0),
                         "transport_cost_per_unit": _finite_float(transport_cost, "Transport cost per unit", minimum=0),
                         "treatment_cost_per_unit": _finite_float(treatment_cost, "Treatment cost per unit", minimum=0),
@@ -723,7 +738,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value="[]",
                 key="sri_scheduled_routes",
                 height=100,
-                help='Each row: supply_id, demand_id, period_id, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, currency, capacity.',
+                help='Each row: supply_id, demand_id, period_id, connection_confirmed=true, connection_evidence_reference, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, currency, capacity.',
             )
             allow_scheduled_shortage = st.checkbox(
                 "Allow unmet demand and report shortage",
@@ -784,7 +799,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value="[]",
                 key="sri_robust_routes",
                 height=110,
-                help='Each route requires supply_id, demand_id, unit_cost, treatment_cost_per_unit, transport_cost_per_unit, currency and capacity.',
+                help='Each route requires supply_id, demand_id, connection_confirmed=true, connection_evidence_reference, unit_cost, treatment_cost_per_unit, transport_cost_per_unit, currency and capacity.',
             )
             robust_allow_shortage = st.checkbox(
                 "Allow and report unmet demand under interval stress",
