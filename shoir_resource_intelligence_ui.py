@@ -34,6 +34,7 @@ from shoir_resource_intelligence import (
     calculate_resource_intensity_change,
     calculate_energy_balance,
     screen_waste_heat_recovery,
+    optimize_single_contaminant_water_reuse,
     validate_exchange_agreement,
     assess_exchange_delivery,
 )
@@ -400,6 +401,54 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             if "heat_recovery_screen" in results:
                 _render_result(st, "Waste-heat temperature screen", results["heat_recovery_screen"])
                 st.warning("A passed temperature screen is not heat exchanger design or verified heat recovery.")
+
+        with st.expander("Single-contaminant water reuse allocation screen"):
+            st.caption(
+                "This preliminary LP maximizes reuse over explicitly confirmed connections while respecting one blended-contaminant limit. "
+                "It is not a full water-pinch study, treatment design or water-quality approval."
+            )
+            water_sources = st.text_area(
+                "Water sources JSON",
+                value='[]',
+                key="sri_water_sources",
+                height=110,
+                help='Each source: source_id, available_flow, flow_unit, concentration, concentration_unit.',
+            )
+            water_sinks = st.text_area(
+                "Water demand sinks JSON",
+                value='[]',
+                key="sri_water_sinks",
+                height=110,
+                help='Each sink: sink_id, required_flow, flow_unit, maximum_concentration, concentration_unit.',
+            )
+            water_connections = st.text_area(
+                "Confirmed source-to-sink connections JSON",
+                value='[]',
+                key="sri_water_connections",
+                height=110,
+                help='Each connection: source_id, sink_id, connection_confirmed=true, connection_evidence_reference, optional capacity.',
+            )
+            w1, w2, w3 = st.columns(3)
+            contaminant_name = w1.text_input("Contaminant / quality parameter", key="sri_water_contaminant")
+            concentration_unit = w2.text_input("Concentration unit", value="mg/L", key="sri_water_concentration_unit")
+            water_flow_unit = w3.text_input("Flow unit", value="m3/day", key="sri_water_flow_unit")
+            if st.button("Optimize preliminary water reuse", key="sri_run_water_reuse"):
+                try:
+                    result = optimize_single_contaminant_water_reuse(
+                        _json_array(water_sources, "Water sources"),
+                        _json_array(water_sinks, "Water demand sinks"),
+                        _json_array(water_connections, "Water connections"),
+                        contaminant=contaminant_name,
+                        concentration_unit=concentration_unit,
+                        flow_unit=water_flow_unit,
+                    )
+                    results["water_reuse_screen"] = result
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Water reuse optimization failed: {exc}")
+            if "water_reuse_screen" in results:
+                _render_result(st, "Water reuse allocation", results["water_reuse_screen"])
+                st.warning("This one-contaminant allocation is not treatment qualification or authorization to reuse water.")
 
     with tabs[3]:
         st.markdown("#### Engineering compatibility screen")
