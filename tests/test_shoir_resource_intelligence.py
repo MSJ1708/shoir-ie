@@ -1756,3 +1756,24 @@ def test_resource_ui_shared_persistence_requires_the_staging_edge_backend(monkey
     assert ok is False
     assert "authenticated staging organization service" in message
     assert saves == []
+
+
+@pytest.mark.parametrize("approval_status", ["APPROVED", "REJECTED", "AUTO_APPROVED"])
+def test_resource_passport_cannot_self_assert_an_approval_decision(approval_status):
+    with pytest.raises(ResourceValidationError, match="authenticated review workflow"):
+        validate_resource_passport({
+            "facility_id": "FAC-A", "name": "Recovered water",
+            "resource_type": "Water", "available_quantity": 10,
+            "unit": "m3/day", "provenance": "IMPORTED",
+            "approval_status": approval_status,
+        })
+
+
+def test_resource_passport_import_defaults_to_draft_when_approval_status_is_blank():
+    passport = validate_resource_passport({
+        "facility_id": "FAC-A", "name": "Recovered water",
+        "resource_type": "Water", "available_quantity": 10,
+        "unit": "m3/day", "provenance": "IMPORTED",
+        "approval_status": "",
+    })
+    assert passport["approval_status"] == "DRAFT"
