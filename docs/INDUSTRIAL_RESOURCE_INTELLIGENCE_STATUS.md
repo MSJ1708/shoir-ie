@@ -40,7 +40,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | 2. Resource Exchange Discovery | PARTIALLY_IMPLEMENTED | Explicitly entered demand and exchange-route candidates; no supplier availability is inferred. | No live marketplace, participant directory, confidential matching, treatment/logistics provider or customer opt-in network exists. |
 | 3. Cross-Company Process Compatibility Twin | PARTIALLY_IMPLEMENTED | Deterministic type/unit and buyer quality-limit screen; supports numeric quality, temperature and pressure limits; explicit lab/engineering hold statuses. | Full composition chemistry, thermodynamics, phase behavior, contamination interaction, equipment envelope, secondary waste and qualified process models remain absent. |
 | 4. Plant Resource Loss and Recovery | PARTIALLY_IMPLEMENTED | Same-unit input/output balance and suspected-discrepancy alert; never calls a discrepancy a confirmed loss. | Multi-stream source mapping, root-cause evidence, recovery project workflow, measured implementation results and persistent action ownership remain incomplete. |
-| 5. Multi-Resource Process Integration | PARTIALLY_IMPLEMENTED | A single-period resource balance foundation. | No water pinch, heat-exchanger network, steam pressure optimization, exergy, energy balance integration or cross-utility optimization is implemented. |
+| 5. Multi-Resource Process Integration | PARTIALLY_IMPLEMENTED | Same-boundary energy balance with residual/efficiency ratios and a conservative waste-heat source/sink temperature-approach screen; no recovered energy or savings is claimed. | No water pinch, heat-exchanger network synthesis, steam pressure optimization, exergy, treatment/energy co-optimization or cross-utility optimization is implemented. Actual exchanger duty and recovery require engineering design. |
 | 6. Resource Quality Forecasting | PARTIALLY_IMPLEMENTED | Time-aware exploratory linear trend, chronological holdout MAE and approximate residual band when at least 20 valid observations are provided. | No validated plant model, multivariate process inputs, seasonality, model monitoring or qualified backtesting acceptance. |
 | 7. Supply Reliability Predictor | PARTIALLY_IMPLEMENTED | Historical in-full-and-quality pass rate and standard error from explicit delivery periods. | It explicitly does not predict future reliability; no verified supplier history, schedule integration or outage model is connected. |
 | 8. Exchange Reliability Engine | PARTIALLY_IMPLEMENTED | Supplier quantity shock, relaxed allocation with explicit shortage, and downstream graph traversal. | No integrated time-dependent quality/supply forecasts, complete physical dependency model, recovery alternatives or network-wide validation. |
@@ -73,6 +73,10 @@ The passport stores owner and source process/equipment text, English/Arabic desc
 ### Resource balance
 
 The balance compares same-period input and accounted output in the same user-entered unit. It reports a discrepancy outside tolerance as **suspected**, never as a confirmed leak. Meter accuracy, boundary completeness, time alignment, inventory change and unmeasured streams must be investigated separately.
+
+### Energy balance and waste heat
+
+The energy balance compares same-boundary input against useful output, entered waste heat and other output in kWh. A residual outside tolerance is an unreconciled discrepancy, not proof of a specific energy loss. The waste-heat screen checks only whether the entered source temperature exceeds the sink temperature plus the minimum approach. A positive screen can estimate gross thermal energy from user-entered heat rate and operating hours, but it is not an exchanger design, recovered-energy measurement, efficiency estimate or verified savings calculation.
 
 ### Compatibility
 
@@ -139,6 +143,8 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Historical delivery pass rate without a future probability.
 - Prevention-first cascade ordering.
 - Unit-consistent capacity bottleneck, preliminary route evidence and production-normalized intensity checks.
+- Same-boundary energy reconciliation and waste-heat temperature-approach screening.
+- Exchange agreement draft approval-reference, delivery quantity, quality and certificate checks.
 - Source-row preservation in import validation.
 - Workbench IEIT search/launch and Starter-tier denial.
 - Explore catalogue and Enterprise policy registration.
