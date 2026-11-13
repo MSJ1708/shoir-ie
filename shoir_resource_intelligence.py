@@ -2348,6 +2348,263 @@ def assess_exchange_delivery(
     }
 
 
+ENGINEERING_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
+    "resource_balance.v1": {
+        "name": "Resource mass-balance screen",
+        "version": "1.0.0",
+        "method": "Deterministic same-unit balance",
+        "formula": "unreconciled = input_quantity - accounted_output_quantity; difference_percent = 100 * unreconciled / input_quantity",
+        "input_units": ["same declared quantity unit", "% tolerance"],
+        "output_units": ["same declared quantity unit", "%"],
+        "assumptions": ["Same system boundary and reporting period", "Input quantity is greater than zero"],
+        "limitations": ["Does not identify root cause", "Does not prove leakage or loss"],
+    },
+    "compatibility_screen.v1": {
+        "name": "Resource compatibility screen",
+        "version": "1.0.0",
+        "method": "Deterministic exact resource type/unit and numeric quality-window rules",
+        "formula": "Each measured property must satisfy buyer minimum <= measured_value <= buyer maximum where bounds exist",
+        "input_units": ["User-declared resource and property units"],
+        "output_units": ["Categorical engineering screen status"],
+        "assumptions": ["No implicit unit conversion"],
+        "limitations": ["Not a thermodynamic, chemistry, equipment or safety certification"],
+    },
+    "resource_network_lp.v1": {
+        "name": "Single-period resource transportation LP",
+        "version": "1.0.0",
+        "method": "SciPy HiGHS linear programming",
+        "formula": "Minimize sum(route_quantity * route_unit_cost) plus explicit shortage penalty subject to supply, demand, route-capacity and compatibility constraints",
+        "input_units": ["Resource flow unit per demand", "One common declared currency per quantity"],
+        "output_units": ["Allocated flow", "Declared currency"],
+        "assumptions": ["One time period", "Explicit route capacity and costs"],
+        "limitations": ["No inventory, storage, production schedule, infrastructure or permit model"],
+    },
+    "period_network_lp.v1": {
+        "name": "Period-aligned resource LP",
+        "version": "1.0.0",
+        "method": "Independent SciPy HiGHS LP per declared period",
+        "formula": "Solve the single-period transportation LP separately for each period_id; forbid cross-period allocation",
+        "input_units": ["Declared period-specific flow unit", "One common currency"],
+        "output_units": ["Period-specific allocated flow", "Declared currency"],
+        "assumptions": ["Every supply/demand/route has a matching period_id"],
+        "limitations": ["No inventory carryover or time-dependent production/maintenance schedule"],
+    },
+    "water_reuse_lp.v1": {
+        "name": "Single-contaminant water-reuse LP",
+        "version": "1.0.0",
+        "method": "Maximum-flow linear program with one blended concentration constraint",
+        "formula": "Maximize sum(source_to_sink_flow), subject to source, sink, connection capacity and sum(flow*concentration) <= sink_max_concentration*sum(flow)",
+        "input_units": ["Common declared flow unit", "Common declared concentration unit"],
+        "output_units": ["Preliminary reused flow", "Blended concentration"],
+        "assumptions": ["Perfect mixing", "Exactly one contaminant", "Explicit user-confirmed physical connections"],
+        "limitations": ["Not multi-contaminant water pinch, treatment design or reuse approval"],
+    },
+    "energy_balance.v1": {
+        "name": "Same-boundary energy balance",
+        "version": "1.0.0",
+        "method": "Deterministic energy reconciliation",
+        "formula": "residual = energy_input - useful_output - waste_heat_output - other_output",
+        "input_units": ["kWh"],
+        "output_units": ["kWh", "%"],
+        "assumptions": ["Same energy boundary and time basis"],
+        "limitations": ["Residual is not proof of a specific energy loss"],
+    },
+    "waste_heat_screen.v1": {
+        "name": "Waste-heat temperature approach screen",
+        "version": "1.0.0",
+        "method": "Source/sink temperature difference check",
+        "formula": "temperature_margin = source_temperature - sink_temperature - minimum_approach_temperature",
+        "input_units": ["°C", "kW", "h/year"],
+        "output_units": ["°C", "kWh/year", declared currency when caller supplies a value factor],
+        "assumptions": ["User-entered heat-source rate and annual hours"],
+        "limitations": ["Not heat-exchanger network design or verified recovered energy"],
+    },
+    "quality_trend.v1": {
+        "name": "Exploratory resource-quality trend",
+        "version": "1.0.0",
+        "method": "Ordinary least squares linear trend with chronological holdout",
+        "formula": "Fit y = intercept + slope * elapsed_days on training records; report chronological holdout MAE and one-step extrapolation",
+        "input_units": ["Timezone-aware timestamp", "Measured quality-property unit"],
+        "output_units": ["Same property unit"],
+        "assumptions": ["Minimum 20 observations by default", "Chronological and unique timestamps"],
+        "limitations": ["Exploratory only; no seasonality, multivariate process or validated plant model"],
+    },
+    "supply_reliability_history.v1": {
+        "name": "Historical delivery reliability",
+        "version": "1.0.0",
+        "method": "Empirical in-full and quality-pass rate",
+        "formula": "successful_periods / total_observed_periods",
+        "input_units": ["Delivered and required quantity in same unit"],
+        "output_units": ["Historical rate", "Standard error"],
+        "assumptions": ["Explicit quality_pass boolean for every period"],
+        "limitations": ["Not a future reliability probability"],
+    },
+    "exchange_value.v1": {
+        "name": "Transfer-neutral exchange value",
+        "version": "1.0.0",
+        "method": "Supplier, buyer and network boundary formulas",
+        "formula": "Supplier = avoided_disposal + sale_revenue - supplier_costs; Buyer = avoided_purchase - buyer_costs; Network = avoided_external_costs - real resource costs, excluding internal transfer revenue",
+        "input_units": ["One explicitly declared three-letter currency"],
+        "output_units": ["Same declared currency"],
+        "assumptions": ["Consistent reporting period and value boundary"],
+        "limitations": ["No counterfactual or independent verification is inferred"],
+    },
+    "environmental_impact.v1": {
+        "name": "Factor-based environmental impact",
+        "version": "1.0.0",
+        "method": "Caller-supplied physical quantities and versioned impact factors",
+        "formula": "net_avoided_CO2e = sum(avoided_activity * factor) - sum(added_burden_activity * factor)",
+        "input_units": ["m3", "kWh", "kg", "tonne-km", "kgCO2e/activity unit"],
+        "output_units": ["kgCO2e"],
+        "assumptions": ["All factors share a compatible geography, period and boundary"],
+        "limitations": ["No factor registry, lifecycle completeness or independent assurance"],
+    },
+    "investment_ranking.v1": {
+        "name": "Weighted engineering project prioritization",
+        "version": "1.0.0",
+        "method": "Weighted normalized 1–5 engineering rubric",
+        "formula": "priority = 20 * sum(normalized_weight * benefit_score), with risk and implementation difficulty inverted",
+        "input_units": ["Scores 1–5", "Entered CAPEX and annual currency values"],
+        "output_units": ["Priority score 0–100", "Simple payback years"],
+        "assumptions": ["Caller-provided scoring weights and cost-benefit inputs"],
+        "limitations": ["Not NPV, IRR, verified ROI or investment approval"],
+    },
+    "performance_persistence.v1": {
+        "name": "Production-normalized resource intensity persistence",
+        "version": "1.0.0",
+        "method": "Time-series ratio monitoring against a declared baseline",
+        "formula": "intensity = resource_usage / production; deviation_percent = 100 * (period_intensity - baseline_intensity) / baseline_intensity",
+        "input_units": ["Declared resource usage unit", "Production unit", "Timezone-aware timestamp"],
+        "output_units": ["Resource unit per production unit", "%"],
+        "assumptions": ["Production-volume normalization only"],
+        "limitations": ["Does not adjust product mix, operating hours or operating conditions; no causality claim"],
+    },
+    "resource_substitution.v1": {
+        "name": "Substitute-resource qualification screen",
+        "version": "1.0.0",
+        "method": "Compatibility result plus product, equipment, lab, engineering, safety and environmental gates",
+        "formula": "Candidate remains blocked unless base compatibility and every required assessment/evidence reference is present",
+        "input_units": ["Candidate/buyer declared engineering units"],
+        "output_units": ["Categorical qualification status"],
+        "assumptions": ["Review references are supplied by authorized people"],
+        "limitations": ["References are not independently verified and do not authorize process substitution"],
+    },
+    "exchange_delivery.v1": {
+        "name": "Exchange delivery assurance",
+        "version": "1.0.0",
+        "method": "Entered agreement tolerance, quality, certificate and evidence comparison",
+        "formula": "quantity deviation = delivered - agreed; quality values compared against entered min/max bounds; certificate expiry compared with delivery date",
+        "input_units": ["Agreement quantity unit", "Declared quality-property units", "ISO date"],
+        "output_units": ["Delivery deviations and review status"],
+        "assumptions": ["Agreement terms and evidence references are entered correctly"],
+        "limitations": ["No contract signature, legal effect, independent certificate verification or operational release"],
+    },
+}
+
+
+def build_engineering_assurance_record(
+    *,
+    model_id: str,
+    input_snapshot: Mapping[str, Any],
+    output_snapshot: Any,
+    actor: str,
+    provenance: str,
+    source_references: Sequence[str] = (),
+    facility_id: str = "",
+) -> dict[str, Any]:
+    """Build a hash-checkable calculation evidence envelope from explicit snapshots.
+
+    The envelope records caller-entered inputs and source references next to an
+    output snapshot and a versioned method description. It does not prove that
+    the inputs were actually used by the original run or independently verify
+    their origin.
+    """
+    model_key = _text(model_id, "model_id")
+    definition = ENGINEERING_MODEL_REGISTRY.get(model_key)
+    if definition is None:
+        raise ResourceValidationError(f"Unknown engineering model id: {model_key}.")
+    if not isinstance(input_snapshot, Mapping):
+        raise ResourceValidationError("input_snapshot must be an object.")
+    actor_name = _text(actor, "actor")
+    evidence_provenance = _text(provenance, "provenance").upper()
+    if evidence_provenance not in USER_INPUT_PROVENANCE_VALUES:
+        raise ResourceValidationError("Evidence provenance must be a user-entered/imported/synthetic/simulated/mock/stale value; LIVE requires a verified connector.")
+    if not isinstance(source_references, Sequence) or isinstance(source_references, (str, bytes, bytearray)):
+        raise ResourceValidationError("source_references must be a sequence of strings.")
+    normalized_references = []
+    for index, value in enumerate(source_references):
+        ref = _text(value, f"source_references[{index}]")
+        if len(ref) > 300:
+            raise ResourceValidationError("Source reference must not exceed 300 characters.")
+        normalized_references.append(ref)
+
+    sensitive_key_tokens = ("password", "token", "secret", "credential", "api_key", "access_key")
+    def sanitize(value: Any, depth: int = 0) -> Any:
+        if depth > 20:
+            raise ResourceValidationError("Assurance snapshot exceeds the nesting-depth limit.")
+        if isinstance(value, Mapping):
+            result = {}
+            for key, item in value.items():
+                key_text = str(key)
+                if any(token in key_text.casefold() for token in sensitive_key_tokens):
+                    continue
+                result[key_text] = sanitize(item, depth + 1)
+            return result
+        if isinstance(value, (list, tuple)):
+            return [sanitize(item, depth + 1) for item in value]
+        if value is None or isinstance(value, (str, int, bool)):
+            return value
+        if isinstance(value, float):
+            if not isfinite(value):
+                raise ResourceValidationError("Assurance snapshots cannot contain non-finite numbers.")
+            return value
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, np.generic):
+            return sanitize(value.item(), depth + 1)
+        raise ResourceValidationError(
+            f"Unsupported assurance snapshot value type: {type(value).__name__}."
+        )
+
+    inputs = sanitize(dict(input_snapshot))
+    outputs = sanitize(output_snapshot)
+    canonical_inputs = json.dumps(
+        inputs, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
+    canonical_outputs = json.dumps(
+        outputs, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
+    if len(canonical_inputs.encode("utf-8")) > 200_000 or len(canonical_outputs.encode("utf-8")) > 200_000:
+        raise ResourceValidationError("An assurance input or output snapshot exceeds 200 KB.")
+    input_hash = hashlib.sha256(canonical_inputs.encode("utf-8")).hexdigest()
+    output_hash = hashlib.sha256(canonical_outputs.encode("utf-8")).hexdigest()
+    record = {
+        "assurance_record_id": str(uuid4()),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "actor": actor_name,
+        "facility_id": _optional_text(facility_id),
+        "model_id": model_key,
+        "model_name": definition["name"],
+        "model_version": definition["version"],
+        "method": definition["method"],
+        "formula_or_rule": definition["formula"],
+        "input_units": definition["input_units"],
+        "output_units": definition["output_units"],
+        "inputs": inputs,
+        "input_sha256": input_hash,
+        "outputs": outputs,
+        "output_sha256": output_hash,
+        "source_references": normalized_references,
+        "provenance": evidence_provenance,
+        "assumptions": definition["assumptions"],
+        "limitations": definition["limitations"],
+        "independent_verification": "NOT_PERFORMED",
+        "source_to_run_link": "CALLER_ASSERTED_NOT_INDEPENDENTLY_VERIFIED",
+        "trust_note": "Hashes detect changes in this evidence envelope; they do not prove source authenticity, timestamp authority or that the supplied input snapshot exactly matches the original calculation invocation.",
+    }
+    return record
+
+
 def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Validate imported passport records while preserving input rows unchanged."""
     accepted, rejected = [], []
@@ -2380,6 +2637,7 @@ __all__ = [
     "optimize_single_contaminant_water_reuse",
     "validate_exchange_agreement", "assess_exchange_delivery",
     "assess_resource_substitution", "rank_resource_improvement_projects",
-    "calculate_environmental_impact",
+    "calculate_environmental_impact", "ENGINEERING_MODEL_REGISTRY",
+    "build_engineering_assurance_record",
     "validate_import_rows",
 ]
