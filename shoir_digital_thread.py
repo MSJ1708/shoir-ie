@@ -291,9 +291,30 @@ def _upsert_node(
     node_id = stable_id(node_type, name, source, identity_key=identity_key)
     nodes = st.session_state[keys["nodes"]]
     next_metadata = dict(metadata or {})
-    for idx, existing in enumerate(nodes):
-        if existing.get("node_id") != node_id:
-            continue
+
+    # Prefer the immutable ID. For pre-existing nodes without an explicit
+    # business key, a unique source key preserves the issued ID across a rename.
+    existing_index = next(
+        (idx for idx, existing in enumerate(nodes) if existing.get("node_id") == node_id),
+        None,
+    )
+    if existing_index is None and str(source or "").strip():
+        source_matches = [
+            idx for idx, existing in enumerate(nodes)
+            if existing.get("node_type") == node_type
+            and str(existing.get("source") or "").strip() == str(source).strip()
+        ]
+        if len(source_matches) > 1:
+            raise ValueError(
+                "This Digital Thread source key maps to multiple existing nodes. "
+                "Resolve the duplicate identity records before synchronizing."
+            )
+        if len(source_matches) == 1:
+            existing_index = source_matches[0]
+
+    if existing_index is not None:
+        existing = nodes[existing_index]
+        existing_id = str(existing.get("node_id") or node_id)
         old_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
         next_metadata = {**old_metadata, **next_metadata}
         aliases = list(old_metadata.get("name_aliases", [])) if isinstance(old_metadata.get("name_aliases"), (list, tuple)) else []
@@ -317,7 +338,7 @@ def _upsert_node(
             if old_metadata.get("display_name_updated_at"):
                 next_metadata["display_name_updated_at"] = old_metadata["display_name_updated_at"]
         payload = {
-            "node_id": node_id,
+            "node_id": existing_id,
             "node_type": node_type,
             "name": (old_name if display_override else new_name)[:180],
             "source": str(source)[:240],
@@ -326,8 +347,9 @@ def _upsert_node(
             "metadata": next_metadata,
             "updated_at": _now(),
         }
-        nodes[idx] = payload
-        return node_id
+        nodes[existing_index] = payload
+        return existing_id
+
     if identity_key:
         next_metadata.setdefault("identity_basis", "immutable_external_key")
     payload = {
