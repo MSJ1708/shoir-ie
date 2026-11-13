@@ -1127,7 +1127,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             _render_result(st, "Delivery assurance detail", next(item for item in deliveries if item["delivery_id"] == selected_delivery))
             st.warning("Delivery assessments are evidence records. A person must review and accept/reject the delivery under the applicable agreement.")
 
-    with tabs[13]:
+    with tabs[12]:
         st.markdown("#### Environmental impact and burden-shifting assessment")
         st.caption("Use factor values and references appropriate to the reporting boundary, geography and period. No factor is supplied or certified by this module.")
         environmental_quantities = [
@@ -1177,7 +1177,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             _render_result(st, "Environmental impact result", results["environmental_impact"])
             st.warning("This is a factor-based estimate using caller-supplied data. Do not publish a verified emissions or environmental claim without factor review, boundary validation and independent assurance.")
 
-    with tabs[14]:
+    with tabs[13]:
         st.markdown("#### Industrial improvement project prioritization")
         st.caption("This is a transparent multi-criteria ranking, not investment approval, ROI or a substitute for a business case.")
         projects_json = st.text_area(
@@ -1206,7 +1206,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             _render_result(st, "Investment prioritization result", results["investment_prioritization"])
             st.warning("Projects blocked by safety are not approved. Scores and simple payback use entered assumptions and are not verified financial returns.")
 
-    with tabs[15]:
+    with tabs[14]:
         st.markdown("#### Reports and evidence export")
         report = {
             "report_type": "Industrial Resource Intelligence workspace snapshot",
