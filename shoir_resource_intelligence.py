@@ -1863,7 +1863,15 @@ def detect_resource_bottleneck(
                 f"Capacity constraint {name} uses {constraint_unit}; expected {unit_label}. No implicit conversion is performed."
             )
         capacity = _number(item.get("capacity"), f"capacity_constraints[{index}].capacity", minimum=0)
-        normalized.append({"constraint": name, "capacity": capacity, "unit": constraint_unit})
+        provenance = _validated_input_provenance(
+            item.get("provenance"), f"capacity_constraints[{index}].provenance"
+        )
+        normalized.append({
+            "constraint": name,
+            "capacity": capacity,
+            "unit": constraint_unit,
+            "provenance": provenance,
+        })
     limiting = min(normalized, key=lambda item: (item["capacity"], item["constraint"].casefold()))
     shortfall = max(0.0, required - limiting["capacity"])
     return {
@@ -1898,6 +1906,13 @@ def assess_infrastructure_route(route: Mapping[str, Any]) -> dict[str, Any]:
             "reason": "A physical connection must be explicitly confirmed with supporting evidence.",
             "operational_authorization": False,
         }
+    route_provenance = _validated_input_provenance(route.get("provenance"), "route.provenance")
+    if route_provenance == "STALE":
+        return {
+            "status": "BLOCKED_STALE_ROUTE_EVIDENCE",
+            "provenance": route_provenance,
+            "operational_authorization": False,
+        }
     distance = _number(route.get("distance_km"), "distance_km", minimum=0)
     capacity = _number(route.get("capacity"), "capacity", minimum=0)
     required = _number(route.get("required_quantity"), "required_quantity", minimum=0)
@@ -1930,6 +1945,7 @@ def assess_infrastructure_route(route: Mapping[str, Any]) -> dict[str, Any]:
         "required_quantity": required,
         "unit": unit,
         "transport_mode": str(route.get("transport_mode") or "").strip(),
+        "provenance": route_provenance,
         "missing_evidence": missing,
         "connection_confirmation_is_user_asserted": True,
         "independent_verification": "NOT_PERFORMED",
