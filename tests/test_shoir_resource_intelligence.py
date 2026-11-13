@@ -2095,3 +2095,24 @@ def test_water_reuse_optimizer_blocks_stale_connection_evidence():
     assert result["status"] == "NO_CONFIRMED_REUSE_CONNECTION"
     assert result["allocations"] == []
     assert result["rejected_connections"][0]["provenance"] == "STALE"
+
+
+def test_resource_ui_json_parsers_enforce_size_and_array_record_limits():
+    from shoir_resource_intelligence_ui import (
+        MAX_RESOURCE_JSON_INPUT_CHARS,
+        MAX_RESOURCE_JSON_ARRAY_RECORDS,
+        _json_object,
+        _json_array,
+    )
+
+    with pytest.raises(ValueError, match="no longer than"):
+        _json_object(" " * (MAX_RESOURCE_JSON_INPUT_CHARS + 1), "Large object")
+    with pytest.raises(ValueError, match="no longer than"):
+        _json_array(" " * (MAX_RESOURCE_JSON_INPUT_CHARS + 1), "Large array")
+    with pytest.raises(ValueError, match="more than"):
+        _json_array(
+            "[" + ",".join("{}" for _ in range(MAX_RESOURCE_JSON_ARRAY_RECORDS + 1)) + "]",
+            "Too many records",
+        )
+    assert _json_object('{"ok":true}', "Small object") == {"ok": True}
+    assert _json_array('[{"ok":true}]', "Small array") == [{"ok": True}]
