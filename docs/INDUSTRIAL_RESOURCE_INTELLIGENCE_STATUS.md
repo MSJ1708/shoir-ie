@@ -51,7 +51,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | 13. Contingency and Resilience Simulator | PARTIALLY_IMPLEMENTED | Single-supplier fractional supply shock and shortage re-optimization; recovery time stays unset without evidence. | No time-stepped multi-event discrete simulation, quality failure/treatment failure models, storage depletion schedule or validated recovery playbook. |
 | 14. Infrastructure Co-Optimization | PARTIALLY_IMPLEMENTED | Preliminary route screen requires user-asserted connection confirmation, route distance, capacity, demand and access/permit/engineering reference fields; it never returns operational authorization. | No GIS/route survey, hydraulic design, pressure/flow model, physical access verification, CAPEX/OPEX optimization, permit validation or construction approval. Real route/permit evidence remains an external dependency. |
 | 15. Physical Feasibility and Safety Gate | PARTIALLY_IMPLEMENTED | Critical failure forces REJECTED; laboratory and engineering/safety/environmental references are required for evidence-recorded state; no operational authorization is returned. | No Saudi or international regulatory rule library, material incompatibility database, permit-source/version register or independently qualified approval. |
-| 16. Industrial Exchange Assurance | NOT_IMPLEMENTED | — | Requires versioned agreements, approved contract terms, delivery and certificate records, acceptance/rejection process and audit lifecycle. |
+| 16. Industrial Exchange Assurance | PARTIALLY_IMPLEMENTED | Structured supplier/buyer agreement drafts with quantity tolerance, quality limits, schedule, certificate requirement, treatment/testing responsibilities, shortage/rejection procedures and four approval-reference fields; delivery assessments compare quantities, quality and certificate validity and retain deviations/evidence references. | Approval references are not signatures; no legally reviewed contract, participant authentication, cross-organization approvals, immutable audit lifecycle, automatic contractual remedy or operational release exists. Delivery status always requires human acceptance and carries no contractual effect. |
 | 17. Industrial Proof of Value | PARTIALLY_IMPLEMENTED | Supplier, buyer and transfer-neutral network formulas. Internal sale revenue is excluded from network value to avoid double-counting. | No customer baseline/counterfactual records, volume normalization, actual delivery reconciliation, emissions factors or independent verification evidence. |
 | 18. Resource Quality Digital Memory | PARTIALLY_IMPLEMENTED | Current passports and results are included in the saved per-user workspace snapshot/export. | No immutable append-only lab/delivery/certificate history, evidence hashes, chain of custody or managed entity lineage. |
 | 19. Confidential Industrial Intelligence Network | BLOCKED_EXTERNAL_DEPENDENCY | Module requires authenticated user and Enterprise entitlement; current save action explicitly refuses to write resource data into an active organization-shared workspace. | No resource-specific organization tenant schema, attribute-based disclosure, approved cross-company matching or authorized company participant network exists. |
@@ -89,6 +89,10 @@ Quality forecasting requires a minimum history and includes a chronological hold
 ### Bottlenecks and infrastructure
 
 The bottleneck screen identifies the smallest entered capacity after enforcing exact unit agreement. It does not infer an unentered capacity. The infrastructure screen requires a user-confirmed physical connection and records distance, capacity and evidence references; any positive result is only preliminary, user-asserted and not operational authorization.
+
+### Exchange assurance
+
+Agreement records are drafts only. The module records supplier/buyer, resource, quantity and tolerance, quality limits, schedule, certificates, treatment/testing responsibilities, shortage/rejection procedures and engineering/safety/environmental/commercial reference fields. Recording all four references does not sign a contract. Delivery assessments compare actual quantity, entered quality values, certificate reference and expiry date, and delivery evidence. They flag shortages, excess, missing quality, out-of-specification results and missing/expired certificates. Each result requires human acceptance and explicitly returns no contractual effect or operational authorization.
 
 ### Safety and value
 
@@ -129,6 +133,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Supplier disruption shortage and unset recovery time.
 - Non-overridable critical safety failure and missing approval references.
 - Transfer-neutral network financial value and non-self-certification of independent verification.
+- Exchange agreement draft approval-reference states and delivery quantity/quality/certificate evidence checks.
 - Downstream dependency graph traversal without causality claims.
 - Insufficient-data and time-aware exploratory forecast behavior.
 - Historical delivery pass rate without a future probability.
