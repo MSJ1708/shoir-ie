@@ -1014,3 +1014,50 @@ def test_workbench_exposes_and_runs_t096_and_t098_configuration_checks():
     assert identity["provider_authentication_tested"] is False
     assert identity["provider_mfa_evidence_verified"] is False
     assert all(row["value_exposed"] is False for row in identity["environment_variables"].to_dict("records"))
+
+
+def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
+    """Exercise T094's real Workbench form, result key, and open-alert deduplication."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T094 · KPI Dashboard and Alert Center")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.text_area(key="tool094_records").set_value(
+        '[{"kpi":"Scrap Rate","value":4,"unit":"%","observed_at":"2026-11-12T09:00:00Z","source":"Synthetic acceptance fixture"}]'
+    )
+    at.text_area(key="tool094_rules").set_value(
+        '[{"rule_id":"scrap-high","kpi":"Scrap Rate","operator":"gt","threshold":3,"severity":"HIGH"}]'
+    )
+    at.text_input(key="tool094_as_of").set_value("2026-11-12T10:00:00Z")
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "T094 first run raised: " + "\n".join(str(error.value) for error in at.exception)
+
+    first = at.session_state.get("shoir_tool_result_T094")
+    assert first is not None, "T094 did not populate shoir_tool_result_T094."
+    assert first["kpi_count"] == 1
+    assert first["breached_kpi_count"] == 1
+    assert first["new_alert_count"] == 1
+    assert first["alert_records"][0]["rule_id"] == "scrap-high"
+    assert first["alert_records"][0]["severity"] == "HIGH"
+    assert first["alert_records"][0]["source"] == "Synthetic acceptance fixture"
+    assert at.session_state["shoir_kpi_open_alert_records"][0]["state"] == "OPEN"
+
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "T094 repeat run raised: " + "\n".join(str(error.value) for error in at.exception)
+
+    repeated = at.session_state.get("shoir_tool_result_T094")
+    assert repeated is not None
+    assert repeated["new_alert_count"] == 0
+    assert repeated["alert_records"][0]["new_alert"] is False
