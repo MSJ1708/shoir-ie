@@ -1856,3 +1856,30 @@ def test_compatibility_rejects_inverted_buyer_quality_limits():
             _supply(quality={"pH": 7.0}),
             _demand(limits={"pH": {"min": 9.0, "max": 6.0}}),
         )
+
+
+def test_safety_gate_rejects_an_explicit_failed_required_laboratory_result():
+    result = evaluate_safety_gate(
+        critical_failure=False,
+        laboratory_required=True,
+        laboratory_passed=False,
+        engineering_approval_reference="ENG-1",
+        safety_approval_reference="HSE-1",
+        environmental_approval_reference="ENV-1",
+    )
+    assert result["status"] == "REJECTED"
+    assert any("laboratory test failed" in blocker.lower() for blocker in result["blockers"])
+    assert result["operational_authorization"] is False
+
+
+def test_safety_gate_keeps_missing_required_laboratory_result_pending():
+    result = evaluate_safety_gate(
+        critical_failure=False,
+        laboratory_required=True,
+        laboratory_passed=None,
+        engineering_approval_reference="ENG-1",
+        safety_approval_reference="HSE-1",
+        environmental_approval_reference="ENV-1",
+    )
+    assert result["status"] == "APPROVAL_PENDING"
+    assert result["operational_authorization"] is False
