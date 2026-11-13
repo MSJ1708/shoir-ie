@@ -28,6 +28,9 @@ from shoir_resource_intelligence import (
     calculate_supply_reliability,
     propagate_network_impact,
     rank_resource_cascade,
+    detect_resource_bottleneck,
+    assess_infrastructure_route,
+    calculate_resource_intensity_change,
 )
 
 
@@ -148,7 +151,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         "Overview & Import", "Resource Passports", "Loss & Recovery",
         "Compatibility", "Network Optimizer", "Resilience",
         "Safety Gate", "Proof of Value", "Quality & Reliability",
-        "Resource Memory", "Reports",
+        "Resource Memory", "Infrastructure & Bottlenecks", "Reports",
     ])
 
     with tabs[0]:
@@ -229,6 +232,11 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             quantity = c3.text_input("Available quantity (numeric)")
             unit = c4.text_input("Unit (e.g. m3/day, kg/h, kWh)")
             category = st.text_input("Resource category", value="INDUSTRIAL_RESOURCE")
+            owner = st.text_input("Resource owner / responsible organization")
+            description_en = st.text_area("Resource description (English)", height=55)
+            description_ar = st.text_area("وصف المورد (العربية)", height=55)
+            source_process = st.text_input("Originating process")
+            source_equipment = st.text_input("Originating equipment / asset")
             quality_json = st.text_area("Measured quality properties (JSON object)", value="{}", height=90)
             c5, c6 = st.columns(2)
             provenance = c5.selectbox("Data provenance", list(PROVENANCE_VALUES), index=2)
@@ -236,8 +244,15 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             c7, c8 = st.columns(2)
             temperature = c7.text_input("Temperature °C (optional)", value="")
             pressure = c8.text_input("Pressure kPa (optional)", value="")
-            source_reference = st.text_input("Source / laboratory / meter reference")
-            treatment_notes = st.text_input("Treatment and handling notes")
+            source_reference = st.text_input("Source / meter reference")
+            availability_window = st.text_input("Availability schedule / window")
+            seasonal_variation = st.text_input("Seasonal or historical variation note")
+            storage_requirements = st.text_input("Storage requirements")
+            transport_requirements = st.text_input("Transportation / handling requirements")
+            laboratory_reference = st.text_input("Laboratory evidence reference")
+            certificate_reference = st.text_input("Certificate reference")
+            certificate_valid_until = st.text_input("Certificate valid until (YYYY-MM-DD)")
+            treatment_notes = st.text_input("Treatment notes")
             safety_restrictions = st.text_area("Safety restrictions", height=70)
             add_passport = st.form_submit_button("Create resource passport")
         if add_passport:
@@ -251,8 +266,15 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                     "available_quantity": quantity, "unit": unit, "quality": qobj,
                     "provenance": provenance, "measured_at": measured_at or None,
                     "temperature_c": temperature or None, "pressure_kpa": pressure or None,
-                    "source_reference": source_reference, "treatment_notes": treatment_notes,
-                    "safety_restrictions": safety_restrictions,
+                    "owner": owner, "description_en": description_en, "description_ar": description_ar,
+                    "source_process": source_process, "source_equipment": source_equipment,
+                    "source_reference": source_reference, "availability_window": availability_window,
+                    "seasonal_variation": seasonal_variation, "storage_requirements": storage_requirements,
+                    "transport_requirements": transport_requirements,
+                    "laboratory_evidence_reference": laboratory_reference,
+                    "certificate_reference": certificate_reference,
+                    "certificate_valid_until": certificate_valid_until,
+                    "treatment_notes": treatment_notes, "safety_restrictions": safety_restrictions,
                 }
                 passport = validate_resource_passport(payload)
                 passports.append(passport)
@@ -536,6 +558,30 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         if "proof_of_value" in results:
             _render_result(st, "Value calculation", results["proof_of_value"])
 
+        st.divider()
+        st.markdown("**Production-normalized resource intensity comparison**")
+        st.caption("This is an intensity comparison, not verified savings or causal attribution.")
+        v1, v2 = st.columns(2)
+        base_usage = v1.text_input("Baseline resource usage", key="sri_intensity_base_usage")
+        base_output = v2.text_input("Baseline production output", key="sri_intensity_base_output")
+        v3, v4 = st.columns(2)
+        current_usage = v3.text_input("Reporting-period resource usage", key="sri_intensity_current_usage")
+        current_output = v4.text_input("Reporting-period production output", key="sri_intensity_current_output")
+        v5, v6 = st.columns(2)
+        intensity_usage_unit = v5.text_input("Usage unit", key="sri_intensity_usage_unit")
+        intensity_output_unit = v6.text_input("Production unit", key="sri_intensity_output_unit")
+        if st.button("Compare normalized resource intensity", key="sri_compare_intensity"):
+            try:
+                results["resource_intensity"] = calculate_resource_intensity_change(
+                    base_usage, base_output, current_usage, current_output,
+                    usage_unit=intensity_usage_unit, production_unit=intensity_output_unit,
+                )
+                st.session_state[STATE_PREFIX + "results"] = results
+            except Exception as exc:
+                st.error(f"Intensity comparison failed: {exc}")
+        if "resource_intensity" in results:
+            _render_result(st, "Normalized intensity comparison", results["resource_intensity"])
+
     with tabs[8]:
         st.markdown("#### Quality and supply history")
         quality_history = st.text_area(
@@ -584,6 +630,76 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             _render_result(st, "Prevention-first resource cascade", results["cascade"])
 
     with tabs[10]:
+        st.markdown("#### Bottleneck and physical infrastructure screening")
+        st.caption("These checks use explicit user-entered capacities and route evidence. Proximity is not proof of a physical connection.")
+        st.markdown("**Capacity bottleneck**")
+        c1, c2 = st.columns(2)
+        bottleneck_required = c1.text_input("Required resource quantity", key="sri_bottleneck_required")
+        bottleneck_unit = c2.text_input("Required unit", key="sri_bottleneck_unit")
+        capacities_json = st.text_area(
+            "Capacity constraints JSON",
+            value="[]",
+            key="sri_bottleneck_capacities",
+            height=100,
+            help='Example: [{"constraint":"Treatment capacity","capacity":80,"unit":"m3/day"},{"constraint":"Storage withdrawal","capacity":60,"unit":"m3/day"}]',
+        )
+        if st.button("Detect limiting capacity", key="sri_detect_bottleneck"):
+            try:
+                results["bottleneck"] = detect_resource_bottleneck(
+                    bottleneck_required,
+                    unit=bottleneck_unit,
+                    capacity_constraints=_json_array(capacities_json, "Capacity constraints"),
+                )
+                st.session_state[STATE_PREFIX + "results"] = results
+            except Exception as exc:
+                st.error(f"Bottleneck screening failed: {exc}")
+        if "bottleneck" in results:
+            _render_result(st, "Bottleneck result", results["bottleneck"])
+
+        st.divider()
+        st.markdown("**Preliminary transport / shared-infrastructure route screen**")
+        connection_choice = st.selectbox(
+            "Physical connection evidence",
+            ["Not supplied", "Confirmed by user", "Unavailable"],
+            key="sri_infrastructure_connection",
+        )
+        r1, r2 = st.columns(2)
+        route_distance = r1.text_input("Route distance (km)", key="sri_infrastructure_distance")
+        route_mode = r2.text_input("Transport / infrastructure mode", key="sri_infrastructure_mode")
+        r3, r4 = st.columns(2)
+        route_capacity = r3.text_input("Declared route capacity", key="sri_infrastructure_capacity")
+        route_required = r4.text_input("Required quantity", key="sri_infrastructure_required")
+        route_unit = st.text_input("Shared capacity / required unit", key="sri_infrastructure_unit")
+        r5, r6 = st.columns(2)
+        route_access = r5.text_input("Route access / survey evidence reference", key="sri_route_access")
+        route_permit = r6.text_input("Permit reference", key="sri_route_permit")
+        route_engineering = st.text_input("Engineering review reference", key="sri_route_engineering")
+        if st.button("Assess preliminary infrastructure feasibility", key="sri_assess_infrastructure"):
+            try:
+                result = assess_infrastructure_route({
+                    "connection_confirmed": (
+                        True if connection_choice == "Confirmed by user"
+                        else False if connection_choice == "Unavailable" else None
+                    ),
+                    "distance_km": route_distance,
+                    "capacity": route_capacity,
+                    "required_quantity": route_required,
+                    "unit": route_unit,
+                    "capacity_unit": route_unit,
+                    "transport_mode": route_mode,
+                    "route_access_evidence": route_access,
+                    "permit_reference": route_permit,
+                    "engineering_review_reference": route_engineering,
+                })
+                results["infrastructure_route"] = result
+                st.session_state[STATE_PREFIX + "results"] = results
+            except Exception as exc:
+                st.error(f"Infrastructure screening failed: {exc}")
+        if "infrastructure_route" in results:
+            _render_result(st, "Infrastructure route result", results["infrastructure_route"])
+            st.warning("A preliminary screen does not establish surveyed route access, hydraulic design, permit validity or construction approval.")
+
+    with tabs[11]:
         st.markdown("#### Reports and evidence export")
         report = {
             "report_type": "Industrial Resource Intelligence workspace snapshot",
