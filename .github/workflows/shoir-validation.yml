@@ -241,16 +241,17 @@ jobs:
             cat artifacts/live-deployment-smoke/streamlit.log
             exit 1
           fi
-      - name: Browser-smoke the local app at desktop and mobile widths
+      - name: Browser-smoke the local app at desktop tablet and mobile widths
         id: browser_smoke
         if: always() && steps.streamlit_start.outcome == 'success'
         env:
           SHOIR_LIVE_URL: http://127.0.0.1:8501/
         run: python scripts/live_deployment_smoke.py
-      - name: Require desktop and mobile browser screenshots
+      - name: Require desktop tablet and mobile browser screenshots
         if: always() && steps.browser_smoke.outcome == 'success'
         run: |
           test -s artifacts/live-deployment-smoke/desktop.png
+          test -s artifacts/live-deployment-smoke/tablet.png
           test -s artifacts/live-deployment-smoke/mobile.png
       - name: Upload local runtime smoke evidence
         if: always()
