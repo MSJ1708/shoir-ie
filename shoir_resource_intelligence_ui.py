@@ -32,6 +32,8 @@ from shoir_resource_intelligence import (
     detect_resource_bottleneck,
     assess_infrastructure_route,
     calculate_resource_intensity_change,
+    calculate_energy_balance,
+    screen_waste_heat_recovery,
     validate_exchange_agreement,
     assess_exchange_delivery,
 )
@@ -351,6 +353,53 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 st.error(f"Balance calculation failed: {exc}")
         if "loss_screen" in results:
             _render_result(st, "Loss-screen result", results["loss_screen"])
+
+        with st.expander("Energy balance and waste-heat recovery screening"):
+            st.markdown("**Same-boundary energy balance**")
+            e1, e2 = st.columns(2)
+            energy_input = e1.text_input("Energy input (kWh)", key="sri_energy_input")
+            useful_output = e2.text_input("Useful energy output (kWh)", key="sri_energy_useful")
+            e3, e4 = st.columns(2)
+            waste_heat_output = e3.text_input("Waste heat output (kWh)", key="sri_energy_waste_heat")
+            other_energy_output = e4.text_input("Other energy output (kWh)", value="0", key="sri_energy_other")
+            energy_tolerance = st.text_input("Energy balance tolerance (%)", value="1.0", key="sri_energy_tolerance")
+            if st.button("Calculate energy balance", key="sri_run_energy_balance"):
+                try:
+                    results["energy_balance"] = calculate_energy_balance(
+                        energy_input, useful_output, waste_heat_output,
+                        other_energy_output, tolerance_percent=energy_tolerance,
+                    )
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Energy balance calculation failed: {exc}")
+            if "energy_balance" in results:
+                _render_result(st, "Energy balance result", results["energy_balance"])
+
+            st.divider()
+            st.markdown("**Waste-heat temperature-approach screen**")
+            h1, h2 = st.columns(2)
+            source_temp = h1.text_input("Heat source temperature (°C)", key="sri_heat_source_temp")
+            sink_temp = h2.text_input("Heat sink required temperature (°C)", key="sri_heat_sink_temp")
+            h3, h4 = st.columns(2)
+            heat_rate = h3.text_input("Available waste-heat rate (kW)", key="sri_heat_rate")
+            approach_temp = h4.text_input("Minimum temperature approach (°C)", key="sri_heat_approach")
+            h5, h6 = st.columns(2)
+            operating_hours = h5.text_input("Annual operating hours (optional)", key="sri_heat_hours")
+            energy_value = h6.text_input("Thermal energy value per kWh (optional)", key="sri_heat_value")
+            if st.button("Screen waste-heat recovery", key="sri_run_heat_recovery"):
+                try:
+                    results["heat_recovery_screen"] = screen_waste_heat_recovery(
+                        source_temp, sink_temp, heat_rate,
+                        minimum_approach_temperature_c=approach_temp,
+                        annual_operating_hours=operating_hours if operating_hours.strip() else None,
+                        energy_value_per_kwh=energy_value if energy_value.strip() else None,
+                    )
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Waste-heat screening failed: {exc}")
+            if "heat_recovery_screen" in results:
+                _render_result(st, "Waste-heat temperature screen", results["heat_recovery_screen"])
+                st.warning("A passed temperature screen is not heat exchanger design or verified heat recovery.")
 
     with tabs[3]:
         st.markdown("#### Engineering compatibility screen")
