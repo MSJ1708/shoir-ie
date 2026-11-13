@@ -1058,8 +1058,13 @@ def validate_exchange_agreement(payload: Mapping[str, Any]) -> dict[str, Any]:
     certificate_required = payload.get("certificate_required", False)
     if not isinstance(certificate_required, bool):
         raise ResourceValidationError("certificate_required must be a boolean.")
+    approval_payload = payload.get("approval_references")
+    if _is_missing(approval_payload):
+        approval_payload = {}
+    if not isinstance(approval_payload, Mapping):
+        raise ResourceValidationError("approval_references must be an object.")
     approval_references = {
-        key: _optional_text((payload.get("approval_references") or {}).get(key))
+        key: _optional_text(approval_payload.get(key))
         for key in ("engineering", "safety", "environmental", "commercial")
     }
     missing_approvals = [key for key, value in approval_references.items() if not value]
