@@ -54,6 +54,7 @@ def _route(supply_id="S1", demand_id="D1", cost=2.0):
         "unit_cost": cost,
         "transport_cost_per_unit": 0.0,
         "treatment_cost_per_unit": 0.0,
+        "currency": "SAR",
         "capacity": 100.0,
     }
 
@@ -169,6 +170,7 @@ def test_supplier_disruption_reports_shortage_without_inventing_recovery_time():
         [_supply(quantity=100)], [_demand(quantity=80)], [_route()],
         supplier_id="S1", supply_reduction_fraction=0.5,
         shortage_penalty_per_unit=1_000_000,
+        shortage_penalty_currency="SAR",
     )
     assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocation_result"]["unmet_demand"][0]["quantity"] == pytest.approx(30)
@@ -471,6 +473,7 @@ def test_complete_supplier_shutdown_returns_full_unmet_demand_not_false_infeasib
         [_supply(quantity=100)], [_demand(quantity=80)], [_route()],
         supplier_id="S1", supply_reduction_fraction=1.0,
         shortage_penalty_per_unit=1_000_000,
+        shortage_penalty_currency="SAR",
     )
     assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocation_result"]["allocations"] == []
@@ -802,6 +805,7 @@ def test_synthetic_end_to_end_resource_intelligence_engine_flow():
         supplier_id=passport["resource_id"],
         supply_reduction_fraction=0.5,
         shortage_penalty_per_unit=1_000_000,
+        shortage_penalty_currency="SAR",
     )
     assert disruption["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
 
@@ -913,13 +917,13 @@ def test_network_optimizer_rejects_missing_route_capacity_and_costs_instead_of_a
         optimize_resource_network([_supply()], [_demand()], [{
             "supply_id": "S1", "demand_id": "D1",
             "unit_cost": 1.0, "transport_cost_per_unit": 0.0,
-            "treatment_cost_per_unit": 0.0,
+            "treatment_cost_per_unit": 0.0, "currency": "SAR",
             # Deliberately no physical route capacity.
         }])
     with pytest.raises(ResourceValidationError):
         optimize_resource_network([_supply()], [_demand()], [{
             "supply_id": "S1", "demand_id": "D1",
-            "unit_cost": 1.0, "capacity": 100.0,
+            "unit_cost": 1.0, "capacity": 100.0, "currency": "SAR",
             # Deliberately no transport or treatment cost inputs.
         }])
 
@@ -1113,6 +1117,7 @@ def test_period_aligned_optimizer_does_not_carry_surplus_into_a_later_period():
     result = optimize_period_aligned_resource_network(
         supplies, demands, routes, allow_shortage=True,
         shortage_penalty_per_unit=1_000_000,
+        shortage_penalty_currency="SAR",
     )
     assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocations"] == []
@@ -1155,6 +1160,7 @@ def test_period_optimizer_reports_complete_shortage_when_all_supply_is_unavailab
         routes=[],
         allow_shortage=True,
         shortage_penalty_per_unit=1_000_000,
+        shortage_penalty_currency="SAR",
     )
     assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocations"] == []
@@ -1171,6 +1177,7 @@ def test_period_optimizer_rejects_routes_without_same_period_supply():
         routes=[{**_route("S-MON", "D-TUE"), "period_id": "2026-11-17"}],
         allow_shortage=True,
         shortage_penalty_per_unit=1_000_000,
+        shortage_penalty_currency="SAR",
     )
     assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
     rejected = result["periods"][0]["rejected_routes"]
@@ -1439,6 +1446,7 @@ def test_combined_network_scenario_applies_supply_demand_and_cost_shocks_togethe
         scenario_id="SCN-1",
         scenario_name="Supply loss and demand spike",
         shortage_penalty_per_unit=1000,
+            shortage_penalty_currency="SAR",
     )
     assert result["baseline_unmet_quantity"] == pytest.approx(0)
     assert result["stressed_unmet_quantity"] == pytest.approx(22)
@@ -1459,6 +1467,7 @@ def test_combined_network_scenario_quality_failure_rejects_route_and_reports_sho
         scenario_id="SCN-QUALITY",
         scenario_name="Supplier quality failure",
         shortage_penalty_per_unit=500,
+        shortage_penalty_currency="SAR",
     )
     assert result["stressed"]["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["stressed"]["allocations"] == []
@@ -1475,14 +1484,37 @@ def test_combined_network_scenario_requires_explicit_targets_and_supported_shock
             *base, [{"type": "SUPPLY_REDUCTION", "supply_id": "missing", "fraction": 0.2}],
             scenario_id="SCN-X", scenario_name="Unknown target",
             shortage_penalty_per_unit=1000,
+            shortage_penalty_currency="SAR",
         )
     with pytest.raises(ResourceValidationError, match="Unsupported resource-network shock type"):
         simulate_resource_network_scenario(
             *base, [{"type": "AI_APPROVAL_OVERRIDE"}],
             scenario_id="SCN-X", scenario_name="Invalid shock",
             shortage_penalty_per_unit=1000,
+            shortage_penalty_currency="SAR",
         )
 
+
+
+
+def test_network_optimizer_rejects_mixed_route_currencies():
+    route_two = {**_route("S2", "D2"), "currency": "USD"}
+    with pytest.raises(ResourceValidationError, match="same currency"):
+        optimize_resource_network(
+            [_supply("S1"), _supply("S2")],
+            [_demand("D1"), _demand("D2")],
+            [_route("S1", "D1"), route_two],
+        )
+
+
+def test_shortage_penalty_currency_must_match_route_cost_currency():
+    with pytest.raises(ResourceValidationError, match="must match the exchange route currency"):
+        optimize_resource_network(
+            [_supply()], [_demand()], [_route()],
+            allow_shortage=True,
+            shortage_penalty_per_unit=1000,
+            shortage_penalty_currency="USD",
+        )
 
 def test_shortage_optimizers_require_an_explicit_penalty_input():
     with pytest.raises(ResourceValidationError, match="shortage_penalty_per_unit"):
@@ -1509,4 +1541,5 @@ def test_combined_network_scenario_rejects_zero_demand_multiplier():
             [{"type": "DEMAND_MULTIPLIER", "demand_id": "D1", "multiplier": 0}],
             scenario_id="SCN-ZERO", scenario_name="Zero demand",
             shortage_penalty_per_unit=1000,
+            shortage_penalty_currency="SAR",
         )
