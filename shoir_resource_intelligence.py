@@ -703,6 +703,9 @@ def forecast_resource_quality(
     minimum_samples: int = 20,
 ) -> dict[str, Any]:
     """Exploratory linear-trend forecast with chronological holdout and uncertainty band."""
+    minimum_samples = int(minimum_samples)
+    if minimum_samples < 12:
+        raise ResourceValidationError("minimum_samples must be at least 12 to retain training and holdout observations.")
     if len(observations) < minimum_samples:
         return {
             "status": "INSUFFICIENT_DATA",
@@ -755,6 +758,9 @@ def calculate_supply_reliability(
     minimum_periods: int = 20,
 ) -> dict[str, Any]:
     """Report historical in-full-and-quality pass rate; does not forecast future reliability."""
+    minimum_periods = int(minimum_periods)
+    if minimum_periods < 1:
+        raise ResourceValidationError("minimum_periods must be at least 1.")
     if len(delivery_history) < minimum_periods:
         return {
             "status": "INSUFFICIENT_DATA",
@@ -1327,6 +1333,18 @@ def assess_exchange_delivery(
     tolerance = _number(agreement.get("quantity_tolerance_percent"), "quantity_tolerance_percent", minimum=0)
     if expected <= 0 or tolerance > 100:
         raise ResourceValidationError("Agreement quantity or tolerance is invalid.")
+    quality_terms = agreement.get("quality_limits")
+    if not isinstance(quality_terms, Mapping) or not quality_terms:
+        raise ResourceValidationError("Agreement quality_limits must be a non-empty object.")
+    for property_name, bounds in quality_terms.items():
+        if not isinstance(bounds, Mapping):
+            raise ResourceValidationError(f"Agreement quality bounds for {property_name} must be an object.")
+        lower = _number(bounds["min"], f"{property_name}.min") if bounds.get("min") is not None else None
+        upper = _number(bounds["max"], f"{property_name}.max") if bounds.get("max") is not None else None
+        if lower is None and upper is None:
+            raise ResourceValidationError(f"Agreement quality limits for {property_name} are empty.")
+        if lower is not None and upper is not None and lower > upper:
+            raise ResourceValidationError(f"Agreement quality minimum exceeds maximum for {property_name}.")
     unit = _text(agreement.get("unit"), "agreement.unit")
     tolerance_quantity = expected * tolerance / 100.0
     deviations: list[str] = []
@@ -1338,10 +1356,8 @@ def assess_exchange_delivery(
     measured_quality = delivery.get("quality")
     missing_quality: list[str] = []
     quality_failures: list[str] = []
-    limits = agreement.get("quality_limits")
-    if not isinstance(limits, Mapping) or not limits:
-        missing_quality.append("No buyer quality limits are recorded in the agreement.")
-    elif not isinstance(measured_quality, Mapping):
+    limits = quality_terms
+    if not isinstance(measured_quality, Mapping):
         missing_quality.extend(str(key) for key in limits)
     else:
         for property_name, bounds in limits.items():
