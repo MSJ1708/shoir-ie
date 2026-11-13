@@ -385,12 +385,10 @@ def optimize_resource_network(
             continue
         cost = (
             _number(raw.get("unit_cost"), "route.unit_cost", minimum=0)
-            + _number(raw.get("treatment_cost_per_unit", 0), "route.treatment_cost_per_unit", minimum=0)
-            + _number(raw.get("transport_cost_per_unit", 0), "route.transport_cost_per_unit", minimum=0)
+            + _number(raw.get("treatment_cost_per_unit"), "route.treatment_cost_per_unit", minimum=0)
+            + _number(raw.get("transport_cost_per_unit"), "route.transport_cost_per_unit", minimum=0)
         )
-        capacity = _number(raw.get("capacity", min(
-            supply["available_quantity"], demand["required_quantity"]
-        )), "route.capacity", minimum=0)
+        capacity = _number(raw.get("capacity"), "route.capacity", minimum=0)
         if capacity <= 0:
             continue
         edges.append({
