@@ -228,6 +228,10 @@ def assess_resource_compatibility(
                 "reasons": [f"At least one numeric limit is required for {property_name}."],
                 "qualification_is_user_asserted": False,
             }
+        if lower is not None and upper is not None and lower > upper:
+            raise ResourceValidationError(
+                f"Buyer quality minimum exceeds maximum for {property_name}."
+            )
         if lower is not None and value < lower:
             violations.append(f"{property_name}={value} is below minimum {lower}.")
         if upper is not None and value > upper:
@@ -1916,9 +1920,7 @@ def optimize_single_contaminant_water_reuse(
             })
             continue
         capacity = _number(
-            connection.get("capacity", min(
-                source_map[source_id]["available_flow"], sink_map[sink_id]["required_flow"]
-            )),
+            connection.get("capacity"),
             f"connections[{index}].capacity",
             minimum=0,
         )
