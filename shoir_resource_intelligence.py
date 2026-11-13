@@ -523,10 +523,6 @@ def optimize_resource_network(
     route_currencies: set[str] = set()
     seen_pairs: set[tuple[str, str]] = set()
     for raw in routes:
-        route_currency = _text(raw.get("currency"), "route.currency").upper()
-        if len(route_currency) != 3 or not route_currency.isalpha():
-            raise ResourceValidationError("route.currency must be a three-letter currency code.")
-        route_currencies.add(route_currency)
         sid = _text(raw.get("supply_id"), "route.supply_id")
         did = _text(raw.get("demand_id"), "route.demand_id")
         connection_confirmed = raw.get("connection_confirmed")
@@ -544,6 +540,10 @@ def optimize_resource_network(
             raw.get("connection_evidence_reference"),
             "route.connection_evidence_reference",
         )
+        route_currency = _text(raw.get("currency"), "route.currency").upper()
+        if len(route_currency) != 3 or not route_currency.isalpha():
+            raise ResourceValidationError("route.currency must be a three-letter currency code.")
+        route_currencies.add(route_currency)
         if sid not in supply_by_id or did not in demand_by_id:
             raise ResourceValidationError(f"Route references unknown supply or demand: {sid} -> {did}.")
         if (sid, did) in seen_pairs:
