@@ -873,3 +873,26 @@ def test_resource_ui_refuses_to_save_resource_data_into_shared_org_workspace():
     ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
     assert ok is False
     assert "No resource data was written" in message
+
+
+def test_quality_forecast_rejects_minimum_sample_setting_without_holdout_capacity():
+    with pytest.raises(ResourceValidationError, match="at least 12"):
+        forecast_resource_quality([], minimum_samples=5)
+
+
+def test_supply_reliability_rejects_nonpositive_minimum_periods():
+    with pytest.raises(ResourceValidationError, match="at least 1"):
+        calculate_supply_reliability([], minimum_periods=0)
+
+
+def test_delivery_assessment_revalidates_tampered_agreement_quality_limits():
+    from shoir_resource_intelligence import validate_exchange_agreement, assess_exchange_delivery
+
+    agreement = validate_exchange_agreement(_exchange_agreement_payload())
+    agreement["quality_limits"] = {"pH": {"min": 9, "max": 7}}
+    with pytest.raises(ResourceValidationError, match="minimum exceeds maximum"):
+        assess_exchange_delivery(agreement, {
+            "delivery_date": "2026-11-12",
+            "delivered_quantity": 100,
+            "quality": {"pH": 7.0},
+        })
