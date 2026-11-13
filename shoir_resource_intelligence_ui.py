@@ -24,6 +24,7 @@ from shoir_resource_intelligence import (
     optimize_resource_network,
     optimize_period_aligned_resource_network,
     simulate_supplier_disruption,
+    simulate_resource_network_scenario,
     evaluate_safety_gate,
     calculate_exchange_value,
     calculate_environmental_impact,
@@ -739,6 +740,61 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         for key in ("disruption", "dependency_impact"):
             if key in results:
                 _render_result(st, key.replace("_", " ").title(), results[key])
+
+        with st.expander("Combined multi-event resource-network scenario"):
+            st.caption(
+                "Combine explicit supply, quality, demand, route-availability and cost shocks. "
+                "The engine re-optimizes a one-period network and reports shortages without inventing recovery time or probabilities."
+            )
+            scenario_name = st.text_input("Scenario name", key="sri_network_scenario_name")
+            scenario_shocks = st.text_area(
+                "Scenario shocks JSON",
+                value="[]",
+                key="sri_network_scenario_shocks",
+                height=150,
+                help='Supported types: SUPPLIER_SHUTDOWN; SUPPLY_REDUCTION (fraction 0–1); SUPPLY_QUALITY_OVERRIDE (quality object); DEMAND_MULTIPLIER; ROUTE_UNAVAILABLE; ROUTE_CAPACITY_MULTIPLIER; ROUTE_RESOURCE_COST_MULTIPLIER; ROUTE_TRANSPORT_COST_MULTIPLIER; ROUTE_TREATMENT_COST_MULTIPLIER. Target routes by route_id or supply_id + demand_id.',
+            )
+            if st.button("Run combined disruption scenario", key="sri_run_network_scenario"):
+                try:
+                    if not passports or not demands:
+                        raise ValueError("Create at least one resource passport and one demand before running a scenario.")
+                    if not routes:
+                        raise ValueError("Add explicit exchange routes before running a network scenario.")
+                    shocks = _json_array(scenario_shocks, "Scenario shocks")
+                    scenario_result = simulate_resource_network_scenario(
+                        passports,
+                        demands,
+                        routes,
+                        shocks,
+                        scenario_id=str(uuid4()),
+                        scenario_name=scenario_name,
+                    )
+                    scenario_runs = results.get("resilience_scenarios", [])
+                    if not isinstance(scenario_runs, list):
+                        scenario_runs = []
+                    scenario_runs.append(scenario_result)
+                    results["resilience_scenarios"] = scenario_runs
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Combined resource-network scenario failed: {exc}")
+            scenario_runs = results.get("resilience_scenarios", [])
+            if scenario_runs:
+                st.dataframe(pd.DataFrame([{
+                    "Scenario": item["scenario_name"],
+                    "ID": item["scenario_id"],
+                    "Status": item["status"],
+                    "Baseline unmet": item["baseline_unmet_quantity"],
+                    "Stressed unmet": item["stressed_unmet_quantity"],
+                    "Change in unmet": item["change_in_unmet_quantity"],
+                    "Recovery time": "Not estimated",
+                } for item in scenario_runs]), use_container_width=True, hide_index=True)
+                selected_scenario_id = st.selectbox(
+                    "Inspect combined scenario",
+                    [item["scenario_id"] for item in scenario_runs],
+                    key="sri_network_scenario_inspector",
+                )
+                selected_scenario = next(item for item in scenario_runs if item["scenario_id"] == selected_scenario_id)
+                _render_result(st, "Combined scenario detail", selected_scenario)
 
     with tabs[6]:
         st.markdown("#### Non-overridable human safety and approval gate")
