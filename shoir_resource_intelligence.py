@@ -906,8 +906,14 @@ def optimize_period_aligned_resource_network(
         raise ResourceValidationError("Supplies, demands and routes must contain object records.") from exc
     for index, row in enumerate(supply_rows):
         row["period_id"] = _text(row.get("period_id"), f"supplies[{index}].period_id")
+        row["provenance"] = _validated_input_provenance(
+            row.get("provenance"), f"supplies[{index}].provenance"
+        )
     for index, row in enumerate(demand_rows):
         row["period_id"] = _text(row.get("period_id"), f"demands[{index}].period_id")
+        row["provenance"] = _validated_input_provenance(
+            row.get("provenance"), f"demands[{index}].provenance"
+        )
     route_currencies: set[str] = set()
     for index, row in enumerate(route_rows):
         row["period_id"] = _text(row.get("period_id"), f"routes[{index}].period_id")
