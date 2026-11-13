@@ -1730,6 +1730,10 @@ def forecast_resource_quality(
     minimum_samples = int(minimum_samples)
     if minimum_samples < 12:
         raise ResourceValidationError("minimum_samples must be at least 12 to retain training and holdout observations.")
+    observation_provenance = [
+        _validated_input_provenance(row.get("provenance"), f"observations[{index}].provenance")
+        for index, row in enumerate(observations)
+    ]
     if len(observations) < minimum_samples:
         return {
             "status": "INSUFFICIENT_DATA",
@@ -1763,6 +1767,7 @@ def forecast_resource_quality(
     return {
         "status": "EXPLORATORY_FORECAST_NOT_VALIDATED",
         "sample_count": len(values),
+        "input_provenance": observation_provenance,
         "holdout_sample_count": len(holdout_error),
         "holdout_mae": mae,
         "forecast": next_value,
@@ -1785,6 +1790,10 @@ def calculate_supply_reliability(
     minimum_periods = int(minimum_periods)
     if minimum_periods < 1:
         raise ResourceValidationError("minimum_periods must be at least 1.")
+    history_provenance = [
+        _validated_input_provenance(row.get("provenance"), f"history[{index}].provenance")
+        for index, row in enumerate(delivery_history)
+    ]
     if len(delivery_history) < minimum_periods:
         return {
             "status": "INSUFFICIENT_DATA",
@@ -1805,6 +1814,7 @@ def calculate_supply_reliability(
     return {
         "status": "HISTORICAL_EMPIRICAL_RATE_NOT_FORECAST",
         "sample_count": len(delivery_history),
+        "input_provenance": history_provenance,
         "successful_periods": passes,
         "historical_pass_rate": rate,
         "standard_error": (rate * (1.0 - rate) / len(delivery_history)) ** 0.5,
