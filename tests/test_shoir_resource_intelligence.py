@@ -1923,3 +1923,23 @@ def test_resource_network_optimizer_requires_route_evidence_reference_when_conne
                 "connection_evidence_reference": "",
             }],
         )
+
+
+def test_resource_passport_accepts_excel_date_cells_for_certificate_validity():
+    from datetime import date, datetime
+
+    base = {
+        "facility_id": "FAC-A",
+        "name": "Recovered process water",
+        "resource_type": "Water",
+        "available_quantity": 10,
+        "unit": "m3/day",
+        "provenance": "IMPORTED",
+    }
+    as_date = validate_resource_passport({**base, "certificate_valid_until": date(2026, 12, 31)})
+    as_datetime = validate_resource_passport({
+        **base,
+        "certificate_valid_until": datetime(2026, 12, 31, 15, 30),
+    })
+    assert as_date["certificate_valid_until"] == "2026-12-31"
+    assert as_datetime["certificate_valid_until"] == "2026-12-31"
