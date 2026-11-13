@@ -726,6 +726,9 @@ def test_water_reuse_lp_maximizes_flow_while_respecting_blended_quality_limit():
     )
     assert result["status"] == "PRELIMINARY_SINGLE_CONTAMINANT_REUSE_ALLOCATION"
     assert result["total_reuse_flow"] == pytest.approx(80)
+    assert all(item["source_provenance"] == "SYNTHETIC" for item in result["allocations"])
+    assert all(item["sink_provenance"] == "MANUAL" for item in result["allocations"])
+    assert all(item["connection_provenance"] == "MANUAL" for item in result["allocations"])
     check = result["sink_quality_checks"][0]
     assert check["blended_concentration"] <= check["maximum_concentration"] + 1e-7
     assert result["operational_authorization"] is False
@@ -2057,3 +2060,38 @@ def test_water_reuse_optimizer_blocks_stale_source_and_sink_records():
             [connection],
             contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
         )
+
+
+def test_main_network_optimizer_blocks_stale_physical_route_evidence():
+    result = optimize_resource_network(
+        [_supply()],
+        [_demand()],
+        [{**_route(), "provenance": "STALE"}],
+    )
+    assert result["status"] == "INFEASIBLE"
+    assert result["allocations"] == []
+    assert result["rejected_routes"][0]["status"] == "BLOCKED_STALE_ROUTE_EVIDENCE"
+
+
+def test_water_reuse_optimizer_blocks_stale_connection_evidence():
+    from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
+
+    result = optimize_single_contaminant_water_reuse(
+        [{
+            "source_id": "S1", "available_flow": 10, "flow_unit": "m3/day",
+            "concentration": 1, "concentration_unit": "mg/L", "provenance": "IMPORTED",
+        }],
+        [{
+            "sink_id": "D1", "required_flow": 10, "flow_unit": "m3/day",
+            "maximum_concentration": 5, "concentration_unit": "mg/L", "provenance": "MANUAL",
+        }],
+        [{
+            "source_id": "S1", "sink_id": "D1", "connection_confirmed": True,
+            "connection_evidence_reference": "OLD-ROUTE", "capacity": 10,
+            "provenance": "STALE",
+        }],
+        contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+    )
+    assert result["status"] == "NO_CONFIRMED_REUSE_CONNECTION"
+    assert result["allocations"] == []
+    assert result["rejected_connections"][0]["provenance"] == "STALE"
