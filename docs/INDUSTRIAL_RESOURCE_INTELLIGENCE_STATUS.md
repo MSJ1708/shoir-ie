@@ -86,7 +86,7 @@ The energy balance compares same-boundary input against useful output, entered w
 
 ### Water reuse
 
-The current water reuse LP covers one named dissolved-contaminant concentration only. It maximizes flow across entered source/sink connections while enforcing source supply, sink demand, connection capacity and a blended concentration limit. Physical connections require an explicit user confirmation plus an evidence-reference field, but that evidence is not independently checked. The model does not represent additional contaminants, microbial hazards, treatment units, secondary waste, process-specific chemistry, storage/time schedules or permit requirements; it is not a water-pinch study or permission to reuse water.
+The current water reuse LP covers one named dissolved-contaminant concentration only. It maximizes flow across entered source/sink connections while enforcing source supply, sink demand, explicit connection capacity and a blended concentration limit. Source, sink and connection provenance are required and retained in allocation output; stale sources/sinks are rejected and stale connection evidence is blocked. Physical connections require an explicit user confirmation plus an evidence-reference field, but that evidence is not independently checked. The model does not represent additional contaminants, microbial hazards, treatment units, secondary waste, process-specific chemistry, storage/time schedules or permit requirements; it is not a water-pinch study or permission to reuse water.
 
 ### Compatibility
 
@@ -94,7 +94,7 @@ The current screen requires exact resource-type and unit agreement. It does not 
 
 ### Network allocation
 
-The LP is deterministic. The basic allocator solves one period; the period-aligned wrapper independently solves each explicit period and never transfers supply across period boundaries. Every eligible route must have an explicit boolean `connection_confirmed=true`, a non-empty `connection_evidence_reference`, explicit capacity, resource/transport/treatment costs (including deliberate zero values) and a three-letter currency code. A false route is rejected before cost/currency assumptions are considered; missing confirmation/reference is an error. Route confirmation is caller-asserted, not independently checked. Mixed currencies are rejected; no FX conversion is inferred. Supply limits, demand equality and route capacities are enforced and solver results are independently reconciled. If shortage mode is enabled, the caller must explicitly supply a shortage penalty amount and matching currency; no default penalty or financial basis is injected. A period with no supply reports the full unmet demand when shortage mode is enabled; routes that reference no same-period supply or have no corresponding demand period are listed as rejected. There is no storage/carryover, production schedule or maintenance calendar connection. Infeasible inputs return INFEASIBLE. It is not a multi-period MILP and does not model actual pipelines, production schedules, tank constraints, pressure, permits or contract commitments.
+The LP is deterministic. The basic allocator solves one period; the period-aligned wrapper independently solves each explicit period and never transfers supply across period boundaries. Every eligible route must have an explicit boolean `connection_confirmed=true`, a non-empty `connection_evidence_reference`, an allowed provenance label, explicit capacity, resource/transport/treatment costs (including deliberate zero values) and a three-letter currency code. Supply, demand and route provenance are returned on allocation rows. Unverified `LIVE` claims are rejected; `STALE` supply/demand records are rejected from current allocation and stale route evidence is blocked. A false route is rejected before cost/currency assumptions are considered; missing confirmation/reference is an error. Route confirmation is caller-asserted, not independently checked. Mixed currencies are rejected; no FX conversion is inferred. Supply limits, demand equality and route capacities are enforced and solver results are independently reconciled. If shortage mode is enabled, the caller must explicitly supply a shortage penalty amount and matching currency; no default penalty or financial basis is injected. A period with no supply reports the full unmet demand when shortage mode is enabled; routes that reference no same-period supply or have no corresponding demand period are listed as rejected. There is no storage/carryover, production schedule or maintenance calendar connection. Infeasible inputs return INFEASIBLE. It is not a multi-period MILP and does not model actual pipelines, production schedules, tank constraints, pressure, permits or contract commitments.
 
 ### Uncertainty-aware allocation
 
@@ -102,7 +102,7 @@ The conservative interval-stress optimizer requires an explicit maximum proporti
 
 ### Forecasting and reliability
 
-Quality forecasting requires a minimum history and includes a chronological holdout error, but remains an exploratory linear trend with an approximate residual interval. Historical supply reliability is an empirical pass rate only. Neither output claims future probability or an operational service-level guarantee.
+Quality forecasting and historical delivery reliability require a provenance label on every input observation and return the source labels with the result. They do not claim future reliability or an operational service-level guarantee. Quality forecasting requires a minimum history and includes a chronological holdout error, but remains an exploratory linear trend with an approximate residual interval. Historical supply reliability is an empirical pass rate only.
 
 ### Performance persistence
 
@@ -185,6 +185,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Dated production-normalized performance monitoring, consecutive degradation alert and timestamp validation.
 - Combined resource-network shock scenarios, quality-route rejection, target validation and explicit shortage-penalty amount/currency requirements.
 - Conservative interval-stress allocation, maximum uncertainty-bound validation and shortage penalty/currency checks.
+- Provenance validation and retention across compatibility, main/period/interval LPs, quality/reliability history, bottlenecks, infrastructure and water reuse; stale inputs are excluded from current optimization.
 - Mixed route-currency and shortage-penalty currency mismatch rejection.
 - Downstream dependency graph traversal without causality claims.
 - Insufficient-data and time-aware exploratory forecast behavior.
