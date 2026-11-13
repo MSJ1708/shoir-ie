@@ -1337,7 +1337,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             run_method = st.form_submit_button("Run workspace recovery action", type="primary", use_container_width=True, key="tool099_run")
                         elif selected_tool["tool_id"] == "T094":
                             st.caption(
-                                "Freshness-aware KPI threshold evaluation. Enter authorized source values; rules are evaluated but no email, SMS or external notification is sent."
+                                "Freshness-aware KPI threshold evaluation. Use gt/gte/lt/lte or >, >=, <, <= operators; each KPI reading must have one unique name, and each rule must reference that name. No email, SMS or external notification is sent."
                             )
                             kpi_records_json = st.text_area(
                                 "KPI readings (JSON list: kpi, value, unit, observed_at, source)",
