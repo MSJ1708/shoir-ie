@@ -512,15 +512,31 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
         state = "STALE" if stale else ("BREACHED" if breached else "OK")
         if stale:
             stale_count += 1
+        rule_id = str(item.get("rule_id") or "").strip()
+        severity = str(item.get("severity") or "").strip()
+        source = str(item.get("source") or "").strip()
         row = {
             "name": name, "value": val, "threshold": threshold, "operator": op,
             "unit": str(item.get("unit") or ""), "measured_at": measured_at.isoformat(),
             "age_minutes": age_minutes, "max_age_minutes": max_age,
             "freshness": "STALE" if stale else "FRESH", "status": state,
         }
+        if rule_id:
+            row["rule_id"] = rule_id
+        if severity:
+            row["severity"] = severity
+        if source:
+            row["source"] = source
         results.append(row)
         if not stale and breached:
-            fp = _canonical_hash({"name": name.casefold(), "operator": op, "threshold": threshold})
+            fingerprint_input = {
+                "name": name.casefold(),
+                "operator": op,
+                "threshold": threshold,
+            }
+            if rule_id:
+                fingerprint_input["rule_id"] = rule_id
+            fp = _canonical_hash(fingerprint_input)
             alert = {**row, "fingerprint": fp, "alert_id": "alert-" + fp[:16], "new_alert": fp not in seen}
             alerts.append(alert)
             seen.add(fp)
