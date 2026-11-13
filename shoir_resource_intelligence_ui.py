@@ -704,6 +704,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         "supply_id": supply_choice, "demand_id": demand_choice,
                         "connection_confirmed": True,
                         "connection_evidence_reference": route_connection_reference.strip(),
+                        "provenance": "MANUAL",
                         "unit_cost": _finite_float(route_cost, "Resource unit cost", minimum=0),
                         "transport_cost_per_unit": _finite_float(transport_cost, "Transport cost per unit", minimum=0),
                         "treatment_cost_per_unit": _finite_float(treatment_cost, "Treatment cost per unit", minimum=0),
@@ -737,21 +738,21 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value="[]",
                 key="sri_scheduled_supplies",
                 height=100,
-                help='Each row: id, period_id, resource_type, available_quantity, unit, quality.',
+                help='Each row: id, period_id, resource_type, available_quantity, unit, quality, provenance (IMPORTED/MANUAL/SYNTHETIC/SIMULATED/MOCK/STALE).',
             )
             scheduled_demands = st.text_area(
                 "Time-bucketed demands JSON",
                 value="[]",
                 key="sri_scheduled_demands",
                 height=100,
-                help='Each row: id, period_id, resource_type, required_quantity, unit, quality_limits.',
+                help='Each row: id, period_id, resource_type, required_quantity, unit, quality_limits, provenance (IMPORTED/MANUAL/SYNTHETIC/SIMULATED/MOCK/STALE).',
             )
             scheduled_routes = st.text_area(
                 "Time-bucketed route constraints JSON",
                 value="[]",
                 key="sri_scheduled_routes",
                 height=100,
-                help='Each row: supply_id, demand_id, period_id, connection_confirmed=true, connection_evidence_reference, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, currency, capacity.',
+                help='Each row: supply_id, demand_id, period_id, connection_confirmed=true, connection_evidence_reference, provenance, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, currency, capacity.',
             )
             allow_scheduled_shortage = st.checkbox(
                 "Allow unmet demand and report shortage",
@@ -812,7 +813,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value="[]",
                 key="sri_robust_routes",
                 height=110,
-                help='Each route requires supply_id, demand_id, connection_confirmed=true, connection_evidence_reference, unit_cost, treatment_cost_per_unit, transport_cost_per_unit, currency and capacity.',
+                help='Each route requires supply_id, demand_id, connection_confirmed=true, connection_evidence_reference, provenance, unit_cost, treatment_cost_per_unit, transport_cost_per_unit, currency and capacity.',
             )
             robust_allow_shortage = st.checkbox(
                 "Allow and report unmet demand under interval stress",
