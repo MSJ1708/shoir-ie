@@ -1712,3 +1712,47 @@ def test_engineering_assurance_envelope_rejects_unsupported_snapshot_objects():
             actor="synthetic-engineer",
             provenance="SYNTHETIC",
         )
+
+
+def test_resource_ui_shared_persistence_never_runs_in_production(monkeypatch):
+    from types import SimpleNamespace
+    import durable_account_store as account_store
+    import workspace_persistence
+    from shoir_resource_intelligence_ui import _persist_workspace
+
+    fake_streamlit = SimpleNamespace(session_state={
+        "shoir_active_organization_workspace": {
+            "organization_id": "ORG-B",
+            "organization_workspace_id": "WORKSPACE-B",
+        }
+    })
+    monkeypatch.setattr(account_store, "APP_ENVIRONMENT", "production")
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+    saves = []
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: saves.append(args) or True)
+    ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
+    assert ok is False
+    assert "outside the authorized staging environment" in message
+    assert saves == []
+
+
+def test_resource_ui_shared_persistence_requires_the_staging_edge_backend(monkeypatch):
+    from types import SimpleNamespace
+    import durable_account_store as account_store
+    import workspace_persistence
+    from shoir_resource_intelligence_ui import _persist_workspace
+
+    fake_streamlit = SimpleNamespace(session_state={
+        "shoir_active_organization_workspace": {
+            "organization_id": "ORG-B",
+            "organization_workspace_id": "WORKSPACE-B",
+        }
+    })
+    monkeypatch.setattr(account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: False)
+    saves = []
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: saves.append(args) or True)
+    ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
+    assert ok is False
+    assert "authenticated staging organization service" in message
+    assert saves == []
