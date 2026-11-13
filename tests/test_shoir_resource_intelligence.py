@@ -1893,9 +1893,9 @@ def test_resource_network_optimizer_rejects_unconfirmed_physical_routes():
     result = optimize_resource_network(
         [_supply()], [_demand()],
         [{
-            **_route(),
+            "supply_id": "S1",
+            "demand_id": "D1",
             "connection_confirmed": False,
-            "connection_evidence_reference": "",
         }],
     )
     assert result["status"] == "INFEASIBLE"
