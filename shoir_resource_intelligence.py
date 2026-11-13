@@ -111,12 +111,18 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise ResourceValidationError("quality must be an object of numeric property measurements.")
     else:
         quality = quality_value
-    certificate_valid_until = _optional_text(payload.get("certificate_valid_until"))
+    certificate_raw = payload.get("certificate_valid_until")
+    if isinstance(certificate_raw, datetime):
+        certificate_valid_until = certificate_raw.date().isoformat()
+    elif isinstance(certificate_raw, date):
+        certificate_valid_until = certificate_raw.isoformat()
+    else:
+        certificate_valid_until = _optional_text(certificate_raw)
     if certificate_valid_until:
         try:
             certificate_valid_until = date.fromisoformat(certificate_valid_until).isoformat()
         except ValueError as exc:
-            raise ResourceValidationError("certificate_valid_until must be a valid YYYY-MM-DD date.") from exc
+            raise ResourceValidationError("certificate_valid_until must be a valid YYYY-MM-DD date or a date-valued spreadsheet cell.") from exc
     approval_status = (_optional_text(payload.get("approval_status")) or "DRAFT").upper()
     if approval_status not in {"DRAFT", "PENDING"}:
         raise ResourceValidationError(
