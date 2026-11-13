@@ -484,21 +484,21 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value='[]',
                 key="sri_water_sources",
                 height=110,
-                help='Each source: source_id, available_flow, flow_unit, concentration, concentration_unit.',
+                help='Each source: source_id, available_flow, flow_unit, concentration, concentration_unit, provenance.',
             )
             water_sinks = st.text_area(
                 "Water demand sinks JSON",
                 value='[]',
                 key="sri_water_sinks",
                 height=110,
-                help='Each sink: sink_id, required_flow, flow_unit, maximum_concentration, concentration_unit.',
+                help='Each sink: sink_id, required_flow, flow_unit, maximum_concentration, concentration_unit, provenance.',
             )
             water_connections = st.text_area(
                 "Confirmed source-to-sink connections JSON",
                 value='[]',
                 key="sri_water_connections",
                 height=110,
-                help='Each connection: source_id, sink_id, connection_confirmed=true, connection_evidence_reference and explicit capacity (required).',
+                help='Each connection: source_id, sink_id, connection_confirmed=true, connection_evidence_reference, explicit capacity (required) and provenance.',
             )
             w1, w2, w3 = st.columns(3)
             contaminant_name = w1.text_input("Contaminant / quality parameter", key="sri_water_contaminant")
@@ -1089,12 +1089,14 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             value="[]",
             key="sri_quality_history",
             height=120,
+            help='Each observation requires timestamp, numeric value and provenance (IMPORTED/MANUAL/SYNTHETIC/SIMULATED/MOCK/STALE).',
         )
         reliability_history = st.text_area(
             "Delivery history JSON",
             value="[]",
             key="sri_reliability_history",
             height=120,
+            help='Each period requires delivered_quantity, required_quantity, quality_pass (boolean) and provenance.',
         )
         if st.button("Run quality and reliability screening", key="sri_quality_reliability"):
             try:
