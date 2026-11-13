@@ -487,3 +487,36 @@ def test_resource_passport_rejects_invalid_certificate_date_and_approval_status(
         validate_resource_passport({**base, "certificate_valid_until": "31-12-2026"})
     with pytest.raises(ResourceValidationError, match="approval_status"):
         validate_resource_passport({**base, "approval_status": "AUTO_APPROVED"})
+
+
+def test_blank_spreadsheet_optional_cells_remain_blank_in_resource_passports():
+    passport = validate_resource_passport({
+        "resource_id": float("nan"),
+        "facility_id": "FAC-A",
+        "name": "Recovered water",
+        "resource_type": "Water",
+        "available_quantity": 20,
+        "unit": "m3/day",
+        "quality": float("nan"),
+        "temperature_c": float("nan"),
+        "pressure_kpa": float("nan"),
+        "owner": float("nan"),
+        "measured_at": float("nan"),
+        "certificate_valid_until": float("nan"),
+        "provenance": "IMPORTED",
+    })
+    assert passport["resource_id"] != "nan"
+    assert passport["quality"] == {}
+    assert passport["temperature_c"] is None
+    assert passport["pressure_kpa"] is None
+    assert passport["owner"] == ""
+    assert passport["measured_at"] is None
+    assert passport["certificate_valid_until"] == ""
+
+
+def test_boolean_is_not_accepted_as_a_numeric_measurement():
+    with pytest.raises(ResourceValidationError, match="not a boolean"):
+        validate_resource_passport({
+            "facility_id": "FAC-A", "name": "Water", "resource_type": "Water",
+            "available_quantity": True, "unit": "m3/day", "provenance": "MANUAL",
+        })
