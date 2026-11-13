@@ -713,8 +713,8 @@ def test_water_reuse_lp_maximizes_flow_while_respecting_blended_quality_limit():
         {"sink_id": "D1", "required_flow": 80, "flow_unit": "m3/day", "maximum_concentration": 50, "concentration_unit": "mg/L"},
     ]
     connections = [
-        {"source_id": "S1", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-1"},
-        {"source_id": "S2", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-2"},
+        {"source_id": "S1", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-1", "capacity": 50},
+        {"source_id": "S2", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-2", "capacity": 50},
     ]
     result = optimize_single_contaminant_water_reuse(
         sources, sinks, connections,
@@ -1835,4 +1835,24 @@ def test_interval_robust_optimizer_rejects_uncertainty_fraction_above_one():
             [{**_supply(), "supply_uncertainty_fraction": 1.2}],
             [{**_demand(), "demand_uncertainty_fraction": 0.1}],
             [_route()],
+        )
+
+
+def test_water_reuse_requires_explicit_physical_connection_capacity():
+    from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
+
+    with pytest.raises(ResourceValidationError, match="connections\[0\]\.capacity"):
+        optimize_single_contaminant_water_reuse(
+            [{"source_id": "S1", "available_flow": 10, "flow_unit": "m3/day", "concentration": 1, "concentration_unit": "mg/L"}],
+            [{"sink_id": "D1", "required_flow": 10, "flow_unit": "m3/day", "maximum_concentration": 5, "concentration_unit": "mg/L"}],
+            [{"source_id": "S1", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-1"}],
+            contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+        )
+
+
+def test_compatibility_rejects_inverted_buyer_quality_limits():
+    with pytest.raises(ResourceValidationError, match="minimum exceeds maximum"):
+        assess_resource_compatibility(
+            _supply(quality={"pH": 7.0}),
+            _demand(limits={"pH": {"min": 9.0, "max": 6.0}}),
         )
