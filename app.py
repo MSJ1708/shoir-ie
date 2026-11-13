@@ -2351,46 +2351,46 @@ if not st.session_state.get("current_user"):
                             unsafe_allow_html=True
                         )
                         if _m.get("name") == "Industrial Resource Intelligence":
-                        _resource_has_access = platform_tier_allows(
-                            str(st.session_state.get("user_tier", "Starter Tier")), "Enterprise"
-                        )
-                        if st.button(
-                            "Open Industrial Resource Intelligence in Workbench",
-                            key="explore_open_industrial_resource_intelligence",
-                            use_container_width=True,
-                            disabled=not _resource_has_access,
-                        ):
-                            st.session_state["shoir_pending_tool_module"] = "Industrial Resource Intelligence"
-                            st.switch_page("pages/Industrial_Engineering_Workbench.py")
-                        if not _resource_has_access:
-                            st.caption("Enterprise access required. This catalogue entry does not grant access.")
-                    _target_tool_id = str(_m.get("tool_id", "")).strip()
-                        if _target_tool_id:
-                            _target_status = str(_m.get("readiness_status") or "BLOCKED")
-                            st.markdown(
-                                f"**Target tool ID and readiness**\n\n**{html.escape(_target_tool_id)}** · **{html.escape(_target_status)}**"
+                            _resource_has_access = platform_tier_allows(
+                                str(st.session_state.get("user_tier", "Starter Tier")), "Enterprise"
                             )
-                            st.markdown(f"**Mapped existing route**\n\n{html.escape(str(_m.get('mapped_route', '')))}")
-                            st.markdown(f"**Required inputs**\n\n{html.escape(str(_m.get('required_inputs', '')))}")
-                            st.markdown(f"**Expected outputs**\n\n{html.escape(str(_m.get('expected_outputs', '')))}")
-                            st.markdown(f"**Remaining gap**\n\n{html.escape(str(_m.get('remaining_gap', '')))}")
-                            _dependency = str(_m.get("external_dependency", "")).strip()
-                            if _dependency:
-                                st.markdown(f"**External configuration**\n\n{html.escape(_dependency)}")
                             if st.button(
-                                "Open this target in Workbench",
-                                key=f"explore_open_target_{_target_tool_id}",
+                                "Open Industrial Resource Intelligence in Workbench",
+                                key="explore_open_industrial_resource_intelligence",
                                 use_container_width=True,
+                                disabled=not _resource_has_access,
                             ):
-                                st.session_state["shoir_100_tool_query"] = ""
-                                st.session_state["shoir_100_tool_workbench"] = "All workbenches"
-                                st.session_state["shoir_100_tool_status"] = "All statuses"
-                                st.session_state.pop("shoir_pending_tool_module", None)
-                                st.session_state["shoir_expand_target_directory"] = True
-                                st.session_state["shoir_100_tool_inspector"] = (
-                                    f"{_target_tool_id} · {str(_m.get('name', '')).split(' · ', 1)[-1]}"
-                                )
+                                st.session_state["shoir_pending_tool_module"] = "Industrial Resource Intelligence"
                                 st.switch_page("pages/Industrial_Engineering_Workbench.py")
+                            if not _resource_has_access:
+                                st.caption("Enterprise access required. This catalogue entry does not grant access.")
+                    _target_tool_id = str(_m.get("tool_id", "")).strip()
+                    if _target_tool_id:
+                        _target_status = str(_m.get("readiness_status") or "BLOCKED")
+                        st.markdown(
+                            f"**Target tool ID and readiness**\n\n**{html.escape(_target_tool_id)}** · **{html.escape(_target_status)}**"
+                        )
+                        st.markdown(f"**Mapped existing route**\n\n{html.escape(str(_m.get('mapped_route', '')))}")
+                        st.markdown(f"**Required inputs**\n\n{html.escape(str(_m.get('required_inputs', '')))}")
+                        st.markdown(f"**Expected outputs**\n\n{html.escape(str(_m.get('expected_outputs', '')))}")
+                        st.markdown(f"**Remaining gap**\n\n{html.escape(str(_m.get('remaining_gap', '')))}")
+                        _dependency = str(_m.get("external_dependency", "")).strip()
+                        if _dependency:
+                            st.markdown(f"**External configuration**\n\n{html.escape(_dependency)}")
+                        if st.button(
+                            "Open this target in Workbench",
+                            key=f"explore_open_target_{_target_tool_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["shoir_100_tool_query"] = ""
+                            st.session_state["shoir_100_tool_workbench"] = "All workbenches"
+                            st.session_state["shoir_100_tool_status"] = "All statuses"
+                            st.session_state.pop("shoir_pending_tool_module", None)
+                            st.session_state["shoir_expand_target_directory"] = True
+                            st.session_state["shoir_100_tool_inspector"] = (
+                                f"{_target_tool_id} · {str(_m.get('name', '')).split(' · ', 1)[-1]}"
+                            )
+                            st.switch_page("pages/Industrial_Engineering_Workbench.py")
 
         if not _filtered_modules:
             st.info("No capability matches those filters. Try a broader search or select All capabilities.")
