@@ -291,7 +291,12 @@ def append_resource_passport_revision(
         dict(item) for item in history
         if isinstance(item, Mapping) and str(item.get("resource_id") or "") == resource_id
     ]
-    prior.sort(key=lambda item: int(item.get("revision_no", 0)))
+    try:
+        prior.sort(key=lambda item: int(item.get("revision_no", 0)))
+    except (TypeError, ValueError) as exc:
+        raise ResourceValidationError("Existing passport revision history has an invalid revision number.") from exc
+    if prior and verify_resource_passport_history(prior)["status"] != "VALID_HASH_CHAINS":
+        raise ResourceValidationError("Existing passport revision history failed its integrity check; refusing to append.")
     revision_no = len(prior) + 1
     previous_hash = prior[-1].get("revision_sha256") if prior else None
     snapshot = dict(passport)
@@ -337,11 +342,21 @@ def verify_resource_passport_history(
 
     reports = []
     for resource_id, revisions in grouped.items():
-        revisions.sort(key=lambda item: int(item.get("revision_no", 0)))
         issues = []
+        def _revision_sort_key(item: Mapping[str, Any]) -> tuple[int, str]:
+            try:
+                revision_value = int(item.get("revision_no", 0))
+            except (TypeError, ValueError):
+                revision_value = 2**31 - 1
+            return revision_value, str(item.get("recorded_at") or "")
+        revisions.sort(key=_revision_sort_key)
         expected_parent = None
         for expected_revision_no, event in enumerate(revisions, start=1):
-            if event.get("revision_no") != expected_revision_no:
+            try:
+                actual_revision_no = int(event.get("revision_no"))
+            except (TypeError, ValueError):
+                actual_revision_no = None
+            if actual_revision_no != expected_revision_no:
                 issues.append(f"Expected revision {expected_revision_no}, found {event.get('revision_no')}.")
             if event.get("previous_revision_sha256") != expected_parent:
                 issues.append(f"Revision {expected_revision_no} parent hash does not match.")
