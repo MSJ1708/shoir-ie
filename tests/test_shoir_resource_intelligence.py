@@ -2001,3 +2001,59 @@ def test_compatibility_does_not_invent_missing_provenance_and_rejects_unverified
             {**raw_supply, "provenance": "LIVE"},
             {**raw_demand, "provenance": "MANUAL"},
         )
+
+
+def test_main_network_optimizer_blocks_stale_supply_and_demand_as_current_inputs():
+    with pytest.raises(ResourceValidationError, match="STALE provenance"):
+        optimize_resource_network(
+            [{**_supply(), "provenance": "STALE"}],
+            [_demand()],
+            [_route()],
+        )
+    with pytest.raises(ResourceValidationError, match="STALE provenance"):
+        optimize_resource_network(
+            [_supply()],
+            [{**_demand(), "provenance": "STALE"}],
+            [_route()],
+        )
+
+
+def test_water_reuse_optimizer_blocks_stale_source_and_sink_records():
+    from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
+
+    source = {
+        "source_id": "S1",
+        "available_flow": 10,
+        "flow_unit": "m3/day",
+        "concentration": 1,
+        "concentration_unit": "mg/L",
+        "provenance": "STALE",
+    }
+    sink = {
+        "sink_id": "D1",
+        "required_flow": 10,
+        "flow_unit": "m3/day",
+        "maximum_concentration": 5,
+        "concentration_unit": "mg/L",
+        "provenance": "MANUAL",
+    }
+    connection = {
+        "source_id": "S1",
+        "sink_id": "D1",
+        "connection_confirmed": True,
+        "connection_evidence_reference": "ROUTE-1",
+        "capacity": 10,
+        "provenance": "MANUAL",
+    }
+    with pytest.raises(ResourceValidationError, match="Water source S1 has STALE provenance"):
+        optimize_single_contaminant_water_reuse(
+            [source], [sink], [connection],
+            contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+        )
+    with pytest.raises(ResourceValidationError, match="Water sink D1 has STALE provenance"):
+        optimize_single_contaminant_water_reuse(
+            [{**source, "provenance": "IMPORTED"}],
+            [{**sink, "provenance": "STALE"}],
+            [connection],
+            contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+        )
