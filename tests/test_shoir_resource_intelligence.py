@@ -1198,3 +1198,155 @@ def test_period_optimizer_rejects_non_boolean_shortage_control():
             routes=[{**_route(), "period_id": "2026-11-16"}],
             allow_shortage="true",
         )
+
+
+def test_resource_substitution_candidate_requires_product_equipment_lab_and_approval_evidence():
+    from shoir_resource_intelligence import assess_resource_substitution
+
+    candidate = _supply(quality={"pH": 7.0, "TDS_mg_l": 250})
+    requirement = _demand(limits={"pH": {"min": 6.5, "max": 8.5}, "TDS_mg_l": {"max": 500}})
+    pending = assess_resource_substitution(candidate, requirement)
+    assert pending["status"] == "CANDIDATE_REQUIRES_QUALIFICATION"
+    assert pending["substitution_authorized"] is False
+    assert len(pending["blockers"]) >= 6
+
+    qualified = assess_resource_substitution(
+        candidate,
+        requirement,
+        product_quality_status="PASS",
+        equipment_compatibility_status="PASS",
+        laboratory_evidence_reference="LAB-SUB-1",
+        engineering_review_reference="ENG-SUB-1",
+        safety_review_reference="HSE-SUB-1",
+        environmental_review_reference="ENV-SUB-1",
+    )
+    assert qualified["status"] == "QUALIFICATION_REFERENCES_RECORDED_PENDING_INDEPENDENT_REVIEW"
+    assert qualified["independent_verification"] == "NOT_PERFORMED"
+    assert qualified["operational_authorization"] is False
+
+
+def test_resource_substitution_rejects_incompatible_or_failed_candidates():
+    from shoir_resource_intelligence import assess_resource_substitution
+
+    candidate = _supply(quality={"pH": 3.0})
+    requirement = _demand(limits={"pH": {"min": 6.5, "max": 8.5}})
+    incompatible = assess_resource_substitution(candidate, requirement)
+    assert incompatible["status"] == "REJECTED"
+    failed = assess_resource_substitution(
+        _supply(),
+        _demand(),
+        product_quality_status="FAIL",
+    )
+    assert failed["status"] == "REJECTED"
+
+
+def _environmental_factor_set():
+    return {
+        "freshwater": {"value": 0.5, "unit": "kgCO2e/m3", "source_reference": "FACTOR-WATER", "version": "v1"},
+        "wastewater": {"value": 0.2, "unit": "kgCO2e/m3", "source_reference": "FACTOR-WW", "version": "v1"},
+        "electricity": {"value": 0.4, "unit": "kgCO2e/kWh", "source_reference": "FACTOR-ELEC", "version": "v1"},
+        "fuel": {"value": 0.25, "unit": "kgCO2e/kWh", "source_reference": "FACTOR-FUEL", "version": "v1"},
+        "waste_diversion": {"value": 0.1, "unit": "kgCO2e/kg", "source_reference": "FACTOR-WASTE", "version": "v1"},
+        "transport": {"value": 0.08, "unit": "kgCO2e/tonne-km", "source_reference": "FACTOR-TRANSPORT", "version": "v1"},
+        "chemical": {"value": 0.3, "unit": "kgCO2e/kg", "source_reference": "FACTOR-CHEM", "version": "v1"},
+        "residual_waste": {"value": 0.15, "unit": "kgCO2e/kg", "source_reference": "FACTOR-RESIDUAL", "version": "v1"},
+    }
+
+
+def test_environmental_impact_calculates_avoided_emissions_less_added_burdens():
+    from shoir_resource_intelligence import calculate_environmental_impact
+
+    result = calculate_environmental_impact(
+        reporting_period="2026-11",
+        facility_boundary="FAC-A process water and utilities",
+        geography="Saudi Arabia",
+        avoided_freshwater_m3=100,
+        avoided_wastewater_m3=50,
+        avoided_electricity_kwh=1000,
+        avoided_fuel_kwh=200,
+        diverted_waste_kg=100,
+        added_treatment_electricity_kwh=250,
+        added_transport_tonne_km=100,
+        added_chemical_kg=20,
+        added_residual_waste_kg=10,
+        factors=_environmental_factor_set(),
+        evidence_status="MEASURED",
+    )
+    assert result["gross_avoided_emissions_kgco2e"] == pytest.approx(485)
+    assert result["additional_burden_kgco2e"] == pytest.approx(134.5)
+    assert result["net_avoided_emissions_kgco2e"] == pytest.approx(350.5)
+    assert result["evidence_status"] == "MEASURED"
+    assert result["independent_verification"] == "NOT_ESTABLISHED"
+
+
+def test_environmental_impact_requires_factor_references_versions_and_exact_units():
+    from shoir_resource_intelligence import calculate_environmental_impact
+
+    factors = _environmental_factor_set()
+    del factors["transport"]
+    with pytest.raises(ResourceValidationError, match="factor transport is required"):
+        calculate_environmental_impact(
+            reporting_period="2026-11", facility_boundary="FAC-A", geography="Saudi Arabia",
+            avoided_freshwater_m3=0, avoided_wastewater_m3=0, avoided_electricity_kwh=0,
+            avoided_fuel_kwh=0, diverted_waste_kg=0, added_treatment_electricity_kwh=0,
+            added_transport_tonne_km=0, added_chemical_kg=0, added_residual_waste_kg=0,
+            factors=factors,
+        )
+    factors = _environmental_factor_set()
+    factors["electricity"]["unit"] = "kWh"
+    with pytest.raises(ResourceValidationError, match="kgCO2e/kWh"):
+        calculate_environmental_impact(
+            reporting_period="2026-11", facility_boundary="FAC-A", geography="Saudi Arabia",
+            avoided_freshwater_m3=0, avoided_wastewater_m3=0, avoided_electricity_kwh=0,
+            avoided_fuel_kwh=0, diverted_waste_kg=0, added_treatment_electricity_kwh=0,
+            added_transport_tonne_km=0, added_chemical_kg=0, added_residual_waste_kg=0,
+            factors=factors,
+        )
+
+
+def test_environmental_impact_downgrades_claim_of_independent_verification():
+    from shoir_resource_intelligence import calculate_environmental_impact
+
+    result = calculate_environmental_impact(
+        reporting_period="2026-11", facility_boundary="FAC-A", geography="Saudi Arabia",
+        avoided_freshwater_m3=1, avoided_wastewater_m3=0, avoided_electricity_kwh=0,
+        avoided_fuel_kwh=0, diverted_waste_kg=0, added_treatment_electricity_kwh=0,
+        added_transport_tonne_km=0, added_chemical_kg=0, added_residual_waste_kg=0,
+        factors=_environmental_factor_set(),
+        evidence_status="INDEPENDENTLY_VERIFIED",
+    )
+    assert result["evidence_status"] == "MEASURED_PENDING_INDEPENDENT_EVIDENCE"
+    assert result["independent_verification"] == "NOT_ESTABLISHED"
+
+
+def test_investment_prioritization_is_transparent_and_keeps_safety_rejected_projects_blocked():
+    from shoir_resource_intelligence import rank_resource_improvement_projects
+
+    projects = [
+        {
+            "project_id": "P1", "name": "Water recovery",
+            "feasibility_score": 5, "resource_impact_score": 5, "reliability_score": 4,
+            "data_confidence_score": 4, "risk_score": 2, "implementation_difficulty_score": 2,
+            "capex": 100000, "annual_gross_benefit": 80000, "annual_opex": 20000,
+            "currency": "SAR", "safety_status": "APPROVAL_PENDING", "evidence_reference": "CASE-1",
+        },
+        {
+            "project_id": "P2", "name": "Unsafe bypass",
+            "feasibility_score": 5, "resource_impact_score": 5, "reliability_score": 5,
+            "data_confidence_score": 5, "risk_score": 1, "implementation_difficulty_score": 1,
+            "capex": 10000, "annual_gross_benefit": 100000, "annual_opex": 1000,
+            "currency": "SAR", "safety_status": "REJECTED", "evidence_reference": "CASE-2",
+        },
+    ]
+    result = rank_resource_improvement_projects(
+        projects,
+        weights={
+            "feasibility": 0.25, "resource_impact": 0.25, "reliability": 0.15,
+            "data_confidence": 0.15, "risk": 0.10, "implementation_difficulty": 0.10,
+        },
+    )
+    by_id = {item["project_id"]: item for item in result["ranked_projects"]}
+    assert by_id["P1"]["simple_payback_years"] == pytest.approx(1.6666667)
+    assert by_id["P1"]["priority_is_financial_roi"] is False
+    assert by_id["P2"]["project_status"] == "BLOCKED_SAFETY"
+    assert by_id["P2"]["priority_rank"] > by_id["P1"]["priority_rank"]
