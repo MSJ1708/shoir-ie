@@ -932,3 +932,31 @@ def test_main_app_explorer_launch_and_direct_module_dispatch_are_registered():
     assert 'st.session_state["shoir_pending_tool_module"] = "Industrial Resource Intelligence"' in app_source
     assert 'elif mod == "Industrial Resource Intelligence":' in app_source
     assert "render_resource_intelligence_workbench(" in app_source
+
+
+def test_safety_gate_rejects_truthy_string_flags_instead_of_interpreting_them():
+    with pytest.raises(ResourceValidationError, match="critical_failure must be a boolean"):
+        evaluate_safety_gate(
+            critical_failure="false",
+            laboratory_required=False,
+            laboratory_passed=True,
+        )
+    with pytest.raises(ResourceValidationError, match="laboratory_passed must be a boolean"):
+        evaluate_safety_gate(
+            critical_failure=False,
+            laboratory_required=True,
+            laboratory_passed="pass",
+        )
+
+
+def test_delivery_assessment_rejects_malformed_certificate_requirement():
+    from shoir_resource_intelligence import validate_exchange_agreement, assess_exchange_delivery
+
+    agreement = validate_exchange_agreement(_exchange_agreement_payload())
+    agreement["certificate_required"] = "false"
+    with pytest.raises(ResourceValidationError, match="certificate_required must be a boolean"):
+        assess_exchange_delivery(agreement, {
+            "delivery_date": "2026-11-12",
+            "delivered_quantity": 100,
+            "quality": {"pH": 7.0, "TDS_mg_l": 300},
+        })
