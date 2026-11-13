@@ -16,6 +16,8 @@ import pandas as pd
 from shoir_resource_intelligence import (
     USER_INPUT_PROVENANCE_VALUES,
     validate_resource_passport,
+    append_resource_passport_revision,
+    verify_resource_passport_history,
     validate_import_rows,
     detect_resource_loss,
     assess_resource_compatibility,
@@ -123,6 +125,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
 
     facility = st.session_state.get(STATE_PREFIX + "facility", {})
     passports = st.session_state.get(STATE_PREFIX + "passports", [])
+    passport_history = st.session_state.get(STATE_PREFIX + "passport_history", [])
     demands = st.session_state.get(STATE_PREFIX + "demands", [])
     routes = st.session_state.get(STATE_PREFIX + "routes", [])
     results = st.session_state.get(STATE_PREFIX + "results", {})
@@ -134,6 +137,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         facility = {}
     if not isinstance(passports, list):
         passports = []
+    if not isinstance(passport_history, list):
+        passport_history = []
     if not isinstance(demands, list):
         demands = []
     if not isinstance(routes, list):
@@ -241,8 +246,11 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 existing_ids = {str(item.get("resource_id")) for item in passports}
                 additions = [item for item in imports["accepted"] if str(item.get("resource_id")) not in existing_ids]
                 passports = passports + additions
+                for item in additions:
+                    passport_history = append_resource_passport_revision(passport_history, item, actor=actor)
                 st.session_state[STATE_PREFIX + "passports"] = passports
-                st.success(f"Added {len(additions)} validated rows. Provenance remains as supplied; no source row was rewritten.")
+                st.session_state[STATE_PREFIX + "passport_history"] = passport_history
+                st.success(f"Added {len(additions)} validated rows and recorded workspace revisions. Provenance remains as supplied; no source row was rewritten.")
 
     with tabs[1]:
         st.markdown("#### Resource passport")
@@ -307,7 +315,9 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 }
                 passport = validate_resource_passport(payload)
                 passports.append(passport)
+                passport_history = append_resource_passport_revision(passport_history, passport, actor=actor)
                 st.session_state[STATE_PREFIX + "passports"] = passports
+                st.session_state[STATE_PREFIX + "passport_history"] = passport_history
                 st.success(f"Resource passport created: {passport['resource_id']} · {passport['provenance']}")
             except Exception as exc:
                 st.error(f"Passport not created: {exc}")
@@ -734,7 +744,24 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         st.markdown("#### Resource digital memory and cascade sequencing")
         st.caption("This first version records passport revisions in the current saved workspace only; it is not a certified chain-of-custody ledger.")
         if passports:
-            _render_result(st, "Current passport history snapshot", passports)
+            _render_result(st, "Current passport snapshot", passports)
+        memory_check = verify_resource_passport_history(passport_history)
+        st.metric("Recorded passport revisions", len(passport_history))
+        st.metric("Workspace revision-chain status", memory_check["status"])
+        if passport_history:
+            st.dataframe(pd.DataFrame([{
+                "Resource ID": item.get("resource_id"),
+                "Revision": item.get("revision_no"),
+                "Recorded At": item.get("recorded_at"),
+                "Recorded By": item.get("recorded_by"),
+                "Content SHA-256": item.get("content_sha256"),
+                "Revision SHA-256": item.get("revision_sha256"),
+            } for item in passport_history]), use_container_width=True, hide_index=True)
+            _render_result(st, "Revision-chain verification", memory_check)
+        st.caption(
+            "Workspace hash checks can reveal accidental or partial edits to stored history. "
+            "They are not an immutable ledger, independent timestamp authority or certified chain of custody."
+        )
         cascade_json = st.text_area(
             "Recovery opportunities JSON",
             value='[{"opportunity_id":"OP-1","action":"REDUCE"},{"opportunity_id":"OP-2","action":"RECOVER"},{"opportunity_id":"OP-3","action":"EXTERNAL_EXCHANGE"}]',
@@ -964,6 +991,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "status": "ENGINEERING_WORKSPACE_NOT_OPERATIONAL_AUTHORIZATION",
             "facility": facility,
             "resource_passports": passports,
+            "passport_revision_history": passport_history,
+            "passport_revision_integrity_check": verify_resource_passport_history(passport_history),
             "demands": demands,
             "exchange_candidates": routes,
             "exchange_agreements": agreements,
