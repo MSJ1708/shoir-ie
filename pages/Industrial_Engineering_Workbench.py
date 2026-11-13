@@ -267,12 +267,17 @@ if search.strip():
     filtered=filtered[filtered["Module"].str.lower().str.contains(q, regex=False)]
     _resource_aliases = (
         "industrial resource intelligence", "industrial resource intelligence & resilience",
-        "industrial resource exchange", "industrial exchange intelligence twin", "ieit",
-        "industrial symbiosis", "resource efficiency", "resource recovery", "waste heat recovery",
+        "industrial resource intelligence & resilience system",
+        "industrial resource exchange", "resource exchange intelligence",
+        "industrial exchange intelligence twin", "ieit", "industrial resource passport",
+        "resource passport", "industrial resource loss", "resource efficiency",
+        "resource recovery", "resource cascade optimization", "waste heat recovery",
         "water reuse", "industrial resource optimization", "industrial resource resilience",
-        "resource matching", "industrial network optimization", "industrial cluster intelligence",
+        "resource quality forecasting", "supplier reliability", "resource matching",
+        "industrial network optimization", "industrial cluster intelligence",
+        "ذكاء الموارد الصناعية", "تبادل الموارد الصناعية", "استعادة الموارد", "كفاءة الموارد",
     )
-    _resource_alias_match = any(q in alias for alias in _resource_aliases)
+    _resource_alias_match = any(q in alias or alias in q for alias in _resource_aliases)
     if _resource_alias_match and category in {"All", "Resource Intelligence"}:
         _resource_row = available.loc[available["Module"] == "Industrial Resource Intelligence"]
         if not _resource_row.empty and "Industrial Resource Intelligence" not in set(filtered["Module"]):
