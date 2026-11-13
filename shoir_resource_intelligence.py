@@ -1209,17 +1209,26 @@ def evaluate_safety_gate(
     if laboratory_passed is not None and not isinstance(laboratory_passed, bool):
         raise ResourceValidationError("laboratory_passed must be a boolean or None.")
     blockers = []
+    laboratory_failed = laboratory_required and laboratory_passed is False
     if critical_failure:
         blockers.append("Critical safety restriction or hazard failure is present.")
     if laboratory_required and laboratory_passed is not True:
-        blockers.append("Required laboratory result has not passed.")
+        blockers.append(
+            "Required laboratory test failed."
+            if laboratory_failed
+            else "Required laboratory result has not been supplied."
+        )
     if not str(engineering_approval_reference).strip():
         blockers.append("Qualified engineering approval reference is missing.")
     if not str(safety_approval_reference).strip():
         blockers.append("Safety approval reference is missing.")
     if not str(environmental_approval_reference).strip():
         blockers.append("Environmental approval reference is missing.")
-    status = "REJECTED" if critical_failure else ("APPROVAL_PENDING" if blockers else "APPROVAL_EVIDENCE_RECORDED")
+    status = (
+        "REJECTED" if critical_failure or laboratory_failed
+        else "APPROVAL_PENDING" if blockers
+        else "APPROVAL_EVIDENCE_RECORDED"
+    )
     return {
         "status": status,
         "blockers": blockers,
