@@ -1023,3 +1023,47 @@ def test_resource_passport_revision_append_refuses_to_extend_a_broken_chain():
     assert verify_resource_passport_history(history)["status"] == "INTEGRITY_CHECK_FAILED"
     with pytest.raises(ResourceValidationError, match="failed its integrity check"):
         append_resource_passport_revision(history, passport, actor="engineer-b")
+
+
+def test_performance_persistence_monitor_flags_repeated_normalized_degradation():
+    from shoir_resource_intelligence import monitor_resource_intensity_persistence
+
+    observations = [
+        {"timestamp": "2026-11-01T00:00:00+00:00", "usage": 110, "production": 100},
+        {"timestamp": "2026-11-08T00:00:00+00:00", "usage": 112, "production": 100},
+        {"timestamp": "2026-11-15T00:00:00+00:00", "usage": 90, "production": 100},
+    ]
+    result = monitor_resource_intensity_persistence(
+        baseline_usage=100,
+        baseline_production=100,
+        observations=observations,
+        usage_unit="m3",
+        production_unit="tonne",
+        degradation_threshold_percent=5,
+        required_consecutive_periods=2,
+    )
+    assert result["status"] == "PERSISTENCE_ALERT"
+    assert result["trailing_degradation_periods"] == 2
+    assert result["persistence_alert"] is True
+    assert result["verified_savings"] is None
+    assert result["causality_verified"] is False
+
+
+def test_performance_persistence_monitor_requires_unique_ascending_timezone_aware_periods():
+    from shoir_resource_intelligence import monitor_resource_intensity_persistence
+
+    with pytest.raises(ResourceValidationError, match="timezone-aware"):
+        monitor_resource_intensity_persistence(
+            100, 100,
+            [{"timestamp": "2026-11-01", "usage": 100, "production": 100}],
+            usage_unit="m3", production_unit="tonne",
+        )
+    with pytest.raises(ResourceValidationError, match="unique, ascending"):
+        monitor_resource_intensity_persistence(
+            100, 100,
+            [
+                {"timestamp": "2026-11-02T00:00:00+00:00", "usage": 100, "production": 100},
+                {"timestamp": "2026-11-01T00:00:00+00:00", "usage": 100, "production": 100},
+            ],
+            usage_unit="m3", production_unit="tonne",
+        )
