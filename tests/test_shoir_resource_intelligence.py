@@ -1140,3 +1140,61 @@ def test_period_aligned_optimizer_keeps_period_route_capacity_and_quality_gates(
     result = optimize_period_aligned_resource_network([supply], [demand], [route])
     assert result["status"] == "INFEASIBLE"
     assert result["periods"][0]["rejected_routes"][0]["status"] == "TECHNICALLY_INCOMPATIBLE"
+
+
+def test_period_optimizer_reports_complete_shortage_when_all_supply_is_unavailable():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    result = optimize_period_aligned_resource_network(
+        supplies=[],
+        demands=[{**_demand("D-NONE", 25), "period_id": "2026-11-20"}],
+        routes=[],
+        allow_shortage=True,
+    )
+    assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
+    assert result["allocations"] == []
+    assert result["unmet_demand_total"] == pytest.approx(25)
+    assert result["periods"][0]["unmet_demand"][0]["quantity"] == pytest.approx(25)
+
+
+def test_period_optimizer_rejects_routes_without_same_period_supply():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    result = optimize_period_aligned_resource_network(
+        supplies=[{**_supply("S-MON", 100), "period_id": "2026-11-16"}],
+        demands=[{**_demand("D-TUE", 80), "period_id": "2026-11-17"}],
+        routes=[{**_route("S-MON", "D-TUE"), "period_id": "2026-11-17"}],
+        allow_shortage=True,
+    )
+    assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
+    rejected = result["periods"][0]["rejected_routes"]
+    assert rejected[0]["status"] == "REJECTED_NO_SAME_PERIOD_SUPPLY"
+    assert result["unmet_demand_total"] == pytest.approx(80)
+
+
+def test_period_optimizer_reports_routes_outside_all_demand_periods():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    result = optimize_period_aligned_resource_network(
+        supplies=[{**_supply("S-1", 100), "period_id": "2026-11-16"}],
+        demands=[{**_demand("D-1", 50), "period_id": "2026-11-16"}],
+        routes=[
+            {**_route("S-1", "D-1"), "period_id": "2026-11-16"},
+            {**_route("S-1", "D-1"), "period_id": "2026-11-18"},
+        ],
+    )
+    assert result["status"] == "OPTIMAL_BY_PERIOD"
+    assert result["unexpected_route_periods"] == ["2026-11-18"]
+    assert result["rejected_routes_outside_demand_periods"][0]["status"] == "REJECTED_ROUTE_PERIOD_WITHOUT_DEMAND"
+
+
+def test_period_optimizer_rejects_non_boolean_shortage_control():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    with pytest.raises(ResourceValidationError, match="allow_shortage must be a boolean"):
+        optimize_period_aligned_resource_network(
+            supplies=[{**_supply(), "period_id": "2026-11-16"}],
+            demands=[{**_demand(), "period_id": "2026-11-16"}],
+            routes=[{**_route(), "period_id": "2026-11-16"}],
+            allow_shortage="true",
+        )
