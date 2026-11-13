@@ -1438,6 +1438,10 @@ def render_module(module: str, tier: str, username: str):
     if required and not tier_allows(tier,required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
+    if module == "Industrial Resource Intelligence":
+        from shoir_resource_intelligence_ui import render_resource_intelligence_workbench
+        render_resource_intelligence_workbench(st, user=username, tier=tier)
+        return
     if module == "Industrial Data Platform":
         from shoir_tool_registry import require_tool_access
         try:
