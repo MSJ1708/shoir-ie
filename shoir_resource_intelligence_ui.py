@@ -192,26 +192,37 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             try:
                 if not facility:
                     raise ValueError("Create a facility profile before importing resource passports.")
-                suffix = upload.name.casefold().rsplit(".", 1)[-1]
-                if suffix == "csv":
-                    frame = pd.read_csv(upload)
-                elif suffix == "xlsx":
-                    frame = pd.read_excel(upload, sheet_name=0, engine="openpyxl")
-                elif suffix == "xls":
-                    frame = pd.read_excel(upload, sheet_name=0, engine="xlrd")
-                else:
-                    raise ValueError("Unsupported import format. Use CSV, XLSX or XLS.")
+                raw_upload = upload.getvalue()
+                from shoir_excel_runtime import MAX_UPLOAD_BYTES, _validate_ooxml_package
+                from shoir_upgrade import read_uploaded_workbook
+                if not raw_upload:
+                    raise ValueError("The uploaded resource file is empty.")
+                if len(raw_upload) > MAX_UPLOAD_BYTES:
+                    raise ValueError(
+                        f"The resource import exceeds the Shoir-IE upload limit of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+                    )
+                # Reuse Shoir-IE's OOXML path/member/expansion checks before workbook parsing.
+                _validate_ooxml_package(raw_upload, upload.name)
+                imported_sheets = read_uploaded_workbook(raw_upload, upload.name)
+                if not imported_sheets:
+                    raise ValueError("No readable worksheets or tables were found.")
+                first_sheet_name, frame = next(iter(imported_sheets.items()))
+                if not isinstance(frame, pd.DataFrame) or frame.empty:
+                    raise ValueError("The first worksheet or table is empty.")
                 rows = frame.to_dict("records")
                 for row in rows:
                     if str(row.get("facility_id") or "").strip().casefold() != str(facility.get("facility_id") or "").strip().casefold():
                         raise ValueError("Every imported row must belong to the currently selected facility.")
-                    if isinstance(row.get("quality"), str) and row["quality"].strip():
-                        row["quality"] = json.loads(row["quality"])
-                    elif not row.get("quality"):
+                    quality_value = row.get("quality")
+                    if isinstance(quality_value, str) and quality_value.strip():
+                        row["quality"] = json.loads(quality_value)
+                    elif quality_value is None or (
+                        not isinstance(quality_value, Mapping) and bool(pd.isna(quality_value))
+                    ):
                         row["quality"] = {}
                 imported = validate_import_rows(rows)
                 st.session_state[STATE_PREFIX + "import_validation"] = imported
-                st.session_state[STATE_PREFIX + "import_source_name"] = upload.name
+                st.session_state[STATE_PREFIX + "import_source_name"] = upload.name + " · " + str(first_sheet_name)
                 imports = imported
             except Exception as exc:
                 st.error(f"Import validation failed safely: {exc}")
