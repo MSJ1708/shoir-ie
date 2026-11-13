@@ -537,6 +537,10 @@ def optimize_resource_network(
         supply_provenance = _validated_input_provenance(
             item.get("provenance"), f"supply {sid}.provenance"
         )
+        if supply_provenance == "STALE":
+            raise ResourceValidationError(
+                f"Supply {sid} has STALE provenance and cannot be used as current optimization input."
+            )
         supply_by_id[sid] = dict(item, resource_id=sid, provenance=supply_provenance)
         _number(item.get("available_quantity"), f"supply {sid} available_quantity", minimum=0)
         _text(item.get("unit"), f"supply {sid} unit")
@@ -547,6 +551,10 @@ def optimize_resource_network(
         demand_provenance = _validated_input_provenance(
             item.get("provenance"), f"demand {did}.provenance"
         )
+        if demand_provenance == "STALE":
+            raise ResourceValidationError(
+                f"Demand {did} has STALE provenance and cannot be used as current optimization input."
+            )
         demand_by_id[did] = dict(item, demand_id=did, provenance=demand_provenance)
         _number(item.get("required_quantity"), f"demand {did} required_quantity", minimum=0)
         if float(item["required_quantity"]) <= 0:
@@ -1995,11 +2003,18 @@ def optimize_single_contaminant_water_reuse(
             raise ResourceValidationError(f"Source {source_id} flow unit does not match {flow_label}.")
         if quality_unit.casefold() != concentration_label.casefold():
             raise ResourceValidationError(f"Source {source_id} concentration unit does not match {concentration_label}.")
+        source_provenance = _validated_input_provenance(
+            source.get("provenance"), f"sources[{index}].provenance"
+        )
+        if source_provenance == "STALE":
+            raise ResourceValidationError(
+                f"Water source {source_id} has STALE provenance and cannot be used in current reuse optimization."
+            )
         source_map[source_id] = {
             "source_id": source_id,
             "available_flow": _number(source.get("available_flow"), f"sources[{index}].available_flow", minimum=0),
             "concentration": _number(source.get("concentration"), f"sources[{index}].concentration", minimum=0),
-            "provenance": _validated_input_provenance(source.get("provenance"), f"sources[{index}].provenance"),
+            "provenance": source_provenance,
         }
     for index, sink in enumerate(sinks):
         sink_id = _text(sink.get("sink_id"), f"sinks[{index}].sink_id")
@@ -2013,11 +2028,18 @@ def optimize_single_contaminant_water_reuse(
             raise ResourceValidationError(f"Sink {sink_id} concentration unit does not match {concentration_label}.")
         demand = _number(sink.get("required_flow"), f"sinks[{index}].required_flow", minimum=0)
         maximum = _number(sink.get("maximum_concentration"), f"sinks[{index}].maximum_concentration", minimum=0)
+        sink_provenance = _validated_input_provenance(
+            sink.get("provenance"), f"sinks[{index}].provenance"
+        )
+        if sink_provenance == "STALE":
+            raise ResourceValidationError(
+                f"Water sink {sink_id} has STALE provenance and cannot be used in current reuse optimization."
+            )
         sink_map[sink_id] = {
             "sink_id": sink_id,
             "required_flow": demand,
             "maximum_concentration": maximum,
-            "provenance": _validated_input_provenance(sink.get("provenance"), f"sinks[{index}].provenance"),
+            "provenance": sink_provenance,
         }
 
     eligible_connections: list[dict[str, Any]] = []
