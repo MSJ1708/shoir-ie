@@ -12,7 +12,7 @@ The new capability is registered inside Shoir-IE's existing module catalogue, Wo
 
 The module label is **Industrial Resource Intelligence**. Its product heading is **Industrial Resource Intelligence & Resilience System**; its engineering concept is the **Industrial Exchange Intelligence Twin (IEIT)**.
 
-The first vertical slice is an explicit-input engineering workspace with deterministic calculation functions. It is not the complete multi-company industrial network product described in the master implementation prompt. The implementation deliberately avoids claiming live supplier availability, live ERP/LIMS/SCADA connectivity, physical infrastructure, legal compliance, verified savings, insurance underwriting, or autonomous operational authority.
+The first vertical slice is an explicit-input engineering workspace with deterministic calculation functions. Free-form JSON inputs are capped at 1,000,000 characters and 10,000 object records per array. Spreadsheet uploads reuse Shoir-IE upload-size and OOXML package checks. It is not the complete multi-company industrial network product described in the master implementation prompt. The implementation deliberately avoids claiming live supplier availability, live ERP/LIMS/SCADA connectivity, physical infrastructure, legal compliance, verified savings, insurance underwriting, or autonomous operational authority.
 
 ## 2. Repository changes in this feature slice
 
@@ -75,6 +75,10 @@ New and imported passports can be set only to DRAFT or PENDING. The current modu
 ### Resource memory and revision history
 
 When a passport is manually created or imported, the UI appends a workspace revision containing the passport snapshot, recorded actor/time, content SHA-256 and parent revision hash. The Resource Memory tab recomputes the content and event hashes and checks revision continuity. This can reveal accidental or partial edits to the currently saved data, but it is not immutable: a workspace editor can rewrite or delete the complete history, and no external timestamp authority or independent custodian is used. It is not a certified chain-of-custody record.
+
+### Bounded user inputs
+
+Resource UI JSON fields are limited to 1,000,000 characters and arrays to 10,000 object records. This reduces accidental or deliberate oversized payloads in free-form engineering inputs. It is not a substitute for server-side request limits or full payload validation at every external API boundary.
 
 ### Resource balance
 
@@ -162,6 +166,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Fail-closed rejection of self-asserted APPROVED/REJECTED passport states.
 - Rejection of user-entered `LIVE` provenance; only a separately verified connector may use it.
 - Shared Shoir-IE OOXML preflight, package path/expansion checks and bounded workbook upload for Excel import.
+- Resource JSON input character and array-record limits.
 - Complete supplier interruption reports full unmet demand with no resource allocation.
 - Invalid/non-finite/zero/negative resource quantities.
 - Balance reconciliation and unconfirmed suspected-loss classification.
