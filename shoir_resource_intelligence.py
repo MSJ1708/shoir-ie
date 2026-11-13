@@ -686,6 +686,116 @@ def optimize_resource_network(
     }
 
 
+def optimize_interval_robust_resource_network(
+    supplies: Sequence[Mapping[str, Any]],
+    demands: Sequence[Mapping[str, Any]],
+    routes: Sequence[Mapping[str, Any]],
+    *,
+    allow_shortage: bool = False,
+    shortage_penalty_per_unit: float | None = None,
+    shortage_penalty_currency: str | None = None,
+) -> dict[str, Any]:
+    """Solve a deterministic conservative interval-stress resource allocation.
+
+    Supply rows declare supply_uncertainty_fraction in [0,1]; demand rows declare
+    demand_uncertainty_fraction in [0,1]. The stressed problem uses lower supply
+    and higher demand bounds. No probability distribution is assumed.
+    """
+    if not supplies or not demands:
+        raise ResourceValidationError("At least one supply and one demand are required.")
+    stressed_supplies = []
+    stressed_demands = []
+    supply_bounds = []
+    demand_bounds = []
+    for index, source in enumerate(supplies):
+        if not isinstance(source, Mapping):
+            raise ResourceValidationError(f"Supply {index + 1} must be an object.")
+        fraction = _number(
+            source.get("supply_uncertainty_fraction"),
+            f"supplies[{index}].supply_uncertainty_fraction",
+            minimum=0,
+        )
+        if fraction > 1:
+            raise ResourceValidationError("Supply uncertainty fraction must not exceed 1.")
+        base = _number(source.get("available_quantity"), f"supplies[{index}].available_quantity", minimum=0)
+        stress_value = base * (1.0 - fraction)
+        stressed_supplies.append({
+            **dict(source),
+            "available_quantity": stress_value,
+        })
+        supply_bounds.append({
+            "resource_id": _text(source.get("resource_id") or source.get("id"), f"supplies[{index}].resource_id"),
+            "baseline_quantity": base,
+            "uncertainty_fraction": fraction,
+            "conservative_quantity": stress_value,
+            "unit": _text(source.get("unit"), f"supplies[{index}].unit"),
+        })
+    for index, demand in enumerate(demands):
+        if not isinstance(demand, Mapping):
+            raise ResourceValidationError(f"Demand {index + 1} must be an object.")
+        fraction = _number(
+            demand.get("demand_uncertainty_fraction"),
+            f"demands[{index}].demand_uncertainty_fraction",
+            minimum=0,
+        )
+        if fraction > 1:
+            raise ResourceValidationError("Demand uncertainty fraction must not exceed 1.")
+        base = _number(demand.get("required_quantity"), f"demands[{index}].required_quantity", minimum=0)
+        if base <= 0:
+            raise ResourceValidationError("Demand required_quantity must be greater than zero.")
+        stress_value = base * (1.0 + fraction)
+        stressed_demands.append({
+            **dict(demand),
+            "required_quantity": stress_value,
+        })
+        demand_bounds.append({
+            "demand_id": _text(demand.get("demand_id") or demand.get("id"), f"demands[{index}].demand_id"),
+            "baseline_quantity": base,
+            "uncertainty_fraction": fraction,
+            "conservative_quantity": stress_value,
+            "unit": _text(demand.get("unit"), f"demands[{index}].unit"),
+        })
+    baseline = optimize_resource_network(
+        supplies, demands, routes,
+        allow_shortage=allow_shortage,
+        shortage_penalty_per_unit=shortage_penalty_per_unit,
+        shortage_penalty_currency=shortage_penalty_currency,
+    )
+    conservative = optimize_resource_network(
+        stressed_supplies, stressed_demands, routes,
+        allow_shortage=allow_shortage,
+        shortage_penalty_per_unit=shortage_penalty_per_unit,
+        shortage_penalty_currency=shortage_penalty_currency,
+    )
+    baseline_unmet = sum(float(item["quantity"]) for item in baseline.get("unmet_demand", []))
+    conservative_unmet = sum(float(item["quantity"]) for item in conservative.get("unmet_demand", []))
+    return {
+        "status": conservative["status"],
+        "baseline": baseline,
+        "conservative_interval_stress": conservative,
+        "supply_uncertainty_bounds": supply_bounds,
+        "demand_uncertainty_bounds": demand_bounds,
+        "baseline_unmet_quantity": baseline_unmet,
+        "conservative_unmet_quantity": conservative_unmet,
+        "additional_unmet_quantity_under_stress": conservative_unmet - baseline_unmet,
+        "objective_cost_currency": conservative.get("objective_cost_currency"),
+        "uncertainty_method": "DETERMINISTIC_INTERVAL_WORST_CASE",
+        "probability": None,
+        "confidence_level": None,
+        "assumptions": [
+            "Each supply uncertainty fraction is an explicit maximum proportional reduction.",
+            "Each demand uncertainty fraction is an explicit maximum proportional increase.",
+            "The stressed allocation is re-optimized after applying the conservative bounds.",
+        ],
+        "limitations": [
+            "No probability distribution, correlation or confidence interval is inferred.",
+            "No robust non-anticipative commitment is solved; each stressed problem is re-optimized with full scenario information.",
+            "No inventory, storage, production schedule or maintenance calendar is represented.",
+            "The interval bounds are user supplied and have not been calibrated from historical data.",
+        ],
+    }
+
+
 def optimize_period_aligned_resource_network(
     supplies: Sequence[Mapping[str, Any]],
     demands: Sequence[Mapping[str, Any]],
@@ -2787,7 +2897,7 @@ __all__ = [
     "ResourceValidationError", "validate_resource_passport",
     "append_resource_passport_revision", "verify_resource_passport_history",
     "assess_resource_compatibility", "calculate_resource_balance",
-    "detect_resource_loss", "optimize_resource_network", "optimize_period_aligned_resource_network",
+    "detect_resource_loss", "optimize_resource_network", "optimize_interval_robust_resource_network", "optimize_period_aligned_resource_network",
     "simulate_supplier_disruption", "simulate_resource_network_scenario", "evaluate_safety_gate",
     "calculate_exchange_value", "propagate_network_impact",
     "forecast_resource_quality", "calculate_supply_reliability",
