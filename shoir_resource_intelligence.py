@@ -2923,13 +2923,26 @@ def verify_engineering_assurance_record(record: Mapping[str, Any]) -> dict[str, 
 
 
 def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Validate imported passport records while preserving input rows unchanged."""
+    """Validate imported passport records and reject duplicate resource IDs."""
     accepted, rejected = [], []
+    seen_resource_ids: set[str] = set()
     for index, row in enumerate(rows):
+        source_row = dict(row) if isinstance(row, Mapping) else {"value": str(row)}
         try:
-            accepted.append(validate_resource_passport(row))
+            passport = validate_resource_passport(row)
+            resource_id = str(passport["resource_id"])
+            if resource_id in seen_resource_ids:
+                raise ResourceValidationError(
+                    f"Duplicate resource_id in import file: {resource_id}."
+                )
+            seen_resource_ids.add(resource_id)
+            accepted.append(passport)
         except (ResourceValidationError, TypeError) as exc:
-            rejected.append({"row_number": index + 1, "reason": str(exc), "source_row": dict(row)})
+            rejected.append({
+                "row_number": index + 1,
+                "reason": str(exc),
+                "source_row": source_row,
+            })
     return {
         "status": "VALID" if not rejected else ("INVALID" if not accepted else "PARTIALLY_VALID"),
         "accepted": accepted,
