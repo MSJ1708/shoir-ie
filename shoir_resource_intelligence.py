@@ -8,6 +8,8 @@ return explicit incomplete/infeasible states rather than inventing data.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import hashlib
+import json
 from math import isfinite
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
@@ -265,6 +267,126 @@ def assess_resource_compatibility(
         status = "TECHNICALLY_COMPATIBLE"
         reasons.append("Entered numeric quality values are within the entered buyer limits.")
     return {"status": status, "reasons": reasons, "qualification_is_user_asserted": False}
+
+
+def append_resource_passport_revision(
+    history: Sequence[Mapping[str, Any]],
+    passport: Mapping[str, Any],
+    *,
+    actor: str,
+) -> list[dict[str, Any]]:
+    """Append a hash-checkable resource passport revision to workspace history.
+
+    This is an integrity-check helper, not an immutable ledger: workspace owners
+    can edit/delete their saved workspace, and no external timestamp authority
+    or independent custodian is involved.
+    """
+    if not isinstance(passport, Mapping):
+        raise ResourceValidationError("Passport revision must be an object.")
+    resource_id = _text(passport.get("resource_id"), "passport.resource_id")
+    actor_name = _text(actor, "actor")
+    if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
+        raise ResourceValidationError("Passport history must be a sequence.")
+    prior = [
+        dict(item) for item in history
+        if isinstance(item, Mapping) and str(item.get("resource_id") or "") == resource_id
+    ]
+    prior.sort(key=lambda item: int(item.get("revision_no", 0)))
+    revision_no = len(prior) + 1
+    previous_hash = prior[-1].get("revision_sha256") if prior else None
+    snapshot = dict(passport)
+    canonical_snapshot = json.dumps(
+        snapshot, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
+    )
+    content_hash = hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest()
+    event = {
+        "resource_id": resource_id,
+        "revision_no": revision_no,
+        "previous_revision_sha256": previous_hash,
+        "content_sha256": content_hash,
+        "recorded_by": actor_name,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "passport_snapshot": snapshot,
+    }
+    canonical_event = json.dumps(
+        event, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
+    )
+    event["revision_sha256"] = hashlib.sha256(canonical_event.encode("utf-8")).hexdigest()
+    result = [dict(item) for item in history]
+    result.append(event)
+    return result
+
+
+def verify_resource_passport_history(
+    history: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Recompute per-resource revision hashes and continuity from saved workspace rows."""
+    if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
+        raise ResourceValidationError("Passport history must be a sequence.")
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    malformed = []
+    for index, item in enumerate(history):
+        if not isinstance(item, Mapping):
+            malformed.append(f"History item {index + 1} is not an object.")
+            continue
+        resource_id = str(item.get("resource_id") or "").strip()
+        if not resource_id:
+            malformed.append(f"History item {index + 1} has no resource_id.")
+            continue
+        grouped.setdefault(resource_id, []).append(dict(item))
+
+    reports = []
+    for resource_id, revisions in grouped.items():
+        revisions.sort(key=lambda item: int(item.get("revision_no", 0)))
+        issues = []
+        expected_parent = None
+        for expected_revision_no, event in enumerate(revisions, start=1):
+            if event.get("revision_no") != expected_revision_no:
+                issues.append(f"Expected revision {expected_revision_no}, found {event.get('revision_no')}.")
+            if event.get("previous_revision_sha256") != expected_parent:
+                issues.append(f"Revision {expected_revision_no} parent hash does not match.")
+            snapshot = event.get("passport_snapshot")
+            if not isinstance(snapshot, Mapping):
+                issues.append(f"Revision {expected_revision_no} has no passport snapshot.")
+                expected_parent = event.get("revision_sha256")
+                continue
+            if str(snapshot.get("resource_id") or "") != resource_id:
+                issues.append(f"Revision {expected_revision_no} snapshot resource_id does not match its event.")
+            canonical_snapshot = json.dumps(
+                dict(snapshot), sort_keys=True, ensure_ascii=False,
+                separators=(",", ":"), default=str
+            )
+            content_hash = hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest()
+            if content_hash != event.get("content_sha256"):
+                issues.append(f"Revision {expected_revision_no} content hash does not match.")
+            event_without_hash = {
+                key: value for key, value in event.items() if key != "revision_sha256"
+            }
+            canonical_event = json.dumps(
+                event_without_hash, sort_keys=True, ensure_ascii=False,
+                separators=(",", ":"), default=str
+            )
+            revision_hash = hashlib.sha256(canonical_event.encode("utf-8")).hexdigest()
+            if revision_hash != event.get("revision_sha256"):
+                issues.append(f"Revision {expected_revision_no} event hash does not match.")
+            expected_parent = event.get("revision_sha256")
+        reports.append({
+            "resource_id": resource_id,
+            "revision_count": len(revisions),
+            "status": "VALID_HASH_CHAIN" if not issues else "INTEGRITY_CHECK_FAILED",
+            "issues": issues,
+        })
+    invalid_resources = [row["resource_id"] for row in reports if row["status"] != "VALID_HASH_CHAIN"]
+    overall = "VALID_HASH_CHAINS" if not malformed and not invalid_resources else "INTEGRITY_CHECK_FAILED"
+    return {
+        "status": overall,
+        "resource_count": len(reports),
+        "revision_count": len(history),
+        "invalid_resource_ids": invalid_resources,
+        "malformed_items": malformed,
+        "resources": reports,
+        "trust_boundary": "Hash integrity can be recomputed from the current workspace; this does not prevent an authorized editor from rewriting the complete history or establish an independent timestamp/custody authority.",
+    }
 
 
 def calculate_resource_balance(
@@ -1454,6 +1576,7 @@ def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 __all__ = [
     "PROVENANCE_VALUES", "USER_INPUT_PROVENANCE_VALUES", "COMPATIBILITY_STATUSES", "CASCADE_ORDER",
     "ResourceValidationError", "validate_resource_passport",
+    "append_resource_passport_revision", "verify_resource_passport_history",
     "assess_resource_compatibility", "calculate_resource_balance",
     "detect_resource_loss", "optimize_resource_network",
     "simulate_supplier_disruption", "evaluate_safety_gate",
