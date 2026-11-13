@@ -53,6 +53,8 @@ from shoir_resource_intelligence import (
 
 
 STATE_PREFIX = "shoir_resource_intelligence_"
+MAX_RESOURCE_JSON_INPUT_CHARS = 1_000_000
+MAX_RESOURCE_JSON_ARRAY_RECORDS = 10_000
 
 
 def _finite_float(raw: Any, label: str, *, minimum: float | None = None) -> float:
@@ -68,6 +70,10 @@ def _finite_float(raw: Any, label: str, *, minimum: float | None = None) -> floa
 
 
 def _json_object(raw: str, label: str) -> dict[str, Any]:
+    if not isinstance(raw, str) or len(raw) > MAX_RESOURCE_JSON_INPUT_CHARS:
+        raise ValueError(
+            f"{label} must be text no longer than {MAX_RESOURCE_JSON_INPUT_CHARS:,} characters."
+        )
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -78,12 +84,20 @@ def _json_object(raw: str, label: str) -> dict[str, Any]:
 
 
 def _json_array(raw: str, label: str) -> list[dict[str, Any]]:
+    if not isinstance(raw, str) or len(raw) > MAX_RESOURCE_JSON_INPUT_CHARS:
+        raise ValueError(
+            f"{label} must be text no longer than {MAX_RESOURCE_JSON_INPUT_CHARS:,} characters."
+        )
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{label} must be valid JSON: {exc.msg}.") from exc
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise ValueError(f"{label} must be a JSON array of objects.")
+    if len(value) > MAX_RESOURCE_JSON_ARRAY_RECORDS:
+        raise ValueError(
+            f"{label} contains more than {MAX_RESOURCE_JSON_ARRAY_RECORDS:,} records."
+        )
     return value
 
 
