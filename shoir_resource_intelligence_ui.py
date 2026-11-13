@@ -485,7 +485,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value='[]',
                 key="sri_water_connections",
                 height=110,
-                help='Each connection: source_id, sink_id, connection_confirmed=true, connection_evidence_reference, optional capacity.',
+                help='Each connection: source_id, sink_id, connection_confirmed=true, connection_evidence_reference and explicit capacity (required).',
             )
             w1, w2, w3 = st.columns(3)
             contaminant_name = w1.text_input("Contaminant / quality parameter", key="sri_water_contaminant")
