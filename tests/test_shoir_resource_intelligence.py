@@ -296,3 +296,57 @@ def test_workbench_discovery_alias_launch_and_entitlement(tmp_path, monkeypatch)
     denied.run(timeout=60)
     assert not denied.exception, "\\n".join(str(error.value) for error in denied.exception)
     assert any("Enterprise" in warning.value for warning in denied.warning)
+
+
+
+def test_over_reconciliation_is_flagged_as_anomaly_not_ignored():
+    result = detect_resource_loss(100, 105, unit="m3/day", tolerance_percent=1)
+    assert result["status"] == "ANOMALY_SUSPECTED"
+    assert result["finding_type"] == "UNRECONCILED_BALANCE"
+    assert result["confirmation_status"] == "NOT_CONFIRMED"
+
+
+def test_compatibility_can_check_temperature_and_pressure_limits():
+    supply = {
+        **_supply(),
+        "temperature_c": 45.0,
+        "pressure_kpa": 250.0,
+    }
+    demand = {
+        **_demand(),
+        "quality_limits": {
+            "pH": {"min": 6.5, "max": 8.5},
+            "temperature_c": {"max": 40.0},
+            "pressure_kpa": {"min": 100.0, "max": 300.0},
+        },
+    }
+    result = assess_resource_compatibility(supply, demand)
+    assert result["status"] == "TECHNICALLY_INCOMPATIBLE"
+    assert any("temperature_c" in reason for reason in result["reasons"])
+
+
+def test_network_optimizer_does_not_treat_treatment_assertion_as_automatic_route_approval():
+    result = optimize_resource_network(
+        [_supply(quality={"pH": 4.0})],
+        [_demand(limits={"pH": {"min": 6.5, "max": 8.5}})],
+        [{
+            **_route(),
+            "treatment_plan": {
+                "residual_quality": {"pH": 7.0},
+                "qualification_evidence": "LAB-REF",
+                "qualified_by": "Engineer",
+            },
+        }],
+    )
+    assert result["status"] == "INFEASIBLE"
+    assert result["rejected_routes"][0]["status"] == "COMPATIBLE_SUBJECT_TO_TREATMENT"
+
+
+def test_explore_catalog_and_shared_tier_policy_are_registered():
+    from industrial_platform import PLATFORM_CATALOG
+    from shoir_tier_capabilities import module_required_tier
+
+    item = next(x for x in PLATFORM_CATALOG if x["name"] == "Industrial Resource Intelligence")
+    assert item["tier"] == "Enterprise"
+    assert item["category"] == "Resource Intelligence"
+    assert module_required_tier("Industrial Resource Intelligence") == "Enterprise"
