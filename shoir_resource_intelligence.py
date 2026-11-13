@@ -199,6 +199,15 @@ def assess_resource_compatibility(
     This is a screening calculation only. A treatment qualification is accepted as
     a recorded user assertion with an evidence reference, not independently verified.
     """
+    input_provenance = {}
+    for label, item in (("supply", supply), ("demand", demand)):
+        raw_provenance = _optional_text(item.get("provenance"))
+        input_provenance[label] = (
+            _validated_input_provenance(raw_provenance, f"{label}.provenance")
+            if raw_provenance
+            else "NOT_DECLARED"
+        )
+
     reasons: list[str] = []
     try:
         supply_type = _text(supply.get("resource_type"), "supply.resource_type").casefold()
@@ -206,10 +215,10 @@ def assess_resource_compatibility(
         supply_unit = _text(supply.get("unit"), "supply.unit").casefold()
         demand_unit = _text(demand.get("unit"), "demand.unit").casefold()
     except ResourceValidationError as exc:
-        return {"status": "INSUFFICIENT_DATA", "reasons": [str(exc)], "qualification_is_user_asserted": False}
+        return {"input_provenance": input_provenance,"status": "INSUFFICIENT_DATA", "reasons": [str(exc)], "qualification_is_user_asserted": False}
 
     if supply_type != demand_type or supply_unit != demand_unit:
-        return {
+        return {"input_provenance": input_provenance,
             "status": "TECHNICALLY_INCOMPATIBLE",
             "reasons": ["Resource type or unit does not match; no implicit unit conversion is performed."],
             "qualification_is_user_asserted": False,
@@ -218,7 +227,7 @@ def assess_resource_compatibility(
     quality = supply.get("quality")
     limits = demand.get("quality_limits")
     if not isinstance(quality, Mapping) or not isinstance(limits, Mapping) or not limits:
-        return {
+        return {"input_provenance": input_provenance,
             "status": "INSUFFICIENT_DATA",
             "reasons": ["Supply measurements and explicit buyer quality limits are required."],
             "qualification_is_user_asserted": False,
@@ -227,13 +236,13 @@ def assess_resource_compatibility(
     violations: list[str] = []
     for property_name, bounds in limits.items():
         if property_name not in quality and property_name not in supply:
-            return {
+            return {"input_provenance": input_provenance,
                 "status": "INSUFFICIENT_DATA",
                 "reasons": [f"Supply measurement is missing required property: {property_name}."],
                 "qualification_is_user_asserted": False,
             }
         if not isinstance(bounds, Mapping):
-            return {
+            return {"input_provenance": input_provenance,
                 "status": "INSUFFICIENT_DATA",
                 "reasons": [f"Buyer limits for {property_name} must be an object."],
                 "qualification_is_user_asserted": False,
@@ -243,7 +252,7 @@ def assess_resource_compatibility(
         lower = _number(bounds["min"], f"demand.quality_limits.{property_name}.min") if bounds.get("min") is not None else None
         upper = _number(bounds["max"], f"demand.quality_limits.{property_name}.max") if bounds.get("max") is not None else None
         if lower is None and upper is None:
-            return {
+            return {"input_provenance": input_provenance,
                 "status": "INSUFFICIENT_DATA",
                 "reasons": [f"At least one numeric limit is required for {property_name}."],
                 "qualification_is_user_asserted": False,
@@ -271,14 +280,14 @@ def assess_resource_compatibility(
                 engineering_review_required=engineering_review_required,
             )
             if residual_assessment["status"] == "TECHNICALLY_COMPATIBLE":
-                return {
+                return {"input_provenance": input_provenance,
                     "status": "COMPATIBLE_SUBJECT_TO_TREATMENT",
                     "reasons": violations + ["Declared treatment residual quality meets the entered limits."],
                     "treatment": dict(plan),
                     "qualification_is_user_asserted": True,
                     "verification_warning": "Treatment qualification evidence and approver identity have not been independently verified.",
                 }
-        return {
+        return {"input_provenance": input_provenance,
             "status": "TECHNICALLY_INCOMPATIBLE",
             "reasons": violations + ["Treatment has not been qualified with residual-quality evidence."],
             "qualification_is_user_asserted": False,
@@ -293,7 +302,7 @@ def assess_resource_compatibility(
     else:
         status = "TECHNICALLY_COMPATIBLE"
         reasons.append("Entered numeric quality values are within the entered buyer limits.")
-    return {"status": status, "reasons": reasons, "qualification_is_user_asserted": False}
+    return {"input_provenance": input_provenance,"status": status, "reasons": reasons, "qualification_is_user_asserted": False}
 
 
 def append_resource_passport_revision(
