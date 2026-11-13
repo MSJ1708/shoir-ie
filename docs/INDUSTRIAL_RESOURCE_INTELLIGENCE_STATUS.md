@@ -36,7 +36,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 
 | Master prompt capability | Current status | Implemented foundation | Remaining work / reason it is not complete |
 |---|---|---|---|
-| 1. Industrial Resource Passport | PARTIALLY_IMPLEMENTED | Facility-linked resource record; type, quantity, unit, numeric quality values, temperature, pressure, schedule text, treatment notes, safety restrictions, timestamp, provenance and approval field. | Multilingual controlled vocabulary, certificate lifecycle, owner/asset/process relationships, lab attachments, versioned history and tenant-scoped persistence are incomplete. |
+| 1. Industrial Resource Passport | PARTIALLY_IMPLEMENTED | Facility-linked record; owner, English/Arabic descriptions, source process/equipment, type, quantity/unit, numeric quality, temperature/pressure, availability window, seasonal notes, storage/transport requirements, treatment/safety notes, source/lab/certificate references, certificate-valid-until text, measurement timestamp and provenance. | Certificate expiry verification, controlled bilingual vocabulary, attachments, versioned history and tenant-scoped persistence remain incomplete. |
 | 2. Resource Exchange Discovery | PARTIALLY_IMPLEMENTED | Explicitly entered demand and exchange-route candidates; no supplier availability is inferred. | No live marketplace, participant directory, confidential matching, treatment/logistics provider or customer opt-in network exists. |
 | 3. Cross-Company Process Compatibility Twin | PARTIALLY_IMPLEMENTED | Deterministic type/unit and buyer quality-limit screen; supports numeric quality, temperature and pressure limits; explicit lab/engineering hold statuses. | Full composition chemistry, thermodynamics, phase behavior, contamination interaction, equipment envelope, secondary waste and qualified process models remain absent. |
 | 4. Plant Resource Loss and Recovery | PARTIALLY_IMPLEMENTED | Same-unit input/output balance and suspected-discrepancy alert; never calls a discrepancy a confirmed loss. | Multi-stream source mapping, root-cause evidence, recovery project workflow, measured implementation results and persistent action ownership remain incomplete. |
@@ -47,9 +47,9 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | 9. Resource Substitution Intelligence | PARTIALLY_IMPLEMENTED | The compatibility screening service can be reused to screen a proposed substitute. | No substitution catalogue, product/process consequence model, safety case or qualified approval workflow exists. |
 | 10. Multi-Company Resource Optimizer | PARTIALLY_IMPLEMENTED | Single-period LP transportation allocation with supply caps, demand satisfaction, route capacities, route cost, type/unit/quality screening and independent reconciliation. | No MILP, multi-period production/maintenance scheduling, storage, infrastructure constraints, uncertainty sets, multi-objective solve or cross-company network. Conditional treatment routes are not optimizer-eligible. |
 | 11. Resource Cascade Optimizer | PARTIALLY_IMPLEMENTED | Deterministic prevention-first ranking of entered opportunity actions. | No quantity-conserving cascade network, overlapping opportunity prevention or marginal-value route optimizer. |
-| 12. Resource Bottleneck Detector | NOT_IMPLEMENTED | — | Needs explicit process/infrastructure capacity model and constraint evidence. |
+| 12. Resource Bottleneck Detector | PARTIALLY_IMPLEMENTED | Deterministic smallest-capacity screen over entered capacity constraints with exact-unit checks and shortfall. | No process-network constraint graph, binding-constraint optimization, equipment operating windows or time-dependent capacity model. |
 | 13. Contingency and Resilience Simulator | PARTIALLY_IMPLEMENTED | Single-supplier fractional supply shock and shortage re-optimization; recovery time stays unset without evidence. | No time-stepped multi-event discrete simulation, quality failure/treatment failure models, storage depletion schedule or validated recovery playbook. |
-| 14. Infrastructure Co-Optimization | BLOCKED_EXTERNAL_DEPENDENCY | No unsupported pipeline or route is assumed. | Requires surveyed route data, pipeline/access rights, pump/pressure/flow limits, transport rates, CAPEX/OPEX, permits and engineering design evidence. |
+| 14. Infrastructure Co-Optimization | PARTIALLY_IMPLEMENTED | Preliminary route screen requires user-asserted connection confirmation, route distance, capacity, demand and access/permit/engineering reference fields; it never returns operational authorization. | No GIS/route survey, hydraulic design, pressure/flow model, physical access verification, CAPEX/OPEX optimization, permit validation or construction approval. Real route/permit evidence remains an external dependency. |
 | 15. Physical Feasibility and Safety Gate | PARTIALLY_IMPLEMENTED | Critical failure forces REJECTED; laboratory and engineering/safety/environmental references are required for evidence-recorded state; no operational authorization is returned. | No Saudi or international regulatory rule library, material incompatibility database, permit-source/version register or independently qualified approval. |
 | 16. Industrial Exchange Assurance | NOT_IMPLEMENTED | — | Requires versioned agreements, approved contract terms, delivery and certificate records, acceptance/rejection process and audit lifecycle. |
 | 17. Industrial Proof of Value | PARTIALLY_IMPLEMENTED | Supplier, buyer and transfer-neutral network formulas. Internal sale revenue is excluded from network value to avoid double-counting. | No customer baseline/counterfactual records, volume normalization, actual delivery reconciliation, emissions factors or independent verification evidence. |
@@ -61,10 +61,14 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | Production and maintenance-aware optimizer | NOT_IMPLEMENTED | — | The current LP is a single-period flow allocation; no production/MRO calendar or asset availability constraints are included. |
 | Uncertainty-aware optimization | NOT_IMPLEMENTED | Forecast intervals are displayed separately; they are not used in an optimizer. | Needs data-backed uncertainty distributions/scenarios, robust/stochastic formulations and validation. |
 | Investment prioritization | NOT_IMPLEMENTED | — | Needs approved cost/benefit inputs, engineering feasibility, safety, risk, portfolio constraints and reproducible financial metric policy. |
-| Performance persistence monitor | NOT_IMPLEMENTED | — | Needs baseline and post-implementation time-series with production/operating-condition normalization and persistence checks. |
+| Performance persistence monitor | PARTIALLY_IMPLEMENTED | Production-normalized usage-intensity comparison between baseline and reporting period; output is explicitly not independently verified. | No continuous monitoring, operating-condition adjustment, degradation detection, persistence alerts, project implementation record or verified savings lifecycle. |
 | Engineering knowledge/model assurance | PARTIALLY_IMPLEMENTED | Calculation methods are deterministic, inspectable and covered by tests; limits and assumptions are returned in outputs. | No versioned standards library, calculation-method approval register, qualified references or full model registry integration. |
 
 ## 4. Engineering method boundaries
+
+### Resource passport
+
+The passport stores owner and source process/equipment text, English/Arabic descriptions, availability/seasonal notes, storage and transport requirements, laboratory and certificate references, and certificate-valid-until text. A reference is not a certificate authenticity or expiry verification.
 
 ### Resource balance
 
@@ -81,6 +85,10 @@ The LP is single-period and deterministic. It allocates only through routes that
 ### Forecasting and reliability
 
 Quality forecasting requires a minimum history and includes a chronological holdout error, but remains an exploratory linear trend with an approximate residual interval. Historical supply reliability is an empirical pass rate only. Neither output claims future probability or an operational service-level guarantee.
+
+### Bottlenecks and infrastructure
+
+The bottleneck screen identifies the smallest entered capacity after enforcing exact unit agreement. It does not infer an unentered capacity. The infrastructure screen requires a user-confirmed physical connection and records distance, capacity and evidence references; any positive result is only preliminary, user-asserted and not operational authorization.
 
 ### Safety and value
 
@@ -106,7 +114,7 @@ This is not proof of authenticated hosted save/re-login recovery for this module
 
 The new test file `tests/test_shoir_resource_intelligence.py` includes coverage for:
 
-- Passport field, provenance, timestamp and numeric validation.
+- Passport field, provenance, timestamp, bilingual-description and numeric validation.
 - Invalid/non-finite/zero/negative resource quantities.
 - Balance reconciliation and unconfirmed suspected-loss classification.
 - Over-reconciliation discrepancy detection.
@@ -122,6 +130,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Insufficient-data and time-aware exploratory forecast behavior.
 - Historical delivery pass rate without a future probability.
 - Prevention-first cascade ordering.
+- Unit-consistent capacity bottleneck, preliminary route evidence and production-normalized intensity checks.
 - Source-row preservation in import validation.
 - Workbench IEIT search/launch and Starter-tier denial.
 - Explore catalogue and Enterprise policy registration.
