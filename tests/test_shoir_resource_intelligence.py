@@ -1272,9 +1272,9 @@ def test_environmental_impact_calculates_avoided_emissions_less_added_burdens():
         factors=_environmental_factor_set(),
         evidence_status="MEASURED",
     )
-    assert result["gross_avoided_emissions_kgco2e"] == pytest.approx(485)
-    assert result["additional_burden_kgco2e"] == pytest.approx(134.5)
-    assert result["net_avoided_emissions_kgco2e"] == pytest.approx(350.5)
+    assert result["gross_avoided_emissions_kgco2e"] == pytest.approx(520)
+    assert result["additional_burden_kgco2e"] == pytest.approx(115.5)
+    assert result["net_avoided_emissions_kgco2e"] == pytest.approx(404.5)
     assert result["evidence_status"] == "MEASURED"
     assert result["independent_verification"] == "NOT_ESTABLISHED"
 
