@@ -1347,6 +1347,98 @@ def screen_waste_heat_recovery(
     }
 
 
+def monitor_resource_intensity_persistence(
+    baseline_usage: float,
+    baseline_production: float,
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    usage_unit: str,
+    production_unit: str,
+    degradation_threshold_percent: float = 5.0,
+    required_consecutive_periods: int = 2,
+) -> dict[str, Any]:
+    """Monitor normalized usage against a declared baseline over dated periods.
+
+    The monitor flags deviations only; it does not establish cause or verified
+    savings, and does not adjust for operating conditions beyond production volume.
+    """
+    base_usage = _number(baseline_usage, "baseline_usage", minimum=0)
+    base_output = _number(baseline_production, "baseline_production", minimum=0)
+    if base_usage <= 0 or base_output <= 0:
+        raise ResourceValidationError("Baseline usage and production must both be greater than zero.")
+    threshold = _number(degradation_threshold_percent, "degradation_threshold_percent", minimum=0)
+    required = int(required_consecutive_periods)
+    if required < 1:
+        raise ResourceValidationError("required_consecutive_periods must be at least 1.")
+    if len(observations) < required:
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "sample_count": len(observations),
+            "required_consecutive_periods": required,
+            "baseline_intensity": base_usage / base_output,
+            "periods": [],
+        }
+    usage_label = _text(usage_unit, "usage_unit")
+    output_label = _text(production_unit, "production_unit")
+    baseline_intensity = base_usage / base_output
+    periods: list[dict[str, Any]] = []
+    timestamps: list[str] = []
+    for index, row in enumerate(observations):
+        timestamp = _utc_timestamp(row.get("timestamp"), f"observations[{index}].timestamp")
+        if timestamp is None:
+            raise ResourceValidationError("Every monitoring observation requires a timezone-aware timestamp.")
+        timestamps.append(timestamp)
+        usage = _number(row.get("usage"), f"observations[{index}].usage", minimum=0)
+        production = _number(row.get("production"), f"observations[{index}].production", minimum=0)
+        if production <= 0:
+            raise ResourceValidationError("Every monitoring period requires positive production.")
+        intensity = usage / production
+        change = 100.0 * (intensity - baseline_intensity) / baseline_intensity
+        state = (
+            "DEGRADATION_SUSPECTED" if change > threshold else
+            "LOWER_INTENSITY_OBSERVED" if change < -threshold else
+            "WITHIN_BASELINE_BAND"
+        )
+        periods.append({
+            "timestamp": timestamp,
+            "usage": usage,
+            "production": production,
+            "intensity": intensity,
+            "intensity_unit": f"{usage_label} per {output_label}",
+            "change_from_baseline_percent": change,
+            "status": state,
+        })
+    if timestamps != sorted(timestamps) or len(set(timestamps)) != len(timestamps):
+        raise ResourceValidationError("Monitoring observations must have unique, ascending timestamps.")
+    trailing_degradation = 0
+    for period in reversed(periods):
+        if period["status"] == "DEGRADATION_SUSPECTED":
+            trailing_degradation += 1
+        else:
+            break
+    alert = trailing_degradation >= required
+    latest_status = periods[-1]["status"]
+    status = "PERSISTENCE_ALERT" if alert else latest_status
+    return {
+        "status": status,
+        "sample_count": len(periods),
+        "baseline_intensity": baseline_intensity,
+        "intensity_unit": f"{usage_label} per {output_label}",
+        "degradation_threshold_percent": threshold,
+        "required_consecutive_periods": required,
+        "trailing_degradation_periods": trailing_degradation,
+        "persistence_alert": alert,
+        "periods": periods,
+        "verified_savings": None,
+        "causality_verified": False,
+        "limitations": [
+            "Production-volume normalization only; operating hours, product mix, quality and ambient/process conditions are not adjusted.",
+            "A degradation alert identifies a deviation from the entered baseline, not its cause.",
+            "Observed lower intensity is not independently verified savings.",
+        ],
+    }
+
+
 def calculate_resource_intensity_change(
     baseline_usage: float,
     baseline_production: float,
@@ -1599,6 +1691,7 @@ __all__ = [
     "forecast_resource_quality", "calculate_supply_reliability",
     "rank_resource_cascade", "detect_resource_bottleneck",
     "assess_infrastructure_route", "calculate_resource_intensity_change",
+    "monitor_resource_intensity_persistence",
     "calculate_energy_balance", "screen_waste_heat_recovery",
     "optimize_single_contaminant_water_reuse",
     "validate_exchange_agreement", "assess_exchange_delivery",
