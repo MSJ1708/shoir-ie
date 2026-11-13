@@ -951,6 +951,9 @@ def rank_resource_improvement_projects(
         return {"status": "INSUFFICIENT_DATA", "ranked_projects": [], "reason": "No project records were supplied."}
     if not isinstance(weights, Mapping):
         raise ResourceValidationError("Project scoring weights must be an object.")
+    unknown_weights = sorted(set(weights) - set(score_dimensions))
+    if unknown_weights:
+        raise ResourceValidationError(f"Unknown project scoring weight(s): {', '.join(str(x) for x in unknown_weights)}.")
     normalized_weights = {
         key: _number(weights.get(key), f"weights.{key}", minimum=0)
         for key in score_dimensions
@@ -985,7 +988,12 @@ def rank_resource_improvement_projects(
         annual_opex = _number(project.get("annual_opex"), f"projects[{index}].annual_opex", minimum=0)
         annual_net_benefit = annual_gross_benefit - annual_opex
         payback = capex / annual_net_benefit if annual_net_benefit > 0 else None
+        currency = _text(project.get("currency"), f"projects[{index}].currency").upper()
+        if len(currency) != 3 or not currency.isalpha():
+            raise ResourceValidationError(f"projects[{index}].currency must be a three-letter currency code.")
         safety_status = _text(project.get("safety_status"), f"projects[{index}].safety_status").upper()
+        if safety_status not in {"REJECTED", "APPROVAL_PENDING", "APPROVAL_EVIDENCE_RECORDED"}:
+            raise ResourceValidationError(f"projects[{index}].safety_status is not a recognized safety gate status.")
         if safety_status == "REJECTED":
             lifecycle = "BLOCKED_SAFETY"
         elif safety_status == "APPROVAL_EVIDENCE_RECORDED":
@@ -1010,7 +1018,7 @@ def rank_resource_improvement_projects(
             "annual_opex": annual_opex,
             "annual_net_benefit": annual_net_benefit,
             "simple_payback_years": payback,
-            "currency": _optional_text(project.get("currency")),
+            "currency": currency,
             "safety_status": safety_status,
             "project_status": lifecycle,
             "evidence_reference": _optional_text(project.get("evidence_reference")),
@@ -1064,6 +1072,13 @@ def calculate_environmental_impact(
     region = _text(geography, "geography")
     if not isinstance(factors, Mapping):
         raise ResourceValidationError("Environmental factors must be an object.")
+    required_factor_names = {
+        "freshwater", "wastewater", "electricity", "fuel",
+        "waste_diversion", "transport", "chemical", "residual_waste",
+    }
+    unknown_factors = sorted(set(factors) - required_factor_names)
+    if unknown_factors:
+        raise ResourceValidationError(f"Unknown environmental factor(s): {', '.join(str(x) for x in unknown_factors)}.")
     factor_units = {
         "freshwater": "kgCO2e/m3",
         "wastewater": "kgCO2e/m3",
