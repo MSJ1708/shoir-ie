@@ -567,6 +567,12 @@ def evaluate_safety_gate(
     environmental_approval_reference: str = "",
 ) -> dict[str, Any]:
     """Fail-closed approval gate; evidence references are recorded, not verified."""
+    if not isinstance(critical_failure, bool):
+        raise ResourceValidationError("critical_failure must be a boolean.")
+    if not isinstance(laboratory_required, bool):
+        raise ResourceValidationError("laboratory_required must be a boolean.")
+    if laboratory_passed is not None and not isinstance(laboratory_passed, bool):
+        raise ResourceValidationError("laboratory_passed must be a boolean or None.")
     blockers = []
     if critical_failure:
         blockers.append("Critical safety restriction or hazard failure is present.")
@@ -1330,6 +1336,9 @@ def assess_exchange_delivery(
     tolerance = _number(agreement.get("quantity_tolerance_percent"), "quantity_tolerance_percent", minimum=0)
     if expected <= 0 or tolerance > 100:
         raise ResourceValidationError("Agreement quantity or tolerance is invalid.")
+    certificate_required = agreement.get("certificate_required", False)
+    if not isinstance(certificate_required, bool):
+        raise ResourceValidationError("Agreement certificate_required must be a boolean.")
     quality_terms = agreement.get("quality_limits")
     if not isinstance(quality_terms, Mapping) or not quality_terms:
         raise ResourceValidationError("Agreement quality_limits must be a non-empty object.")
@@ -1375,7 +1384,7 @@ def assess_exchange_delivery(
 
     certificate_reference = _optional_text(delivery.get("certificate_reference"))
     certificate_valid_until = _optional_text(delivery.get("certificate_valid_until"))
-    if agreement.get("certificate_required") is True:
+    if certificate_required:
         if not certificate_reference or not certificate_valid_until:
             deviations.append("CERTIFICATE_MISSING")
         else:
