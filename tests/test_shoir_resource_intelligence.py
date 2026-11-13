@@ -919,3 +919,16 @@ def test_network_optimizer_rejects_missing_route_capacity_and_costs_instead_of_a
             "unit_cost": 1.0, "capacity": 100.0,
             # Deliberately no transport or treatment cost inputs.
         }])
+
+
+def test_main_app_explorer_launch_and_direct_module_dispatch_are_registered():
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+    ast.parse(app_source)
+    assert 'key="explore_open_industrial_resource_intelligence"' in app_source
+    assert 'disabled=not _resource_has_access' in app_source
+    assert 'st.session_state["shoir_pending_tool_module"] = "Industrial Resource Intelligence"' in app_source
+    assert 'elif mod == "Industrial Resource Intelligence":' in app_source
+    assert "render_resource_intelligence_workbench(" in app_source
