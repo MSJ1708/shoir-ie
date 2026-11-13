@@ -168,6 +168,7 @@ def test_supplier_disruption_reports_shortage_without_inventing_recovery_time():
     result = simulate_supplier_disruption(
         [_supply(quantity=100)], [_demand(quantity=80)], [_route()],
         supplier_id="S1", supply_reduction_fraction=0.5,
+        shortage_penalty_per_unit=1_000_000,
     )
     assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocation_result"]["unmet_demand"][0]["quantity"] == pytest.approx(30)
@@ -469,6 +470,7 @@ def test_complete_supplier_shutdown_returns_full_unmet_demand_not_false_infeasib
     result = simulate_supplier_disruption(
         [_supply(quantity=100)], [_demand(quantity=80)], [_route()],
         supplier_id="S1", supply_reduction_fraction=1.0,
+        shortage_penalty_per_unit=1_000_000,
     )
     assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocation_result"]["allocations"] == []
@@ -799,6 +801,7 @@ def test_synthetic_end_to_end_resource_intelligence_engine_flow():
         [{**route, "supply_id": passport["resource_id"]}],
         supplier_id=passport["resource_id"],
         supply_reduction_fraction=0.5,
+        shortage_penalty_per_unit=1_000_000,
     )
     assert disruption["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
 
@@ -1109,6 +1112,7 @@ def test_period_aligned_optimizer_does_not_carry_surplus_into_a_later_period():
     ]
     result = optimize_period_aligned_resource_network(
         supplies, demands, routes, allow_shortage=True,
+        shortage_penalty_per_unit=1_000_000,
     )
     assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocations"] == []
@@ -1150,6 +1154,7 @@ def test_period_optimizer_reports_complete_shortage_when_all_supply_is_unavailab
         demands=[{**_demand("D-NONE", 25), "period_id": "2026-11-20"}],
         routes=[],
         allow_shortage=True,
+        shortage_penalty_per_unit=1_000_000,
     )
     assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocations"] == []
@@ -1416,3 +1421,63 @@ def test_resource_intelligence_ui_declared_tabs_and_indexes_are_consistent():
     assert '"Environmental Impact"' in source
     assert '"Investment Prioritization"' in source
     assert '"Reports"' in source
+
+
+def test_combined_network_scenario_applies_supply_demand_and_cost_shocks_together():
+    from shoir_resource_intelligence import simulate_resource_network_scenario
+
+    result = simulate_resource_network_scenario(
+        [_supply(quantity=100)],
+        [_demand(quantity=60)],
+        [_route()],
+        [
+            {"type": "SUPPLY_REDUCTION", "supply_id": "S1", "fraction": 0.5},
+            {"type": "DEMAND_MULTIPLIER", "demand_id": "D1", "multiplier": 1.2},
+            {"type": "ROUTE_RESOURCE_COST_MULTIPLIER", "supply_id": "S1", "demand_id": "D1", "multiplier": 2},
+        ],
+        scenario_id="SCN-1",
+        scenario_name="Supply loss and demand spike",
+        shortage_penalty_per_unit=1000,
+    )
+    assert result["baseline_unmet_quantity"] == pytest.approx(0)
+    assert result["stressed_unmet_quantity"] == pytest.approx(22)
+    assert result["change_in_unmet_quantity"] == pytest.approx(22)
+    assert result["stressed"]["allocations"][0]["quantity"] == pytest.approx(50)
+    assert result["recovery_time"] is None
+    assert result["probability"] is None
+
+
+def test_combined_network_scenario_quality_failure_rejects_route_and_reports_shortage():
+    from shoir_resource_intelligence import simulate_resource_network_scenario
+
+    result = simulate_resource_network_scenario(
+        [_supply(quantity=100)],
+        [_demand(quantity=60, limits={"pH": {"min": 6.5, "max": 8.5}})],
+        [_route()],
+        [{"type": "SUPPLY_QUALITY_OVERRIDE", "supply_id": "S1", "quality": {"pH": 3.0}}],
+        scenario_id="SCN-QUALITY",
+        scenario_name="Supplier quality failure",
+        shortage_penalty_per_unit=500,
+    )
+    assert result["stressed"]["status"] == "FEASIBLE_WITH_SHORTAGE"
+    assert result["stressed"]["allocations"] == []
+    assert result["stressed_unmet_quantity"] == pytest.approx(60)
+    assert result["stressed"]["rejected_routes"][0]["status"] == "TECHNICALLY_INCOMPATIBLE"
+
+
+def test_combined_network_scenario_requires_explicit_targets_and_supported_shock_types():
+    from shoir_resource_intelligence import simulate_resource_network_scenario
+
+    base = ([_supply()], [_demand()], [_route()])
+    with pytest.raises(ResourceValidationError, match="exactly one supply"):
+        simulate_resource_network_scenario(
+            *base, [{"type": "SUPPLY_REDUCTION", "supply_id": "missing", "fraction": 0.2}],
+            scenario_id="SCN-X", scenario_name="Unknown target",
+            shortage_penalty_per_unit=1000,
+        )
+    with pytest.raises(ResourceValidationError, match="Unsupported resource-network shock type"):
+        simulate_resource_network_scenario(
+            *base, [{"type": "AI_APPROVAL_OVERRIDE"}],
+            scenario_id="SCN-X", scenario_name="Invalid shock",
+            shortage_penalty_per_unit=1000,
+        )
