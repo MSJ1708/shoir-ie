@@ -381,3 +381,32 @@ def test_clear_loaded_workspace_state_does_not_clear_untracked_personal_state():
 
     assert session["current_personal_value"] == "preserve"
     assert session["remote_session_token"] == "live-session"
+
+
+def test_digital_thread_rename_history_persists_but_rename_widget_state_does_not(tmp_path: Path):
+    db = str(tmp_path / "workspace.db")
+    source = {
+        "authenticated": True,
+        "current_user": "Alice",
+        "global_thread_rename_target": "AST-1001",
+        "global_thread_rename_name_AST-1001": "Main Press",
+        "global_thread_rename_save": True,
+        "shoir_digital_thread_rename_history": [{
+            "event_id": "DTR-TEST-1",
+            "node_id": "AST-1001",
+            "previous_name": "Press 1001",
+            "new_name": "Main Press",
+        }],
+    }
+
+    assert _excluded("global_thread_rename_target")
+    assert _excluded("global_thread_rename_name_AST-1001")
+    assert _excluded("global_thread_rename_save")
+    assert save_user_workspace("Alice", source, db)
+
+    restored = {}
+    assert load_user_workspace("Alice", restored, db)
+    assert "global_thread_rename_target" not in restored
+    assert "global_thread_rename_name_AST-1001" not in restored
+    assert "global_thread_rename_save" not in restored
+    assert restored["shoir_digital_thread_rename_history"][0]["event_id"] == "DTR-TEST-1"
