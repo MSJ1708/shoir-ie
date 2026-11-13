@@ -53,7 +53,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | 15. Physical Feasibility and Safety Gate | PARTIALLY_IMPLEMENTED | Critical failure forces REJECTED; laboratory and engineering/safety/environmental references are required for evidence-recorded state; no operational authorization is returned. | No Saudi or international regulatory rule library, material incompatibility database, permit-source/version register or independently qualified approval. |
 | 16. Industrial Exchange Assurance | PARTIALLY_IMPLEMENTED | Structured supplier/buyer agreement drafts with quantity tolerance, quality limits, schedule, certificate requirement, treatment/testing responsibilities, shortage/rejection procedures and four approval-reference fields; delivery assessments compare quantities, quality and certificate validity and retain deviations/evidence references. | Approval references are not signatures; no legally reviewed contract, participant authentication, cross-organization approvals, immutable audit lifecycle, automatic contractual remedy or operational release exists. Delivery status always requires human acceptance and carries no contractual effect. |
 | 17. Industrial Proof of Value | PARTIALLY_IMPLEMENTED | Supplier, buyer and transfer-neutral network formulas. Internal sale revenue is excluded from network value to avoid double-counting. | No customer baseline/counterfactual records, volume normalization, actual delivery reconciliation, emissions factors or independent verification evidence. |
-| 18. Resource Quality Digital Memory | PARTIALLY_IMPLEMENTED | Current passports and results are included in the saved per-user workspace snapshot/export. | No immutable append-only lab/delivery/certificate history, evidence hashes, chain of custody or managed entity lineage. |
+| 18. Resource Quality Digital Memory | PARTIALLY_IMPLEMENTED | Passport additions/imports append workspace revision snapshots with actor/time fields, content SHA-256, parent revision hash and a verifier; history is included in the explicit per-user workspace save and JSON export. | The workspace is editable and can be rewritten/deleted; hashes do not provide immutable storage, an independent timestamp authority, certified chain of custody, laboratory integration or managed entity lineage. |
 | 19. Confidential Industrial Intelligence Network | BLOCKED_EXTERNAL_DEPENDENCY | Module requires authenticated user and Enterprise entitlement; current save action explicitly refuses to write resource data into an active organization-shared workspace. | No resource-specific organization tenant schema, attribute-based disclosure, approved cross-company matching or authorized company participant network exists. |
 | 20. Exchange Failure Risk Intelligence | PARTIALLY_IMPLEMENTED | Explicit supplier shock and shortage exposure in a one-period allocation. | No replacement-provider database, contract exposure model, validated recovery-time distribution, insured risk or financial guarantee. |
 | 21. Emergency Resource Network | BLOCKED_EXTERNAL_DEPENDENCY | No fictitious resource inventory or emergency capacity is shown. | Requires qualified participant registration, current availability, quality certificates, transport availability, permits and emergency coordination agreement. |
@@ -69,6 +69,10 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 ### Resource passport
 
 The passport stores owner and source process/equipment text, English/Arabic descriptions, availability/seasonal notes, storage and transport requirements, laboratory and certificate references, and certificate-valid-until text. A reference is not a certificate authenticity or expiry verification.
+
+### Resource memory and revision history
+
+When a passport is manually created or imported, the UI appends a workspace revision containing the passport snapshot, recorded actor/time, content SHA-256 and parent revision hash. The Resource Memory tab recomputes the content and event hashes and checks revision continuity. This can reveal accidental or partial edits to the currently saved data, but it is not immutable: a workspace editor can rewrite or delete the complete history, and no external timestamp authority or independent custodian is used. It is not a certified chain-of-custody record.
 
 ### Resource balance
 
@@ -142,6 +146,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Non-overridable critical safety failure and missing approval references.
 - Transfer-neutral network financial value and non-self-certification of independent verification.
 - Exchange agreement draft approval-reference states and delivery quantity/quality/certificate evidence checks.
+- Passport revision hash-chain creation, continuity verification, tamper detection and refusal to extend a broken chain.
 - Downstream dependency graph traversal without causality claims.
 - Insufficient-data and time-aware exploratory forecast behavior.
 - Historical delivery pass rate without a future probability.
