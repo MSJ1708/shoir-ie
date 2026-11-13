@@ -44,6 +44,7 @@ def _demand(demand_id="D1", quantity=60.0, limits=None):
         "required_quantity": quantity,
         "unit": "m3/day",
         "quality_limits": limits or {"pH": {"min": 6.5, "max": 8.5}, "TDS_mg_l": {"max": 500}},
+        "provenance": "MANUAL",
     }
 
 
@@ -58,6 +59,7 @@ def _route(supply_id="S1", demand_id="D1", cost=2.0):
         "capacity": 100.0,
         "connection_confirmed": True,
         "connection_evidence_reference": "SYNTHETIC-ROUTE-EVIDENCE",
+        "provenance": "MANUAL",
     }
 
 
@@ -1003,6 +1005,7 @@ def test_network_optimizer_rejects_missing_route_capacity_and_costs_instead_of_a
             "unit_cost": 1.0, "transport_cost_per_unit": 0.0,
             "treatment_cost_per_unit": 0.0, "currency": "SAR",
             "connection_confirmed": True, "connection_evidence_reference": "ROUTE-TEST",
+            "provenance": "MANUAL",
             # Deliberately no physical route capacity.
         }])
     with pytest.raises(ResourceValidationError):
@@ -1010,6 +1013,7 @@ def test_network_optimizer_rejects_missing_route_capacity_and_costs_instead_of_a
             "supply_id": "S1", "demand_id": "D1",
             "unit_cost": 1.0, "capacity": 100.0, "currency": "SAR",
             "connection_confirmed": True, "connection_evidence_reference": "ROUTE-TEST",
+            "provenance": "MANUAL",
             # Deliberately no transport or treatment cost inputs.
         }])
 
