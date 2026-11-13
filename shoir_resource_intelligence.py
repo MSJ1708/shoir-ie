@@ -909,6 +909,8 @@ def simulate_resource_network_scenario(
         elif kind == "DEMAND_MULTIPLIER":
             target = _text(raw.get("demand_id"), "shock.demand_id")
             multiplier = _number(raw.get("multiplier"), "shock.multiplier", minimum=0)
+            if multiplier <= 0:
+                raise ResourceValidationError("Demand multiplier must be greater than zero.")
             item = _find_demand(target)
             original = _number(item.get("required_quantity"), "demand.required_quantity", minimum=0)
             if original <= 0:
