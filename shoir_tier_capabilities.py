@@ -51,6 +51,7 @@ MODULE_REQUIREMENTS = {
     "Excel Data Cleaning & Import": "Starter",
     "Excel Intelligence": "Enterprise",
     "Industrial Workbook": "Starter",
+    "Industrial Resource Intelligence": "Enterprise",
     "Research AI": "Research Pack",
     "Statistical Hypothesis Testing": "Research Pack",
     "Literature & Citation Matrix": "Research Pack",
