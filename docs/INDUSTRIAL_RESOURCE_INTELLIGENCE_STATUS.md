@@ -18,8 +18,8 @@ The first vertical slice is an explicit-input engineering workspace with determi
 
 | File | Change |
 |---|---|
-| `shoir_resource_intelligence.py` | New deterministic engineering services for passport validation, resource balance/loss screening, compatibility, constrained resource allocation, supply-disruption scenarios, dependency propagation, safety gating, value calculation, exploratory quality forecasting, historical delivery reliability, cascade ranking and CSV-row validation. |
-| `shoir_resource_intelligence_ui.py` | New Streamlit workspace rendered inside the existing Workbench. Includes facility profile, CSV import validation, resource passports, balance screening, compatibility, demand/route entry, LP optimizer, disruption and dependency screens, safety gate, value calculation, history screening, cascade ranking and JSON evidence export. |
+| `shoir_resource_intelligence.py` | New deterministic engineering services for passport validation, resource balance/loss screening, compatibility, constrained resource allocation, supply-disruption scenarios, dependency propagation, safety gating, value calculation, exploratory quality forecasting, historical delivery reliability, cascade ranking, bottleneck/infrastructure/intensity screening and CSV-row validation. |
+| `shoir_resource_intelligence_ui.py` | New Streamlit workspace rendered inside the existing Workbench. Includes facility profile, shared secure CSV/XLS/XLSX import, resource passports, balance screening, compatibility, demand/route entry, LP optimizer, disruption and dependency screens, safety gate, value calculation, history screening, cascade ranking, bottleneck/infrastructure screens and JSON evidence export. |
 | `industrial_platform_excellence.py` | Adds the module to the existing Workbench module matrix at Enterprise. |
 | `shoir_tier_capabilities.py` | Adds an explicit Enterprise module entitlement. Existing plan definitions and the 100-tool catalogue are unchanged. |
 | `industrial_platform.py` | Adds the module to `PLATFORM_CATALOG` and routes direct module calls to the dedicated renderer rather than a generic placeholder. |
@@ -115,6 +115,9 @@ This is not proof of authenticated hosted save/re-login recovery for this module
 The new test file `tests/test_shoir_resource_intelligence.py` includes coverage for:
 
 - Passport field, provenance, timestamp, bilingual-description and numeric validation.
+- Rejection of user-entered `LIVE` provenance; only a separately verified connector may use it.
+- Shared Shoir-IE OOXML preflight, package path/expansion checks and bounded workbook upload for Excel import.
+- Complete supplier interruption reports full unmet demand with no resource allocation.
 - Invalid/non-finite/zero/negative resource quantities.
 - Balance reconciliation and unconfirmed suspected-loss classification.
 - Over-reconciliation discrepancy detection.
