@@ -669,11 +669,18 @@ def optimize_period_aligned_resource_network(
     production scheduling and maintenance calendars are not inferred; callers
     must represent each period's available supply and demand explicitly.
     """
-    if not supplies or not demands:
-        raise ResourceValidationError("At least one time-bucketed supply and demand are required.")
-    supply_rows = [dict(row) for row in supplies]
-    demand_rows = [dict(row) for row in demands]
-    route_rows = [dict(row) for row in routes]
+    if not demands:
+        raise ResourceValidationError("At least one time-bucketed demand is required.")
+    if not supplies and not allow_shortage:
+        raise ResourceValidationError("At least one time-bucketed supply is required unless shortage reporting is enabled.")
+    if not isinstance(allow_shortage, bool):
+        raise ResourceValidationError("allow_shortage must be a boolean.")
+    try:
+        supply_rows = [dict(row) for row in supplies]
+        demand_rows = [dict(row) for row in demands]
+        route_rows = [dict(row) for row in routes]
+    except (TypeError, ValueError) as exc:
+        raise ResourceValidationError("Supplies, demands and routes must contain object records.") from exc
     for index, row in enumerate(supply_rows):
         row["period_id"] = _text(row.get("period_id"), f"supplies[{index}].period_id")
     for index, row in enumerate(demand_rows):
@@ -684,6 +691,9 @@ def optimize_period_aligned_resource_network(
     supply_periods = {row["period_id"] for row in supply_rows}
     demand_periods = {row["period_id"] for row in demand_rows}
     periods = sorted(demand_periods)
+    unexpected_route_periods = sorted(
+        {row["period_id"] for row in route_rows} - demand_periods
+    )
     period_results = []
     all_allocations = []
     total_cost = 0.0
@@ -702,11 +712,20 @@ def optimize_period_aligned_resource_network(
             for row in route_rows if row["period_id"] == period_id
         ]
         if not period_supplies:
+            rejected_for_period = [
+                {
+                    "supply_id": _optional_text(route.get("supply_id")),
+                    "demand_id": _optional_text(route.get("demand_id")),
+                    "status": "REJECTED_NO_SAME_PERIOD_SUPPLY",
+                    "reason": "Route period has no declared same-period supply. Cross-period carryover is not modeled.",
+                }
+                for route in period_routes
+            ]
             period_result = {
                 "status": "FEASIBLE_WITH_SHORTAGE" if allow_shortage else "INFEASIBLE",
                 "reason": "No supply was declared for this demand period; no carryover or external replenishment is assumed.",
                 "allocations": [],
-                "rejected_routes": [],
+                "rejected_routes": rejected_for_period,
                 "objective_cost": (
                     _number(shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0)
                     * sum(_number(item.get("required_quantity"), "required_quantity", minimum=0) for item in period_demands)
@@ -748,9 +767,19 @@ def optimize_period_aligned_resource_network(
         "period_count": len(periods),
         "periods": period_results,
         "allocations": all_allocations,
-        "objective_cost": total_cost if status != "INFEASIBLE" else None,
+        "objective_cost": total_cost if status in {"OPTIMAL_BY_PERIOD", "FEASIBLE_WITH_SHORTAGE"} else None,
         "unmet_demand_total": total_unmet,
         "unused_supply_periods": unexpected_supply_periods,
+        "rejected_routes_outside_demand_periods": [
+            {
+                "period_id": route["period_id"],
+                "supply_id": _optional_text(route.get("supply_id")),
+                "demand_id": _optional_text(route.get("demand_id")),
+                "status": "REJECTED_ROUTE_PERIOD_WITHOUT_DEMAND",
+            }
+            for route in route_rows if route["period_id"] in unexpected_route_periods
+        ],
+        "unexpected_route_periods": unexpected_route_periods,
         "period_alignment": "STRICT_NO_CROSS_PERIOD_ALLOCATION",
         "storage_or_carryover": "NOT_MODELED",
         "production_and_maintenance_schedules": "NOT_CONNECTED; caller must encode per-period availability and demand.",
