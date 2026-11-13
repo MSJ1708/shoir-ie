@@ -24,6 +24,7 @@ from shoir_resource_intelligence import (
     detect_resource_loss,
     assess_resource_compatibility,
     optimize_resource_network,
+    optimize_interval_robust_resource_network,
     optimize_period_aligned_resource_network,
     simulate_supplier_disruption,
     simulate_resource_network_scenario,
@@ -758,6 +759,68 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             if "period_optimization" in results:
                 _render_result(st, "Period-aligned optimization result", results["period_optimization"])
                 st.warning("Period alignment does not establish a physical connection, storage availability, production schedule or maintenance approval.")
+
+        with st.expander("Conservative uncertainty / interval-stress optimization"):
+            st.caption(
+                "Enter explicit maximum supply reductions and demand increases. "
+                "The solver re-optimizes under those bounds; it does not estimate probabilities or confidence levels."
+            )
+            robust_supplies_text = st.text_area(
+                "Uncertainty-bounded supplies JSON",
+                value="[]",
+                key="sri_robust_supplies",
+                height=110,
+                help='Each supply record requires available_quantity and supply_uncertainty_fraction (0–1), plus resource_id, resource_type, unit, quality and provenance.',
+            )
+            robust_demands_text = st.text_area(
+                "Uncertainty-bounded demands JSON",
+                value="[]",
+                key="sri_robust_demands",
+                height=110,
+                help='Each demand record requires required_quantity and demand_uncertainty_fraction (0–1), plus demand_id, resource_type, unit and quality_limits.',
+            )
+            robust_routes_text = st.text_area(
+                "Constrained routes JSON",
+                value="[]",
+                key="sri_robust_routes",
+                height=110,
+                help='Each route requires supply_id, demand_id, unit_cost, treatment_cost_per_unit, transport_cost_per_unit, currency and capacity.',
+            )
+            robust_allow_shortage = st.checkbox(
+                "Allow and report unmet demand under interval stress",
+                value=True,
+                key="sri_robust_allow_shortage",
+            )
+            robust_penalty_col1, robust_penalty_col2 = st.columns(2)
+            robust_penalty = robust_penalty_col1.text_input(
+                "Shortage penalty per unit (required if shortage is allowed)",
+                key="sri_robust_shortage_penalty",
+            )
+            robust_penalty_currency = robust_penalty_col2.text_input(
+                "Shortage penalty currency",
+                key="sri_robust_shortage_currency",
+            )
+            if st.button("Run conservative interval-stress optimization", key="sri_run_robust_optimizer"):
+                try:
+                    results["robust_optimization"] = optimize_interval_robust_resource_network(
+                        _json_array(robust_supplies_text, "Uncertainty-bounded supplies"),
+                        _json_array(robust_demands_text, "Uncertainty-bounded demands"),
+                        _json_array(robust_routes_text, "Constrained routes"),
+                        allow_shortage=robust_allow_shortage,
+                        shortage_penalty_per_unit=(
+                            _finite_float(robust_penalty, "Shortage penalty", minimum=0)
+                            if robust_allow_shortage else None
+                        ),
+                        shortage_penalty_currency=(
+                            robust_penalty_currency if robust_allow_shortage else None
+                        ),
+                    )
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Interval-stress optimization failed: {exc}")
+            if "robust_optimization" in results:
+                _render_result(st, "Conservative interval-stress result", results["robust_optimization"])
+                st.warning("This is a deterministic user-defined bound scenario, not a probability forecast or stochastic/robust non-anticipative solution.")
 
     with tabs[5]:
         st.markdown("#### Supply disruption and dependency propagation")
