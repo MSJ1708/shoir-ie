@@ -92,6 +92,7 @@ _PREFIX_EXCLUDE = (
     "upgrade_uploader_",
     # Never hydrate Streamlit button state; the global command Open button is transient.
     "global_command_open_",
+    "global_thread_rename_",
     "sx_save_",
     "sx_open_",
     "sx_job_",
@@ -134,6 +135,7 @@ _ACTION_KEYS = {
     "run_monte_carlo_btn",
     "payment_screenshot_upload",
     "shoir_create_study",
+    "global_thread_rename_save",
     "shoir_presentation_return",
     # Unified application-shell actions are ephemeral Streamlit button state.
     # Persisting any of these keys would hydrate a button before its widget is
