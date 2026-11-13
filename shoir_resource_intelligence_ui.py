@@ -1,8 +1,10 @@
 """Streamlit surface for Industrial Resource Intelligence.
 
 The UI is deliberately nested inside the existing Shoir-IE Workbench. It uses
-explicit manual/imported inputs, per-user workspace persistence and human gates.
-It does not claim multi-company shared tenancy or live industrial connectivity.
+explicit manual/imported inputs, existing personal or staging organization
+workspace persistence, server-side role checks and human approval gates. It
+does not claim cross-company exchange, live industrial connectivity or
+autonomous operational authority.
 """
 from __future__ import annotations
 
