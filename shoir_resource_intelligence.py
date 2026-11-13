@@ -2088,7 +2088,7 @@ def optimize_single_contaminant_water_reuse(
                 sink_map[sink_id]["required_flow"],
             ),
             "connection_evidence_reference": evidence,
-            "provenance": connection_provenance,
+            "connection_provenance": connection_provenance,
         })
 
     if not eligible_connections:
