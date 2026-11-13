@@ -960,3 +960,66 @@ def test_delivery_assessment_rejects_malformed_certificate_requirement():
             "delivered_quantity": 100,
             "quality": {"pH": 7.0, "TDS_mg_l": 300},
         })
+
+
+def test_resource_passport_revision_history_verifies_parent_and_content_hashes():
+    from shoir_resource_intelligence import (
+        append_resource_passport_revision,
+        verify_resource_passport_history,
+    )
+
+    passport = validate_resource_passport({
+        "facility_id": "FAC-A", "resource_id": "RES-1",
+        "name": "Recovered water", "resource_type": "Water",
+        "available_quantity": 10, "unit": "m3/day",
+        "provenance": "IMPORTED", "quality": {"pH": 7.2},
+    })
+    history = append_resource_passport_revision([], passport, actor="engineer-a")
+    second_passport = {**passport, "available_quantity": 12}
+    history = append_resource_passport_revision(history, second_passport, actor="engineer-b")
+    checked = verify_resource_passport_history(history)
+    assert checked["status"] == "VALID_HASH_CHAINS"
+    assert checked["resources"][0]["revision_count"] == 2
+    assert history[1]["previous_revision_sha256"] == history[0]["revision_sha256"]
+
+
+def test_resource_passport_revision_verifier_detects_snapshot_tampering():
+    from shoir_resource_intelligence import (
+        append_resource_passport_revision,
+        verify_resource_passport_history,
+    )
+
+    passport = validate_resource_passport({
+        "facility_id": "FAC-A", "resource_id": "RES-2",
+        "name": "Recovered water", "resource_type": "Water",
+        "available_quantity": 10, "unit": "m3/day",
+        "provenance": "MANUAL",
+    })
+    history = append_resource_passport_revision([], passport, actor="engineer-a")
+    tampered = [dict(history[0])]
+    tampered[0]["passport_snapshot"] = {
+        **tampered[0]["passport_snapshot"],
+        "available_quantity": 999,
+    }
+    result = verify_resource_passport_history(tampered)
+    assert result["status"] == "INTEGRITY_CHECK_FAILED"
+    assert "content hash does not match" in result["resources"][0]["issues"][0]
+
+
+def test_resource_passport_revision_append_refuses_to_extend_a_broken_chain():
+    from shoir_resource_intelligence import (
+        append_resource_passport_revision,
+        verify_resource_passport_history,
+    )
+
+    passport = validate_resource_passport({
+        "facility_id": "FAC-A", "resource_id": "RES-3",
+        "name": "Recovered water", "resource_type": "Water",
+        "available_quantity": 10, "unit": "m3/day",
+        "provenance": "MANUAL",
+    })
+    history = append_resource_passport_revision([], passport, actor="engineer-a")
+    history[0]["recorded_by"] = "tampered-actor"
+    assert verify_resource_passport_history(history)["status"] == "INTEGRITY_CHECK_FAILED"
+    with pytest.raises(ResourceValidationError, match="failed its integrity check"):
+        append_resource_passport_revision(history, passport, actor="engineer-b")
