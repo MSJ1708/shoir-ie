@@ -1170,6 +1170,7 @@ def test_period_optimizer_rejects_routes_without_same_period_supply():
         demands=[{**_demand("D-TUE", 80), "period_id": "2026-11-17"}],
         routes=[{**_route("S-MON", "D-TUE"), "period_id": "2026-11-17"}],
         allow_shortage=True,
+        shortage_penalty_per_unit=1_000_000,
     )
     assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
     rejected = result["periods"][0]["rejected_routes"]
@@ -1479,5 +1480,33 @@ def test_combined_network_scenario_requires_explicit_targets_and_supported_shock
         simulate_resource_network_scenario(
             *base, [{"type": "AI_APPROVAL_OVERRIDE"}],
             scenario_id="SCN-X", scenario_name="Invalid shock",
+            shortage_penalty_per_unit=1000,
+        )
+
+
+def test_shortage_optimizers_require_an_explicit_penalty_input():
+    with pytest.raises(ResourceValidationError, match="shortage_penalty_per_unit"):
+        optimize_resource_network(
+            [_supply(quantity=10)], [_demand(quantity=20)], [_route()],
+            allow_shortage=True,
+        )
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+    with pytest.raises(ResourceValidationError, match="shortage_penalty_per_unit"):
+        optimize_period_aligned_resource_network(
+            [{**_supply(quantity=10), "period_id": "2026-11-20"}],
+            [{**_demand(quantity=20), "period_id": "2026-11-20"}],
+            [{**_route(), "period_id": "2026-11-20"}],
+            allow_shortage=True,
+        )
+
+
+def test_combined_network_scenario_rejects_zero_demand_multiplier():
+    from shoir_resource_intelligence import simulate_resource_network_scenario
+
+    with pytest.raises(ResourceValidationError, match="greater than zero"):
+        simulate_resource_network_scenario(
+            [_supply()], [_demand()], [_route()],
+            [{"type": "DEMAND_MULTIPLIER", "demand_id": "D1", "multiplier": 0}],
+            scenario_id="SCN-ZERO", scenario_name="Zero demand",
             shortage_penalty_per_unit=1000,
         )
