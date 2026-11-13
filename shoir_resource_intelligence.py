@@ -871,6 +871,294 @@ def evaluate_safety_gate(
     }
 
 
+def assess_resource_substitution(
+    candidate_resource: Mapping[str, Any],
+    buyer_requirement: Mapping[str, Any],
+    *,
+    product_quality_status: str = "NOT_ASSESSED",
+    equipment_compatibility_status: str = "NOT_ASSESSED",
+    laboratory_evidence_reference: str = "",
+    engineering_review_reference: str = "",
+    safety_review_reference: str = "",
+    environmental_review_reference: str = "",
+) -> dict[str, Any]:
+    """Screen a substitute candidate without authorizing process substitution."""
+    compatibility = assess_resource_compatibility(candidate_resource, buyer_requirement)
+    allowed = {"NOT_ASSESSED", "TEST_REQUIRED", "PASS", "FAIL"}
+    product_status = _text(product_quality_status, "product_quality_status").upper()
+    equipment_status = _text(equipment_compatibility_status, "equipment_compatibility_status").upper()
+    if product_status not in allowed or equipment_status not in allowed:
+        raise ResourceValidationError("Substitution test status must be NOT_ASSESSED, TEST_REQUIRED, PASS or FAIL.")
+    references = {
+        "laboratory": _optional_text(laboratory_evidence_reference),
+        "engineering": _optional_text(engineering_review_reference),
+        "safety": _optional_text(safety_review_reference),
+        "environmental": _optional_text(environmental_review_reference),
+    }
+    blockers = []
+    if compatibility["status"] == "TECHNICALLY_INCOMPATIBLE":
+        blockers.append("Resource type, unit or entered quality is incompatible.")
+    elif compatibility["status"] == "INSUFFICIENT_DATA":
+        blockers.append("Essential compatibility measurements or operating limits are missing.")
+    elif compatibility["status"] != "TECHNICALLY_COMPATIBLE":
+        blockers.append("Base resource compatibility remains conditional or requires further review.")
+    for label, status in (
+        ("product quality", product_status),
+        ("equipment compatibility", equipment_status),
+    ):
+        if status == "FAIL":
+            blockers.append(f"{label.title()} check failed.")
+        elif status in {"NOT_ASSESSED", "TEST_REQUIRED"}:
+            blockers.append(f"{label.title()} check is not qualified.")
+    for key in ("laboratory", "engineering", "safety", "environmental"):
+        if not references[key]:
+            blockers.append(f"{key.title()} evidence reference is missing.")
+    if compatibility["status"] == "TECHNICALLY_INCOMPATIBLE" or "FAIL" in {product_status, equipment_status}:
+        status = "REJECTED"
+    elif compatibility["status"] == "INSUFFICIENT_DATA":
+        status = "INSUFFICIENT_DATA"
+    elif blockers:
+        status = "CANDIDATE_REQUIRES_QUALIFICATION"
+    else:
+        status = "QUALIFICATION_REFERENCES_RECORDED_PENDING_INDEPENDENT_REVIEW"
+    return {
+        "status": status,
+        "candidate_resource_id": _optional_text(candidate_resource.get("resource_id")),
+        "candidate_resource_name": _optional_text(candidate_resource.get("name")),
+        "compatibility": compatibility,
+        "product_quality_status": product_status,
+        "equipment_compatibility_status": equipment_status,
+        "evidence_references": references,
+        "blockers": blockers,
+        "independent_verification": "NOT_PERFORMED",
+        "operational_authorization": False,
+        "substitution_authorized": False,
+        "note": "A substitute candidate is not approved for production use. Product quality, equipment, laboratory, engineering, safety and environmental qualification remain the responsibility of authorized reviewers.",
+    }
+
+
+def rank_resource_improvement_projects(
+    projects: Sequence[Mapping[str, Any]],
+    *,
+    weights: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Rank projects using explicit 1–5 engineering scores and transparent weights."""
+    score_dimensions = (
+        "feasibility", "resource_impact", "reliability", "data_confidence",
+        "risk", "implementation_difficulty",
+    )
+    if not projects:
+        return {"status": "INSUFFICIENT_DATA", "ranked_projects": [], "reason": "No project records were supplied."}
+    if not isinstance(weights, Mapping):
+        raise ResourceValidationError("Project scoring weights must be an object.")
+    normalized_weights = {
+        key: _number(weights.get(key), f"weights.{key}", minimum=0)
+        for key in score_dimensions
+    }
+    weight_total = sum(normalized_weights.values())
+    if weight_total <= 0:
+        raise ResourceValidationError("At least one project scoring weight must be positive.")
+    normalized_weights = {key: value / weight_total for key, value in normalized_weights.items()}
+    ranked = []
+    seen_ids: set[str] = set()
+    for index, project in enumerate(projects):
+        if not isinstance(project, Mapping):
+            raise ResourceValidationError(f"Project {index + 1} must be an object.")
+        project_id = _text(project.get("project_id"), f"projects[{index}].project_id")
+        if project_id in seen_ids:
+            raise ResourceValidationError(f"Duplicate project_id: {project_id}.")
+        seen_ids.add(project_id)
+        name = _text(project.get("name"), f"projects[{index}].name")
+        scores = {
+            key: _number(project.get(f"{key}_score"), f"projects[{index}].{key}_score", minimum=1)
+            for key in score_dimensions
+        }
+        for key, value in scores.items():
+            if value > 5:
+                raise ResourceValidationError(f"projects[{index}].{key}_score must not exceed 5.")
+        capex = _number(project.get("capex"), f"projects[{index}].capex", minimum=0)
+        annual_gross_benefit = _number(
+            project.get("annual_gross_benefit"),
+            f"projects[{index}].annual_gross_benefit",
+            minimum=0,
+        )
+        annual_opex = _number(project.get("annual_opex"), f"projects[{index}].annual_opex", minimum=0)
+        annual_net_benefit = annual_gross_benefit - annual_opex
+        payback = capex / annual_net_benefit if annual_net_benefit > 0 else None
+        safety_status = _text(project.get("safety_status"), f"projects[{index}].safety_status").upper()
+        if safety_status == "REJECTED":
+            lifecycle = "BLOCKED_SAFETY"
+        elif safety_status == "APPROVAL_EVIDENCE_RECORDED":
+            lifecycle = "APPROVAL_REFERENCES_RECORDED_NOT_INDEPENDENTLY_VERIFIED"
+        else:
+            lifecycle = "APPROVAL_PENDING"
+        normalized_score = (
+            normalized_weights["feasibility"] * scores["feasibility"]
+            + normalized_weights["resource_impact"] * scores["resource_impact"]
+            + normalized_weights["reliability"] * scores["reliability"]
+            + normalized_weights["data_confidence"] * scores["data_confidence"]
+            + normalized_weights["risk"] * (6 - scores["risk"])
+            + normalized_weights["implementation_difficulty"] * (6 - scores["implementation_difficulty"])
+        ) * 20.0
+        ranked.append({
+            "project_id": project_id,
+            "name": name,
+            "scores": scores,
+            "priority_score_0_100": normalized_score,
+            "capex": capex,
+            "annual_gross_benefit": annual_gross_benefit,
+            "annual_opex": annual_opex,
+            "annual_net_benefit": annual_net_benefit,
+            "simple_payback_years": payback,
+            "currency": _optional_text(project.get("currency")),
+            "safety_status": safety_status,
+            "project_status": lifecycle,
+            "evidence_reference": _optional_text(project.get("evidence_reference")),
+            "priority_is_financial_roi": False,
+        })
+    ranked.sort(key=lambda item: (
+        item["project_status"] == "BLOCKED_SAFETY",
+        -item["priority_score_0_100"],
+        item["project_id"],
+    ))
+    for index, item in enumerate(ranked, start=1):
+        item["priority_rank"] = index
+    return {
+        "status": "RANKED_WITH_SAFETY_BLOCKS" if any(x["project_status"] == "BLOCKED_SAFETY" for x in ranked) else "RANKED",
+        "ranked_projects": ranked,
+        "weights": normalized_weights,
+        "scoring_method": "Weighted 1–5 engineering rubric normalized to 0–100; higher risk and implementation difficulty reduce score.",
+        "limitations": [
+            "Priority score is not ROI, NPV, IRR or a recommendation to approve investment.",
+            "Payback is a simple arithmetic ratio using entered annual gross benefit less entered annual operating cost; it excludes tax, discounting, ramp-up and uncertainty.",
+            "Safety-rejected projects are flagged and must not proceed regardless of ranking.",
+            "Entered score evidence and approval references have not been independently verified.",
+        ],
+    }
+
+
+def calculate_environmental_impact(
+    *,
+    reporting_period: str,
+    facility_boundary: str,
+    geography: str,
+    avoided_freshwater_m3: float,
+    avoided_wastewater_m3: float,
+    avoided_electricity_kwh: float,
+    avoided_fuel_kwh: float,
+    diverted_waste_kg: float,
+    added_treatment_electricity_kwh: float,
+    added_transport_tonne_km: float,
+    added_chemical_kg: float,
+    added_residual_waste_kg: float,
+    factors: Mapping[str, Any],
+    evidence_status: str = "ESTIMATED",
+) -> dict[str, Any]:
+    """Calculate bounded, factor-based indicative CO2e effects and physical outcomes.
+
+    Factor values and references must be supplied by the caller. This function
+    does not retrieve, endorse or independently validate environmental factors.
+    """
+    period = _text(reporting_period, "reporting_period")
+    boundary = _text(facility_boundary, "facility_boundary")
+    region = _text(geography, "geography")
+    if not isinstance(factors, Mapping):
+        raise ResourceValidationError("Environmental factors must be an object.")
+    factor_units = {
+        "freshwater": "kgCO2e/m3",
+        "wastewater": "kgCO2e/m3",
+        "electricity": "kgCO2e/kWh",
+        "fuel": "kgCO2e/kWh",
+        "waste_diversion": "kgCO2e/kg",
+        "transport": "kgCO2e/tonne-km",
+        "chemical": "kgCO2e/kg",
+        "residual_waste": "kgCO2e/kg",
+    }
+    normalized_factors = {}
+    for name, expected_unit in factor_units.items():
+        item = factors.get(name)
+        if not isinstance(item, Mapping):
+            raise ResourceValidationError(f"Environmental factor {name} is required.")
+        value = _number(item.get("value"), f"factors.{name}.value", minimum=0)
+        unit = _text(item.get("unit"), f"factors.{name}.unit")
+        if unit.casefold() != expected_unit.casefold():
+            raise ResourceValidationError(f"Factor {name} must use {expected_unit}.")
+        source = _text(item.get("source_reference"), f"factors.{name}.source_reference")
+        version = _text(item.get("version"), f"factors.{name}.version")
+        normalized_factors[name] = {
+            "value": value,
+            "unit": unit,
+            "source_reference": source,
+            "version": version,
+        }
+    quantities = {
+        "avoided_freshwater_m3": _number(avoided_freshwater_m3, "avoided_freshwater_m3", minimum=0),
+        "avoided_wastewater_m3": _number(avoided_wastewater_m3, "avoided_wastewater_m3", minimum=0),
+        "avoided_electricity_kwh": _number(avoided_electricity_kwh, "avoided_electricity_kwh", minimum=0),
+        "avoided_fuel_kwh": _number(avoided_fuel_kwh, "avoided_fuel_kwh", minimum=0),
+        "diverted_waste_kg": _number(diverted_waste_kg, "diverted_waste_kg", minimum=0),
+        "added_treatment_electricity_kwh": _number(added_treatment_electricity_kwh, "added_treatment_electricity_kwh", minimum=0),
+        "added_transport_tonne_km": _number(added_transport_tonne_km, "added_transport_tonne_km", minimum=0),
+        "added_chemical_kg": _number(added_chemical_kg, "added_chemical_kg", minimum=0),
+        "added_residual_waste_kg": _number(added_residual_waste_kg, "added_residual_waste_kg", minimum=0),
+    }
+    avoided_components = {
+        "freshwater": quantities["avoided_freshwater_m3"] * normalized_factors["freshwater"]["value"],
+        "wastewater": quantities["avoided_wastewater_m3"] * normalized_factors["wastewater"]["value"],
+        "electricity": quantities["avoided_electricity_kwh"] * normalized_factors["electricity"]["value"],
+        "fuel": quantities["avoided_fuel_kwh"] * normalized_factors["fuel"]["value"],
+        "waste_diversion": quantities["diverted_waste_kg"] * normalized_factors["waste_diversion"]["value"],
+    }
+    burden_components = {
+        "treatment_electricity": quantities["added_treatment_electricity_kwh"] * normalized_factors["electricity"]["value"],
+        "transport": quantities["added_transport_tonne_km"] * normalized_factors["transport"]["value"],
+        "additional_chemicals": quantities["added_chemical_kg"] * normalized_factors["chemical"]["value"],
+        "residual_waste": quantities["added_residual_waste_kg"] * normalized_factors["residual_waste"]["value"],
+    }
+    gross_avoided = sum(avoided_components.values())
+    additional_burden = sum(burden_components.values())
+    net_avoided = gross_avoided - additional_burden
+    status = _text(evidence_status, "evidence_status").upper()
+    if status not in {"FORECAST", "ESTIMATED", "MEASURED", "INDEPENDENTLY_VERIFIED"}:
+        raise ResourceValidationError("Unsupported environmental evidence status.")
+    if status == "INDEPENDENTLY_VERIFIED":
+        status = "MEASURED_PENDING_INDEPENDENT_EVIDENCE"
+    return {
+        "status": "NET_ENVIRONMENTAL_BENEFIT_ESTIMATED" if net_avoided > 0 else (
+            "NET_ENVIRONMENTAL_BURDEN_ESTIMATED" if net_avoided < 0 else "NO_NET_CO2E_CHANGE_ESTIMATED"
+        ),
+        "reporting_period": period,
+        "facility_boundary": boundary,
+        "geography": region,
+        "physical_resource_outcomes": {
+            "avoided_freshwater_m3": quantities["avoided_freshwater_m3"],
+            "avoided_wastewater_m3": quantities["avoided_wastewater_m3"],
+            "avoided_electricity_kwh": quantities["avoided_electricity_kwh"],
+            "avoided_fuel_kwh": quantities["avoided_fuel_kwh"],
+            "diverted_waste_kg": quantities["diverted_waste_kg"],
+            "added_treatment_electricity_kwh": quantities["added_treatment_electricity_kwh"],
+            "added_transport_tonne_km": quantities["added_transport_tonne_km"],
+            "added_chemical_kg": quantities["added_chemical_kg"],
+            "added_residual_waste_kg": quantities["added_residual_waste_kg"],
+        },
+        "avoided_emissions_kgco2e_by_component": avoided_components,
+        "additional_burden_kgco2e_by_component": burden_components,
+        "gross_avoided_emissions_kgco2e": gross_avoided,
+        "additional_burden_kgco2e": additional_burden,
+        "net_avoided_emissions_kgco2e": net_avoided,
+        "evidence_status": status,
+        "factor_registry": normalized_factors,
+        "independent_verification": "NOT_ESTABLISHED",
+        "limitations": [
+            "All emission factors and physical quantities are caller-supplied and have not been independently validated.",
+            "The caller must ensure that factor boundaries, geography, reporting period and allocation methods are compatible.",
+            "No lifecycle, indirect, rebound or omitted burdens are included unless explicitly represented in the inputs.",
+            "Do not add the same electricity or fuel benefit to multiple components; double counting is not automatically detected.",
+            "A positive net value is an estimate, not a verified environmental claim or certification.",
+        ],
+    }
+
+
 def calculate_exchange_value(
     *,
     avoided_disposal_cost: float,
@@ -1831,5 +2119,7 @@ __all__ = [
     "calculate_energy_balance", "screen_waste_heat_recovery",
     "optimize_single_contaminant_water_reuse",
     "validate_exchange_agreement", "assess_exchange_delivery",
+    "assess_resource_substitution", "rank_resource_improvement_projects",
+    "calculate_environmental_impact",
     "validate_import_rows",
 ]
