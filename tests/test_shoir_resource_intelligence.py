@@ -820,7 +820,7 @@ def test_synthetic_end_to_end_resource_intelligence_engine_flow():
     agreement = validate_exchange_agreement(agreement_payload)
     delivery = assess_exchange_delivery(agreement, {
         "delivery_date": "2026-11-12",
-        "delivered_quantity": 68,
+        "delivered_quantity": 98,
         "quality": {"pH": 7.1, "TDS_mg_l": 260},
         "certificate_reference": "SYN-CERT-1",
         "certificate_valid_until": "2026-12-31",
