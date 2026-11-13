@@ -471,7 +471,7 @@ def optimize_resource_network(
     routes: Sequence[Mapping[str, Any]],
     *,
     allow_shortage: bool = False,
-    shortage_penalty_per_unit: float = 1_000_000.0,
+    shortage_penalty_per_unit: float | None = None,
 ) -> dict[str, Any]:
     """Solve a constrained transportation LP with independent qualification checks.
 
@@ -480,6 +480,12 @@ def optimize_resource_network(
     """
     if not supplies or not demands:
         raise ResourceValidationError("At least one supply and one demand are required.")
+    if not isinstance(allow_shortage, bool):
+        raise ResourceValidationError("allow_shortage must be a boolean.")
+    if allow_shortage:
+        shortage_penalty_per_unit = _number(
+            shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0
+        )
     supply_by_id: dict[str, dict[str, Any]] = {}
     demand_by_id: dict[str, dict[str, Any]] = {}
     for item in supplies:
@@ -661,7 +667,7 @@ def optimize_period_aligned_resource_network(
     routes: Sequence[Mapping[str, Any]],
     *,
     allow_shortage: bool = False,
-    shortage_penalty_per_unit: float = 1_000_000.0,
+    shortage_penalty_per_unit: float | None = None,
 ) -> dict[str, Any]:
     """Optimize allocations inside explicit matching time buckets.
 
@@ -675,6 +681,10 @@ def optimize_period_aligned_resource_network(
         raise ResourceValidationError("At least one time-bucketed supply is required unless shortage reporting is enabled.")
     if not isinstance(allow_shortage, bool):
         raise ResourceValidationError("allow_shortage must be a boolean.")
+    if allow_shortage:
+        shortage_penalty_per_unit = _number(
+            shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0
+        )
     try:
         supply_rows = [dict(row) for row in supplies]
         demand_rows = [dict(row) for row in demands]
@@ -799,7 +809,7 @@ def simulate_resource_network_scenario(
     *,
     scenario_id: str,
     scenario_name: str,
-    shortage_penalty_per_unit: float = 1_000_000.0,
+    shortage_penalty_per_unit: float,
 ) -> dict[str, Any]:
     """Apply multiple explicit resource-network shocks and re-optimize.
 
@@ -981,6 +991,7 @@ def simulate_supplier_disruption(
     *,
     supplier_id: str,
     supply_reduction_fraction: float,
+    shortage_penalty_per_unit: float,
 ) -> dict[str, Any]:
     """Re-solve one-period allocation after an explicit supplier-capacity shock."""
     fraction = _number(supply_reduction_fraction, "supply_reduction_fraction", minimum=0)
@@ -998,7 +1009,10 @@ def simulate_supplier_disruption(
         changed.append(item)
     if not found:
         raise ResourceValidationError(f"Unknown supplier id: {target}.")
-    result = optimize_resource_network(changed, demands, routes, allow_shortage=True)
+    result = optimize_resource_network(
+        changed, demands, routes, allow_shortage=True,
+        shortage_penalty_per_unit=shortage_penalty_per_unit,
+    )
     return {
         "status": result["status"],
         "supplier_id": target,
