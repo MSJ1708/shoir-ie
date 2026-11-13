@@ -1158,7 +1158,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             value="[]",
             key="sri_bottleneck_capacities",
             height=100,
-            help='Example: [{"constraint":"Treatment capacity","capacity":80,"unit":"m3/day"},{"constraint":"Storage withdrawal","capacity":60,"unit":"m3/day"}]',
+            help='Example: [{"constraint":"Treatment capacity","capacity":80,"unit":"m3/day","provenance":"IMPORTED"},{"constraint":"Storage withdrawal","capacity":60,"unit":"m3/day","provenance":"MANUAL"}]. Every constraint requires provenance.',
         )
         if st.button("Detect limiting capacity", key="sri_detect_bottleneck"):
             try:
@@ -1198,6 +1198,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         True if connection_choice == "Confirmed by user"
                         else False if connection_choice == "Unavailable" else None
                     ),
+                    "provenance": "MANUAL",
                     "distance_km": route_distance,
                     "capacity": route_capacity,
                     "required_quantity": route_required,
