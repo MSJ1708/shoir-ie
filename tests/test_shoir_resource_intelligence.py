@@ -458,3 +458,32 @@ def test_complete_supplier_shutdown_returns_full_unmet_demand_not_false_infeasib
     assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
     assert result["allocation_result"]["allocations"] == []
     assert result["allocation_result"]["unmet_demand"][0]["quantity"] == pytest.approx(80)
+
+
+def test_small_balance_difference_inside_tolerance_is_not_a_suspected_loss():
+    result = detect_resource_loss(100, 99.5, unit="m3/day", tolerance_percent=1)
+    assert result["status"] == "WITHIN_TOLERANCE"
+    assert result["finding_type"] == "NO_MATERIAL_ANOMALY"
+    assert result["confirmation_status"] == "NOT_CONFIRMED"
+
+
+def test_missing_excel_text_cells_are_not_coerced_to_the_literal_nan_string():
+    from shoir_resource_intelligence import _text
+    import numpy as np
+
+    with pytest.raises(ResourceValidationError):
+        _text(float("nan"), "resource name")
+    with pytest.raises(ResourceValidationError):
+        _text(np.float64("nan"), "resource name")
+
+
+def test_resource_passport_rejects_invalid_certificate_date_and_approval_status():
+    base = {
+        "facility_id": "FAC-A", "name": "Recovered water",
+        "resource_type": "Water", "available_quantity": 10,
+        "unit": "m3/day", "provenance": "MANUAL",
+    }
+    with pytest.raises(ResourceValidationError, match="YYYY-MM-DD"):
+        validate_resource_passport({**base, "certificate_valid_until": "31-12-2026"})
+    with pytest.raises(ResourceValidationError, match="approval_status"):
+        validate_resource_passport({**base, "approval_status": "AUTO_APPROVED"})
