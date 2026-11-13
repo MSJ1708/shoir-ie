@@ -217,8 +217,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                     if isinstance(quality_value, str) and quality_value.strip():
                         row["quality"] = json.loads(quality_value)
                     elif quality_value is None or (
-                        not isinstance(quality_value, Mapping) and bool(pd.isna(quality_value))
-                    ):
+                        pd.api.types.is_scalar(quality_value) and bool(pd.isna(quality_value))
+                    ) or (isinstance(quality_value, str) and not quality_value.strip()):
                         row["quality"] = {}
                 imported = validate_import_rows(rows)
                 st.session_state[STATE_PREFIX + "import_validation"] = imported
