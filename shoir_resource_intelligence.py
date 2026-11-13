@@ -7,7 +7,7 @@ return explicit incomplete/infeasible states rather than inventing data.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import isfinite
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
@@ -36,7 +36,13 @@ class ResourceValidationError(ValueError):
 
 
 def _text(value: Any, field: str) -> str:
-    result = str(value or "").strip()
+    missing_type = value.__class__.__name__ if value is not None else ""
+    if value is None or missing_type in {"NAType", "NaTType"}:
+        result = ""
+    elif isinstance(value, (float, np.floating)) and not isfinite(float(value)):
+        result = ""
+    else:
+        result = str(value).strip()
     if not result:
         raise ResourceValidationError(f"{field} is required.")
     if len(result) > 240:
@@ -82,9 +88,22 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
     quantity = _number(payload.get("available_quantity"), "available_quantity", minimum=0)
     if quantity <= 0:
         raise ResourceValidationError("available_quantity must be greater than zero.")
-    quality = payload.get("quality") or {}
-    if not isinstance(quality, Mapping):
+    quality_value = payload.get("quality")
+    if quality_value is None:
+        quality = {}
+    elif not isinstance(quality_value, Mapping):
         raise ResourceValidationError("quality must be an object of numeric property measurements.")
+    else:
+        quality = quality_value
+    certificate_valid_until = str(payload.get("certificate_valid_until") or "").strip()
+    if certificate_valid_until:
+        try:
+            certificate_valid_until = date.fromisoformat(certificate_valid_until).isoformat()
+        except ValueError as exc:
+            raise ResourceValidationError("certificate_valid_until must be a valid YYYY-MM-DD date.") from exc
+    approval_status = str(payload.get("approval_status") or "DRAFT").strip().upper()
+    if approval_status not in {"DRAFT", "PENDING", "APPROVED", "REJECTED"}:
+        raise ResourceValidationError("approval_status must be DRAFT, PENDING, APPROVED or REJECTED.")
     normalized_quality = {
         _text(key, "quality property"): _number(value, f"quality.{key}")
         for key, value in quality.items()
@@ -120,11 +139,11 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
         "source_reference": str(payload.get("source_reference") or "").strip(),
         "laboratory_evidence_reference": str(payload.get("laboratory_evidence_reference") or "").strip(),
         "certificate_reference": str(payload.get("certificate_reference") or "").strip(),
-        "certificate_valid_until": str(payload.get("certificate_valid_until") or "").strip(),
+        "certificate_valid_until": certificate_valid_until,
         "measured_at": _utc_timestamp(payload.get("measured_at"), "measured_at"),
         "provenance": provenance,
         "created_at": str(payload.get("created_at") or datetime.now(timezone.utc).isoformat()),
-        "approval_status": str(payload.get("approval_status") or "DRAFT").upper(),
+        "approval_status": approval_status,
     }
 
 
@@ -283,8 +302,10 @@ def detect_resource_loss(
         raise ResourceValidationError("Evidence provenance must be imported, manual, synthetic, simulated, mock or stale. LIVE requires a verified connector.")
     result.update({
         "finding_type": (
-            "SUSPECTED_RESOURCE_LOSS" if result["unreconciled_quantity"] > 0
-            else "UNRECONCILED_BALANCE" if result["status"] == "ANOMALY_SUSPECTED"
+            "SUSPECTED_RESOURCE_LOSS"
+            if result["status"] == "ANOMALY_SUSPECTED" and result["unreconciled_quantity"] > 0
+            else "UNRECONCILED_BALANCE"
+            if result["status"] == "ANOMALY_SUSPECTED"
             else "NO_MATERIAL_ANOMALY"
         ),
         "evidence_provenance": provenance,
