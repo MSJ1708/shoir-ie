@@ -179,19 +179,27 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 st.success("Facility profile recorded as MANUAL input.")
         st.markdown("#### 2 · Import resource passport rows")
         st.caption(
-            "CSV must contain facility_id, name, resource_type, available_quantity, unit and provenance. "
-            "Optional quality must be a JSON object string. The source file is not modified."
+            "CSV or Excel must contain facility_id, name, resource_type, available_quantity, unit and provenance. "
+            "Optional quality must be a JSON object string. Excel imports read the first worksheet. The source file is not modified."
         )
         upload = st.file_uploader(
-            "Upload CSV resource records",
-            type=["csv"],
+            "Upload CSV or Excel resource records",
+            type=["csv", "xlsx", "xls"],
             key="sri_resource_csv_upload",
         )
         if upload is not None and st.button("Validate imported rows", key="sri_validate_import"):
             try:
-                frame = pd.read_csv(upload)
                 if not facility:
                     raise ValueError("Create a facility profile before importing resource passports.")
+                suffix = upload.name.casefold().rsplit(".", 1)[-1]
+                if suffix == "csv":
+                    frame = pd.read_csv(upload)
+                elif suffix == "xlsx":
+                    frame = pd.read_excel(upload, sheet_name=0, engine="openpyxl")
+                elif suffix == "xls":
+                    frame = pd.read_excel(upload, sheet_name=0, engine="xlrd")
+                else:
+                    raise ValueError("Unsupported import format. Use CSV, XLSX or XLS.")
                 rows = frame.to_dict("records")
                 for row in rows:
                     if str(row.get("facility_id") or "").strip().casefold() != str(facility.get("facility_id") or "").strip().casefold():
