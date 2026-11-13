@@ -1943,3 +1943,24 @@ def test_resource_passport_accepts_excel_date_cells_for_certificate_validity():
     })
     assert as_date["certificate_valid_until"] == "2026-12-31"
     assert as_datetime["certificate_valid_until"] == "2026-12-31"
+
+
+def test_resource_import_validation_rejects_duplicate_passport_ids_without_mutating_source_rows():
+    base = {
+        "resource_id": "DUP-1",
+        "facility_id": "FAC-A",
+        "name": "Recovered water",
+        "resource_type": "Water",
+        "available_quantity": 10,
+        "unit": "m3/day",
+        "provenance": "IMPORTED",
+    }
+    rows = [{**base}, {**base, "available_quantity": 20}]
+    original = [dict(row) for row in rows]
+    result = validate_import_rows(rows)
+    assert result["status"] == "PARTIALLY_VALID"
+    assert len(result["accepted"]) == 1
+    assert len(result["rejected"]) == 1
+    assert "Duplicate resource_id" in result["rejected"][0]["reason"]
+    assert rows == original
+    assert result["source_rows_modified"] is False
