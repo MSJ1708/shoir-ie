@@ -501,9 +501,11 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
         name = _nonempty_text(item.get("name"), "KPI name", 200)
         val = _number(item.get("value"), f"{name}.value")
         threshold = _number(item.get("threshold"), f"{name}.threshold")
-        op = str(item.get("operator", "gt")).lower()
+        raw_op = str(item.get("operator", "gt")).strip().lower()
+        operator_aliases = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}
+        op = operator_aliases.get(raw_op, raw_op)
         if op not in valid_ops:
-            raise ValueError(f"{name}.operator must be one of gt, gte, lt, lte.")
+            raise ValueError(f"{name}.operator must be one of gt, gte, lt, lte, >, >=, <, <=.")
         measured_at = _utc_timestamp(item.get("measured_at"), f"{name}.measured_at")
         max_age = _number(item.get("max_age_minutes", 60), f"{name}.max_age_minutes", minimum=0)
         age_minutes = max(0.0, (as_of - measured_at).total_seconds() / 60.0)
@@ -537,7 +539,14 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
             if rule_id:
                 fingerprint_input["rule_id"] = rule_id
             fp = _canonical_hash(fingerprint_input)
-            alert = {**row, "fingerprint": fp, "alert_id": "alert-" + fp[:16], "new_alert": fp not in seen}
+            is_new_alert = fp not in seen
+            alert = {
+                **row,
+                "fingerprint": fp,
+                "alert_id": "alert-" + fp[:16],
+                "new_alert": is_new_alert,
+                "Event": "NEW" if is_new_alert else "EXISTING",
+            }
             alerts.append(alert)
             seen.add(fp)
     return {
@@ -547,6 +556,7 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
         "kpi_count": len(results),
         "stale_kpi_count": stale_count,
         "breached_kpi_count": sum(r["status"] == "BREACHED" for r in results),
+        "open_alert_count": len(alerts),
         "new_alert_count": sum(bool(a["new_alert"]) for a in alerts),
         "kpis": pd.DataFrame(results),
         "alerts": pd.DataFrame(alerts),
