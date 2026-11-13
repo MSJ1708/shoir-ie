@@ -791,6 +791,189 @@ def optimize_period_aligned_resource_network(
     }
 
 
+def simulate_resource_network_scenario(
+    supplies: Sequence[Mapping[str, Any]],
+    demands: Sequence[Mapping[str, Any]],
+    routes: Sequence[Mapping[str, Any]],
+    shocks: Sequence[Mapping[str, Any]],
+    *,
+    scenario_id: str,
+    scenario_name: str,
+    shortage_penalty_per_unit: float = 1_000_000.0,
+) -> dict[str, Any]:
+    """Apply multiple explicit resource-network shocks and re-optimize.
+
+    Supported shocks:
+    SUPPLIER_SHUTDOWN, SUPPLY_REDUCTION, SUPPLY_QUALITY_OVERRIDE,
+    DEMAND_MULTIPLIER, ROUTE_UNAVAILABLE, ROUTE_CAPACITY_MULTIPLIER,
+    ROUTE_RESOURCE_COST_MULTIPLIER, ROUTE_TRANSPORT_COST_MULTIPLIER,
+    ROUTE_TREATMENT_COST_MULTIPLIER.
+
+    This is a deterministic one-period what-if solver, not a time-stepped
+    discrete-event simulator or validated probability model.
+    """
+    scenario_key = _text(scenario_id, "scenario_id")
+    scenario_label = _text(scenario_name, "scenario_name")
+    if not supplies or not demands:
+        raise ResourceValidationError("Scenario requires at least one supply and one demand record.")
+    if not isinstance(shocks, Sequence) or isinstance(shocks, (str, bytes, bytearray)):
+        raise ResourceValidationError("shocks must be a sequence of objects.")
+    changed_supplies = [dict(item) for item in supplies]
+    changed_demands = [dict(item) for item in demands]
+    changed_routes = [dict(item) for item in routes]
+    applied = []
+    supported = {
+        "SUPPLIER_SHUTDOWN",
+        "SUPPLY_REDUCTION",
+        "SUPPLY_QUALITY_OVERRIDE",
+        "DEMAND_MULTIPLIER",
+        "ROUTE_UNAVAILABLE",
+        "ROUTE_CAPACITY_MULTIPLIER",
+        "ROUTE_RESOURCE_COST_MULTIPLIER",
+        "ROUTE_TRANSPORT_COST_MULTIPLIER",
+        "ROUTE_TREATMENT_COST_MULTIPLIER",
+    }
+
+    def _find_supply(target: str) -> dict[str, Any]:
+        matches = [
+            item for item in changed_supplies
+            if str(item.get("resource_id") or item.get("id") or "") == target
+        ]
+        if len(matches) != 1:
+            raise ResourceValidationError(f"Supply target {target} must match exactly one supply record.")
+        return matches[0]
+
+    def _find_demand(target: str) -> dict[str, Any]:
+        matches = [
+            item for item in changed_demands
+            if str(item.get("demand_id") or item.get("id") or "") == target
+        ]
+        if len(matches) != 1:
+            raise ResourceValidationError(f"Demand target {target} must match exactly one demand record.")
+        return matches[0]
+
+    def _find_route(shock: Mapping[str, Any]) -> dict[str, Any]:
+        route_id = _optional_text(shock.get("route_id"))
+        if route_id:
+            matches = [item for item in changed_routes if str(item.get("route_id") or "") == route_id]
+        else:
+            supply_id = _text(shock.get("supply_id"), "shock.supply_id")
+            demand_id = _text(shock.get("demand_id"), "shock.demand_id")
+            matches = [
+                item for item in changed_routes
+                if str(item.get("supply_id") or "") == supply_id
+                and str(item.get("demand_id") or "") == demand_id
+            ]
+        if len(matches) != 1:
+            raise ResourceValidationError("Route shock must match exactly one declared route.")
+        return matches[0]
+
+    for index, raw in enumerate(shocks):
+        if not isinstance(raw, Mapping):
+            raise ResourceValidationError(f"Shock {index + 1} must be an object.")
+        kind = _text(raw.get("type"), f"shocks[{index}].type").upper()
+        if kind not in supported:
+            raise ResourceValidationError(f"Unsupported resource-network shock type: {kind}.")
+        if kind == "SUPPLIER_SHUTDOWN":
+            target = _text(raw.get("supply_id"), "shock.supply_id")
+            item = _find_supply(target)
+            item["available_quantity"] = 0.0
+            applied.append({"type": kind, "supply_id": target})
+        elif kind == "SUPPLY_REDUCTION":
+            target = _text(raw.get("supply_id"), "shock.supply_id")
+            fraction = _number(raw.get("fraction"), "shock.fraction", minimum=0)
+            if fraction > 1:
+                raise ResourceValidationError("Supply reduction fraction must not exceed 1.")
+            item = _find_supply(target)
+            original = _number(item.get("available_quantity"), "supply.available_quantity", minimum=0)
+            item["available_quantity"] = original * (1.0 - fraction)
+            applied.append({"type": kind, "supply_id": target, "fraction": fraction})
+        elif kind == "SUPPLY_QUALITY_OVERRIDE":
+            target = _text(raw.get("supply_id"), "shock.supply_id")
+            quality = raw.get("quality")
+            if not isinstance(quality, Mapping) or not quality:
+                raise ResourceValidationError("Supply quality override requires a non-empty quality object.")
+            item = _find_supply(target)
+            item["quality"] = dict(quality)
+            applied.append({"type": kind, "supply_id": target, "quality_override": dict(quality)})
+        elif kind == "DEMAND_MULTIPLIER":
+            target = _text(raw.get("demand_id"), "shock.demand_id")
+            multiplier = _number(raw.get("multiplier"), "shock.multiplier", minimum=0)
+            item = _find_demand(target)
+            original = _number(item.get("required_quantity"), "demand.required_quantity", minimum=0)
+            if original <= 0:
+                raise ResourceValidationError("Demand required_quantity must be greater than zero.")
+            item["required_quantity"] = original * multiplier
+            applied.append({"type": kind, "demand_id": target, "multiplier": multiplier})
+        else:
+            route = _find_route(raw)
+            if kind == "ROUTE_UNAVAILABLE":
+                changed_routes.remove(route)
+                applied.append({
+                    "type": kind,
+                    "supply_id": _optional_text(route.get("supply_id")),
+                    "demand_id": _optional_text(route.get("demand_id")),
+                })
+            else:
+                field, label = {
+                    "ROUTE_CAPACITY_MULTIPLIER": ("capacity", "capacity"),
+                    "ROUTE_RESOURCE_COST_MULTIPLIER": ("unit_cost", "unit_cost"),
+                    "ROUTE_TRANSPORT_COST_MULTIPLIER": ("transport_cost_per_unit", "transport_cost_per_unit"),
+                    "ROUTE_TREATMENT_COST_MULTIPLIER": ("treatment_cost_per_unit", "treatment_cost_per_unit"),
+                }[kind]
+                multiplier = _number(raw.get("multiplier"), "shock.multiplier", minimum=0)
+                original = _number(route.get(field), f"route.{label}", minimum=0)
+                route[field] = original * multiplier
+                applied.append({
+                    "type": kind,
+                    "supply_id": _optional_text(route.get("supply_id")),
+                    "demand_id": _optional_text(route.get("demand_id")),
+                    "multiplier": multiplier,
+                })
+
+    baseline_result = optimize_resource_network(
+        supplies, demands, routes,
+        allow_shortage=True,
+        shortage_penalty_per_unit=shortage_penalty_per_unit,
+    )
+    stressed_result = optimize_resource_network(
+        changed_supplies, changed_demands, changed_routes,
+        allow_shortage=True,
+        shortage_penalty_per_unit=shortage_penalty_per_unit,
+    )
+    baseline_unmet = sum(float(item["quantity"]) for item in baseline_result.get("unmet_demand", []))
+    stressed_unmet = sum(float(item["quantity"]) for item in stressed_result.get("unmet_demand", []))
+    baseline_cost = baseline_result.get("objective_cost")
+    stressed_cost = stressed_result.get("objective_cost")
+    return {
+        "scenario_id": scenario_key,
+        "scenario_name": scenario_label,
+        "status": stressed_result["status"],
+        "shocks_applied": applied,
+        "baseline": baseline_result,
+        "stressed": stressed_result,
+        "baseline_unmet_quantity": baseline_unmet,
+        "stressed_unmet_quantity": stressed_unmet,
+        "change_in_unmet_quantity": stressed_unmet - baseline_unmet,
+        "baseline_objective_cost": baseline_cost,
+        "stressed_objective_cost": stressed_cost,
+        "change_in_objective_cost": (
+            float(stressed_cost) - float(baseline_cost)
+            if stressed_cost is not None and baseline_cost is not None else None
+        ),
+        "recovery_time": None,
+        "recovery_time_note": "Not estimated: no validated restoration-time distribution or recovery plan was supplied.",
+        "probability": None,
+        "probability_note": "No probability is estimated. The shocks are deterministic user-defined scenarios.",
+        "limitations": [
+            "One-period deterministic resource allocation only.",
+            "No maintenance calendar, storage depletion, production rescheduling or time-stepped outage duration is modeled.",
+            "No supplier, price or disruption probability is inferred.",
+            "A shortage penalty is a scenario input, not a measured financial loss.",
+        ],
+    }
+
+
 def simulate_supplier_disruption(
     supplies: Sequence[Mapping[str, Any]],
     demands: Sequence[Mapping[str, Any]],
@@ -2125,7 +2308,7 @@ __all__ = [
     "append_resource_passport_revision", "verify_resource_passport_history",
     "assess_resource_compatibility", "calculate_resource_balance",
     "detect_resource_loss", "optimize_resource_network", "optimize_period_aligned_resource_network",
-    "simulate_supplier_disruption", "evaluate_safety_gate",
+    "simulate_supplier_disruption", "simulate_resource_network_scenario", "evaluate_safety_gate",
     "calculate_exchange_value", "propagate_network_impact",
     "forecast_resource_quality", "calculate_supply_reliability",
     "rank_resource_cascade", "detect_resource_bottleneck",
