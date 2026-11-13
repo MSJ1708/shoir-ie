@@ -265,6 +265,18 @@ if category != "All":
 if search.strip():
     q=search.strip().lower()
     filtered=filtered[filtered["Module"].str.lower().str.contains(q, regex=False)]
+    _resource_aliases = (
+        "industrial resource intelligence", "industrial resource intelligence & resilience",
+        "industrial resource exchange", "industrial exchange intelligence twin", "ieit",
+        "industrial symbiosis", "resource efficiency", "resource recovery", "waste heat recovery",
+        "water reuse", "industrial resource optimization", "industrial resource resilience",
+        "resource matching", "industrial network optimization", "industrial cluster intelligence",
+    )
+    _resource_alias_match = any(q in alias for alias in _resource_aliases)
+    if _resource_alias_match and category in {"All", "Resource Intelligence"}:
+        _resource_row = available.loc[available["Module"] == "Industrial Resource Intelligence"]
+        if not _resource_row.empty and "Industrial Resource Intelligence" not in set(filtered["Module"]):
+            filtered = pd.concat([filtered, _resource_row], ignore_index=True).drop_duplicates(subset=["Module"])
 
 labels = filtered["Module"].tolist()
 if not labels:
