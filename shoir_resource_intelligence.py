@@ -1059,7 +1059,10 @@ def optimize_single_contaminant_water_reuse(
 
     sink_quality: list[dict[str, Any]] = []
     quality_violations = []
+    flow_violations = []
     for sink_id, flow in sink_flow.items():
+        if flow > sink_map[sink_id]["required_flow"] + 1e-7:
+            flow_violations.append(f"Sink demand exceeded: {sink_id}.")
         if flow <= 1e-8:
             continue
         blended = sink_contaminant_load[sink_id] / flow
@@ -1073,8 +1076,14 @@ def optimize_single_contaminant_water_reuse(
             "maximum_concentration": maximum,
             "concentration_unit": concentration_label,
         })
+    for source_id, flow in source_flow.items():
+        if flow > source_map[source_id]["available_flow"] + 1e-7:
+            flow_violations.append(f"Source supply exceeded: {source_id}.")
+    for index, edge in enumerate(eligible_connections):
+        if float(solved.x[index]) > edge["capacity"] + 1e-7:
+            flow_violations.append(f"Connection capacity exceeded: {edge['source_id']} -> {edge['sink_id']}.")
     total_flow = float(sum(sink_flow.values()))
-    if quality_violations:
+    if quality_violations or flow_violations:
         status = "VALIDATION_FAILED"
     elif total_flow <= 1e-8:
         status = "NO_QUALIFIED_REUSE"
@@ -1092,6 +1101,7 @@ def optimize_single_contaminant_water_reuse(
         "rejected_connections": rejected_connections,
         "solver": "scipy.optimize.linprog(method=highs)",
         "quality_violations": quality_violations,
+        "flow_violations": flow_violations,
         "physical_connection_confirmation_is_user_asserted": True,
         "operational_authorization": False,
         "limitations": [
