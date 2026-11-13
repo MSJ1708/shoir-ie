@@ -350,3 +350,88 @@ def test_explore_catalog_and_shared_tier_policy_are_registered():
     assert item["tier"] == "Enterprise"
     assert item["category"] == "Resource Intelligence"
     assert module_required_tier("Industrial Resource Intelligence") == "Enterprise"
+
+
+def test_resource_bottleneck_identifies_the_smallest_capacity_constraint():
+    from shoir_resource_intelligence import detect_resource_bottleneck
+
+    result = detect_resource_bottleneck(
+        75,
+        unit="m3/day",
+        capacity_constraints=[
+            {"constraint": "Treatment", "capacity": 90, "unit": "m3/day"},
+            {"constraint": "Storage withdrawal", "capacity": 60, "unit": "m3/day"},
+        ],
+    )
+    assert result["status"] == "BOTTLENECK"
+    assert result["limiting_constraint"]["constraint"] == "Storage withdrawal"
+    assert result["shortfall_quantity"] == pytest.approx(15)
+
+
+def test_bottleneck_refuses_mixed_capacity_units():
+    from shoir_resource_intelligence import detect_resource_bottleneck
+
+    with pytest.raises(ResourceValidationError):
+        detect_resource_bottleneck(
+            10,
+            unit="m3/day",
+            capacity_constraints=[{"constraint": "Pump", "capacity": 20, "unit": "L/s"}],
+        )
+
+
+def test_infrastructure_route_requires_connection_evidence_capacity_and_approvals():
+    from shoir_resource_intelligence import assess_infrastructure_route
+
+    unknown = assess_infrastructure_route({"connection_confirmed": None})
+    assert unknown["status"] == "INSUFFICIENT_DATA"
+    short = assess_infrastructure_route({
+        "connection_confirmed": True, "distance_km": 5, "capacity": 20,
+        "required_quantity": 30, "unit": "m3/day",
+    })
+    assert short["status"] == "INFEASIBLE_CAPACITY"
+    pending = assess_infrastructure_route({
+        "connection_confirmed": True, "distance_km": 5, "capacity": 40,
+        "required_quantity": 30, "unit": "m3/day",
+    })
+    assert pending["status"] == "APPROVAL_PENDING"
+    feasible = assess_infrastructure_route({
+        "connection_confirmed": True, "distance_km": 5, "capacity": 40,
+        "required_quantity": 30, "unit": "m3/day",
+        "route_access_evidence": "SURVEY-1",
+        "permit_reference": "PERMIT-1",
+        "engineering_review_reference": "ENG-1",
+    })
+    assert feasible["status"] == "PRELIMINARY_FEASIBILITY_ONLY"
+    assert feasible["operational_authorization"] is False
+    assert feasible["independent_verification"] == "NOT_PERFORMED"
+
+
+def test_resource_intensity_comparison_normalizes_usage_by_production():
+    from shoir_resource_intelligence import calculate_resource_intensity_change
+
+    result = calculate_resource_intensity_change(
+        1000, 100, 900, 100,
+        usage_unit="m3", production_unit="tonne",
+    )
+    assert result["baseline_intensity"] == pytest.approx(10)
+    assert result["reporting_intensity"] == pytest.approx(9)
+    assert result["change_percent"] == pytest.approx(-10)
+    assert result["evidence_status"] == "COMPARISON_ONLY_NOT_INDEPENDENTLY_VERIFIED"
+
+
+def test_resource_passport_preserves_owner_and_bilingual_descriptions():
+    passport = validate_resource_passport({
+        "facility_id": "FAC-A", "name": "Recovered water",
+        "resource_type": "Water", "available_quantity": 15,
+        "unit": "m3/day", "provenance": "MANUAL",
+        "owner": "Utilities Department",
+        "description_en": "Treated process-water stream",
+        "description_ar": "مياه معالجة",
+        "source_process": "Cooling loop",
+        "source_equipment": "HX-100",
+        "laboratory_evidence_reference": "LAB-12",
+    })
+    assert passport["owner"] == "Utilities Department"
+    assert passport["description_ar"] == "مياه معالجة"
+    assert passport["source_equipment"] == "HX-100"
+    assert passport["laboratory_evidence_reference"] == "LAB-12"
