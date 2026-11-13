@@ -118,8 +118,11 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
         except ValueError as exc:
             raise ResourceValidationError("certificate_valid_until must be a valid YYYY-MM-DD date.") from exc
     approval_status = (_optional_text(payload.get("approval_status")) or "DRAFT").upper()
-    if approval_status not in {"DRAFT", "PENDING", "APPROVED", "REJECTED"}:
-        raise ResourceValidationError("approval_status must be DRAFT, PENDING, APPROVED or REJECTED.")
+    if approval_status not in {"DRAFT", "PENDING"}:
+        raise ResourceValidationError(
+            "Resource passports may only be created as DRAFT or PENDING. "
+            "APPROVED/REJECTED requires an authenticated review workflow that is not implemented here."
+        )
     normalized_quality = {
         _text(key, "quality property"): _number(value, f"quality.{key}")
         for key, value in quality.items()
