@@ -56,6 +56,8 @@ def _route(supply_id="S1", demand_id="D1", cost=2.0):
         "treatment_cost_per_unit": 0.0,
         "currency": "SAR",
         "capacity": 100.0,
+        "connection_confirmed": True,
+        "connection_evidence_reference": "SYNTHETIC-ROUTE-EVIDENCE",
     }
 
 
@@ -1000,12 +1002,14 @@ def test_network_optimizer_rejects_missing_route_capacity_and_costs_instead_of_a
             "supply_id": "S1", "demand_id": "D1",
             "unit_cost": 1.0, "transport_cost_per_unit": 0.0,
             "treatment_cost_per_unit": 0.0, "currency": "SAR",
+            "connection_confirmed": True, "connection_evidence_reference": "ROUTE-TEST",
             # Deliberately no physical route capacity.
         }])
     with pytest.raises(ResourceValidationError):
         optimize_resource_network([_supply()], [_demand()], [{
             "supply_id": "S1", "demand_id": "D1",
             "unit_cost": 1.0, "capacity": 100.0, "currency": "SAR",
+            "connection_confirmed": True, "connection_evidence_reference": "ROUTE-TEST",
             # Deliberately no transport or treatment cost inputs.
         }])
 
@@ -1883,3 +1887,39 @@ def test_safety_gate_keeps_missing_required_laboratory_result_pending():
     )
     assert result["status"] == "APPROVAL_PENDING"
     assert result["operational_authorization"] is False
+
+
+def test_resource_network_optimizer_rejects_unconfirmed_physical_routes():
+    result = optimize_resource_network(
+        [_supply()], [_demand()],
+        [{
+            **_route(),
+            "connection_confirmed": False,
+            "connection_evidence_reference": "",
+        }],
+    )
+    assert result["status"] == "INFEASIBLE"
+    assert result["allocations"] == []
+    assert result["rejected_routes"][0]["status"] == "BLOCKED_NO_CONFIRMED_PHYSICAL_ROUTE"
+
+
+def test_resource_network_optimizer_requires_route_confirmation_to_be_a_boolean():
+    with pytest.raises(ResourceValidationError, match="route.connection_confirmed must be an explicit boolean"):
+        optimize_resource_network(
+            [_supply()], [_demand()],
+            [{
+                **_route(),
+                "connection_confirmed": "yes",
+            }],
+        )
+
+
+def test_resource_network_optimizer_requires_route_evidence_reference_when_connection_is_confirmed():
+    with pytest.raises(ResourceValidationError, match="route.connection_evidence_reference"):
+        optimize_resource_network(
+            [_supply()], [_demand()],
+            [{
+                **_route(),
+                "connection_evidence_reference": "",
+            }],
+        )
