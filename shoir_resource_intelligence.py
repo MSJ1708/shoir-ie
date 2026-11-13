@@ -2605,6 +2605,63 @@ def build_engineering_assurance_record(
     return record
 
 
+def verify_engineering_assurance_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Recompute assurance input/output digests and check the registered model version."""
+    if not isinstance(record, Mapping):
+        raise ResourceValidationError("Engineering assurance record must be an object.")
+    model_id = _text(record.get("model_id"), "model_id")
+    definition = ENGINEERING_MODEL_REGISTRY.get(model_id)
+    if definition is None:
+        return {
+            "status": "UNKNOWN_MODEL",
+            "model_id": model_id,
+            "issues": ["The model id is not in the current versioned registry."],
+            "independent_verification": "NOT_PERFORMED",
+        }
+    issues = []
+    if record.get("model_version") != definition["version"]:
+        issues.append("Model version differs from the current registry definition.")
+    inputs = record.get("inputs")
+    outputs = record.get("outputs")
+    if not isinstance(inputs, Mapping):
+        issues.append("Input snapshot is missing or malformed.")
+    if "outputs" not in record:
+        issues.append("Output snapshot is missing.")
+    computed_input_hash = None
+    computed_output_hash = None
+    try:
+        canonical_inputs = json.dumps(
+            inputs, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
+        computed_input_hash = hashlib.sha256(canonical_inputs.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError, OverflowError):
+        issues.append("Input snapshot cannot be deterministically serialized.")
+    try:
+        canonical_outputs = json.dumps(
+            outputs, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
+        computed_output_hash = hashlib.sha256(canonical_outputs.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError, OverflowError):
+        issues.append("Output snapshot cannot be deterministically serialized.")
+    if computed_input_hash and computed_input_hash != record.get("input_sha256"):
+        issues.append("Input snapshot hash does not match.")
+    if computed_output_hash and computed_output_hash != record.get("output_sha256"):
+        issues.append("Output snapshot hash does not match.")
+    if record.get("independent_verification") != "NOT_PERFORMED":
+        issues.append("Assurance record verification status was modified.")
+    return {
+        "status": "HASHES_VALID" if not issues else "INTEGRITY_CHECK_FAILED",
+        "model_id": model_id,
+        "model_version": definition["version"],
+        "computed_input_sha256": computed_input_hash,
+        "computed_output_sha256": computed_output_hash,
+        "issues": issues,
+        "source_to_run_link": record.get("source_to_run_link"),
+        "independent_verification": "NOT_PERFORMED",
+        "trust_boundary": "Digest validation proves only that the current snapshots match their stored hashes. It does not prove source authenticity, original-run linkage, author identity or an independent timestamp.",
+    }
+
+
 def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Validate imported passport records while preserving input rows unchanged."""
     accepted, rejected = [], []
@@ -2638,6 +2695,6 @@ __all__ = [
     "validate_exchange_agreement", "assess_exchange_delivery",
     "assess_resource_substitution", "rank_resource_improvement_projects",
     "calculate_environmental_impact", "ENGINEERING_MODEL_REGISTRY",
-    "build_engineering_assurance_record",
+    "build_engineering_assurance_record", "verify_engineering_assurance_record",
     "validate_import_rows",
 ]
