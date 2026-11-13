@@ -92,7 +92,7 @@ The current screen requires exact resource-type and unit agreement. It does not 
 
 ### Network allocation
 
-The LP is deterministic. The basic allocator solves one period; the period-aligned wrapper independently solves each explicit period and never transfers supply across period boundaries. Every period requires separate supply/demand/route records, and every route requires explicit capacity and resource/transport/treatment costs (including deliberate zero values). No missing route capacity or cost is silently defaulted. Supply limits, demand equality and route capacities are enforced and solver results are independently reconciled. There is no storage/carryover, production schedule or maintenance calendar connection. Infeasible inputs return INFEASIBLE. It is not a multi-period MILP and does not model actual pipelines, production schedules, tank constraints, pressure, permits or contract commitments.
+The LP is deterministic. The basic allocator solves one period; the period-aligned wrapper independently solves each explicit period and never transfers supply across period boundaries. Every period requires separate supply/demand/route records, and every route requires explicit capacity and resource/transport/treatment costs (including deliberate zero values). No missing route capacity or cost is silently defaulted. Supply limits, demand equality and route capacities are enforced and solver results are independently reconciled. A period with no supply reports the full unmet demand when shortage mode is enabled; routes that reference no same-period supply or have no corresponding demand period are listed as rejected. There is no storage/carryover, production schedule or maintenance calendar connection. Infeasible inputs return INFEASIBLE. It is not a multi-period MILP and does not model actual pipelines, production schedules, tank constraints, pressure, permits or contract commitments.
 
 ### Forecasting and reliability
 
@@ -157,7 +157,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Historical delivery pass rate without a future probability.
 - Prevention-first cascade ordering.
 - Unit-consistent capacity bottleneck, preliminary route evidence and production-normalized intensity checks.
-- Strict period-aligned network allocation, shortage reporting and no-cross-period carryover tests.
+- Strict period-aligned network allocation, shortage reporting, unavailable-supply, no-same-period-route, out-of-demand-period-route and no-cross-period carryover tests.
 - Same-boundary energy reconciliation and waste-heat temperature-approach screening.
 - One-contaminant water reuse LP with blended-quality, unit and connection checks.
 - Exchange agreement draft approval-reference, delivery quantity, quality and certificate checks.
