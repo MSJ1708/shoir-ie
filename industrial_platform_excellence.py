@@ -113,6 +113,7 @@ MODULE_MATRIX = [
     ("Economics","Capital Investment & Engineering Economics","Professional"),
     ("Workforce","Workforce Engineering","Professional"),
     ("Sustainability","Industrial Sustainability & LCA","Professional"),
+    ("Resource Intelligence","Industrial Resource Intelligence","Enterprise"),
     ("Benchmarking","Benchmarking & Engineering Standards","Professional"),
     ("Governance","Engineering Model Registry","Enterprise"),
     ("Governance","Scenario Versioning & Comparison","Professional"),
