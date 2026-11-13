@@ -528,3 +528,105 @@ def test_boolean_is_not_accepted_as_a_numeric_measurement():
             "facility_id": "FAC-A", "name": "Water", "resource_type": "Water",
             "available_quantity": True, "unit": "m3/day", "provenance": "MANUAL",
         })
+
+
+def _exchange_agreement_payload():
+    return {
+        "supplier": "Supplier Facility A",
+        "buyer": "Buyer Facility B",
+        "resource_id": "S1",
+        "resource_name": "Recovered process water",
+        "agreed_quantity": 100,
+        "unit": "m3/day",
+        "quantity_tolerance_percent": 5,
+        "quality_limits": {
+            "pH": {"min": 6.5, "max": 8.5},
+            "TDS_mg_l": {"max": 500},
+        },
+        "delivery_schedule": "Daily, 06:00–08:00",
+        "certificate_required": True,
+        "treatment_responsibility": "Supplier",
+        "testing_requirements": "Certificate per delivery",
+        "shortage_response": "Buyer to be notified",
+        "rejection_procedure": "Quarantine pending review",
+        "approval_references": {},
+    }
+
+
+def test_exchange_agreement_is_a_draft_until_human_references_are_recorded():
+    from shoir_resource_intelligence import validate_exchange_agreement
+
+    agreement = validate_exchange_agreement(_exchange_agreement_payload())
+    assert agreement["status"] == "APPROVAL_PENDING"
+    assert agreement["contract_status"] == "DRAFT_NOT_A_SIGNED_CONTRACT"
+    assert agreement["operational_authorization"] is False
+    assert len(agreement["missing_approval_references"]) == 4
+
+
+def test_exchange_agreement_with_approval_references_still_is_not_signed():
+    from shoir_resource_intelligence import validate_exchange_agreement
+
+    payload = _exchange_agreement_payload()
+    payload["approval_references"] = {
+        "engineering": "ENG-1",
+        "safety": "HSE-1",
+        "environmental": "ENV-1",
+        "commercial": "COM-1",
+    }
+    agreement = validate_exchange_agreement(payload)
+    assert agreement["status"] == "APPROVAL_REFERENCES_RECORDED_NOT_SIGNED"
+    assert agreement["contract_status"] == "DRAFT_NOT_A_SIGNED_CONTRACT"
+    assert agreement["operational_authorization"] is False
+
+
+def test_delivery_assurance_compares_quantity_quality_and_certificate_terms():
+    from shoir_resource_intelligence import validate_exchange_agreement, assess_exchange_delivery
+
+    agreement = validate_exchange_agreement(_exchange_agreement_payload())
+    result = assess_exchange_delivery(agreement, {
+        "delivery_date": "2026-11-12",
+        "delivered_quantity": 98,
+        "quality": {"pH": 7.1, "TDS_mg_l": 300},
+        "certificate_reference": "CERT-100",
+        "certificate_valid_until": "2026-12-31",
+        "delivery_evidence_reference": "TICKET-100",
+    })
+    assert result["status"] == "WITHIN_ENTERED_TOLERANCES_PENDING_HUMAN_ACCEPTANCE"
+    assert result["deviations"] == []
+    assert result["human_acceptance_required"] is True
+    assert result["contractual_effect"] == "NOT_CALCULATED"
+    assert result["operational_authorization"] is False
+
+
+def test_delivery_assurance_blocks_out_of_spec_quality_and_expired_certificate():
+    from shoir_resource_intelligence import validate_exchange_agreement, assess_exchange_delivery
+
+    agreement = validate_exchange_agreement(_exchange_agreement_payload())
+    result = assess_exchange_delivery(agreement, {
+        "delivery_date": "2026-11-12",
+        "delivered_quantity": 98,
+        "quality": {"pH": 4.0, "TDS_mg_l": 900},
+        "certificate_reference": "CERT-OLD",
+        "certificate_valid_until": "2026-11-01",
+        "delivery_evidence_reference": "TICKET-101",
+    })
+    assert result["status"] == "REJECTED_PENDING_REVIEW"
+    assert "QUALITY_OUT_OF_SPECIFICATION" in result["deviations"]
+    assert "CERTIFICATE_EXPIRED" in result["deviations"]
+
+
+def test_delivery_assurance_reports_shortage_and_missing_evidence_without_contract_penalty():
+    from shoir_resource_intelligence import validate_exchange_agreement, assess_exchange_delivery
+
+    agreement = validate_exchange_agreement(_exchange_agreement_payload())
+    result = assess_exchange_delivery(agreement, {
+        "delivery_date": "2026-11-12",
+        "delivered_quantity": 60,
+        "quality": {"pH": 7.0, "TDS_mg_l": 300},
+        "certificate_reference": "CERT-OK",
+        "certificate_valid_until": "2026-12-31",
+    })
+    assert result["status"] == "EVIDENCE_INCOMPLETE"
+    assert "SHORTAGE" in result["deviations"]
+    assert "DELIVERY_EVIDENCE_MISSING" in result["deviations"]
+    assert result["contractual_effect"] == "NOT_CALCULATED"
