@@ -738,3 +738,138 @@ def test_water_reuse_requires_matching_flow_and_concentration_units():
             [],
             contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
         )
+
+
+def test_synthetic_end_to_end_resource_intelligence_engine_flow():
+    import json
+    from shoir_resource_intelligence import (
+        validate_import_rows,
+        detect_resource_loss,
+        optimize_resource_network,
+        evaluate_safety_gate,
+        validate_exchange_agreement,
+        assess_exchange_delivery,
+        calculate_exchange_value,
+        simulate_supplier_disruption,
+    )
+
+    # Synthetic factory source, demand and network evidence only.
+    passport = validate_resource_passport({
+        "facility_id": "SYN-FAC-001",
+        "name": "Synthetic recovered process water",
+        "resource_type": "Water",
+        "available_quantity": 100,
+        "unit": "m3/day",
+        "quality": {"pH": 7.2, "TDS_mg_l": 250},
+        "provenance": "SYNTHETIC",
+    })
+    imported = validate_import_rows([passport])
+    assert imported["status"] == "VALID"
+    assert imported["accepted"][0]["provenance"] == "SYNTHETIC"
+
+    loss = detect_resource_loss(
+        100, 95, unit="m3/day", tolerance_percent=1,
+        evidence_provenance="SYNTHETIC",
+    )
+    assert loss["finding_type"] == "SUSPECTED_RESOURCE_LOSS"
+    assert loss["confirmation_status"] == "NOT_CONFIRMED"
+
+    demand = _demand(quantity=70)
+    route = _route()
+    optimized = optimize_resource_network([{
+        **passport,
+        "resource_id": passport["resource_id"],
+    }], [demand], [{
+        **route,
+        "supply_id": passport["resource_id"],
+    }])
+    assert optimized["status"] == "OPTIMAL"
+    assert optimized["allocations"][0]["quantity"] == pytest.approx(70)
+
+    disruption = simulate_supplier_disruption(
+        [{**passport, "resource_id": passport["resource_id"]}],
+        [demand],
+        [{**route, "supply_id": passport["resource_id"]}],
+        supplier_id=passport["resource_id"],
+        supply_reduction_fraction=0.5,
+    )
+    assert disruption["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
+
+    safety = evaluate_safety_gate(
+        critical_failure=False,
+        laboratory_required=True,
+        laboratory_passed=True,
+        engineering_approval_reference="SYN-ENG-APPROVAL",
+        safety_approval_reference="SYN-HSE-APPROVAL",
+        environmental_approval_reference="SYN-ENV-APPROVAL",
+    )
+    assert safety["status"] == "APPROVAL_EVIDENCE_RECORDED"
+    assert safety["operational_authorization"] is False
+
+    agreement_payload = _exchange_agreement_payload()
+    agreement_payload["supplier"] = "Synthetic Supplier"
+    agreement_payload["buyer"] = "Synthetic Buyer"
+    agreement_payload["resource_id"] = passport["resource_id"]
+    agreement_payload["resource_name"] = passport["name"]
+    agreement_payload["approval_references"] = {
+        "engineering": "SYN-ENG-1",
+        "safety": "SYN-HSE-1",
+        "environmental": "SYN-ENV-1",
+        "commercial": "SYN-COM-1",
+    }
+    agreement = validate_exchange_agreement(agreement_payload)
+    delivery = assess_exchange_delivery(agreement, {
+        "delivery_date": "2026-11-12",
+        "delivered_quantity": 68,
+        "quality": {"pH": 7.1, "TDS_mg_l": 260},
+        "certificate_reference": "SYN-CERT-1",
+        "certificate_valid_until": "2026-12-31",
+        "delivery_evidence_reference": "SYN-TICKET-1",
+    })
+    assert delivery["status"] == "WITHIN_ENTERED_TOLERANCES_PENDING_HUMAN_ACCEPTANCE"
+
+    value = calculate_exchange_value(
+        avoided_disposal_cost=100,
+        supplier_sale_revenue=20,
+        supplier_preparation_cost=10,
+        supplier_testing_cost=5,
+        supplier_handling_delivery_cost=5,
+        avoided_alternative_purchase_cost=200,
+        buyer_treatment_cost=50,
+        buyer_transport_cost=10,
+        buyer_testing_cost=5,
+        buyer_additional_operating_cost=5,
+        currency="SAR",
+        evidence_status="ESTIMATED",
+    )
+    evidence_bundle = {
+        "provenance": "SYNTHETIC",
+        "passport": passport,
+        "loss_screen": loss,
+        "optimization": optimized,
+        "disruption": disruption,
+        "safety": safety,
+        "agreement": agreement,
+        "delivery": delivery,
+        "value": value,
+    }
+    serialized = json.dumps(evidence_bundle, ensure_ascii=False, default=str)
+    assert "SYNTHETIC" in serialized
+    assert "NOT_CONFIRMED" in serialized
+    assert "NOT_CALCULATED" in serialized
+    assert "operational_authorization" in serialized
+
+
+def test_resource_ui_refuses_to_save_resource_data_into_shared_org_workspace():
+    from types import SimpleNamespace
+    from shoir_resource_intelligence_ui import _persist_workspace
+
+    fake_streamlit = SimpleNamespace(session_state={
+        "shoir_active_organization_workspace": {
+            "organization_id": "ORG-B",
+            "organization_workspace_id": "WORKSPACE-B",
+        }
+    })
+    ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
+    assert ok is False
+    assert "No resource data was written" in message
