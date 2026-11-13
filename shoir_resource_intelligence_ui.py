@@ -625,6 +625,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 route_cost = r3.text_input("Resource unit cost (enter 0 only if confirmed)")
                 transport_cost = r4.text_input("Transport cost / unit (enter 0 only if confirmed)")
                 treatment_cost = r5.text_input("Treatment cost / unit (enter 0 only if confirmed)")
+                route_currency = st.text_input("Cost currency (3-letter code, e.g. SAR)", key="sri_route_currency")
                 route_capacity = st.text_input("Confirmed maximum physical route quantity (required)")
                 add_route = st.form_submit_button("Add exchange candidate")
             if add_route:
@@ -634,6 +635,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         "unit_cost": _finite_float(route_cost, "Resource unit cost", minimum=0),
                         "transport_cost_per_unit": _finite_float(transport_cost, "Transport cost per unit", minimum=0),
                         "treatment_cost_per_unit": _finite_float(treatment_cost, "Treatment cost per unit", minimum=0),
+                        "currency": route_currency,
                     }
                     route["capacity"] = _finite_float(route_capacity, "Confirmed maximum route quantity", minimum=0.000000001)
                     routes.append(route)
@@ -677,17 +679,23 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 value="[]",
                 key="sri_scheduled_routes",
                 height=100,
-                help='Each row: supply_id, demand_id, period_id, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, capacity.',
+                help='Each row: supply_id, demand_id, period_id, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, currency, capacity.',
             )
             allow_scheduled_shortage = st.checkbox(
                 "Allow unmet demand and report shortage",
                 value=True,
                 key="sri_allow_scheduled_shortage",
             )
-            scheduled_shortage_penalty = st.text_input(
+            scheduled_penalty_col1, scheduled_penalty_col2 = st.columns(2)
+            scheduled_shortage_penalty = scheduled_penalty_col1.text_input(
                 "Scenario shortage penalty per unit (required when shortage mode is enabled)",
                 value="",
                 key="sri_scheduled_shortage_penalty",
+            )
+            scheduled_shortage_currency = scheduled_penalty_col2.text_input(
+                "Shortage penalty currency (3-letter code)",
+                value="",
+                key="sri_scheduled_shortage_currency",
             )
             if st.button("Optimize by period", key="sri_run_period_optimizer"):
                 try:
@@ -699,6 +707,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         shortage_penalty_per_unit=_finite_float(
                             scheduled_shortage_penalty, "Scenario shortage penalty", minimum=0
                         ),
+                        shortage_penalty_currency=scheduled_shortage_currency,
                     )
                     st.session_state[STATE_PREFIX + "results"] = results
                 except Exception as exc:
@@ -712,9 +721,14 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         if passports:
             shock_supplier = st.selectbox("Supplier resource affected", [str(x["resource_id"]) for x in passports], key="sri_shock_supplier")
             fraction = st.slider("Supply reduction", min_value=0.0, max_value=1.0, value=0.25, step=0.05, key="sri_shock_fraction")
-            supplier_shortage_penalty = st.text_input(
+            supplier_penalty_col1, supplier_penalty_col2 = st.columns(2)
+            supplier_shortage_penalty = supplier_penalty_col1.text_input(
                 "Scenario shortage penalty per unit (explicit assumption)",
                 key="sri_supplier_shortage_penalty",
+            )
+            supplier_shortage_currency = supplier_penalty_col2.text_input(
+                "Shortage penalty currency (3-letter code)",
+                key="sri_supplier_shortage_currency",
             )
             if st.button("Simulate supply reduction", key="sri_run_shock"):
                 try:
@@ -724,6 +738,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         shortage_penalty_per_unit=_finite_float(
                             supplier_shortage_penalty, "Scenario shortage penalty", minimum=0
                         ),
+                        shortage_penalty_currency=supplier_shortage_currency,
                     )
                     results["disruption"] = result
                     st.session_state[STATE_PREFIX + "results"] = results
@@ -754,9 +769,14 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 "The engine re-optimizes a one-period network and reports shortages without inventing recovery time or probabilities."
             )
             scenario_name = st.text_input("Scenario name", key="sri_network_scenario_name")
-            network_shortage_penalty = st.text_input(
+            network_penalty_col1, network_penalty_col2 = st.columns(2)
+            network_shortage_penalty = network_penalty_col1.text_input(
                 "Scenario shortage penalty per unit (explicit assumption)",
                 key="sri_network_shortage_penalty",
+            )
+            network_shortage_currency = network_penalty_col2.text_input(
+                "Shortage penalty currency (3-letter code)",
+                key="sri_network_shortage_currency",
             )
             scenario_shocks = st.text_area(
                 "Scenario shocks JSON",
@@ -782,6 +802,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         shortage_penalty_per_unit=_finite_float(
                             network_shortage_penalty, "Scenario shortage penalty", minimum=0
                         ),
+                        shortage_penalty_currency=network_shortage_currency,
                     )
                     scenario_runs = results.get("resilience_scenarios", [])
                     if not isinstance(scenario_runs, list):
