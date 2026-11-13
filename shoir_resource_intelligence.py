@@ -2603,8 +2603,8 @@ def build_engineering_assurance_record(
     definition = ENGINEERING_MODEL_REGISTRY.get(model_key)
     if definition is None:
         raise ResourceValidationError(f"Unknown engineering model id: {model_key}.")
-    if not isinstance(input_snapshot, Mapping):
-        raise ResourceValidationError("input_snapshot must be an object.")
+    if not isinstance(input_snapshot, Mapping) or not input_snapshot:
+        raise ResourceValidationError("input_snapshot must be a non-empty object.")
     actor_name = _text(actor, "actor")
     evidence_provenance = _text(provenance, "provenance").upper()
     if evidence_provenance not in USER_INPUT_PROVENANCE_VALUES:
@@ -2680,8 +2680,13 @@ def build_engineering_assurance_record(
         "limitations": definition["limitations"],
         "independent_verification": "NOT_PERFORMED",
         "source_to_run_link": "CALLER_ASSERTED_NOT_INDEPENDENTLY_VERIFIED",
+        "source_reference_status": "REFERENCES_RECORDED" if normalized_references else "SOURCE_REFERENCES_NOT_SUPPLIED",
         "trust_note": "Hashes detect changes in this evidence envelope; they do not prove source authenticity, timestamp authority or that the supplied input snapshot exactly matches the original calculation invocation.",
     }
+    canonical_record = json.dumps(
+        record, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
+    record["record_sha256"] = hashlib.sha256(canonical_record.encode("utf-8")).hexdigest()
     return record
 
 
@@ -2727,6 +2732,21 @@ def verify_engineering_assurance_record(record: Mapping[str, Any]) -> dict[str, 
         issues.append("Input snapshot hash does not match.")
     if computed_output_hash and computed_output_hash != record.get("output_sha256"):
         issues.append("Output snapshot hash does not match.")
+    stored_record_hash = record.get("record_sha256")
+    canonical_record = {
+        key: value for key, value in record.items() if key != "record_sha256"
+    }
+    try:
+        canonical_record_json = json.dumps(
+            canonical_record, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False
+        )
+        computed_record_hash = hashlib.sha256(canonical_record_json.encode("utf-8")).hexdigest()
+        if computed_record_hash != stored_record_hash:
+            issues.append("Assurance record metadata hash does not match.")
+    except (TypeError, ValueError, OverflowError):
+        computed_record_hash = None
+        issues.append("Assurance record metadata cannot be deterministically serialized.")
     if record.get("independent_verification") != "NOT_PERFORMED":
         issues.append("Assurance record verification status was modified.")
     return {
@@ -2735,6 +2755,7 @@ def verify_engineering_assurance_record(record: Mapping[str, Any]) -> dict[str, 
         "model_version": definition["version"],
         "computed_input_sha256": computed_input_hash,
         "computed_output_sha256": computed_output_hash,
+        "computed_record_sha256": computed_record_hash,
         "issues": issues,
         "source_to_run_link": record.get("source_to_run_link"),
         "independent_verification": "NOT_PERFORMED",
