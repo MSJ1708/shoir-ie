@@ -472,6 +472,7 @@ def optimize_resource_network(
     *,
     allow_shortage: bool = False,
     shortage_penalty_per_unit: float | None = None,
+    shortage_penalty_currency: str | None = None,
 ) -> dict[str, Any]:
     """Solve a constrained transportation LP with independent qualification checks.
 
@@ -486,6 +487,11 @@ def optimize_resource_network(
         shortage_penalty_per_unit = _number(
             shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0
         )
+        shortage_penalty_currency = _text(
+            shortage_penalty_currency, "shortage_penalty_currency"
+        ).upper()
+        if len(shortage_penalty_currency) != 3 or not shortage_penalty_currency.isalpha():
+            raise ResourceValidationError("shortage_penalty_currency must be a three-letter currency code.")
     supply_by_id: dict[str, dict[str, Any]] = {}
     demand_by_id: dict[str, dict[str, Any]] = {}
     for item in supplies:
@@ -507,8 +513,13 @@ def optimize_resource_network(
 
     edges: list[dict[str, Any]] = []
     rejected_routes: list[dict[str, Any]] = []
+    route_currencies: set[str] = set()
     seen_pairs: set[tuple[str, str]] = set()
     for raw in routes:
+        route_currency = _text(raw.get("currency"), "route.currency").upper()
+        if len(route_currency) != 3 or not route_currency.isalpha():
+            raise ResourceValidationError("route.currency must be a three-letter currency code.")
+        route_currencies.add(route_currency)
         sid = _text(raw.get("supply_id"), "route.supply_id")
         did = _text(raw.get("demand_id"), "route.demand_id")
         if sid not in supply_by_id or did not in demand_by_id:
@@ -536,8 +547,16 @@ def optimize_resource_network(
             continue
         edges.append({
             "supply_id": sid, "demand_id": did, "unit_cost": cost,
+            "currency": route_currency,
             "capacity": capacity, "compatibility": compatibility["status"],
         })
+
+    if len(route_currencies) > 1:
+        raise ResourceValidationError("All exchange routes in one optimization must use the same currency.")
+    route_currency_value = next(iter(route_currencies), None)
+    if allow_shortage and route_currency_value and shortage_penalty_currency != route_currency_value:
+        raise ResourceValidationError("Shortage penalty currency must match the exchange route currency.")
+    objective_currency = shortage_penalty_currency if allow_shortage else route_currency_value
 
     if not edges:
         unmet_demand = [
@@ -552,6 +571,7 @@ def optimize_resource_network(
                 "solver": "CLOSED_FORM_NO_FEASIBLE_ROUTE",
                 "allocations": [], "rejected_routes": rejected_routes,
                 "objective_cost": penalty * sum(float(d["required_quantity"]) for d in demand_by_id.values()),
+                "objective_cost_currency": objective_currency,
                 "unmet_demand": unmet_demand,
                 "assumptions": ["No eligible supply route was available.", "No resource was allocated.", "Shortage penalty is a configured scenario cost, not a measured financial loss."],
             }
@@ -559,7 +579,8 @@ def optimize_resource_network(
             "status": "INFEASIBLE",
             "reason": "No route passed the independent type, unit and quality screening gate.",
             "allocations": [], "rejected_routes": rejected_routes,
-            "objective_cost": None, "unmet_demand": unmet_demand,
+            "objective_cost": None, "objective_cost_currency": objective_currency,
+            "unmet_demand": unmet_demand,
         }
 
     n_edges, n_demands = len(edges), len(demand_by_id)
@@ -602,7 +623,7 @@ def optimize_resource_network(
             "reason": str(solved.message),
             "solver": "scipy.optimize.linprog(method=highs)",
             "allocations": [], "rejected_routes": rejected_routes,
-            "objective_cost": None, "unmet_demand": [
+            "objective_cost": None, "objective_cost_currency": objective_currency, "unmet_demand": [
                 {"demand_id": d["demand_id"], "quantity": d["required_quantity"], "unit": d["unit"]}
                 for d in demand_by_id.values()
             ],
@@ -639,12 +660,13 @@ def optimize_resource_network(
             "status": "VALIDATION_FAILED", "reason": "; ".join(violations),
             "solver": "scipy.optimize.linprog(method=highs)",
             "allocations": allocations, "rejected_routes": rejected_routes,
-            "objective_cost": None, "unmet_demand": unmet,
+            "objective_cost": None, "objective_cost_currency": objective_currency, "unmet_demand": unmet,
         }
     return {
         "status": "FEASIBLE_WITH_SHORTAGE" if unmet else "OPTIMAL",
         "solver": "scipy.optimize.linprog(method=highs)",
         "objective_cost": float(solved.fun),
+        "objective_cost_currency": objective_currency,
         "allocations": allocations,
         "rejected_routes": rejected_routes,
         "unmet_demand": unmet,
