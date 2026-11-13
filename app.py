@@ -2350,20 +2350,20 @@ if not st.session_state.get("current_user"):
                             f'{html.escape(str(_m.get("example","")))}</div>',
                             unsafe_allow_html=True
                         )
-                        if _m.get("name") == "Industrial Resource Intelligence":
-                            _resource_has_access = platform_tier_allows(
-                                str(st.session_state.get("user_tier", "Starter Tier")), "Enterprise"
-                            )
-                            if st.button(
-                                "Open Industrial Resource Intelligence in Workbench",
-                                key="explore_open_industrial_resource_intelligence",
-                                use_container_width=True,
-                                disabled=not _resource_has_access,
-                            ):
-                                st.session_state["shoir_pending_tool_module"] = "Industrial Resource Intelligence"
-                                st.switch_page("pages/Industrial_Engineering_Workbench.py")
-                            if not _resource_has_access:
-                                st.caption("Enterprise access required. This catalogue entry does not grant access.")
+                    if _m.get("name") == "Industrial Resource Intelligence":
+                        _resource_has_access = platform_tier_allows(
+                            str(st.session_state.get("user_tier", "Starter Tier")), "Enterprise"
+                        )
+                        if st.button(
+                            "Open Industrial Resource Intelligence in Workbench",
+                            key="explore_open_industrial_resource_intelligence",
+                            use_container_width=True,
+                            disabled=not _resource_has_access,
+                        ):
+                            st.session_state["shoir_pending_tool_module"] = "Industrial Resource Intelligence"
+                            st.switch_page("pages/Industrial_Engineering_Workbench.py")
+                        if not _resource_has_access:
+                            st.caption("Enterprise access required. This catalogue entry does not grant access.")
                     _target_tool_id = str(_m.get("tool_id", "")).strip()
                     if _target_tool_id:
                         _target_status = str(_m.get("readiness_status") or "BLOCKED")
