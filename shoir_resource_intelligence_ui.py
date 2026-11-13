@@ -43,6 +43,9 @@ from shoir_resource_intelligence import (
     optimize_single_contaminant_water_reuse,
     validate_exchange_agreement,
     assess_exchange_delivery,
+    ENGINEERING_MODEL_REGISTRY,
+    build_engineering_assurance_record,
+    verify_engineering_assurance_record,
 )
 
 
@@ -210,7 +213,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         "Compatibility", "Network Optimizer", "Resilience",
         "Safety Gate", "Proof of Value", "Quality & Reliability",
         "Resource Memory", "Infrastructure & Bottlenecks", "Exchange Assurance",
-        "Environmental Impact", "Investment Prioritization", "Reports",
+        "Environmental Impact", "Investment Prioritization",
+        "Model Assurance", "Reports",
     ])
 
     with tabs[0]:
@@ -1335,6 +1339,140 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             st.warning("Projects blocked by safety are not approved. Scores and simple payback use entered assumptions and are not verified financial returns.")
 
     with tabs[14]:
+        st.markdown("#### Engineering Knowledge & Model Assurance")
+        st.caption(
+            "Select a completed calculation, attach the input snapshot and source references, "
+            "and create a versioned evidence envelope. Input/source context is entered by the user; "
+            "the system does not infer that it exactly reproduces the original run."
+        )
+        result_model_map = {
+            "Resource balance / suspected loss": ("loss_screen", "resource_balance.v1"),
+            "Engineering compatibility": ("compatibility", "compatibility_screen.v1"),
+            "Single-period resource optimization": ("optimization", "resource_network_lp.v1"),
+            "Period-aligned resource optimization": ("period_optimization", "period_network_lp.v1"),
+            "Single-contaminant water reuse": ("water_reuse_screen", "water_reuse_lp.v1"),
+            "Energy balance": ("energy_balance", "energy_balance.v1"),
+            "Waste-heat screen": ("heat_recovery_screen", "waste_heat_screen.v1"),
+            "Quality trend forecast": ("quality_forecast", "quality_trend.v1"),
+            "Historical supply reliability": ("supply_reliability", "supply_reliability_history.v1"),
+            "Single supplier disruption": ("disruption", "single_supplier_shock.v1"),
+            "Combined resilience scenario(s)": ("resilience_scenarios", "resilience_scenario.v1"),
+            "Dependency propagation": ("dependency_impact", "dependency_graph.v1"),
+            "Safety approval gate": ("safety_gate", "safety_gate.v1"),
+            "Resource cascade": ("cascade", "resource_cascade.v1"),
+            "Capacity bottleneck": ("bottleneck", "bottleneck_screen.v1"),
+            "Infrastructure route": ("infrastructure_route", "infrastructure_route.v1"),
+            "Exchange financial value": ("proof_of_value", "exchange_value.v1"),
+            "Resource intensity": ("resource_intensity", "resource_intensity.v1"),
+            "Performance persistence": ("performance_persistence", "performance_persistence.v1"),
+            "Substitution qualification": ("substitution", "resource_substitution.v1"),
+            "Environmental impact": ("environmental_impact", "environmental_impact.v1"),
+            "Investment prioritization": ("investment_prioritization", "investment_ranking.v1"),
+        }
+        available_assurance_items = {
+            label: (key, model_id)
+            for label, (key, model_id) in result_model_map.items()
+            if key in results
+        }
+        if not available_assurance_items:
+            st.info("Run an engineering calculation before creating an assurance envelope.")
+        else:
+            selected_assurance_label = st.selectbox(
+                "Completed calculation to document",
+                list(available_assurance_items),
+                key="sri_assurance_result_selector",
+            )
+            result_key, model_id = available_assurance_items[selected_assurance_label]
+            model_definition = ENGINEERING_MODEL_REGISTRY[model_id]
+            with st.expander("Inspect registered calculation method", expanded=True):
+                _render_result(st, "Versioned engineering method", model_definition)
+            input_snapshot_text = st.text_area(
+                "Calculation input snapshot JSON",
+                value="{}",
+                key="sri_assurance_input_snapshot",
+                height=130,
+                help="Enter the exact inputs and units used by the calculation. The module stores this as caller-provided context, not as proof of the original invocation.",
+            )
+            source_reference_text = st.text_area(
+                "Source references (one reference per line)",
+                value="",
+                key="sri_assurance_source_references",
+                height=75,
+                help="Examples: source workbook ID, meter tag, lab report ID, instrument record or approved engineering document reference. Do not paste credentials.",
+            )
+            assurance_provenance = st.selectbox(
+                "Input provenance",
+                list(USER_INPUT_PROVENANCE_VALUES),
+                index=1,
+                key="sri_assurance_provenance",
+            )
+            if st.button("Create model assurance evidence envelope", key="sri_create_assurance_record"):
+                try:
+                    input_snapshot = _json_object(input_snapshot_text, "Calculation input snapshot")
+                    source_references = [
+                        value.strip()
+                        for value in source_reference_text.splitlines()
+                        if value.strip()
+                    ]
+                    record = build_engineering_assurance_record(
+                        model_id=model_id,
+                        input_snapshot=input_snapshot,
+                        output_snapshot=results[result_key],
+                        actor=actor,
+                        facility_id=str(facility.get("facility_id") or ""),
+                        provenance=assurance_provenance,
+                        source_references=source_references,
+                    )
+                    assurance_records = results.get("assurance_records", [])
+                    if not isinstance(assurance_records, list):
+                        assurance_records = []
+                    assurance_records.append(record)
+                    results["assurance_records"] = assurance_records
+                    st.session_state[STATE_PREFIX + "results"] = results
+                    st.success(f"Evidence envelope recorded: {record['assurance_record_id']}")
+                except Exception as exc:
+                    st.error(f"Assurance envelope was not created: {exc}")
+
+        assurance_records = results.get("assurance_records", [])
+        if isinstance(assurance_records, list) and assurance_records:
+            st.markdown("**Saved calculation assurance envelopes**")
+            verification_rows = []
+            verification_by_id = {}
+            for record in assurance_records:
+                verification = verify_engineering_assurance_record(record)
+                verification_by_id[str(record.get("assurance_record_id"))] = verification
+                verification_rows.append({
+                    "Record ID": record.get("assurance_record_id"),
+                    "Model": record.get("model_name"),
+                    "Version": record.get("model_version"),
+                    "Facility": record.get("facility_id"),
+                    "Provenance": record.get("provenance"),
+                    "Input SHA-256": record.get("input_sha256"),
+                    "Output SHA-256": record.get("output_sha256"),
+                    "Integrity": verification["status"],
+                })
+            st.dataframe(pd.DataFrame(verification_rows), use_container_width=True, hide_index=True)
+            selected_record_id = st.selectbox(
+                "Inspect assurance envelope",
+                [str(record.get("assurance_record_id")) for record in assurance_records],
+                key="sri_assurance_record_inspector",
+            )
+            selected_record = next(
+                record for record in assurance_records
+                if str(record.get("assurance_record_id")) == selected_record_id
+            )
+            _render_result(st, "Assurance evidence envelope", selected_record)
+            _render_result(
+                st,
+                "Recomputed hash integrity check",
+                verification_by_id[selected_record_id],
+            )
+            st.warning(
+                "A valid hash check does not prove the source data, author, timestamp or original-run linkage. "
+                "Independent engineering review remains outstanding."
+            )
+
+    with tabs[15]:
         st.markdown("#### Reports and evidence export")
         report = {
             "report_type": "Industrial Resource Intelligence workspace snapshot",
@@ -1349,6 +1487,13 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "delivery_assessments": deliveries,
             "environmental_impact": results.get("environmental_impact"),
             "investment_prioritization": results.get("investment_prioritization"),
+            "engineering_model_registry": ENGINEERING_MODEL_REGISTRY,
+            "calculation_assurance_records": results.get("assurance_records", []),
+            "calculation_assurance_integrity_checks": [
+                verify_engineering_assurance_record(item)
+                for item in results.get("assurance_records", [])
+                if isinstance(item, dict)
+            ],
             "results": results,
             "limitations": [
                 "No live supplier or customer participation is asserted.",
