@@ -10513,6 +10513,18 @@ else:
         else:
             st.warning("Team Workspaces & RBAC requires an Enterprise subscription.")
         _shoir_module_stop()
+    elif mod == "Industrial Resource Intelligence":
+        try:
+            from shoir_resource_intelligence_ui import render_resource_intelligence_workbench
+            render_resource_intelligence_workbench(
+                st,
+                user=st.session_state.get("current_user", "unknown"),
+                tier=tier_val,
+            )
+        except Exception as exc:
+            st.error("Industrial Resource Intelligence could not be loaded safely.")
+            with st.expander("Technical diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
     elif mod in {x["name"] for x in PLATFORM_CATALOG}:
         try:
             render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
