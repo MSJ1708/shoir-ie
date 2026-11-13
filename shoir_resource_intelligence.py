@@ -995,6 +995,7 @@ def simulate_resource_network_scenario(
         changed_supplies, changed_demands, changed_routes,
         allow_shortage=True,
         shortage_penalty_per_unit=shortage_penalty_per_unit,
+        shortage_penalty_currency=shortage_penalty_currency,
     )
     baseline_unmet = sum(float(item["quantity"]) for item in baseline_result.get("unmet_demand", []))
     stressed_unmet = sum(float(item["quantity"]) for item in stressed_result.get("unmet_demand", []))
