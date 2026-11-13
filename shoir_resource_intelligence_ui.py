@@ -82,22 +82,59 @@ def _json_array(raw: str, label: str) -> list[dict[str, Any]]:
 
 
 def _persist_workspace(st, user: str) -> tuple[bool, str]:
-    """Save only to the current user's personal workspace in this first release slice."""
-    if isinstance(st.session_state.get("shoir_active_organization_workspace"), dict):
-        return False, (
-            "Organization-shared persistence is not enabled for this module yet. "
-            "No resource data was written to the shared workspace."
-        )
+    """Save through Shoir-IE's existing personal or staging organization workspace path."""
+    organization_context = st.session_state.get("shoir_active_organization_workspace")
+    if organization_context is not None and not isinstance(organization_context, dict):
+        return False, "The active organization workspace context is invalid. No resource data was saved."
     try:
-        from durable_account_store import durable_backend_configured
+        import durable_account_store as account_store
         from workspace_persistence import save_user_workspace
+
+        if isinstance(organization_context, dict):
+            # Shared resource passports and exchange records must use only the
+            # already-authorized staging Edge Function. The read check confirms
+            # current membership; the workspace_save RPC independently checks
+            # the write permission (Owner/Admin/Engineer) and revision.
+            if str(account_store.APP_ENVIRONMENT).casefold() != "staging":
+                return False, (
+                    "Shared Industrial Resource Intelligence persistence is not enabled "
+                    "outside the authorized staging environment. No personal-workspace fallback was used."
+                )
+            if not account_store.edge_backend_configured():
+                return False, (
+                    "The authenticated staging organization service is not configured. "
+                    "No resource data was saved to a local or personal workspace."
+                )
+            account_store.validate_remote_organization_workspace_access(user)
+            if not save_user_workspace(user, st.session_state):
+                return False, str(
+                    st.session_state.get("_workspace_save_error")
+                    or "Shared workspace save was not confirmed."
+                )
+            revision = st.session_state.get("_workspace_org_revision")
+            return True, (
+                f"Saved to the managed organization workspace (revision {revision}). "
+                "The Edge Function enforces organization membership, write role and revision checks. "
+                "Reload after signing in again to verify recovery."
+            )
+
         if not save_user_workspace(user, st.session_state):
             return False, str(st.session_state.get("_workspace_save_error") or "Workspace save was not confirmed.")
-        if durable_backend_configured():
+        if account_store.durable_backend_configured():
             return True, "Saved to the configured managed per-user workspace. Reload after signing in again to verify recovery."
         return True, "Saved to the local workspace fallback. It may not survive a hosted restart."
+    except PermissionError:
+        return False, (
+            "The active account is not authorized to save this organization workspace. "
+            "Viewer and Approver roles are read-only for resource data."
+        )
     except Exception:
-        return False, "Workspace save failed. The current data remains only in this session."
+        return False, (
+            "Workspace persistence was not confirmed. The module did not fall back "
+            "from a shared organization workspace to personal or local storage."
+            if isinstance(organization_context, dict)
+            else "Workspace save failed. The current data remains only in this session."
+        )
 
 
 def _render_result(st, title: str, value: Any) -> None:
