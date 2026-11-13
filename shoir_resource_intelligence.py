@@ -52,6 +52,18 @@ def _text(value: Any, field: str) -> str:
     return result
 
 
+def _is_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if value.__class__.__name__ in {"NAType", "NaTType"}:
+        return True
+    return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
+
+
+def _optional_text(value: Any) -> str:
+    return "" if _is_missing(value) else str(value).strip()
+
+
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
     try:
         result = float(value)
@@ -65,7 +77,7 @@ def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
 
 
 def _utc_timestamp(value: Any, field: str) -> str | None:
-    if value in (None, ""):
+    if _is_missing(value) or value == "":
         return None
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -89,19 +101,19 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
     if quantity <= 0:
         raise ResourceValidationError("available_quantity must be greater than zero.")
     quality_value = payload.get("quality")
-    if quality_value is None:
+    if _is_missing(quality_value):
         quality = {}
     elif not isinstance(quality_value, Mapping):
         raise ResourceValidationError("quality must be an object of numeric property measurements.")
     else:
         quality = quality_value
-    certificate_valid_until = str(payload.get("certificate_valid_until") or "").strip()
+    certificate_valid_until = _optional_text(payload.get("certificate_valid_until"))
     if certificate_valid_until:
         try:
             certificate_valid_until = date.fromisoformat(certificate_valid_until).isoformat()
         except ValueError as exc:
             raise ResourceValidationError("certificate_valid_until must be a valid YYYY-MM-DD date.") from exc
-    approval_status = str(payload.get("approval_status") or "DRAFT").strip().upper()
+    approval_status = (_optional_text(payload.get("approval_status")) or "DRAFT").upper()
     if approval_status not in {"DRAFT", "PENDING", "APPROVED", "REJECTED"}:
         raise ResourceValidationError("approval_status must be DRAFT, PENDING, APPROVED or REJECTED.")
     normalized_quality = {
@@ -113,36 +125,36 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
         "facility_id": _text(payload.get("facility_id"), "facility_id"),
         "name": _text(payload.get("name"), "name"),
         "resource_type": _text(payload.get("resource_type"), "resource_type"),
-        "category": str(payload.get("category") or "OTHER").strip().upper(),
+        "category": (_optional_text(payload.get("category")) or "OTHER").upper(),
         "available_quantity": quantity,
         "unit": _text(payload.get("unit"), "unit"),
         "quality": normalized_quality,
         "temperature_c": (
             _number(payload["temperature_c"], "temperature_c")
-            if payload.get("temperature_c") not in (None, "") else None
+            if not _is_missing(payload.get("temperature_c")) and payload.get("temperature_c") != "" else None
         ),
         "pressure_kpa": (
             _number(payload["pressure_kpa"], "pressure_kpa", minimum=0)
-            if payload.get("pressure_kpa") not in (None, "") else None
+            if not _is_missing(payload.get("pressure_kpa")) and payload.get("pressure_kpa") != "" else None
         ),
-        "owner": str(payload.get("owner") or "").strip(),
-        "description_en": str(payload.get("description_en") or "").strip(),
-        "description_ar": str(payload.get("description_ar") or "").strip(),
-        "source_process": str(payload.get("source_process") or "").strip(),
-        "source_equipment": str(payload.get("source_equipment") or "").strip(),
-        "availability_window": str(payload.get("availability_window") or "").strip(),
-        "seasonal_variation": str(payload.get("seasonal_variation") or "").strip(),
-        "storage_requirements": str(payload.get("storage_requirements") or "").strip(),
-        "transport_requirements": str(payload.get("transport_requirements") or "").strip(),
-        "treatment_notes": str(payload.get("treatment_notes") or "").strip(),
-        "safety_restrictions": str(payload.get("safety_restrictions") or "").strip(),
-        "source_reference": str(payload.get("source_reference") or "").strip(),
-        "laboratory_evidence_reference": str(payload.get("laboratory_evidence_reference") or "").strip(),
-        "certificate_reference": str(payload.get("certificate_reference") or "").strip(),
+        "owner": _optional_text(payload.get("owner")),
+        "description_en": _optional_text(payload.get("description_en")),
+        "description_ar": _optional_text(payload.get("description_ar")),
+        "source_process": _optional_text(payload.get("source_process")),
+        "source_equipment": _optional_text(payload.get("source_equipment")),
+        "availability_window": _optional_text(payload.get("availability_window")),
+        "seasonal_variation": _optional_text(payload.get("seasonal_variation")),
+        "storage_requirements": _optional_text(payload.get("storage_requirements")),
+        "transport_requirements": _optional_text(payload.get("transport_requirements")),
+        "treatment_notes": _optional_text(payload.get("treatment_notes")),
+        "safety_restrictions": _optional_text(payload.get("safety_restrictions")),
+        "source_reference": _optional_text(payload.get("source_reference")),
+        "laboratory_evidence_reference": _optional_text(payload.get("laboratory_evidence_reference")),
+        "certificate_reference": _optional_text(payload.get("certificate_reference")),
         "certificate_valid_until": certificate_valid_until,
         "measured_at": _utc_timestamp(payload.get("measured_at"), "measured_at"),
         "provenance": provenance,
-        "created_at": str(payload.get("created_at") or datetime.now(timezone.utc).isoformat()),
+        "created_at": _optional_text(payload.get("created_at")) or datetime.now(timezone.utc).isoformat(),
         "approval_status": approval_status,
     }
 
