@@ -48,7 +48,14 @@ def _demand(demand_id="D1", quantity=60.0, limits=None):
 
 
 def _route(supply_id="S1", demand_id="D1", cost=2.0):
-    return {"supply_id": supply_id, "demand_id": demand_id, "unit_cost": cost}
+    return {
+        "supply_id": supply_id,
+        "demand_id": demand_id,
+        "unit_cost": cost,
+        "transport_cost_per_unit": 0.0,
+        "treatment_cost_per_unit": 0.0,
+        "capacity": 100.0,
+    }
 
 
 def test_resource_passport_normalizes_provenance_and_requires_real_inputs():
@@ -896,3 +903,19 @@ def test_delivery_assessment_revalidates_tampered_agreement_quality_limits():
             "delivered_quantity": 100,
             "quality": {"pH": 7.0},
         })
+
+
+def test_network_optimizer_rejects_missing_route_capacity_and_costs_instead_of_assuming_zero():
+    with pytest.raises(ResourceValidationError):
+        optimize_resource_network([_supply()], [_demand()], [{
+            "supply_id": "S1", "demand_id": "D1",
+            "unit_cost": 1.0, "transport_cost_per_unit": 0.0,
+            "treatment_cost_per_unit": 0.0,
+            # Deliberately no physical route capacity.
+        }])
+    with pytest.raises(ResourceValidationError):
+        optimize_resource_network([_supply()], [_demand()], [{
+            "supply_id": "S1", "demand_id": "D1",
+            "unit_cost": 1.0, "capacity": 100.0,
+            # Deliberately no transport or treatment cost inputs.
+        }])
