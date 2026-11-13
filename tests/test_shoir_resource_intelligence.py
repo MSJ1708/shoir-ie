@@ -1350,3 +1350,69 @@ def test_investment_prioritization_is_transparent_and_keeps_safety_rejected_proj
     assert by_id["P1"]["priority_is_financial_roi"] is False
     assert by_id["P2"]["project_status"] == "BLOCKED_SAFETY"
     assert by_id["P2"]["priority_rank"] > by_id["P1"]["priority_rank"]
+
+
+def test_project_prioritization_rejects_unknown_weights_currency_and_safety_status():
+    from shoir_resource_intelligence import rank_resource_improvement_projects
+
+    project = {
+        "project_id": "P-1", "name": "Recovery project",
+        "feasibility_score": 4, "resource_impact_score": 4, "reliability_score": 4,
+        "data_confidence_score": 4, "risk_score": 2, "implementation_difficulty_score": 2,
+        "capex": 1000, "annual_gross_benefit": 2000, "annual_opex": 500,
+        "currency": "SAR", "safety_status": "APPROVAL_PENDING",
+    }
+    weights = {
+        "feasibility": 0.2, "resource_impact": 0.2, "reliability": 0.2,
+        "data_confidence": 0.2, "risk": 0.1, "implementation_difficulty": 0.1,
+    }
+    with pytest.raises(ResourceValidationError, match="Unknown project scoring weight"):
+        rank_resource_improvement_projects([project], weights={**weights, "unapproved_bonus": 0.5})
+    with pytest.raises(ResourceValidationError, match="three-letter currency"):
+        rank_resource_improvement_projects([{
+            **project, "currency": "dollars",
+        }], weights=weights)
+    with pytest.raises(ResourceValidationError, match="recognized safety gate status"):
+        rank_resource_improvement_projects([{
+            **project, "safety_status": "APPROVED_BY_AI",
+        }], weights=weights)
+
+
+def test_environmental_impact_rejects_unknown_factor_categories():
+    from shoir_resource_intelligence import calculate_environmental_impact
+
+    with pytest.raises(ResourceValidationError, match="Unknown environmental factor"):
+        calculate_environmental_impact(
+            reporting_period="2026-11", facility_boundary="FAC-A", geography="Saudi Arabia",
+            avoided_freshwater_m3=0, avoided_wastewater_m3=0, avoided_electricity_kwh=0,
+            avoided_fuel_kwh=0, diverted_waste_kg=0, added_treatment_electricity_kwh=0,
+            added_transport_tonne_km=0, added_chemical_kg=0, added_residual_waste_kg=0,
+            factors={**_environmental_factor_set(), "unverified_avoided_carbon": {"value": 99}},
+        )
+
+
+def test_resource_intelligence_ui_declared_tabs_and_indexes_are_consistent():
+    import ast
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "shoir_resource_intelligence_ui.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    tabs_count = None
+    tab_indexes = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "tabs" for target in node.targets
+        ):
+            call = node.value
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "tabs":
+                tabs_count = len(ast.literal_eval(call.args[0]))
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "tabs":
+            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
+                tab_indexes.append(node.slice.value)
+    assert tabs_count == 15
+    assert tab_indexes
+    assert max(tab_indexes) < tabs_count
+    assert '"Environmental Impact"' in source
+    assert '"Investment Prioritization"' in source
+    assert '"Reports"' in source
