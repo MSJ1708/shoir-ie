@@ -121,7 +121,7 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in quality.items()
     }
     return {
-        "resource_id": str(payload.get("resource_id") or uuid4()),
+        "resource_id": _optional_text(payload.get("resource_id")) or str(uuid4()),
         "facility_id": _text(payload.get("facility_id"), "facility_id"),
         "name": _text(payload.get("name"), "name"),
         "resource_type": _text(payload.get("resource_type"), "resource_type"),
