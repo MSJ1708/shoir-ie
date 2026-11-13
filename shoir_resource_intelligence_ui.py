@@ -685,8 +685,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 key="sri_allow_scheduled_shortage",
             )
             scheduled_shortage_penalty = st.text_input(
-                "Scenario shortage penalty per unit",
-                value="1000000",
+                "Scenario shortage penalty per unit (required when shortage mode is enabled)",
+                value="",
                 key="sri_scheduled_shortage_penalty",
             )
             if st.button("Optimize by period", key="sri_run_period_optimizer"):
