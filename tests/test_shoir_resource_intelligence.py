@@ -1777,3 +1777,62 @@ def test_resource_passport_import_defaults_to_draft_when_approval_status_is_blan
         "approval_status": "",
     })
     assert passport["approval_status"] == "DRAFT"
+
+
+def test_interval_robust_optimizer_uses_conservative_supply_and_demand_bounds():
+    from shoir_resource_intelligence import optimize_interval_robust_resource_network
+
+    result = optimize_interval_robust_resource_network(
+        [{**_supply(quantity=100), "supply_uncertainty_fraction": 0.2}],
+        [{**_demand(quantity=60), "demand_uncertainty_fraction": 0.5}],
+        [_route()],
+        allow_shortage=True,
+        shortage_penalty_per_unit=1000,
+        shortage_penalty_currency="SAR",
+    )
+    assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
+    assert result["baseline"]["allocations"][0]["quantity"] == pytest.approx(60)
+    assert result["conservative_interval_stress"]["allocations"][0]["quantity"] == pytest.approx(80)
+    assert result["conservative_unmet_quantity"] == pytest.approx(10)
+    assert result["additional_unmet_quantity_under_stress"] == pytest.approx(10)
+    assert result["probability"] is None
+    assert result["confidence_level"] is None
+    assert result["uncertainty_method"] == "DETERMINISTIC_INTERVAL_WORST_CASE"
+
+
+def test_interval_robust_optimizer_requires_explicit_uncertainty_bounds_and_penalty_currency():
+    from shoir_resource_intelligence import optimize_interval_robust_resource_network
+
+    with pytest.raises(ResourceValidationError, match="supply_uncertainty_fraction"):
+        optimize_interval_robust_resource_network(
+            [_supply()],
+            [{**_demand(), "demand_uncertainty_fraction": 0.1}],
+            [_route()],
+        )
+    with pytest.raises(ResourceValidationError, match="shortage_penalty_per_unit"):
+        optimize_interval_robust_resource_network(
+            [{**_supply(), "supply_uncertainty_fraction": 0.1}],
+            [{**_demand(), "demand_uncertainty_fraction": 0.1}],
+            [_route()],
+            allow_shortage=True,
+        )
+    with pytest.raises(ResourceValidationError, match="must match the exchange route currency"):
+        optimize_interval_robust_resource_network(
+            [{**_supply(), "supply_uncertainty_fraction": 0.1}],
+            [{**_demand(), "demand_uncertainty_fraction": 0.1}],
+            [_route()],
+            allow_shortage=True,
+            shortage_penalty_per_unit=1000,
+            shortage_penalty_currency="USD",
+        )
+
+
+def test_interval_robust_optimizer_rejects_uncertainty_fraction_above_one():
+    from shoir_resource_intelligence import optimize_interval_robust_resource_network
+
+    with pytest.raises(ResourceValidationError, match="must not exceed 1"):
+        optimize_interval_robust_resource_network(
+            [{**_supply(), "supply_uncertainty_fraction": 1.2}],
+            [{**_demand(), "demand_uncertainty_fraction": 0.1}],
+            [_route()],
+        )
