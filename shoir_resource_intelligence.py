@@ -1990,6 +1990,7 @@ def optimize_single_contaminant_water_reuse(
             "source_id": source_id,
             "available_flow": _number(source.get("available_flow"), f"sources[{index}].available_flow", minimum=0),
             "concentration": _number(source.get("concentration"), f"sources[{index}].concentration", minimum=0),
+            "provenance": _validated_input_provenance(source.get("provenance"), f"sources[{index}].provenance"),
         }
     for index, sink in enumerate(sinks):
         sink_id = _text(sink.get("sink_id"), f"sinks[{index}].sink_id")
@@ -2007,6 +2008,7 @@ def optimize_single_contaminant_water_reuse(
             "sink_id": sink_id,
             "required_flow": demand,
             "maximum_concentration": maximum,
+            "provenance": _validated_input_provenance(sink.get("provenance"), f"sinks[{index}].provenance"),
         }
 
     eligible_connections: list[dict[str, Any]] = []
@@ -2028,6 +2030,17 @@ def optimize_single_contaminant_water_reuse(
                 "reason": "A user-confirmed physical connection and evidence reference are required.",
             })
             continue
+        connection_provenance = _validated_input_provenance(
+            connection.get("provenance"), f"connections[{index}].provenance"
+        )
+        if connection_provenance == "STALE":
+            rejected_connections.append({
+                "source_id": source_id,
+                "sink_id": sink_id,
+                "reason": "Stale physical connection evidence cannot be optimized.",
+                "provenance": connection_provenance,
+            })
+            continue
         capacity = _number(
             connection.get("capacity"),
             f"connections[{index}].capacity",
@@ -2044,6 +2057,7 @@ def optimize_single_contaminant_water_reuse(
                 sink_map[sink_id]["required_flow"],
             ),
             "connection_evidence_reference": evidence,
+            "provenance": connection_provenance,
         })
 
     if not eligible_connections:
@@ -2109,6 +2123,8 @@ def optimize_single_contaminant_water_reuse(
             **edge,
             "allocated_flow": flow,
             "source_concentration": concentration,
+            "source_provenance": source_map[edge["source_id"]]["provenance"],
+            "sink_provenance": sink_map[edge["sink_id"]]["provenance"],
         })
 
     sink_quality: list[dict[str, Any]] = []
