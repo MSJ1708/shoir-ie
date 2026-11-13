@@ -688,3 +688,53 @@ def test_exchange_agreement_requires_valid_quality_bounds_and_approval_reference
     bad["approval_references"] = "not-an-object"
     with pytest.raises(ResourceValidationError, match="approval_references"):
         validate_exchange_agreement(bad)
+
+
+def test_water_reuse_lp_maximizes_flow_while_respecting_blended_quality_limit():
+    from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
+
+    sources = [
+        {"source_id": "S1", "available_flow": 50, "flow_unit": "m3/day", "concentration": 100, "concentration_unit": "mg/L"},
+        {"source_id": "S2", "available_flow": 50, "flow_unit": "m3/day", "concentration": 0, "concentration_unit": "mg/L"},
+    ]
+    sinks = [
+        {"sink_id": "D1", "required_flow": 80, "flow_unit": "m3/day", "maximum_concentration": 50, "concentration_unit": "mg/L"},
+    ]
+    connections = [
+        {"source_id": "S1", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-1"},
+        {"source_id": "S2", "sink_id": "D1", "connection_confirmed": True, "connection_evidence_reference": "ROUTE-2"},
+    ]
+    result = optimize_single_contaminant_water_reuse(
+        sources, sinks, connections,
+        contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+    )
+    assert result["status"] == "PRELIMINARY_SINGLE_CONTAMINANT_REUSE_ALLOCATION"
+    assert result["total_reuse_flow"] == pytest.approx(80)
+    check = result["sink_quality_checks"][0]
+    assert check["blended_concentration"] <= check["maximum_concentration"] + 1e-7
+    assert result["operational_authorization"] is False
+
+
+def test_water_reuse_does_not_assume_physical_connections():
+    from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
+
+    result = optimize_single_contaminant_water_reuse(
+        [{"source_id": "S1", "available_flow": 10, "flow_unit": "m3/day", "concentration": 1, "concentration_unit": "mg/L"}],
+        [{"sink_id": "D1", "required_flow": 10, "flow_unit": "m3/day", "maximum_concentration": 5, "concentration_unit": "mg/L"}],
+        [{"source_id": "S1", "sink_id": "D1", "connection_confirmed": False}],
+        contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+    )
+    assert result["status"] == "NO_CONFIRMED_REUSE_CONNECTION"
+    assert result["total_reuse_flow"] == 0
+
+
+def test_water_reuse_requires_matching_flow_and_concentration_units():
+    from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
+
+    with pytest.raises(ResourceValidationError, match="flow unit"):
+        optimize_single_contaminant_water_reuse(
+            [{"source_id": "S1", "available_flow": 10, "flow_unit": "L/s", "concentration": 1, "concentration_unit": "mg/L"}],
+            [{"sink_id": "D1", "required_flow": 10, "flow_unit": "m3/day", "maximum_concentration": 5, "concentration_unit": "mg/L"}],
+            [],
+            contaminant="TDS", concentration_unit="mg/L", flow_unit="m3/day",
+        )
