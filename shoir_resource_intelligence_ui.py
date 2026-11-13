@@ -296,17 +296,25 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             if imports.get("accepted") and st.button("Add valid rows to resource passports", key="sri_add_imported"):
                 existing_ids = {str(item.get("resource_id")) for item in passports}
                 additions = []
+                skipped_existing_ids = []
                 for item in imports["accepted"]:
                     resource_id = str(item.get("resource_id"))
                     if resource_id not in existing_ids:
                         additions.append(item)
                         existing_ids.add(resource_id)
+                    else:
+                        skipped_existing_ids.append(resource_id)
                 passports = passports + additions
                 for item in additions:
                     passport_history = append_resource_passport_revision(passport_history, item, actor=actor)
                 st.session_state[STATE_PREFIX + "passports"] = passports
                 st.session_state[STATE_PREFIX + "passport_history"] = passport_history
                 st.success(f"Added {len(additions)} validated rows and recorded workspace revisions. Provenance remains as supplied; no source row was rewritten.")
+                if skipped_existing_ids:
+                    st.warning(
+                        f"Skipped {len(skipped_existing_ids)} row(s) because their resource IDs already exist in this facility: "
+                        + ", ".join(skipped_existing_ids[:20])
+                    )
 
     with tabs[1]:
         st.markdown("#### Resource passport")
