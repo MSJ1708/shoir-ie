@@ -22,6 +22,7 @@ from shoir_resource_intelligence import (
     detect_resource_loss,
     assess_resource_compatibility,
     optimize_resource_network,
+    optimize_period_aligned_resource_network,
     simulate_supplier_disruption,
     evaluate_safety_gate,
     calculate_exchange_value,
@@ -593,6 +594,60 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 st.error(f"Network optimization failed safely: {exc}")
         if "optimization" in results:
             _render_result(st, "Optimization result", results["optimization"])
+
+        with st.expander("Time-bucketed resource allocation (no automatic carryover)"):
+            st.caption(
+                "Provide supply, demand and candidate routes separately for each period (for example, shift or date). "
+                "The optimizer never moves supply between periods and does not infer storage."
+            )
+            scheduled_supplies = st.text_area(
+                "Time-bucketed supplies JSON",
+                value="[]",
+                key="sri_scheduled_supplies",
+                height=100,
+                help='Each row: id, period_id, resource_type, available_quantity, unit, quality.',
+            )
+            scheduled_demands = st.text_area(
+                "Time-bucketed demands JSON",
+                value="[]",
+                key="sri_scheduled_demands",
+                height=100,
+                help='Each row: id, period_id, resource_type, required_quantity, unit, quality_limits.',
+            )
+            scheduled_routes = st.text_area(
+                "Time-bucketed route constraints JSON",
+                value="[]",
+                key="sri_scheduled_routes",
+                height=100,
+                help='Each row: supply_id, demand_id, period_id, unit_cost, transport_cost_per_unit, treatment_cost_per_unit, capacity.',
+            )
+            allow_scheduled_shortage = st.checkbox(
+                "Allow unmet demand and report shortage",
+                value=True,
+                key="sri_allow_scheduled_shortage",
+            )
+            scheduled_shortage_penalty = st.text_input(
+                "Scenario shortage penalty per unit",
+                value="1000000",
+                key="sri_scheduled_shortage_penalty",
+            )
+            if st.button("Optimize by period", key="sri_run_period_optimizer"):
+                try:
+                    results["period_optimization"] = optimize_period_aligned_resource_network(
+                        _json_array(scheduled_supplies, "Time-bucketed supplies"),
+                        _json_array(scheduled_demands, "Time-bucketed demands"),
+                        _json_array(scheduled_routes, "Time-bucketed routes"),
+                        allow_shortage=allow_scheduled_shortage,
+                        shortage_penalty_per_unit=_finite_float(
+                            scheduled_shortage_penalty, "Scenario shortage penalty", minimum=0
+                        ),
+                    )
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Time-bucketed optimization failed: {exc}")
+            if "period_optimization" in results:
+                _render_result(st, "Period-aligned optimization result", results["period_optimization"])
+                st.warning("Period alignment does not establish a physical connection, storage availability, production schedule or maintenance approval.")
 
     with tabs[5]:
         st.markdown("#### Supply disruption and dependency propagation")
