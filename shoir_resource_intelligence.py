@@ -655,6 +655,113 @@ def optimize_resource_network(
     }
 
 
+def optimize_period_aligned_resource_network(
+    supplies: Sequence[Mapping[str, Any]],
+    demands: Sequence[Mapping[str, Any]],
+    routes: Sequence[Mapping[str, Any]],
+    *,
+    allow_shortage: bool = False,
+    shortage_penalty_per_unit: float = 1_000_000.0,
+) -> dict[str, Any]:
+    """Optimize allocations inside explicit matching time buckets.
+
+    No allocation crosses a period boundary. Inventory carryover, storage,
+    production scheduling and maintenance calendars are not inferred; callers
+    must represent each period's available supply and demand explicitly.
+    """
+    if not supplies or not demands:
+        raise ResourceValidationError("At least one time-bucketed supply and demand are required.")
+    supply_rows = [dict(row) for row in supplies]
+    demand_rows = [dict(row) for row in demands]
+    route_rows = [dict(row) for row in routes]
+    for index, row in enumerate(supply_rows):
+        row["period_id"] = _text(row.get("period_id"), f"supplies[{index}].period_id")
+    for index, row in enumerate(demand_rows):
+        row["period_id"] = _text(row.get("period_id"), f"demands[{index}].period_id")
+    for index, row in enumerate(route_rows):
+        row["period_id"] = _text(row.get("period_id"), f"routes[{index}].period_id")
+
+    supply_periods = {row["period_id"] for row in supply_rows}
+    demand_periods = {row["period_id"] for row in demand_rows}
+    periods = sorted(demand_periods)
+    period_results = []
+    all_allocations = []
+    total_cost = 0.0
+    total_unmet = 0.0
+    for period_id in periods:
+        period_demands = [
+            {key: value for key, value in row.items() if key != "period_id"}
+            for row in demand_rows if row["period_id"] == period_id
+        ]
+        period_supplies = [
+            {key: value for key, value in row.items() if key != "period_id"}
+            for row in supply_rows if row["period_id"] == period_id
+        ]
+        period_routes = [
+            {key: value for key, value in row.items() if key != "period_id"}
+            for row in route_rows if row["period_id"] == period_id
+        ]
+        if not period_supplies:
+            period_result = {
+                "status": "FEASIBLE_WITH_SHORTAGE" if allow_shortage else "INFEASIBLE",
+                "reason": "No supply was declared for this demand period; no carryover or external replenishment is assumed.",
+                "allocations": [],
+                "rejected_routes": [],
+                "objective_cost": (
+                    _number(shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0)
+                    * sum(_number(item.get("required_quantity"), "required_quantity", minimum=0) for item in period_demands)
+                    if allow_shortage else None
+                ),
+                "unmet_demand": [
+                    {"demand_id": _text(item.get("demand_id") or item.get("id"), "demand id"),
+                     "quantity": _number(item.get("required_quantity"), "required_quantity", minimum=0),
+                     "unit": _text(item.get("unit"), "demand.unit")}
+                    for item in period_demands
+                ],
+            }
+        else:
+            period_result = optimize_resource_network(
+                period_supplies,
+                period_demands,
+                period_routes,
+                allow_shortage=allow_shortage,
+                shortage_penalty_per_unit=shortage_penalty_per_unit,
+            )
+        period_result["period_id"] = period_id
+        period_results.append(period_result)
+        for allocation in period_result.get("allocations", []):
+            all_allocations.append({**allocation, "period_id": period_id})
+        if period_result.get("objective_cost") is not None:
+            total_cost += float(period_result["objective_cost"])
+        total_unmet += sum(float(item["quantity"]) for item in period_result.get("unmet_demand", []))
+
+    unexpected_supply_periods = sorted(supply_periods - demand_periods)
+    period_states = [item["status"] for item in period_results]
+    if any(status in {"INFEASIBLE", "VALIDATION_FAILED"} for status in period_states):
+        status = "INFEASIBLE" if "INFEASIBLE" in period_states else "VALIDATION_FAILED"
+    elif any(status == "FEASIBLE_WITH_SHORTAGE" for status in period_states):
+        status = "FEASIBLE_WITH_SHORTAGE"
+    else:
+        status = "OPTIMAL_BY_PERIOD"
+    return {
+        "status": status,
+        "period_count": len(periods),
+        "periods": period_results,
+        "allocations": all_allocations,
+        "objective_cost": total_cost if status != "INFEASIBLE" else None,
+        "unmet_demand_total": total_unmet,
+        "unused_supply_periods": unexpected_supply_periods,
+        "period_alignment": "STRICT_NO_CROSS_PERIOD_ALLOCATION",
+        "storage_or_carryover": "NOT_MODELED",
+        "production_and_maintenance_schedules": "NOT_CONNECTED; caller must encode per-period availability and demand.",
+        "limitations": [
+            "No storage or inventory carryover between periods.",
+            "No automatic production schedule, maintenance calendar or operating-hour interpretation.",
+            "Every period is optimized independently; the model cannot transfer surplus across periods.",
+        ],
+    }
+
+
 def simulate_supplier_disruption(
     supplies: Sequence[Mapping[str, Any]],
     demands: Sequence[Mapping[str, Any]],
@@ -1685,7 +1792,7 @@ __all__ = [
     "ResourceValidationError", "validate_resource_passport",
     "append_resource_passport_revision", "verify_resource_passport_history",
     "assess_resource_compatibility", "calculate_resource_balance",
-    "detect_resource_loss", "optimize_resource_network",
+    "detect_resource_loss", "optimize_resource_network", "optimize_period_aligned_resource_network",
     "simulate_supplier_disruption", "evaluate_safety_gate",
     "calculate_exchange_value", "propagate_network_impact",
     "forecast_resource_quality", "calculate_supply_reliability",
