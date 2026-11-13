@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 import pandas as pd
