@@ -26,6 +26,9 @@ from shoir_resource_intelligence import (
     simulate_supplier_disruption,
     evaluate_safety_gate,
     calculate_exchange_value,
+    calculate_environmental_impact,
+    rank_resource_improvement_projects,
+    assess_resource_substitution,
     forecast_resource_quality,
     calculate_supply_reliability,
     propagate_network_impact,
@@ -168,7 +171,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         "Overview & Import", "Resource Passports", "Loss & Recovery",
         "Compatibility", "Network Optimizer", "Resilience",
         "Safety Gate", "Proof of Value", "Quality & Reliability",
-        "Resource Memory", "Infrastructure & Bottlenecks", "Exchange Assurance", "Reports",
+        "Resource Memory", "Infrastructure & Bottlenecks", "Exchange Assurance",
+        "Environmental Impact", "Investment Prioritization", "Reports",
     ])
 
     with tabs[0]:
@@ -495,6 +499,59 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                     st.error(f"Compatibility assessment failed: {exc}")
         if "compatibility" in results:
             _render_result(st, "Compatibility result", results["compatibility"])
+
+        with st.expander("Industrial resource substitution candidate"):
+            st.caption("A substitute remains a candidate until product, equipment, laboratory, engineering, safety and environmental qualification is completed.")
+            if passports:
+                substitute_id = st.selectbox(
+                    "Candidate substitute resource",
+                    [str(item["resource_id"]) for item in passports],
+                    key="sri_substitute_resource",
+                )
+                substitute_requirement = st.text_area(
+                    "Buyer / process substitution requirements JSON",
+                    value='{"resource_type":"Water","unit":"m3/day","quality_limits":{"pH":{"min":6.5,"max":8.5}}}',
+                    key="sri_substitute_requirement",
+                    height=90,
+                )
+                s1, s2 = st.columns(2)
+                product_status = s1.selectbox(
+                    "Product quality assessment",
+                    ["NOT_ASSESSED", "TEST_REQUIRED", "PASS", "FAIL"],
+                    key="sri_sub_product_status",
+                )
+                equipment_status = s2.selectbox(
+                    "Equipment compatibility assessment",
+                    ["NOT_ASSESSED", "TEST_REQUIRED", "PASS", "FAIL"],
+                    key="sri_sub_equipment_status",
+                )
+                s3, s4 = st.columns(2)
+                lab_ref = s3.text_input("Substitution laboratory evidence reference", key="sri_sub_lab_ref")
+                engineering_ref = s4.text_input("Substitution engineering review reference", key="sri_sub_engineering_ref")
+                s5, s6 = st.columns(2)
+                safety_ref = s5.text_input("Substitution safety review reference", key="sri_sub_safety_ref")
+                environmental_ref = s6.text_input("Substitution environmental review reference", key="sri_sub_environmental_ref")
+                if st.button("Assess substitution candidate", key="sri_run_substitution"):
+                    try:
+                        candidate = next(item for item in passports if str(item["resource_id"]) == substitute_id)
+                        results["substitution"] = assess_resource_substitution(
+                            candidate,
+                            _json_object(substitute_requirement, "Substitution requirement"),
+                            product_quality_status=product_status,
+                            equipment_compatibility_status=equipment_status,
+                            laboratory_evidence_reference=lab_ref,
+                            engineering_review_reference=engineering_ref,
+                            safety_review_reference=safety_ref,
+                            environmental_review_reference=environmental_ref,
+                        )
+                        st.session_state[STATE_PREFIX + "results"] = results
+                    except Exception as exc:
+                        st.error(f"Substitution assessment failed: {exc}")
+                if "substitution" in results:
+                    _render_result(st, "Substitution candidate assessment", results["substitution"])
+                    st.warning("A candidate assessment never authorizes substituting a material or changing process conditions.")
+            else:
+                st.info("Create a passport before assessing resource substitution.")
 
     with tabs[4]:
         st.markdown("#### Controlled exchange candidates and network optimizer")
@@ -1070,7 +1127,86 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             _render_result(st, "Delivery assurance detail", next(item for item in deliveries if item["delivery_id"] == selected_delivery))
             st.warning("Delivery assessments are evidence records. A person must review and accept/reject the delivery under the applicable agreement.")
 
-    with tabs[12]:
+    with tabs[13]:
+        st.markdown("#### Environmental impact and burden-shifting assessment")
+        st.caption("Use factor values and references appropriate to the reporting boundary, geography and period. No factor is supplied or certified by this module.")
+        environmental_quantities = [
+            ("avoided_freshwater_m3", "Avoided freshwater (m³)"),
+            ("avoided_wastewater_m3", "Avoided wastewater (m³)"),
+            ("avoided_electricity_kwh", "Avoided electricity (kWh)"),
+            ("avoided_fuel_kwh", "Avoided fuel energy (kWh)"),
+            ("diverted_waste_kg", "Diverted waste (kg)"),
+            ("added_treatment_electricity_kwh", "Added treatment electricity (kWh)"),
+            ("added_transport_tonne_km", "Added transport (tonne-km)"),
+            ("added_chemical_kg", "Added chemicals (kg)"),
+            ("added_residual_waste_kg", "Added residual waste (kg)"),
+        ]
+        env_values = {}
+        for index in range(0, len(environmental_quantities), 2):
+            left, right = st.columns(2)
+            for col, (key, label) in zip((left, right), environmental_quantities[index:index+2]):
+                env_values[key] = col.text_input(label, key="sri_env_" + key)
+        env1, env2, env3 = st.columns(3)
+        reporting_period = env1.text_input("Reporting period", key="sri_env_period")
+        facility_boundary = env2.text_input("Facility / system boundary", key="sri_env_boundary")
+        geography = env3.text_input("Geography", value=str(facility.get("location") or ""), key="sri_env_geography")
+        factors_json = st.text_area(
+            "Versioned environmental factors JSON",
+            value="{}",
+            key="sri_environmental_factors",
+            height=170,
+            help='Required keys: freshwater, wastewater, electricity, fuel, waste_diversion, transport, chemical, residual_waste. Each requires value, exact unit, source_reference and version.',
+        )
+        env_status = st.selectbox("Environmental evidence level", ["FORECAST", "ESTIMATED", "MEASURED"], key="sri_env_status")
+        if st.button("Calculate bounded environmental impact", key="sri_run_environmental"):
+            try:
+                if any(str(value).strip() == "" for value in env_values.values()):
+                    raise ValueError("Enter every physical quantity explicitly. Use 0 only when the measured/assumed quantity is zero.")
+                results["environmental_impact"] = calculate_environmental_impact(
+                    reporting_period=reporting_period,
+                    facility_boundary=facility_boundary,
+                    geography=geography,
+                    **{key: _finite_float(value, key, minimum=0) for key, value in env_values.items()},
+                    factors=_json_object(factors_json, "Environmental factors"),
+                    evidence_status=env_status,
+                )
+                st.session_state[STATE_PREFIX + "results"] = results
+            except Exception as exc:
+                st.error(f"Environmental calculation failed: {exc}")
+        if "environmental_impact" in results:
+            _render_result(st, "Environmental impact result", results["environmental_impact"])
+            st.warning("This is a factor-based estimate using caller-supplied data. Do not publish a verified emissions or environmental claim without factor review, boundary validation and independent assurance.")
+
+    with tabs[14]:
+        st.markdown("#### Industrial improvement project prioritization")
+        st.caption("This is a transparent multi-criteria ranking, not investment approval, ROI or a substitute for a business case.")
+        projects_json = st.text_area(
+            "Improvement project register JSON",
+            value="[]",
+            key="sri_investment_projects",
+            height=200,
+            help='Each project: project_id, name, feasibility_score, resource_impact_score, reliability_score, data_confidence_score, risk_score, implementation_difficulty_score (all 1–5), capex, annual_gross_benefit, annual_opex, currency, safety_status and evidence_reference.',
+        )
+        weights_json = st.text_area(
+            "Scoring weights JSON (illustrative defaults; review before use)",
+            value='{"feasibility":0.25,"resource_impact":0.25,"reliability":0.15,"data_confidence":0.15,"risk":0.10,"implementation_difficulty":0.10}',
+            key="sri_investment_weights",
+            height=90,
+        )
+        if st.button("Rank improvement projects", key="sri_rank_projects"):
+            try:
+                results["investment_prioritization"] = rank_resource_improvement_projects(
+                    _json_array(projects_json, "Improvement projects"),
+                    weights=_json_object(weights_json, "Project scoring weights"),
+                )
+                st.session_state[STATE_PREFIX + "results"] = results
+            except Exception as exc:
+                st.error(f"Project prioritization failed: {exc}")
+        if "investment_prioritization" in results:
+            _render_result(st, "Investment prioritization result", results["investment_prioritization"])
+            st.warning("Projects blocked by safety are not approved. Scores and simple payback use entered assumptions and are not verified financial returns.")
+
+    with tabs[15]:
         st.markdown("#### Reports and evidence export")
         report = {
             "report_type": "Industrial Resource Intelligence workspace snapshot",
@@ -1083,6 +1219,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "exchange_candidates": routes,
             "exchange_agreements": agreements,
             "delivery_assessments": deliveries,
+            "environmental_impact": results.get("environmental_impact"),
+            "investment_prioritization": results.get("investment_prioritization"),
             "results": results,
             "limitations": [
                 "No live supplier or customer participation is asserted.",
