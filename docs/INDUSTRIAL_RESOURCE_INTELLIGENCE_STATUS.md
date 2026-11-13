@@ -36,7 +36,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 
 | Master prompt capability | Current status | Implemented foundation | Remaining work / reason it is not complete |
 |---|---|---|---|
-| 1. Industrial Resource Passport | PARTIALLY_IMPLEMENTED | Facility-linked record; owner, English/Arabic descriptions, source process/equipment, type, quantity/unit, numeric quality, temperature/pressure, availability window, seasonal notes, storage/transport requirements, treatment/safety notes, source/lab/certificate references, certificate-valid-until text, measurement timestamp and provenance. Passport state can be saved into an existing authorized staging organization workspace through the current membership/role and optimistic-revision service. | Certificate authenticity/expiry verification, controlled bilingual vocabulary, attachments, organization-specific resource schema, fine-grained field visibility and cross-company disclosure controls remain incomplete. |
+| 1. Industrial Resource Passport | PARTIALLY_IMPLEMENTED | Facility-linked record; owner, English/Arabic descriptions, source process/equipment, type, quantity/unit, numeric quality, temperature/pressure, availability window, seasonal notes, storage/transport requirements, treatment/safety notes, source/lab/certificate references, certificate-valid-until text, measurement timestamp and provenance. New/imported passport rows are limited to DRAFT/PENDING; a user cannot self-assert APPROVED/REJECTED. Passport state can be saved into an existing authorized staging organization workspace through the current membership/role and optimistic-revision service. | An authenticated approval workflow, certificate authenticity/expiry verification, controlled bilingual vocabulary, attachments, organization-specific resource schema, fine-grained field visibility and cross-company disclosure controls remain incomplete. |
 | 2. Resource Exchange Discovery | PARTIALLY_IMPLEMENTED | Explicitly entered demand and exchange-route candidates; no supplier availability is inferred. | No live marketplace, participant directory, confidential matching, treatment/logistics provider or customer opt-in network exists. |
 | 3. Cross-Company Process Compatibility Twin | PARTIALLY_IMPLEMENTED | Deterministic type/unit and buyer quality-limit screen; supports numeric quality, temperature and pressure limits; explicit lab/engineering hold statuses. | Full composition chemistry, thermodynamics, phase behavior, contamination interaction, equipment envelope, secondary waste and qualified process models remain absent. |
 | 4. Plant Resource Loss and Recovery | PARTIALLY_IMPLEMENTED | Same-unit input/output balance and suspected-discrepancy alert; never calls a discrepancy a confirmed loss. | Multi-stream source mapping, root-cause evidence, recovery project workflow, measured implementation results and persistent action ownership remain incomplete. |
@@ -69,6 +69,8 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 ### Resource passport
 
 The passport stores owner and source process/equipment text, English/Arabic descriptions, availability/seasonal notes, storage and transport requirements, laboratory and certificate references, and certificate-valid-until text. A reference is not a certificate authenticity or expiry verification.
+
+New and imported passports can be set only to DRAFT or PENDING. The current module deliberately rejects an imported or manually entered APPROVED/REJECTED status because there is no authenticated engineering/safety/environmental review workflow attached to passport state yet. Approval references elsewhere in the module are evidence fields only, not passport approval.
 
 ### Resource memory and revision history
 
@@ -153,6 +155,7 @@ This is an evidence-packaging foundation, not a model execution journal: input/s
 The new test file `tests/test_shoir_resource_intelligence.py` includes coverage for:
 
 - Passport field, provenance, timestamp, bilingual-description and numeric validation.
+- Fail-closed rejection of self-asserted APPROVED/REJECTED passport states.
 - Rejection of user-entered `LIVE` provenance; only a separately verified connector may use it.
 - Shared Shoir-IE OOXML preflight, package path/expansion checks and bounded workbook upload for Excel import.
 - Complete supplier interruption reports full unmet demand with no resource allocation.
