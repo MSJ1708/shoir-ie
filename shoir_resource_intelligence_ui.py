@@ -7,6 +7,7 @@ It does not claim multi-company shared tenancy or live industrial connectivity.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 from uuid import uuid4
 
@@ -31,6 +32,18 @@ from shoir_resource_intelligence import (
 
 
 STATE_PREFIX = "shoir_resource_intelligence_"
+
+
+def _finite_float(raw: Any, label: str, *, minimum: float | None = None) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{label} must be a finite number.") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"{label} must be a finite number.")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{label} must be at least {minimum}.")
+    return value
 
 
 def _json_object(raw: str, label: str) -> dict[str, Any]:
@@ -65,8 +78,9 @@ def _persist_workspace(st, user: str) -> tuple[bool, str]:
         from workspace_persistence import save_user_workspace
         if not save_user_workspace(user, st.session_state):
             return False, str(st.session_state.get("_workspace_save_error") or "Workspace save was not confirmed.")
-        mode = "managed per-user workspace" if durable_backend_configured() else "local fallback"
-        return True, f"Saved to the {mode}. Local fallback may not survive a hosted restart."
+        if durable_backend_configured():
+            return True, "Saved to the configured managed per-user workspace. Reload after signing in again to verify recovery."
+        return True, "Saved to the local workspace fallback. It may not survive a hosted restart."
     except Exception:
         return False, "Workspace save failed. The current data remains only in this session."
 
@@ -173,8 +187,12 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         if upload is not None and st.button("Validate imported rows", key="sri_validate_import"):
             try:
                 frame = pd.read_csv(upload)
+                if not facility:
+                    raise ValueError("Create a facility profile before importing resource passports.")
                 rows = frame.to_dict("records")
                 for row in rows:
+                    if str(row.get("facility_id") or "").strip().casefold() != str(facility.get("facility_id") or "").strip().casefold():
+                        raise ValueError("Every imported row must belong to the currently selected facility.")
                     if isinstance(row.get("quality"), str) and row["quality"].strip():
                         row["quality"] = json.loads(row["quality"])
                     elif not row.get("quality"):
@@ -338,7 +356,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                     demand = {
                         "demand_id": str(uuid4()), "name": demand_name,
                         "resource_type": new_demand_type,
-                        "required_quantity": float(required_quantity),
+                        "required_quantity": _finite_float(required_quantity, "Required quantity", minimum=0.000000001),
                         "unit": demand_unit_new,
                         "quality_limits": _json_object(demand_limits, "Quality limits"),
                         "provenance": "MANUAL",
@@ -366,7 +384,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                     try:
                         demand = {
                             "demand_id": str(uuid4()), "name": demand_name,
-                            "resource_type": new_demand_type, "required_quantity": float(required_quantity),
+                            "resource_type": new_demand_type, "required_quantity": _finite_float(required_quantity, "Required quantity", minimum=0.000000001),
                             "unit": demand_unit_new, "quality_limits": _json_object(demand_limits, "Quality limits"),
                             "provenance": "MANUAL",
                         }
@@ -397,12 +415,12 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 try:
                     route = {
                         "supply_id": supply_choice, "demand_id": demand_choice,
-                        "unit_cost": float(route_cost),
-                        "transport_cost_per_unit": float(transport_cost),
-                        "treatment_cost_per_unit": float(treatment_cost),
+                        "unit_cost": _finite_float(route_cost, "Resource unit cost", minimum=0),
+                        "transport_cost_per_unit": _finite_float(transport_cost, "Transport cost per unit", minimum=0),
+                        "treatment_cost_per_unit": _finite_float(treatment_cost, "Treatment cost per unit", minimum=0),
                     }
                     if route_capacity.strip():
-                        route["capacity"] = float(route_capacity)
+                        route["capacity"] = _finite_float(route_capacity, "Maximum route quantity", minimum=0.000000001)
                     if min(route["unit_cost"], route["transport_cost_per_unit"], route["treatment_cost_per_unit"]) < 0:
                         raise ValueError("Route costs cannot be negative.")
                     routes.append(route)
