@@ -874,8 +874,44 @@ def test_synthetic_end_to_end_resource_intelligence_engine_flow():
     assert "operational_authorization" in serialized
 
 
-def test_resource_ui_refuses_to_save_resource_data_into_shared_org_workspace():
+def test_resource_ui_shared_save_uses_existing_staging_org_access_and_revision_services(monkeypatch):
     from types import SimpleNamespace
+    import durable_account_store as account_store
+    import workspace_persistence
+    from shoir_resource_intelligence_ui import _persist_workspace
+
+    state = {
+        "shoir_active_organization_workspace": {
+            "organization_id": "ORG-B",
+            "organization_workspace_id": "WORKSPACE-B",
+        }
+    }
+    fake_streamlit = SimpleNamespace(session_state=state)
+    events = []
+    monkeypatch.setattr(account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+    monkeypatch.setattr(
+        account_store,
+        "validate_remote_organization_workspace_access",
+        lambda actor: events.append(("read_access", actor)) or True,
+    )
+    def save(actor, session_state):
+        events.append(("managed_save", actor, session_state["shoir_active_organization_workspace"]))
+        session_state["_workspace_org_revision"] = 8
+        return True
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", save)
+
+    ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
+    assert ok is True
+    assert "managed organization workspace (revision 8)" in message
+    assert events[0] == ("read_access", "synthetic-resource-user")
+    assert events[1][0] == "managed_save"
+
+
+def test_resource_ui_shared_save_fails_closed_when_membership_validation_fails(monkeypatch):
+    from types import SimpleNamespace
+    import durable_account_store as account_store
+    import workspace_persistence
     from shoir_resource_intelligence_ui import _persist_workspace
 
     fake_streamlit = SimpleNamespace(session_state={
@@ -884,9 +920,55 @@ def test_resource_ui_refuses_to_save_resource_data_into_shared_org_workspace():
             "organization_workspace_id": "WORKSPACE-B",
         }
     })
+    monkeypatch.setattr(account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+    monkeypatch.setattr(
+        account_store,
+        "validate_remote_organization_workspace_access",
+        lambda actor: (_ for _ in ()).throw(PermissionError("membership denied")),
+    )
+    saves = []
+    monkeypatch.setattr(
+        workspace_persistence,
+        "save_user_workspace",
+        lambda *args, **kwargs: saves.append(args) or True,
+    )
+
     ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
     assert ok is False
-    assert "No resource data was written" in message
+    assert "not authorized" in message
+    assert saves == []
+
+
+def test_resource_ui_shared_save_does_not_fall_back_when_managed_writer_role_is_denied(monkeypatch):
+    from types import SimpleNamespace
+    import durable_account_store as account_store
+    import workspace_persistence
+    from shoir_resource_intelligence_ui import _persist_workspace
+
+    state = {
+        "shoir_active_organization_workspace": {
+            "organization_id": "ORG-B",
+            "organization_workspace_id": "WORKSPACE-B",
+        },
+        "_workspace_save_error": "Organization role does not permit this workspace action.",
+    }
+    fake_streamlit = SimpleNamespace(session_state=state)
+    events = []
+    monkeypatch.setattr(account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(account_store, "edge_backend_configured", lambda: True)
+    monkeypatch.setattr(account_store, "validate_remote_organization_workspace_access", lambda actor: True)
+    monkeypatch.setattr(
+        workspace_persistence,
+        "save_user_workspace",
+        lambda *args, **kwargs: events.append("managed_edge_attempt") or False,
+    )
+    monkeypatch.setattr(account_store, "durable_backend_configured", lambda: events.append("forbidden_fallback") or True)
+
+    ok, message = _persist_workspace(fake_streamlit, "synthetic-resource-user")
+    assert ok is False
+    assert "Organization role does not permit" in message
+    assert events == ["managed_edge_attempt"]
 
 
 def test_quality_forecast_rejects_minimum_sample_setting_without_holdout_capacity():
