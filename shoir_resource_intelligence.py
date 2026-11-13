@@ -65,6 +65,8 @@ def _optional_text(value: Any) -> str:
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ResourceValidationError(f"{field} must be a numeric measurement, not a boolean.")
     try:
         result = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
