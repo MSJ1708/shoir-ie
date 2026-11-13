@@ -32,6 +32,7 @@ from shoir_resource_intelligence import (
     detect_resource_bottleneck,
     assess_infrastructure_route,
     calculate_resource_intensity_change,
+    monitor_resource_intensity_persistence,
     calculate_energy_balance,
     screen_waste_heat_recovery,
     optimize_single_contaminant_water_reuse,
@@ -712,6 +713,36 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 st.error(f"Intensity comparison failed: {exc}")
         if "resource_intensity" in results:
             _render_result(st, "Normalized intensity comparison", results["resource_intensity"])
+
+        st.divider()
+        st.markdown("**Resource performance persistence monitor**")
+        st.caption("Compare repeated dated resource-use measurements with the declared production-normalized baseline. This flags deviations; it does not determine cause or verify savings.")
+        persistence_observations = st.text_area(
+            "Dated usage and production observations JSON",
+            value="[]",
+            key="sri_persistence_observations",
+            height=110,
+            help='Example: [{"timestamp":"2026-11-01T00:00:00+03:00","usage":900,"production":100},{"timestamp":"2026-11-08T00:00:00+03:00","usage":950,"production":100}]',
+        )
+        p1, p2 = st.columns(2)
+        degradation_threshold = p1.text_input("Degradation alert threshold (%)", value="5.0", key="sri_persistence_threshold")
+        required_periods = p2.number_input("Consecutive periods to alert", min_value=1, max_value=24, value=2, step=1, key="sri_persistence_periods")
+        if st.button("Monitor resource performance persistence", key="sri_run_persistence_monitor"):
+            try:
+                results["performance_persistence"] = monitor_resource_intensity_persistence(
+                    base_usage,
+                    base_output,
+                    _json_array(persistence_observations, "Performance observations"),
+                    usage_unit=intensity_usage_unit,
+                    production_unit=intensity_output_unit,
+                    degradation_threshold_percent=degradation_threshold,
+                    required_consecutive_periods=int(required_periods),
+                )
+                st.session_state[STATE_PREFIX + "results"] = results
+            except Exception as exc:
+                st.error(f"Performance persistence monitoring failed: {exc}")
+        if "performance_persistence" in results:
+            _render_result(st, "Performance persistence result", results["performance_persistence"])
 
     with tabs[8]:
         st.markdown("#### Quality and supply history")
