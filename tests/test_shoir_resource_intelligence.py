@@ -381,8 +381,8 @@ def test_resource_bottleneck_identifies_the_smallest_capacity_constraint():
         75,
         unit="m3/day",
         capacity_constraints=[
-            {"constraint": "Treatment", "capacity": 90, "unit": "m3/day"},
-            {"constraint": "Storage withdrawal", "capacity": 60, "unit": "m3/day"},
+            {"constraint": "Treatment", "capacity": 90, "unit": "m3/day", "provenance": "SYNTHETIC"},
+            {"constraint": "Storage withdrawal", "capacity": 60, "unit": "m3/day", "provenance": "SYNTHETIC"},
         ],
     )
     assert result["status"] == "BOTTLENECK"
@@ -407,17 +407,17 @@ def test_infrastructure_route_requires_connection_evidence_capacity_and_approval
     unknown = assess_infrastructure_route({"connection_confirmed": None})
     assert unknown["status"] == "INSUFFICIENT_DATA"
     short = assess_infrastructure_route({
-        "connection_confirmed": True, "distance_km": 5, "capacity": 20,
+        "connection_confirmed": True, "provenance": "SYNTHETIC", "distance_km": 5, "capacity": 20,
         "required_quantity": 30, "unit": "m3/day",
     })
     assert short["status"] == "INFEASIBLE_CAPACITY"
     pending = assess_infrastructure_route({
-        "connection_confirmed": True, "distance_km": 5, "capacity": 40,
+        "connection_confirmed": True, "provenance": "SYNTHETIC", "distance_km": 5, "capacity": 40,
         "required_quantity": 30, "unit": "m3/day",
     })
     assert pending["status"] == "APPROVAL_PENDING"
     feasible = assess_infrastructure_route({
-        "connection_confirmed": True, "distance_km": 5, "capacity": 40,
+        "connection_confirmed": True, "provenance": "SYNTHETIC", "distance_km": 5, "capacity": 40,
         "required_quantity": 30, "unit": "m3/day",
         "route_access_evidence": "SURVEY-1",
         "permit_reference": "PERMIT-1",
