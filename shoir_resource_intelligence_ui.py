@@ -545,6 +545,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         "resource_type": demand_type,
                         "unit": demand_unit,
                         "quality_limits": _json_object(limits_text, "Buyer quality limits"),
+                        "provenance": "MANUAL",
                     }
                     result = assess_resource_compatibility(
                         supply, demand,
@@ -568,7 +569,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 )
                 substitute_requirement = st.text_area(
                     "Buyer / process substitution requirements JSON",
-                    value='{"resource_type":"Water","unit":"m3/day","quality_limits":{"pH":{"min":6.5,"max":8.5}}}',
+                    value='{"resource_type":"Water","unit":"m3/day","quality_limits":{"pH":{"min":6.5,"max":8.5}},"provenance":"MANUAL"}',
                     key="sri_substitute_requirement",
                     height=90,
                 )
