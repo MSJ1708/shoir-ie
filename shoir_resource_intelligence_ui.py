@@ -712,11 +712,18 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         if passports:
             shock_supplier = st.selectbox("Supplier resource affected", [str(x["resource_id"]) for x in passports], key="sri_shock_supplier")
             fraction = st.slider("Supply reduction", min_value=0.0, max_value=1.0, value=0.25, step=0.05, key="sri_shock_fraction")
+            supplier_shortage_penalty = st.text_input(
+                "Scenario shortage penalty per unit (explicit assumption)",
+                key="sri_supplier_shortage_penalty",
+            )
             if st.button("Simulate supply reduction", key="sri_run_shock"):
                 try:
                     result = simulate_supplier_disruption(
                         passports, demands, routes,
                         supplier_id=shock_supplier, supply_reduction_fraction=fraction,
+                        shortage_penalty_per_unit=_finite_float(
+                            supplier_shortage_penalty, "Scenario shortage penalty", minimum=0
+                        ),
                     )
                     results["disruption"] = result
                     st.session_state[STATE_PREFIX + "results"] = results
@@ -747,6 +754,10 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 "The engine re-optimizes a one-period network and reports shortages without inventing recovery time or probabilities."
             )
             scenario_name = st.text_input("Scenario name", key="sri_network_scenario_name")
+            network_shortage_penalty = st.text_input(
+                "Scenario shortage penalty per unit (explicit assumption)",
+                key="sri_network_shortage_penalty",
+            )
             scenario_shocks = st.text_area(
                 "Scenario shocks JSON",
                 value="[]",
@@ -768,6 +779,9 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         shocks,
                         scenario_id=str(uuid4()),
                         scenario_name=scenario_name,
+                        shortage_penalty_per_unit=_finite_float(
+                            network_shortage_penalty, "Scenario shortage penalty", minimum=0
+                        ),
                     )
                     scenario_runs = results.get("resilience_scenarios", [])
                     if not isinstance(scenario_runs, list):
