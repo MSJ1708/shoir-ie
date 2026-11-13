@@ -238,7 +238,7 @@ def test_dependency_propagation_is_downstream_and_does_not_claim_causality():
 def test_quality_forecast_refuses_insufficient_history_and_reports_backtest_when_available():
     assert forecast_resource_quality([])["status"] == "INSUFFICIENT_DATA"
     observations = [
-        {"timestamp": f"2026-01-{day:02d}T00:00:00+00:00", "value": 7.0 + day * 0.01}
+        {"timestamp": f"2026-01-{day:02d}T00:00:00+00:00", "value": 7.0 + day * 0.01, "provenance": "SYNTHETIC"}
         for day in range(1, 26)
     ]
     result = forecast_resource_quality(observations)
@@ -249,7 +249,7 @@ def test_quality_forecast_refuses_insufficient_history_and_reports_backtest_when
 
 def test_supply_reliability_reports_empirical_history_not_future_probability():
     history = [
-        {"delivered_quantity": 100, "required_quantity": 100, "quality_pass": True}
+        {"delivered_quantity": 100, "required_quantity": 100, "quality_pass": True, "provenance": "SYNTHETIC"}
         for _ in range(20)
     ]
     result = calculate_supply_reliability(history)
