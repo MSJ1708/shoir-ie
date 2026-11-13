@@ -277,6 +277,8 @@ if search.strip():
         _resource_row = available.loc[available["Module"] == "Industrial Resource Intelligence"]
         if not _resource_row.empty and "Industrial Resource Intelligence" not in set(filtered["Module"]):
             filtered = pd.concat([filtered, _resource_row], ignore_index=True).drop_duplicates(subset=["Module"])
+        if not tier_allows(RAW_TIER, "Enterprise"):
+            st.sidebar.warning("🔒 Industrial Resource Intelligence requires the Enterprise capability level.")
 
 labels = filtered["Module"].tolist()
 if not labels:
