@@ -898,6 +898,211 @@ def assess_infrastructure_route(route: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def optimize_single_contaminant_water_reuse(
+    sources: Sequence[Mapping[str, Any]],
+    sinks: Sequence[Mapping[str, Any]],
+    connections: Sequence[Mapping[str, Any]],
+    *,
+    contaminant: str,
+    concentration_unit: str,
+    flow_unit: str,
+) -> dict[str, Any]:
+    """Maximize preliminary water reuse with one blended-contaminant limit.
+
+    Every physical source-to-sink connection must be explicitly entered and
+    marked as user-confirmed with an evidence reference. The model covers one
+    contaminant only and does not model treatment, pathogens, chemistry or permits.
+    """
+    contaminant_name = _text(contaminant, "contaminant")
+    concentration_label = _text(concentration_unit, "concentration_unit")
+    flow_label = _text(flow_unit, "flow_unit")
+    if not sources or not sinks:
+        raise ResourceValidationError("At least one water source and one demand sink are required.")
+    source_map: dict[str, dict[str, Any]] = {}
+    sink_map: dict[str, dict[str, Any]] = {}
+    for index, source in enumerate(sources):
+        source_id = _text(source.get("source_id"), f"sources[{index}].source_id")
+        if source_id in source_map:
+            raise ResourceValidationError(f"Duplicate source_id: {source_id}.")
+        source_unit = _text(source.get("flow_unit"), f"sources[{index}].flow_unit")
+        quality_unit = _text(source.get("concentration_unit"), f"sources[{index}].concentration_unit")
+        if source_unit.casefold() != flow_label.casefold():
+            raise ResourceValidationError(f"Source {source_id} flow unit does not match {flow_label}.")
+        if quality_unit.casefold() != concentration_label.casefold():
+            raise ResourceValidationError(f"Source {source_id} concentration unit does not match {concentration_label}.")
+        source_map[source_id] = {
+            "source_id": source_id,
+            "available_flow": _number(source.get("available_flow"), f"sources[{index}].available_flow", minimum=0),
+            "concentration": _number(source.get("concentration"), f"sources[{index}].concentration", minimum=0),
+        }
+    for index, sink in enumerate(sinks):
+        sink_id = _text(sink.get("sink_id"), f"sinks[{index}].sink_id")
+        if sink_id in sink_map:
+            raise ResourceValidationError(f"Duplicate sink_id: {sink_id}.")
+        sink_unit = _text(sink.get("flow_unit"), f"sinks[{index}].flow_unit")
+        quality_unit = _text(sink.get("concentration_unit"), f"sinks[{index}].concentration_unit")
+        if sink_unit.casefold() != flow_label.casefold():
+            raise ResourceValidationError(f"Sink {sink_id} flow unit does not match {flow_label}.")
+        if quality_unit.casefold() != concentration_label.casefold():
+            raise ResourceValidationError(f"Sink {sink_id} concentration unit does not match {concentration_label}.")
+        demand = _number(sink.get("required_flow"), f"sinks[{index}].required_flow", minimum=0)
+        maximum = _number(sink.get("maximum_concentration"), f"sinks[{index}].maximum_concentration", minimum=0)
+        sink_map[sink_id] = {
+            "sink_id": sink_id,
+            "required_flow": demand,
+            "maximum_concentration": maximum,
+        }
+
+    eligible_connections: list[dict[str, Any]] = []
+    rejected_connections: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for index, connection in enumerate(connections):
+        source_id = _text(connection.get("source_id"), f"connections[{index}].source_id")
+        sink_id = _text(connection.get("sink_id"), f"connections[{index}].sink_id")
+        if source_id not in source_map or sink_id not in sink_map:
+            raise ResourceValidationError(f"Connection references unknown source or sink: {source_id} -> {sink_id}.")
+        if (source_id, sink_id) in seen:
+            raise ResourceValidationError(f"Duplicate water reuse connection: {source_id} -> {sink_id}.")
+        seen.add((source_id, sink_id))
+        evidence = _optional_text(connection.get("connection_evidence_reference"))
+        if connection.get("connection_confirmed") is not True or not evidence:
+            rejected_connections.append({
+                "source_id": source_id,
+                "sink_id": sink_id,
+                "reason": "A user-confirmed physical connection and evidence reference are required.",
+            })
+            continue
+        capacity = _number(
+            connection.get("capacity", min(
+                source_map[source_id]["available_flow"], sink_map[sink_id]["required_flow"]
+            )),
+            f"connections[{index}].capacity",
+            minimum=0,
+        )
+        if capacity <= 0:
+            continue
+        eligible_connections.append({
+            "source_id": source_id,
+            "sink_id": sink_id,
+            "capacity": min(
+                capacity,
+                source_map[source_id]["available_flow"],
+                sink_map[sink_id]["required_flow"],
+            ),
+            "connection_evidence_reference": evidence,
+        })
+
+    if not eligible_connections:
+        return {
+            "status": "NO_CONFIRMED_REUSE_CONNECTION",
+            "contaminant": contaminant_name,
+            "allocations": [],
+            "total_reuse_flow": 0.0,
+            "rejected_connections": rejected_connections,
+            "operational_authorization": False,
+        }
+
+    n_edges = len(eligible_connections)
+    objective = -np.ones(n_edges, dtype=float)
+    a_ub: list[list[float]] = []
+    b_ub: list[float] = []
+    source_ids = list(source_map)
+    sink_ids = list(sink_map)
+    for source_id in source_ids:
+        a_ub.append([1.0 if edge["source_id"] == source_id else 0.0 for edge in eligible_connections])
+        b_ub.append(source_map[source_id]["available_flow"])
+    for sink_id in sink_ids:
+        a_ub.append([1.0 if edge["sink_id"] == sink_id else 0.0 for edge in eligible_connections])
+        b_ub.append(sink_map[sink_id]["required_flow"])
+        a_ub.append([
+            source_map[edge["source_id"]]["concentration"] - sink_map[sink_id]["maximum_concentration"]
+            if edge["sink_id"] == sink_id else 0.0
+            for edge in eligible_connections
+        ])
+        b_ub.append(0.0)
+
+    solved = linprog(
+        c=objective,
+        A_ub=np.asarray(a_ub, dtype=float),
+        b_ub=np.asarray(b_ub, dtype=float),
+        bounds=[(0, edge["capacity"]) for edge in eligible_connections],
+        method="highs",
+    )
+    if not solved.success:
+        return {
+            "status": "OPTIMIZATION_FAILED",
+            "solver_message": str(solved.message),
+            "allocations": [],
+            "total_reuse_flow": 0.0,
+            "rejected_connections": rejected_connections,
+            "operational_authorization": False,
+        }
+
+    allocations: list[dict[str, Any]] = []
+    sink_flow: dict[str, float] = {sink_id: 0.0 for sink_id in sink_ids}
+    sink_contaminant_load: dict[str, float] = {sink_id: 0.0 for sink_id in sink_ids}
+    source_flow: dict[str, float] = {source_id: 0.0 for source_id in source_ids}
+    for index, edge in enumerate(eligible_connections):
+        flow = float(solved.x[index])
+        if flow <= 1e-8:
+            continue
+        concentration = source_map[edge["source_id"]]["concentration"]
+        sink_id = edge["sink_id"]
+        source_flow[edge["source_id"]] += flow
+        sink_flow[sink_id] += flow
+        sink_contaminant_load[sink_id] += flow * concentration
+        allocations.append({
+            **edge,
+            "allocated_flow": flow,
+            "source_concentration": concentration,
+        })
+
+    sink_quality: list[dict[str, Any]] = []
+    quality_violations = []
+    for sink_id, flow in sink_flow.items():
+        if flow <= 1e-8:
+            continue
+        blended = sink_contaminant_load[sink_id] / flow
+        maximum = sink_map[sink_id]["maximum_concentration"]
+        if blended > maximum + 1e-7:
+            quality_violations.append(sink_id)
+        sink_quality.append({
+            "sink_id": sink_id,
+            "allocated_flow": flow,
+            "blended_concentration": blended,
+            "maximum_concentration": maximum,
+            "concentration_unit": concentration_label,
+        })
+    total_flow = float(sum(sink_flow.values()))
+    if quality_violations:
+        status = "VALIDATION_FAILED"
+    elif total_flow <= 1e-8:
+        status = "NO_QUALIFIED_REUSE"
+    else:
+        status = "PRELIMINARY_SINGLE_CONTAMINANT_REUSE_ALLOCATION"
+    return {
+        "status": status,
+        "contaminant": contaminant_name,
+        "concentration_unit": concentration_label,
+        "flow_unit": flow_label,
+        "total_reuse_flow": total_flow,
+        "allocations": allocations,
+        "source_flow_totals": source_flow,
+        "sink_quality_checks": sink_quality,
+        "rejected_connections": rejected_connections,
+        "solver": "scipy.optimize.linprog(method=highs)",
+        "quality_violations": quality_violations,
+        "physical_connection_confirmation_is_user_asserted": True,
+        "operational_authorization": False,
+        "limitations": [
+            "One dissolved contaminant and perfect mixing only.",
+            "No treatment unit, secondary waste, microbial, chemical interaction or process-specific requirement is modeled.",
+            "Connection evidence is user-entered and not independently checked.",
+            "This is not a multi-contaminant water-pinch study or authorization to reuse water.",
+        ],
+    }
+
+
 def calculate_energy_balance(
     energy_input_kwh: float,
     useful_energy_output_kwh: float,
@@ -1225,6 +1430,7 @@ __all__ = [
     "rank_resource_cascade", "detect_resource_bottleneck",
     "assess_infrastructure_route", "calculate_resource_intensity_change",
     "calculate_energy_balance", "screen_waste_heat_recovery",
+    "optimize_single_contaminant_water_reuse",
     "validate_exchange_agreement", "assess_exchange_delivery",
     "validate_import_rows",
 ]
