@@ -295,7 +295,12 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             _render_result(st, "Import validation result", imports)
             if imports.get("accepted") and st.button("Add valid rows to resource passports", key="sri_add_imported"):
                 existing_ids = {str(item.get("resource_id")) for item in passports}
-                additions = [item for item in imports["accepted"] if str(item.get("resource_id")) not in existing_ids]
+                additions = []
+                for item in imports["accepted"]:
+                    resource_id = str(item.get("resource_id"))
+                    if resource_id not in existing_ids:
+                        additions.append(item)
+                        existing_ids.add(resource_id)
                 passports = passports + additions
                 for item in additions:
                     passport_history = append_resource_passport_revision(passport_history, item, actor=actor)
