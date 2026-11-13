@@ -630,3 +630,61 @@ def test_delivery_assurance_reports_shortage_and_missing_evidence_without_contra
     assert "SHORTAGE" in result["deviations"]
     assert "DELIVERY_EVIDENCE_MISSING" in result["deviations"]
     assert result["contractual_effect"] == "NOT_CALCULATED"
+
+
+def test_energy_balance_reports_reconciliation_and_never_confirms_a_loss():
+    from shoir_resource_intelligence import calculate_energy_balance
+
+    result = calculate_energy_balance(
+        1000, 700, 200, 50, tolerance_percent=1,
+    )
+    assert result["status"] == "ANOMALY_SUSPECTED"
+    assert result["unreconciled_energy_kwh"] == pytest.approx(50)
+    assert result["useful_energy_ratio_percent"] == pytest.approx(70)
+    assert "not proof" in result["interpretation"]
+
+
+def test_energy_balance_within_tolerance_is_reported_without_a_loss_claim():
+    from shoir_resource_intelligence import calculate_energy_balance
+
+    result = calculate_energy_balance(
+        1000, 700, 200, 95, tolerance_percent=1,
+    )
+    assert result["status"] == "WITHIN_TOLERANCE"
+    assert result["unreconciled_percent"] == pytest.approx(0.5)
+
+
+def test_waste_heat_screen_requires_temperature_approach_and_never_claims_recovery():
+    from shoir_resource_intelligence import screen_waste_heat_recovery
+
+    passed = screen_waste_heat_recovery(
+        150, 80, 500,
+        minimum_approach_temperature_c=15,
+        annual_operating_hours=4000,
+        energy_value_per_kwh=0.2,
+    )
+    assert passed["status"] == "TEMPERATURE_APPROACH_PASSED_REQUIRES_HX_DESIGN"
+    assert passed["temperature_margin_c"] == pytest.approx(55)
+    assert passed["screened_annual_thermal_energy_kwh"] == pytest.approx(2_000_000)
+    assert passed["verified_recovered_energy_kwh"] is None
+    assert passed["verified_savings"] is None
+
+    failed = screen_waste_heat_recovery(
+        90, 80, 500,
+        minimum_approach_temperature_c=15,
+    )
+    assert failed["status"] == "INFEASIBLE_TEMPERATURE_APPROACH"
+
+
+def test_exchange_agreement_requires_valid_quality_bounds_and_approval_reference_shape():
+    from shoir_resource_intelligence import validate_exchange_agreement
+
+    bad = _exchange_agreement_payload()
+    bad["quality_limits"] = {"pH": {"min": 9, "max": 7}}
+    with pytest.raises(ResourceValidationError, match="minimum exceeds maximum"):
+        validate_exchange_agreement(bad)
+
+    bad = _exchange_agreement_payload()
+    bad["approval_references"] = "not-an-object"
+    with pytest.raises(ResourceValidationError, match="approval_references"):
+        validate_exchange_agreement(bad)
