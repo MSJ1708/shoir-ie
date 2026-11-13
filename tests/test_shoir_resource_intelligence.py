@@ -85,7 +85,7 @@ def test_resource_balance_reconciles_same_unit_and_exposes_signed_difference():
 
 
 def test_resource_loss_screen_never_confirms_a_loss_from_a_balance_anomaly():
-    result = detect_resource_loss(100, 80, unit="kg", evidence_provenance="LIVE")
+    result = detect_resource_loss(100, 80, unit="kg", evidence_provenance="IMPORTED")
     assert result["finding_type"] == "SUSPECTED_RESOURCE_LOSS"
     assert result["confirmation_status"] == "NOT_CONFIRMED"
 
@@ -435,3 +435,26 @@ def test_resource_passport_preserves_owner_and_bilingual_descriptions():
     assert passport["description_ar"] == "مياه معالجة"
     assert passport["source_equipment"] == "HX-100"
     assert passport["laboratory_evidence_reference"] == "LAB-12"
+
+
+def test_manual_resource_passports_cannot_claim_live_without_verified_connector():
+    with pytest.raises(ResourceValidationError, match="LIVE provenance is reserved"):
+        validate_resource_passport({
+            "facility_id": "FAC-A", "name": "Water", "resource_type": "Water",
+            "available_quantity": 10, "unit": "m3/day", "provenance": "LIVE",
+        })
+
+
+def test_loss_screen_does_not_accept_live_as_user_entered_provenance():
+    with pytest.raises(ResourceValidationError, match="LIVE requires a verified connector"):
+        detect_resource_loss(100, 90, unit="m3/day", evidence_provenance="LIVE")
+
+
+def test_complete_supplier_shutdown_returns_full_unmet_demand_not_false_infeasibility():
+    result = simulate_supplier_disruption(
+        [_supply(quantity=100)], [_demand(quantity=80)], [_route()],
+        supplier_id="S1", supply_reduction_fraction=1.0,
+    )
+    assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
+    assert result["allocation_result"]["allocations"] == []
+    assert result["allocation_result"]["unmet_demand"][0]["quantity"] == pytest.approx(80)
