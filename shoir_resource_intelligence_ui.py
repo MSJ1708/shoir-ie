@@ -14,9 +14,7 @@ from uuid import uuid4
 import pandas as pd
 
 from shoir_resource_intelligence import (
-    PROVENANCE_VALUES,
     USER_INPUT_PROVENANCE_VALUES,
-    ResourceValidationError,
     validate_resource_passport,
     validate_import_rows,
     detect_resource_loss,
