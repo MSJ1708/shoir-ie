@@ -529,6 +529,21 @@ def optimize_resource_network(
         route_currencies.add(route_currency)
         sid = _text(raw.get("supply_id"), "route.supply_id")
         did = _text(raw.get("demand_id"), "route.demand_id")
+        connection_confirmed = raw.get("connection_confirmed")
+        if not isinstance(connection_confirmed, bool):
+            raise ResourceValidationError("route.connection_confirmed must be an explicit boolean.")
+        if not connection_confirmed:
+            rejected_routes.append({
+                "supply_id": sid,
+                "demand_id": did,
+                "status": "BLOCKED_NO_CONFIRMED_PHYSICAL_ROUTE",
+                "reason": "No physical route was confirmed; the optimizer will not assume a connection.",
+            })
+            continue
+        connection_evidence = _text(
+            raw.get("connection_evidence_reference"),
+            "route.connection_evidence_reference",
+        )
         if sid not in supply_by_id or did not in demand_by_id:
             raise ResourceValidationError(f"Route references unknown supply or demand: {sid} -> {did}.")
         if (sid, did) in seen_pairs:
@@ -555,7 +570,10 @@ def optimize_resource_network(
         edges.append({
             "supply_id": sid, "demand_id": did, "unit_cost": cost,
             "currency": route_currency,
-            "capacity": capacity, "compatibility": compatibility["status"],
+            "capacity": capacity,
+            "connection_confirmed": connection_confirmed,
+            "connection_evidence_reference": connection_evidence,
+            "compatibility": compatibility["status"],
         })
 
     if len(route_currencies) > 1:
@@ -685,6 +703,7 @@ def optimize_resource_network(
             "Single-period, deterministic allocation.",
             "Entered unit costs are additive and expressed per allocated quantity.",
             "No implicit unit conversion, pipeline capacity, production schedule or permit approval is inferred.",
+            "Physical connection confirmation and its evidence reference are caller-asserted and have not been independently checked.",
             "Compatibility is a screening gate, not a complete process engineering or safety certification.",
         ],
     }
