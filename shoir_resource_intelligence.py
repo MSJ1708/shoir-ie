@@ -16,6 +16,7 @@ import numpy as np
 from scipy.optimize import linprog
 
 PROVENANCE_VALUES = ("LIVE", "IMPORTED", "MANUAL", "SYNTHETIC", "SIMULATED", "MOCK", "STALE")
+USER_INPUT_PROVENANCE_VALUES = ("IMPORTED", "MANUAL", "SYNTHETIC", "SIMULATED", "MOCK", "STALE")
 COMPATIBILITY_STATUSES = (
     "TECHNICALLY_COMPATIBLE",
     "COMPATIBLE_SUBJECT_TO_TREATMENT",
@@ -76,6 +77,8 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
     provenance = _text(payload.get("provenance"), "provenance").upper()
     if provenance not in PROVENANCE_VALUES:
         raise ResourceValidationError(f"provenance must be one of {', '.join(PROVENANCE_VALUES)}.")
+    if provenance == "LIVE":
+        raise ResourceValidationError("LIVE provenance is reserved for a separately verified connector. Manual and imported records cannot claim LIVE.")
     quantity = _number(payload.get("available_quantity"), "available_quantity", minimum=0)
     if quantity <= 0:
         raise ResourceValidationError("available_quantity must be greater than zero.")
@@ -276,8 +279,8 @@ def detect_resource_loss(
         input_quantity, accounted_quantity, unit=unit, tolerance_percent=tolerance_percent
     )
     provenance = _text(evidence_provenance, "evidence_provenance").upper()
-    if provenance not in PROVENANCE_VALUES:
-        raise ResourceValidationError("Unknown evidence provenance.")
+    if provenance not in USER_INPUT_PROVENANCE_VALUES:
+        raise ResourceValidationError("Evidence provenance must be imported, manual, synthetic, simulated, mock or stale. LIVE requires a verified connector.")
     result.update({
         "finding_type": (
             "SUSPECTED_RESOURCE_LOSS" if result["unreconciled_quantity"] > 0
@@ -361,14 +364,26 @@ def optimize_resource_network(
         })
 
     if not edges:
+        unmet_demand = [
+            {"demand_id": d["demand_id"], "quantity": d["required_quantity"], "unit": d["unit"]}
+            for d in demand_by_id.values()
+        ]
+        if allow_shortage:
+            penalty = _number(shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0)
+            return {
+                "status": "FEASIBLE_WITH_SHORTAGE",
+                "reason": "No route passed engineering screening or no positive supply capacity remained; demand is recorded as unmet rather than inventing an allocation.",
+                "solver": "CLOSED_FORM_NO_FEASIBLE_ROUTE",
+                "allocations": [], "rejected_routes": rejected_routes,
+                "objective_cost": penalty * sum(float(d["required_quantity"]) for d in demand_by_id.values()),
+                "unmet_demand": unmet_demand,
+                "assumptions": ["No eligible supply route was available.", "No resource was allocated.", "Shortage penalty is a configured scenario cost, not a measured financial loss."],
+            }
         return {
             "status": "INFEASIBLE",
             "reason": "No route passed the independent type, unit and quality screening gate.",
             "allocations": [], "rejected_routes": rejected_routes,
-            "objective_cost": None, "unmet_demand": [
-                {"demand_id": d["demand_id"], "quantity": d["required_quantity"], "unit": d["unit"]}
-                for d in demand_by_id.values()
-            ],
+            "objective_cost": None, "unmet_demand": unmet_demand,
         }
 
     n_edges, n_demands = len(edges), len(demand_by_id)
@@ -903,7 +918,7 @@ def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 __all__ = [
-    "PROVENANCE_VALUES", "COMPATIBILITY_STATUSES", "CASCADE_ORDER",
+    "PROVENANCE_VALUES", "USER_INPUT_PROVENANCE_VALUES", "COMPATIBILITY_STATUSES", "CASCADE_ORDER",
     "ResourceValidationError", "validate_resource_passport",
     "assess_resource_compatibility", "calculate_resource_balance",
     "detect_resource_loss", "optimize_resource_network",
