@@ -420,7 +420,6 @@ def optimize_resource_network(
         }
 
     n_edges, n_demands = len(edges), len(demand_by_id)
-    n_vars = n_edges + (n_demands if allow_shortage else 0)
     objective = [edge["unit_cost"] for edge in edges]
     if allow_shortage:
         penalty = _number(shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0)
