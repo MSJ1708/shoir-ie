@@ -62,7 +62,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | Uncertainty-aware optimization | NOT_IMPLEMENTED | Forecast intervals are displayed separately; they are not used in an optimizer. | Needs data-backed uncertainty distributions/scenarios, robust/stochastic formulations and validation. |
 | Investment prioritization | PARTIALLY_IMPLEMENTED | Explicit 1–5 feasibility, resource-impact, reliability, confidence, risk and implementation-difficulty scores are combined with caller-visible weights. Entered CAPEX, gross annual benefit and OPEX produce a simple payback ratio; safety-rejected projects remain blocked and sort below other projects. | No NPV/IRR, discount rate, tax, ramp-up, portfolio constraints, uncertainty, verified cash flow, approved scoring policy or investment authorization. |
 | Performance persistence monitor | PARTIALLY_IMPLEMENTED | Dated usage/production observations are normalized against a declared baseline; consecutive periods beyond a configured degradation threshold trigger PERSISTENCE_ALERT. | No continuous sensor feed, operating-condition/product-mix adjustment, degradation causality, project implementation register, managed scheduled monitoring or independently verified savings lifecycle. |
-| Engineering knowledge/model assurance | PARTIALLY_IMPLEMENTED | Calculation methods are deterministic, inspectable and covered by tests; limits and assumptions are returned in outputs. | No versioned standards library, calculation-method approval register, qualified references or full model registry integration. |
+| Engineering knowledge/model assurance | PARTIALLY_IMPLEMENTED | Versioned deterministic model registry exposes method, formula/rule, input/output units, assumptions and limitations; Model Assurance can package caller-entered inputs/source refs with output snapshots, actor/time, provenance and SHA-256 hashes and verify snapshot/metadata integrity. | No controlled standards/regulatory source library, approved calculation-method register, independent original-run capture, qualified reference validation or independent model assurance is connected. |
 
 ## 4. Engineering method boundaries
 
@@ -142,6 +142,12 @@ This code path reuses the existing organization workspace infrastructure; it doe
 - Explore Modules receives the platform catalogue entry and an Enterprise-disabled launch control; the launch routes into the existing Workbench.
 - Renderer-level and UI-level Enterprise checks are present. Existing Starter accounts do not gain access through search or a direct renderer call.
 
+### Engineering knowledge and model assurance
+
+A versioned method registry now records the calculation method, formula/rule, input/output units, assumptions and limitations for the main deterministic engines. A user can select a completed calculation in the Model Assurance tab, enter the input snapshot and source references, and create a hash-checkable evidence envelope containing the registered model version, actor/time, facility, provenance, input/output snapshots and SHA-256 digests. The envelope verifier recomputes input, output and metadata hashes and flags tampering.
+
+This is an evidence-packaging foundation, not a model execution journal: input/source context is entered by the user and the service explicitly records that source-to-run linkage is caller-asserted. Hash checks do not prove source authenticity, timestamp authority, reviewer qualification or independent verification. Credentials and token-like input keys are excluded from the snapshot. Assurance records are included in the workspace evidence JSON export.
+
 ## 7. New tests and exact-head validation
 
 The new test file `tests/test_shoir_resource_intelligence.py` includes coverage for:
@@ -164,6 +170,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Exchange agreement draft approval-reference states and delivery quantity/quality/certificate evidence checks.
 - Passport revision hash-chain creation, continuity verification, tamper detection and refusal to extend a broken chain.
 - Resource module shared-workspace save authorization, membership denial, write-role denial and no personal/local fallback.
+- Versioned model registry, assurance snapshot creation, secret-key scrubbing, input/output/metadata tamper detection and source-to-run trust-boundary tests.
 - Substitute candidate rejection/qualification evidence boundaries.
 - Factor-unit/reference/version validation and net CO2e calculation including added treatment, transport, chemical and residual-waste burdens.
 - Explicit weighted project ranking, simple payback arithmetic and safety-rejected project blocking.
