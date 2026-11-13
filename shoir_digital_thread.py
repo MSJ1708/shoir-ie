@@ -298,7 +298,7 @@ def _upsert_node(
         (idx for idx, existing in enumerate(nodes) if existing.get("node_id") == node_id),
         None,
     )
-    if existing_index is None and str(source or "").strip():
+    if existing_index is None and not str(identity_key or "").strip() and str(source or "").strip():
         source_matches = [
             idx for idx, existing in enumerate(nodes)
             if existing.get("node_type") == node_type
