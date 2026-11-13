@@ -736,6 +736,145 @@ def rank_resource_cascade(opportunities: Sequence[Mapping[str, Any]]) -> list[di
     return normalized
 
 
+def detect_resource_bottleneck(
+    required_quantity: float,
+    *,
+    unit: str,
+    capacity_constraints: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Identify the tightest declared capacity constraint for a single resource."""
+    required = _number(required_quantity, "required_quantity", minimum=0)
+    if required <= 0:
+        raise ResourceValidationError("required_quantity must be greater than zero.")
+    unit_label = _text(unit, "unit")
+    if not capacity_constraints:
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "reason": "At least one measured or configured capacity constraint is required.",
+            "bottleneck": None,
+        }
+    normalized = []
+    for index, item in enumerate(capacity_constraints):
+        name = _text(item.get("constraint"), f"capacity_constraints[{index}].constraint")
+        constraint_unit = _text(item.get("unit"), f"capacity_constraints[{index}].unit")
+        if constraint_unit.casefold() != unit_label.casefold():
+            raise ResourceValidationError(
+                f"Capacity constraint {name} uses {constraint_unit}; expected {unit_label}. No implicit conversion is performed."
+            )
+        capacity = _number(item.get("capacity"), f"capacity_constraints[{index}].capacity", minimum=0)
+        normalized.append({"constraint": name, "capacity": capacity, "unit": constraint_unit})
+    limiting = min(normalized, key=lambda item: (item["capacity"], item["constraint"].casefold()))
+    shortfall = max(0.0, required - limiting["capacity"])
+    return {
+        "status": "BOTTLENECK" if shortfall > 1e-9 else "NO_CAPACITY_SHORTFALL",
+        "required_quantity": required,
+        "unit": unit_label,
+        "limiting_constraint": limiting,
+        "shortfall_quantity": shortfall,
+        "all_constraints": normalized,
+        "interpretation": (
+            "The limiting entered capacity is below the required quantity."
+            if shortfall > 1e-9 else
+            "All entered capacities meet the required quantity; unentered constraints remain unknown."
+        ),
+    }
+
+
+def assess_infrastructure_route(route: Mapping[str, Any]) -> dict[str, Any]:
+    """Screen an explicitly declared route; never infers a connection from proximity."""
+    if not isinstance(route, Mapping):
+        raise ResourceValidationError("Infrastructure route must be an object.")
+    connection = route.get("connection_confirmed")
+    if connection is False:
+        return {
+            "status": "BLOCKED_NO_CONFIRMED_CONNECTION",
+            "reason": "The user indicates that a usable physical connection is unavailable.",
+            "operational_authorization": False,
+        }
+    if connection is not True:
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "reason": "A physical connection must be explicitly confirmed with supporting evidence.",
+            "operational_authorization": False,
+        }
+    distance = _number(route.get("distance_km"), "distance_km", minimum=0)
+    capacity = _number(route.get("capacity"), "capacity", minimum=0)
+    required = _number(route.get("required_quantity"), "required_quantity", minimum=0)
+    unit = _text(route.get("unit"), "unit")
+    capacity_unit = _text(route.get("capacity_unit") or unit, "capacity_unit")
+    if unit.casefold() != capacity_unit.casefold():
+        raise ResourceValidationError("Route capacity and required quantity must use the same unit.")
+    if required <= 0:
+        raise ResourceValidationError("required_quantity must be greater than zero.")
+    if capacity < required:
+        return {
+            "status": "INFEASIBLE_CAPACITY",
+            "distance_km": distance,
+            "capacity": capacity,
+            "required_quantity": required,
+            "unit": unit,
+            "operational_authorization": False,
+        }
+    missing = [
+        label for label, value in (
+            ("route_access_evidence", route.get("route_access_evidence")),
+            ("permit_reference", route.get("permit_reference")),
+            ("engineering_review_reference", route.get("engineering_review_reference")),
+        ) if not str(value or "").strip()
+    ]
+    return {
+        "status": "APPROVAL_PENDING" if missing else "PRELIMINARY_FEASIBILITY_ONLY",
+        "distance_km": distance,
+        "capacity": capacity,
+        "required_quantity": required,
+        "unit": unit,
+        "transport_mode": str(route.get("transport_mode") or "").strip(),
+        "missing_evidence": missing,
+        "connection_confirmation_is_user_asserted": True,
+        "independent_verification": "NOT_PERFORMED",
+        "operational_authorization": False,
+        "note": "This is a preliminary user-entered route screen, not a survey, hydraulic design, permit or construction approval.",
+    }
+
+
+def calculate_resource_intensity_change(
+    baseline_usage: float,
+    baseline_production: float,
+    reporting_usage: float,
+    reporting_production: float,
+    *,
+    usage_unit: str,
+    production_unit: str,
+) -> dict[str, Any]:
+    """Compare usage intensity across periods without self-certifying savings."""
+    base_usage = _number(baseline_usage, "baseline_usage", minimum=0)
+    base_output = _number(baseline_production, "baseline_production", minimum=0)
+    current_usage = _number(reporting_usage, "reporting_usage", minimum=0)
+    current_output = _number(reporting_production, "reporting_production", minimum=0)
+    if base_output <= 0 or current_output <= 0:
+        raise ResourceValidationError("Both production quantities must be greater than zero.")
+    if base_usage <= 0:
+        raise ResourceValidationError("baseline_usage must be greater than zero for a comparable intensity.")
+    usage_label = _text(usage_unit, "usage_unit")
+    output_label = _text(production_unit, "production_unit")
+    baseline_intensity = base_usage / base_output
+    reporting_intensity = current_usage / current_output
+    change_percent = 100.0 * (reporting_intensity - baseline_intensity) / baseline_intensity
+    return {
+        "status": (
+            "LOWER_REPORTED_INTENSITY" if change_percent < 0 else
+            "HIGHER_REPORTED_INTENSITY" if change_percent > 0 else
+            "UNCHANGED_REPORTED_INTENSITY"
+        ),
+        "baseline_intensity": baseline_intensity,
+        "reporting_intensity": reporting_intensity,
+        "intensity_unit": f"{usage_label} per {output_label}",
+        "change_percent": change_percent,
+        "evidence_status": "COMPARISON_ONLY_NOT_INDEPENDENTLY_VERIFIED",
+        "note": "Production-normalized intensity comparison only; operating conditions, quality, boundaries and causal attribution are not verified.",
+    }
+
+
 def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Validate imported passport records while preserving input rows unchanged."""
     accepted, rejected = [], []
@@ -760,5 +899,7 @@ __all__ = [
     "simulate_supplier_disruption", "evaluate_safety_gate",
     "calculate_exchange_value", "propagate_network_impact",
     "forecast_resource_quality", "calculate_supply_reliability",
-    "rank_resource_cascade", "validate_import_rows",
+    "rank_resource_cascade", "detect_resource_bottleneck",
+    "assess_infrastructure_route", "calculate_resource_intensity_change",
+    "validate_import_rows",
 ]
