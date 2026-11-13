@@ -32,6 +32,8 @@ from shoir_resource_intelligence import (
     detect_resource_bottleneck,
     assess_infrastructure_route,
     calculate_resource_intensity_change,
+    validate_exchange_agreement,
+    assess_exchange_delivery,
 )
 
 
@@ -124,6 +126,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
     routes = st.session_state.get(STATE_PREFIX + "routes", [])
     results = st.session_state.get(STATE_PREFIX + "results", {})
     imports = st.session_state.get(STATE_PREFIX + "import_validation", None)
+    agreements = st.session_state.get(STATE_PREFIX + "agreements", [])
+    deliveries = st.session_state.get(STATE_PREFIX + "deliveries", [])
 
     if not isinstance(facility, dict):
         facility = {}
@@ -135,6 +139,10 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         routes = []
     if not isinstance(results, dict):
         results = {}
+    if not isinstance(agreements, list):
+        agreements = []
+    if not isinstance(deliveries, list):
+        deliveries = []
 
     head1, head2, head3, head4 = st.columns(4)
     head1.metric("Facility", facility.get("name") or "Not configured")
@@ -152,7 +160,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         "Overview & Import", "Resource Passports", "Loss & Recovery",
         "Compatibility", "Network Optimizer", "Resilience",
         "Safety Gate", "Proof of Value", "Quality & Reliability",
-        "Resource Memory", "Infrastructure & Bottlenecks", "Reports",
+        "Resource Memory", "Infrastructure & Bottlenecks", "Exchange Assurance", "Reports",
     ])
 
     with tabs[0]:
@@ -720,6 +728,143 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             st.warning("A preliminary screen does not establish surveyed route access, hydraulic design, permit validity or construction approval.")
 
     with tabs[11]:
+        st.markdown("#### Digital exchange agreement draft and delivery assurance")
+        st.caption(
+            "This records entered exchange terms and delivery evidence for review. "
+            "It is not a signed contract, participant authorization, legal determination or physical transfer approval."
+        )
+        if not passports:
+            st.info("Create a resource passport before drafting an exchange agreement.")
+        else:
+            with st.form("sri_exchange_agreement_form"):
+                a1, a2 = st.columns(2)
+                supplier = a1.text_input("Supplier organization / facility")
+                buyer = a2.text_input("Buyer organization / facility")
+                resource_ids = [str(item["resource_id"]) for item in passports]
+                resource_choice = st.selectbox("Resource passport", resource_ids, key="sri_agreement_resource")
+                selected_passport = next(item for item in passports if str(item["resource_id"]) == resource_choice)
+                st.caption(f"Resource: {selected_passport['name']} · {selected_passport['resource_type']} · {selected_passport['unit']}")
+                a3, a4 = st.columns(2)
+                agreed_quantity = a3.text_input("Agreed quantity")
+                quantity_tolerance = a4.text_input("Quantity tolerance (%)", value="0")
+                delivery_schedule = st.text_input("Delivery schedule / period")
+                quality_terms = st.text_area(
+                    "Agreed quality limits JSON (minimum / maximum)",
+                    value="{}",
+                    height=100,
+                )
+                certificate_required = st.checkbox("A valid certificate is required for each delivery", value=True)
+                treatment_responsibility = st.text_input("Treatment responsibility")
+                testing_requirements = st.text_input("Testing requirements")
+                shortage_response = st.text_area("Shortage response arrangement", height=60)
+                rejection_procedure = st.text_area("Rejection / quarantine procedure", height=60)
+                st.markdown("**Human approval references (references only; not signatures)**")
+                ap1, ap2 = st.columns(2)
+                engineering_approval = ap1.text_input("Engineering approval reference")
+                safety_approval = ap2.text_input("Safety approval reference")
+                ap3, ap4 = st.columns(2)
+                environmental_approval = ap3.text_input("Environmental approval reference")
+                commercial_approval = ap4.text_input("Commercial approval reference")
+                create_agreement = st.form_submit_button("Create exchange agreement draft")
+            if create_agreement:
+                try:
+                    agreement = validate_exchange_agreement({
+                        "supplier": supplier,
+                        "buyer": buyer,
+                        "resource_id": resource_choice,
+                        "resource_name": selected_passport["name"],
+                        "agreed_quantity": agreed_quantity,
+                        "unit": selected_passport["unit"],
+                        "quantity_tolerance_percent": quantity_tolerance,
+                        "quality_limits": _json_object(quality_terms, "Agreed quality limits"),
+                        "delivery_schedule": delivery_schedule,
+                        "certificate_required": certificate_required,
+                        "treatment_responsibility": treatment_responsibility,
+                        "testing_requirements": testing_requirements,
+                        "shortage_response": shortage_response,
+                        "rejection_procedure": rejection_procedure,
+                        "approval_references": {
+                            "engineering": engineering_approval,
+                            "safety": safety_approval,
+                            "environmental": environmental_approval,
+                            "commercial": commercial_approval,
+                        },
+                    })
+                    agreements.append(agreement)
+                    st.session_state[STATE_PREFIX + "agreements"] = agreements
+                    st.success(f"Agreement draft recorded: {agreement['agreement_id']} · {agreement['status']}")
+                except Exception as exc:
+                    st.error(f"Agreement draft was not created: {exc}")
+
+        if agreements:
+            st.markdown("**Recorded exchange drafts**")
+            st.dataframe(pd.DataFrame([{
+                "Agreement ID": item["agreement_id"],
+                "Supplier": item["supplier"],
+                "Buyer": item["buyer"],
+                "Resource": item["resource_name"],
+                "Quantity": item["agreed_quantity"],
+                "Unit": item["unit"],
+                "Status": item["status"],
+                "Contract status": item["contract_status"],
+            } for item in agreements]), use_container_width=True, hide_index=True)
+            with st.form("sri_delivery_record_form"):
+                agreement_options = [
+                    f"{item['agreement_id']} · {item['supplier']} → {item['buyer']}"
+                    for item in agreements
+                ]
+                selected_agreement_label = st.selectbox("Agreement", agreement_options, key="sri_delivery_agreement")
+                selected_agreement_id = selected_agreement_label.split(" · ", 1)[0]
+                selected_agreement = next(item for item in agreements if item["agreement_id"] == selected_agreement_id)
+                d1, d2 = st.columns(2)
+                delivery_date = d1.text_input("Delivery date (YYYY-MM-DD)")
+                delivered_quantity = d2.text_input("Actual delivered quantity")
+                quality_measurements = st.text_area("Measured delivery quality JSON", value="{}", height=90)
+                d3, d4 = st.columns(2)
+                certificate_reference_delivery = d3.text_input("Certificate reference")
+                certificate_valid_until_delivery = d4.text_input("Certificate valid until (YYYY-MM-DD)")
+                delivery_evidence_reference = st.text_input("Delivery / scale ticket / laboratory evidence reference")
+                record_delivery = st.form_submit_button("Record and assess delivery")
+            if record_delivery:
+                try:
+                    delivery_result = assess_exchange_delivery(
+                        selected_agreement,
+                        {
+                            "delivery_date": delivery_date,
+                            "delivered_quantity": delivered_quantity,
+                            "quality": _json_object(quality_measurements, "Delivery quality measurements"),
+                            "certificate_reference": certificate_reference_delivery,
+                            "certificate_valid_until": certificate_valid_until_delivery,
+                            "delivery_evidence_reference": delivery_evidence_reference,
+                        },
+                    )
+                    deliveries.append(delivery_result)
+                    st.session_state[STATE_PREFIX + "deliveries"] = deliveries
+                    st.success(f"Delivery assessment recorded: {delivery_result['status']}")
+                except Exception as exc:
+                    st.error(f"Delivery assessment failed: {exc}")
+        if deliveries:
+            st.markdown("**Delivery assurance history**")
+            st.dataframe(pd.DataFrame([{
+                "Delivery ID": item["delivery_id"],
+                "Agreement ID": item["agreement_id"],
+                "Date": item["delivery_date"],
+                "Expected": item["expected_quantity"],
+                "Delivered": item["delivered_quantity"],
+                "Unit": item["unit"],
+                "Status": item["status"],
+                "Deviations": ", ".join(item["deviations"]),
+                "Human acceptance required": item["human_acceptance_required"],
+            } for item in deliveries]), use_container_width=True, hide_index=True)
+            selected_delivery = st.selectbox(
+                "Inspect delivery assessment",
+                [item["delivery_id"] for item in deliveries],
+                key="sri_delivery_inspector",
+            )
+            _render_result(st, "Delivery assurance detail", next(item for item in deliveries if item["delivery_id"] == selected_delivery))
+            st.warning("Delivery assessments are evidence records. A person must review and accept/reject the delivery under the applicable agreement.")
+
+    with tabs[12]:
         st.markdown("#### Reports and evidence export")
         report = {
             "report_type": "Industrial Resource Intelligence workspace snapshot",
@@ -728,6 +873,8 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "resource_passports": passports,
             "demands": demands,
             "exchange_candidates": routes,
+            "exchange_agreements": agreements,
+            "delivery_assessments": deliveries,
             "results": results,
             "limitations": [
                 "No live supplier or customer participation is asserted.",
