@@ -1415,6 +1415,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "Engineering compatibility": ("compatibility", "compatibility_screen.v1"),
             "Single-period resource optimization": ("optimization", "resource_network_lp.v1"),
             "Period-aligned resource optimization": ("period_optimization", "period_network_lp.v1"),
+            "Conservative interval-stress optimization": ("robust_optimization", "interval_robust_network.v1"),
             "Single-contaminant water reuse": ("water_reuse_screen", "water_reuse_lp.v1"),
             "Energy balance": ("energy_balance", "energy_balance.v1"),
             "Waste-heat screen": ("heat_recovery_screen", "waste_heat_screen.v1"),
