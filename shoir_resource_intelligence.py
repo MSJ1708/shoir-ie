@@ -690,6 +690,7 @@ def optimize_period_aligned_resource_network(
     *,
     allow_shortage: bool = False,
     shortage_penalty_per_unit: float | None = None,
+    shortage_penalty_currency: str | None = None,
 ) -> dict[str, Any]:
     """Optimize allocations inside explicit matching time buckets.
 
@@ -707,6 +708,11 @@ def optimize_period_aligned_resource_network(
         shortage_penalty_per_unit = _number(
             shortage_penalty_per_unit, "shortage_penalty_per_unit", minimum=0
         )
+        shortage_penalty_currency = _text(
+            shortage_penalty_currency, "shortage_penalty_currency"
+        ).upper()
+        if len(shortage_penalty_currency) != 3 or not shortage_penalty_currency.isalpha():
+            raise ResourceValidationError("shortage_penalty_currency must be a three-letter currency code.")
     try:
         supply_rows = [dict(row) for row in supplies]
         demand_rows = [dict(row) for row in demands]
@@ -717,8 +723,18 @@ def optimize_period_aligned_resource_network(
         row["period_id"] = _text(row.get("period_id"), f"supplies[{index}].period_id")
     for index, row in enumerate(demand_rows):
         row["period_id"] = _text(row.get("period_id"), f"demands[{index}].period_id")
+    route_currencies: set[str] = set()
     for index, row in enumerate(route_rows):
         row["period_id"] = _text(row.get("period_id"), f"routes[{index}].period_id")
+        currency = _text(row.get("currency"), f"routes[{index}].currency").upper()
+        if len(currency) != 3 or not currency.isalpha():
+            raise ResourceValidationError(f"routes[{index}].currency must be a three-letter currency code.")
+        route_currencies.add(currency)
+    if len(route_currencies) > 1:
+        raise ResourceValidationError("All time-bucketed routes in one optimization must use the same currency.")
+    route_currency_value = next(iter(route_currencies), None)
+    if allow_shortage and route_currency_value and shortage_penalty_currency != route_currency_value:
+        raise ResourceValidationError("Shortage penalty currency must match the time-bucketed route currency.")
 
     supply_periods = {row["period_id"] for row in supply_rows}
     demand_periods = {row["period_id"] for row in demand_rows}
@@ -763,6 +779,7 @@ def optimize_period_aligned_resource_network(
                     * sum(_number(item.get("required_quantity"), "required_quantity", minimum=0) for item in period_demands)
                     if allow_shortage else None
                 ),
+                "objective_cost_currency": shortage_penalty_currency if allow_shortage else route_currency_value,
                 "unmet_demand": [
                     {"demand_id": _text(item.get("demand_id") or item.get("id"), "demand id"),
                      "quantity": _number(item.get("required_quantity"), "required_quantity", minimum=0),
@@ -777,6 +794,7 @@ def optimize_period_aligned_resource_network(
                 period_routes,
                 allow_shortage=allow_shortage,
                 shortage_penalty_per_unit=shortage_penalty_per_unit,
+                shortage_penalty_currency=shortage_penalty_currency,
             )
         period_result["period_id"] = period_id
         period_results.append(period_result)
@@ -800,6 +818,7 @@ def optimize_period_aligned_resource_network(
         "periods": period_results,
         "allocations": all_allocations,
         "objective_cost": total_cost if status in {"OPTIMAL_BY_PERIOD", "FEASIBLE_WITH_SHORTAGE"} else None,
+        "objective_cost_currency": shortage_penalty_currency if allow_shortage else route_currency_value,
         "unmet_demand_total": total_unmet,
         "unused_supply_periods": unexpected_supply_periods,
         "rejected_routes_outside_demand_periods": [
@@ -832,6 +851,7 @@ def simulate_resource_network_scenario(
     scenario_id: str,
     scenario_name: str,
     shortage_penalty_per_unit: float,
+    shortage_penalty_currency: str,
 ) -> dict[str, Any]:
     """Apply multiple explicit resource-network shocks and re-optimize.
 
@@ -969,6 +989,7 @@ def simulate_resource_network_scenario(
         supplies, demands, routes,
         allow_shortage=True,
         shortage_penalty_per_unit=shortage_penalty_per_unit,
+        shortage_penalty_currency=shortage_penalty_currency,
     )
     stressed_result = optimize_resource_network(
         changed_supplies, changed_demands, changed_routes,
@@ -1016,6 +1037,7 @@ def simulate_supplier_disruption(
     supplier_id: str,
     supply_reduction_fraction: float,
     shortage_penalty_per_unit: float,
+    shortage_penalty_currency: str,
 ) -> dict[str, Any]:
     """Re-solve one-period allocation after an explicit supplier-capacity shock."""
     fraction = _number(supply_reduction_fraction, "supply_reduction_fraction", minimum=0)
@@ -1036,6 +1058,7 @@ def simulate_supplier_disruption(
     result = optimize_resource_network(
         changed, demands, routes, allow_shortage=True,
         shortage_penalty_per_unit=shortage_penalty_per_unit,
+        shortage_penalty_currency=shortage_penalty_currency,
     )
     return {
         "status": result["status"],
