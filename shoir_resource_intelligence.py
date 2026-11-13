@@ -66,6 +66,20 @@ def _optional_text(value: Any) -> str:
     return "" if _is_missing(value) else str(value).strip()
 
 
+def _validated_input_provenance(value: Any, field: str) -> str:
+    provenance = _text(value, field).upper()
+    if provenance == "LIVE":
+        raise ResourceValidationError(
+            f"{field}=LIVE is not accepted without a separately verified connector. "
+            "Use IMPORTED, MANUAL, SYNTHETIC, SIMULATED, MOCK or STALE."
+        )
+    if provenance not in USER_INPUT_PROVENANCE_VALUES:
+        raise ResourceValidationError(
+            f"{field} must be one of {', '.join(USER_INPUT_PROVENANCE_VALUES)}."
+        )
+    return provenance
+
+
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ResourceValidationError(f"{field} must be a numeric measurement, not a boolean.")
@@ -511,14 +525,20 @@ def optimize_resource_network(
         sid = _text(item.get("resource_id") or item.get("id"), "supply id")
         if sid in supply_by_id:
             raise ResourceValidationError(f"Duplicate supply id: {sid}.")
-        supply_by_id[sid] = dict(item, resource_id=sid)
+        supply_provenance = _validated_input_provenance(
+            item.get("provenance"), f"supply {sid}.provenance"
+        )
+        supply_by_id[sid] = dict(item, resource_id=sid, provenance=supply_provenance)
         _number(item.get("available_quantity"), f"supply {sid} available_quantity", minimum=0)
         _text(item.get("unit"), f"supply {sid} unit")
     for item in demands:
         did = _text(item.get("demand_id") or item.get("id"), "demand id")
         if did in demand_by_id:
             raise ResourceValidationError(f"Duplicate demand id: {did}.")
-        demand_by_id[did] = dict(item, demand_id=did)
+        demand_provenance = _validated_input_provenance(
+            item.get("provenance"), f"demand {did}.provenance"
+        )
+        demand_by_id[did] = dict(item, demand_id=did, provenance=demand_provenance)
         _number(item.get("required_quantity"), f"demand {did} required_quantity", minimum=0)
         if float(item["required_quantity"]) <= 0:
             raise ResourceValidationError(f"demand {did} required_quantity must be greater than zero.")
@@ -546,6 +566,18 @@ def optimize_resource_network(
             raw.get("connection_evidence_reference"),
             "route.connection_evidence_reference",
         )
+        route_provenance = _validated_input_provenance(
+            raw.get("provenance"), "route.provenance"
+        )
+        if route_provenance == "STALE":
+            rejected_routes.append({
+                "supply_id": sid,
+                "demand_id": did,
+                "status": "BLOCKED_STALE_ROUTE_EVIDENCE",
+                "route_provenance": route_provenance,
+                "reason": "A stale physical-route record is not eligible for current network optimization.",
+            })
+            continue
         route_currency = _text(raw.get("currency"), "route.currency").upper()
         if len(route_currency) != 3 or not route_currency.isalpha():
             raise ResourceValidationError("route.currency must be a three-letter currency code.")
@@ -563,7 +595,14 @@ def optimize_resource_network(
             engineering_review_required=bool(raw.get("engineering_review_required", False)),
         )
         if compatibility["status"] != "TECHNICALLY_COMPATIBLE":
-            rejected_routes.append({"supply_id": sid, "demand_id": did, **compatibility})
+            rejected_routes.append({
+                "supply_id": sid,
+                "demand_id": did,
+                "supply_provenance": supply["provenance"],
+                "demand_provenance": demand["provenance"],
+                "route_provenance": route_provenance,
+                **compatibility,
+            })
             continue
         cost = (
             _number(raw.get("unit_cost"), "route.unit_cost", minimum=0)
@@ -579,6 +618,9 @@ def optimize_resource_network(
             "capacity": capacity,
             "connection_confirmed": connection_confirmed,
             "connection_evidence_reference": connection_evidence,
+            "supply_provenance": supply["provenance"],
+            "demand_provenance": demand["provenance"],
+            "route_provenance": route_provenance,
             "compatibility": compatibility["status"],
         })
 
@@ -710,6 +752,7 @@ def optimize_resource_network(
             "Entered unit costs are additive and expressed per allocated quantity.",
             "No implicit unit conversion, pipeline capacity, production schedule or permit approval is inferred.",
             "Physical connection confirmation and its evidence reference are caller-asserted and have not been independently checked.",
+            "Supply, demand and route provenance are retained on allocations; STALE route evidence is blocked.",
             "Compatibility is a screening gate, not a complete process engineering or safety certification.",
         ],
     }
