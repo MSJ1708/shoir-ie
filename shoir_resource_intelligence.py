@@ -936,6 +936,175 @@ def calculate_resource_intensity_change(
     }
 
 
+def validate_exchange_agreement(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Create a structured exchange draft; it is not a signed contract or release."""
+    if not isinstance(payload, Mapping):
+        raise ResourceValidationError("Exchange agreement must be an object.")
+    supplier = _text(payload.get("supplier"), "supplier")
+    buyer = _text(payload.get("buyer"), "buyer")
+    resource_id = _text(payload.get("resource_id"), "resource_id")
+    resource_name = _text(payload.get("resource_name"), "resource_name")
+    unit = _text(payload.get("unit"), "unit")
+    quantity = _number(payload.get("agreed_quantity"), "agreed_quantity", minimum=0)
+    if quantity <= 0:
+        raise ResourceValidationError("agreed_quantity must be greater than zero.")
+    tolerance = _number(payload.get("quantity_tolerance_percent"), "quantity_tolerance_percent", minimum=0)
+    if tolerance > 100:
+        raise ResourceValidationError("quantity_tolerance_percent must not exceed 100.")
+    schedule = _text(payload.get("delivery_schedule"), "delivery_schedule")
+    quality_limits = payload.get("quality_limits")
+    if not isinstance(quality_limits, Mapping) or not quality_limits:
+        raise ResourceValidationError("At least one explicit quality limit is required.")
+    normalized_limits: dict[str, dict[str, float | None]] = {}
+    for name, bounds in quality_limits.items():
+        property_name = _text(name, "quality property")
+        if not isinstance(bounds, Mapping):
+            raise ResourceValidationError(f"Quality bounds for {property_name} must be an object.")
+        lower = _number(bounds["min"], f"{property_name}.min") if bounds.get("min") is not None else None
+        upper = _number(bounds["max"], f"{property_name}.max") if bounds.get("max") is not None else None
+        if lower is None and upper is None:
+            raise ResourceValidationError(f"Quality property {property_name} needs a minimum or maximum.")
+        if lower is not None and upper is not None and lower > upper:
+            raise ResourceValidationError(f"Quality minimum exceeds maximum for {property_name}.")
+        normalized_limits[property_name] = {"min": lower, "max": upper}
+    certificate_required = payload.get("certificate_required", False)
+    if not isinstance(certificate_required, bool):
+        raise ResourceValidationError("certificate_required must be a boolean.")
+    approval_references = {
+        key: _optional_text((payload.get("approval_references") or {}).get(key))
+        for key in ("engineering", "safety", "environmental", "commercial")
+    }
+    missing_approvals = [key for key, value in approval_references.items() if not value]
+    return {
+        "agreement_id": _optional_text(payload.get("agreement_id")) or str(uuid4()),
+        "supplier": supplier,
+        "buyer": buyer,
+        "resource_id": resource_id,
+        "resource_name": resource_name,
+        "agreed_quantity": quantity,
+        "unit": unit,
+        "quantity_tolerance_percent": tolerance,
+        "quality_limits": normalized_limits,
+        "delivery_schedule": schedule,
+        "certificate_required": certificate_required,
+        "treatment_responsibility": _optional_text(payload.get("treatment_responsibility")),
+        "testing_requirements": _optional_text(payload.get("testing_requirements")),
+        "shortage_response": _optional_text(payload.get("shortage_response")),
+        "rejection_procedure": _optional_text(payload.get("rejection_procedure")),
+        "approval_references": approval_references,
+        "missing_approval_references": missing_approvals,
+        "status": "APPROVAL_PENDING" if missing_approvals else "APPROVAL_REFERENCES_RECORDED_NOT_SIGNED",
+        "contract_status": "DRAFT_NOT_A_SIGNED_CONTRACT",
+        "created_at": _optional_text(payload.get("created_at")) or datetime.now(timezone.utc).isoformat(),
+        "contractual_effect": "NOT_CALCULATED",
+        "operational_authorization": False,
+    }
+
+
+def assess_exchange_delivery(
+    agreement: Mapping[str, Any],
+    delivery: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compare a delivery with entered agreement terms; require human acceptance."""
+    if not isinstance(agreement, Mapping) or not isinstance(delivery, Mapping):
+        raise ResourceValidationError("Agreement and delivery must both be objects.")
+    agreement_id = _text(agreement.get("agreement_id"), "agreement_id")
+    delivery_date_text = _text(delivery.get("delivery_date"), "delivery_date")
+    try:
+        delivery_day = date.fromisoformat(delivery_date_text)
+    except ValueError as exc:
+        raise ResourceValidationError("delivery_date must be a valid YYYY-MM-DD date.") from exc
+    expected = _number(agreement.get("agreed_quantity"), "agreed_quantity", minimum=0)
+    delivered = _number(delivery.get("delivered_quantity"), "delivered_quantity", minimum=0)
+    tolerance = _number(agreement.get("quantity_tolerance_percent"), "quantity_tolerance_percent", minimum=0)
+    if expected <= 0 or tolerance > 100:
+        raise ResourceValidationError("Agreement quantity or tolerance is invalid.")
+    unit = _text(agreement.get("unit"), "agreement.unit")
+    tolerance_quantity = expected * tolerance / 100.0
+    deviations: list[str] = []
+    if delivered < expected - tolerance_quantity:
+        deviations.append("SHORTAGE")
+    elif delivered > expected + tolerance_quantity:
+        deviations.append("EXCESS_QUANTITY")
+
+    measured_quality = delivery.get("quality")
+    missing_quality: list[str] = []
+    quality_failures: list[str] = []
+    limits = agreement.get("quality_limits")
+    if not isinstance(limits, Mapping) or not limits:
+        missing_quality.append("No buyer quality limits are recorded in the agreement.")
+    elif not isinstance(measured_quality, Mapping):
+        missing_quality.extend(str(key) for key in limits)
+    else:
+        for property_name, bounds in limits.items():
+            if property_name not in measured_quality:
+                missing_quality.append(str(property_name))
+                continue
+            value = _number(measured_quality[property_name], f"delivery.quality.{property_name}")
+            lower = bounds.get("min") if isinstance(bounds, Mapping) else None
+            upper = bounds.get("max") if isinstance(bounds, Mapping) else None
+            if lower is not None and value < float(lower):
+                quality_failures.append(f"{property_name}={value} below {lower}")
+            if upper is not None and value > float(upper):
+                quality_failures.append(f"{property_name}={value} above {upper}")
+    if missing_quality:
+        deviations.append("QUALITY_DATA_MISSING")
+    if quality_failures:
+        deviations.append("QUALITY_OUT_OF_SPECIFICATION")
+
+    certificate_reference = _optional_text(delivery.get("certificate_reference"))
+    certificate_valid_until = _optional_text(delivery.get("certificate_valid_until"))
+    if agreement.get("certificate_required") is True:
+        if not certificate_reference or not certificate_valid_until:
+            deviations.append("CERTIFICATE_MISSING")
+        else:
+            try:
+                expiry_day = date.fromisoformat(certificate_valid_until)
+            except ValueError as exc:
+                raise ResourceValidationError("certificate_valid_until must be a valid YYYY-MM-DD date.") from exc
+            if expiry_day < delivery_day:
+                deviations.append("CERTIFICATE_EXPIRED")
+    evidence_reference = _optional_text(delivery.get("delivery_evidence_reference"))
+    if not evidence_reference:
+        deviations.append("DELIVERY_EVIDENCE_MISSING")
+
+    blocking = {
+        "QUALITY_DATA_MISSING", "QUALITY_OUT_OF_SPECIFICATION",
+        "CERTIFICATE_MISSING", "CERTIFICATE_EXPIRED",
+    }
+    if any(item in blocking for item in deviations):
+        status = "REJECTED_PENDING_REVIEW"
+    elif "DELIVERY_EVIDENCE_MISSING" in deviations:
+        status = "EVIDENCE_INCOMPLETE"
+    elif "SHORTAGE" in deviations:
+        status = "SHORTAGE_REVIEW"
+    elif "EXCESS_QUANTITY" in deviations:
+        status = "EXCESS_REVIEW"
+    else:
+        status = "WITHIN_ENTERED_TOLERANCES_PENDING_HUMAN_ACCEPTANCE"
+    return {
+        "delivery_id": _optional_text(delivery.get("delivery_id")) or str(uuid4()),
+        "agreement_id": agreement_id,
+        "delivery_date": delivery_day.isoformat(),
+        "expected_quantity": expected,
+        "delivered_quantity": delivered,
+        "unit": unit,
+        "quantity_tolerance": tolerance_quantity,
+        "quantity_variance": delivered - expected,
+        "quality_failures": quality_failures,
+        "missing_quality_properties": missing_quality,
+        "deviations": deviations,
+        "status": status,
+        "certificate_reference": certificate_reference,
+        "certificate_valid_until": certificate_valid_until,
+        "delivery_evidence_reference": evidence_reference,
+        "human_acceptance_required": True,
+        "contractual_effect": "NOT_CALCULATED",
+        "operational_authorization": False,
+        "independent_verification": "NOT_PERFORMED",
+    }
+
+
 def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Validate imported passport records while preserving input rows unchanged."""
     accepted, rejected = [], []
@@ -962,5 +1131,6 @@ __all__ = [
     "forecast_resource_quality", "calculate_supply_reliability",
     "rank_resource_cascade", "detect_resource_bottleneck",
     "assess_infrastructure_route", "calculate_resource_intensity_change",
+    "validate_exchange_agreement", "assess_exchange_delivery",
     "validate_import_rows",
 ]
