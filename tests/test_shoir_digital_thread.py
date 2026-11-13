@@ -310,3 +310,45 @@ def test_digital_thread_rename_save_requires_remote_write_confirmation(monkeypat
 
     with pytest.raises(RuntimeError, match="not confirmed"):
         thread.persist_digital_thread_workspace("tester")
+
+
+def test_legacy_source_identity_preserves_node_id_across_rename_and_sync(monkeypatch):
+    from types import SimpleNamespace
+    import shoir_digital_thread as thread
+
+    keys = thread._keys()
+    state = {}
+    monkeypatch.setattr(thread, "st", SimpleNamespace(session_state=state))
+    thread.ensure_thread_state("synthetic-user")
+
+    original_id = thread._upsert_node(
+        "Asset", "Press 1001", "Manufacturing|canonical|Asset|Press 1001", "Manufacturing"
+    )
+    thread.rename_thread_node(original_id, "Main Press")
+    refreshed_id = thread._upsert_node(
+        "Asset", "Press 1001", "Manufacturing|canonical|Asset|Press 1001", "Manufacturing"
+    )
+
+    assert refreshed_id == original_id
+    assert state[keys["nodes"]][0]["node_id"] == original_id
+    assert state[keys["nodes"]][0]["name"] == "Main Press"
+    assert "Press 1001" in state[keys["nodes"]][0]["metadata"]["name_aliases"]
+
+
+def test_legacy_source_identity_fails_closed_when_duplicate_nodes_exist(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    import shoir_digital_thread as thread
+
+    keys = thread._keys()
+    state = {}
+    monkeypatch.setattr(thread, "st", SimpleNamespace(session_state=state))
+    thread.ensure_thread_state("synthetic-user")
+    source = "Manufacturing|canonical|Asset|legacy"
+    state[keys["nodes"]] = [
+        {"node_id": "AST-LEGACY-1", "node_type": "Asset", "name": "Press A", "source": source, "metadata": {}},
+        {"node_id": "AST-LEGACY-2", "node_type": "Asset", "name": "Press B", "source": source, "metadata": {}},
+    ]
+
+    with pytest.raises(ValueError, match="multiple existing nodes"):
+        thread._upsert_node("Asset", "Main Press", source, "Manufacturing")
