@@ -898,6 +898,94 @@ def assess_infrastructure_route(route: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def calculate_energy_balance(
+    energy_input_kwh: float,
+    useful_energy_output_kwh: float,
+    waste_heat_output_kwh: float,
+    other_energy_output_kwh: float = 0.0,
+    *,
+    tolerance_percent: float = 1.0,
+) -> dict[str, Any]:
+    """Reconcile same-boundary energy terms without treating residual as confirmed loss."""
+    energy_in = _number(energy_input_kwh, "energy_input_kwh", minimum=0)
+    useful = _number(useful_energy_output_kwh, "useful_energy_output_kwh", minimum=0)
+    waste_heat = _number(waste_heat_output_kwh, "waste_heat_output_kwh", minimum=0)
+    other = _number(other_energy_output_kwh, "other_energy_output_kwh", minimum=0)
+    tolerance = _number(tolerance_percent, "tolerance_percent", minimum=0)
+    if energy_in <= 0:
+        raise ResourceValidationError("energy_input_kwh must be greater than zero.")
+    accounted = useful + waste_heat + other
+    residual = energy_in - accounted
+    residual_percent = 100.0 * residual / energy_in
+    anomaly = abs(residual_percent) > tolerance
+    return {
+        "status": "ANOMALY_SUSPECTED" if anomaly else "WITHIN_TOLERANCE",
+        "energy_input_kwh": energy_in,
+        "useful_energy_output_kwh": useful,
+        "waste_heat_output_kwh": waste_heat,
+        "other_energy_output_kwh": other,
+        "accounted_output_kwh": accounted,
+        "unreconciled_energy_kwh": residual,
+        "unreconciled_percent": residual_percent,
+        "useful_energy_ratio_percent": 100.0 * useful / energy_in,
+        "waste_heat_ratio_percent": 100.0 * waste_heat / energy_in,
+        "tolerance_percent": tolerance,
+        "interpretation": (
+            "The entered energy terms do not close within tolerance. Check boundary, time basis, meter uncertainty and omitted streams; this is not proof of a specific energy loss."
+            if anomaly else
+            "The entered energy terms close within the configured tolerance; this does not independently verify the measurements or system boundary."
+        ),
+    }
+
+
+def screen_waste_heat_recovery(
+    source_temperature_c: float,
+    sink_temperature_c: float,
+    available_heat_rate_kw: float,
+    *,
+    minimum_approach_temperature_c: float,
+    annual_operating_hours: float | None = None,
+    energy_value_per_kwh: float | None = None,
+) -> dict[str, Any]:
+    """Run a temperature-approach screen; no exchanger performance is presumed."""
+    source_temp = _number(source_temperature_c, "source_temperature_c")
+    sink_temp = _number(sink_temperature_c, "sink_temperature_c")
+    heat_rate = _number(available_heat_rate_kw, "available_heat_rate_kw", minimum=0)
+    approach = _number(minimum_approach_temperature_c, "minimum_approach_temperature_c", minimum=0)
+    if heat_rate <= 0:
+        raise ResourceValidationError("available_heat_rate_kw must be greater than zero.")
+    margin = source_temp - sink_temp - approach
+    annual_energy = None
+    indicative_value = None
+    operating_hours = None
+    rate_value = None
+    if annual_operating_hours is not None:
+        operating_hours = _number(annual_operating_hours, "annual_operating_hours", minimum=0)
+        if operating_hours > 8760:
+            raise ResourceValidationError("annual_operating_hours must not exceed 8760.")
+        annual_energy = heat_rate * operating_hours
+    if energy_value_per_kwh is not None:
+        rate_value = _number(energy_value_per_kwh, "energy_value_per_kwh", minimum=0)
+        if annual_energy is not None:
+            indicative_value = annual_energy * rate_value
+    passed = margin > 0
+    return {
+        "status": "TEMPERATURE_APPROACH_PASSED_REQUIRES_HX_DESIGN" if passed else "INFEASIBLE_TEMPERATURE_APPROACH",
+        "source_temperature_c": source_temp,
+        "sink_temperature_c": sink_temp,
+        "minimum_approach_temperature_c": approach,
+        "temperature_margin_c": margin,
+        "entered_heat_source_rate_kw": heat_rate,
+        "screened_annual_thermal_energy_kwh": annual_energy,
+        "energy_value_per_kwh": rate_value,
+        "indicative_thermal_energy_value": indicative_value,
+        "verified_recovered_energy_kwh": None,
+        "verified_savings": None,
+        "independent_verification": "NOT_PERFORMED",
+        "note": "Temperature feasibility screen only. Actual heat duty, exchanger effectiveness, fouling, pressure drop, utility integration, CAPEX/OPEX and safety require separate engineering design and validation.",
+    }
+
+
 def calculate_resource_intensity_change(
     baseline_usage: float,
     baseline_production: float,
@@ -1131,6 +1219,7 @@ __all__ = [
     "forecast_resource_quality", "calculate_supply_reliability",
     "rank_resource_cascade", "detect_resource_bottleneck",
     "assess_infrastructure_route", "calculate_resource_intensity_change",
+    "calculate_energy_balance", "screen_waste_heat_recovery",
     "validate_exchange_agreement", "assess_exchange_delivery",
     "validate_import_rows",
 ]
