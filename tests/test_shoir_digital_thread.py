@@ -325,8 +325,11 @@ def test_legacy_source_identity_preserves_node_id_across_rename_and_sync(monkeyp
         "Asset", "Press 1001", "Manufacturing|canonical|Asset|Press 1001", "Manufacturing"
     )
     thread.rename_thread_node(original_id, "Main Press")
+    # Simulate a source refresh that changes the display column and therefore
+    # computes a different legacy name-based ID; the unique source must recover
+    # the previously issued ID and keep the user's display override.
     refreshed_id = thread._upsert_node(
-        "Asset", "Press 1001", "Manufacturing|canonical|Asset|Press 1001", "Manufacturing"
+        "Asset", "Press 1002", "Manufacturing|canonical|Asset|Press 1001", "Manufacturing"
     )
 
     assert refreshed_id == original_id
