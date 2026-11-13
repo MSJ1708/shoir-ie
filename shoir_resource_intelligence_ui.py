@@ -552,10 +552,10 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 supply_choice = r1.selectbox("Route supply", [str(x["resource_id"]) for x in passports])
                 demand_choice = r2.selectbox("Route demand", [str(x["demand_id"]) for x in demands])
                 r3, r4, r5 = st.columns(3)
-                route_cost = r3.text_input("Resource unit cost")
-                transport_cost = r4.text_input("Transport cost / unit")
-                treatment_cost = r5.text_input("Treatment cost / unit", value="0")
-                route_capacity = st.text_input("Maximum route quantity (blank = supply/demand limit)")
+                route_cost = r3.text_input("Resource unit cost (enter 0 only if confirmed)")
+                transport_cost = r4.text_input("Transport cost / unit (enter 0 only if confirmed)")
+                treatment_cost = r5.text_input("Treatment cost / unit (enter 0 only if confirmed)")
+                route_capacity = st.text_input("Confirmed maximum physical route quantity (required)")
                 add_route = st.form_submit_button("Add exchange candidate")
             if add_route:
                 try:
@@ -565,10 +565,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                         "transport_cost_per_unit": _finite_float(transport_cost, "Transport cost per unit", minimum=0),
                         "treatment_cost_per_unit": _finite_float(treatment_cost, "Treatment cost per unit", minimum=0),
                     }
-                    if route_capacity.strip():
-                        route["capacity"] = _finite_float(route_capacity, "Maximum route quantity", minimum=0.000000001)
-                    if min(route["unit_cost"], route["transport_cost_per_unit"], route["treatment_cost_per_unit"]) < 0:
-                        raise ValueError("Route costs cannot be negative.")
+                    route["capacity"] = _finite_float(route_capacity, "Confirmed maximum route quantity", minimum=0.000000001)
                     routes.append(route)
                     st.session_state[STATE_PREFIX + "routes"] = routes
                     st.success("Exchange candidate recorded. Engineering qualification remains pending.")
