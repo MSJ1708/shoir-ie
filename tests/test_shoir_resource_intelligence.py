@@ -1505,11 +1505,12 @@ def test_resource_intelligence_ui_declared_tabs_and_indexes_are_consistent():
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "tabs":
             if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
                 tab_indexes.append(node.slice.value)
-    assert tabs_count == 15
+    assert tabs_count == 16
     assert tab_indexes
     assert max(tab_indexes) < tabs_count
     assert '"Environmental Impact"' in source
     assert '"Investment Prioritization"' in source
+    assert '"Model Assurance"' in source
     assert '"Reports"' in source
 
 
@@ -1624,4 +1625,90 @@ def test_combined_network_scenario_rejects_zero_demand_multiplier():
             scenario_id="SCN-ZERO", scenario_name="Zero demand",
             shortage_penalty_per_unit=1000,
             shortage_penalty_currency="SAR",
+        )
+
+
+def test_engineering_model_assurance_envelope_hashes_input_output_and_model_version():
+    from shoir_resource_intelligence import (
+        ENGINEERING_MODEL_REGISTRY,
+        build_engineering_assurance_record,
+        verify_engineering_assurance_record,
+    )
+
+    record = build_engineering_assurance_record(
+        model_id="resource_balance.v1",
+        input_snapshot={
+            "input_quantity": 100,
+            "output_quantity": 95,
+            "unit": "m3/day",
+            "password": "must-not-be-stored",
+            "nested": {"api_token": "must-not-be-stored", "meter_tag": "FT-100"},
+        },
+        output_snapshot={
+            "status": "ANOMALY_SUSPECTED",
+            "unreconciled_quantity": 5,
+            "confirmation_status": "NOT_CONFIRMED",
+        },
+        actor="synthetic-engineer",
+        provenance="SYNTHETIC",
+        source_references=["SYNTHETIC-METER-001"],
+        facility_id="SYNTHETIC-FAC-001",
+    )
+    assert record["model_version"] == ENGINEERING_MODEL_REGISTRY["resource_balance.v1"]["version"]
+    assert "password" not in record["inputs"]
+    assert "api_token" not in record["inputs"]["nested"]
+    assert record["source_reference_status"] == "REFERENCES_RECORDED"
+    checked = verify_engineering_assurance_record(record)
+    assert checked["status"] == "HASHES_VALID"
+    assert checked["independent_verification"] == "NOT_PERFORMED"
+
+
+def test_engineering_assurance_verifier_detects_input_output_and_metadata_tampering():
+    from shoir_resource_intelligence import build_engineering_assurance_record, verify_engineering_assurance_record
+
+    record = build_engineering_assurance_record(
+        model_id="energy_balance.v1",
+        input_snapshot={"input_kwh": 100, "outputs_kwh": 98},
+        output_snapshot={"status": "WITHIN_TOLERANCE", "residual_kwh": 2},
+        actor="synthetic-engineer",
+        provenance="SYNTHETIC",
+    )
+    tampered = {**record, "inputs": {**record["inputs"], "input_kwh": 999}}
+    checked = verify_engineering_assurance_record(tampered)
+    assert checked["status"] == "INTEGRITY_CHECK_FAILED"
+    assert any("Input snapshot hash" in issue for issue in checked["issues"])
+    assert any("metadata hash" in issue for issue in checked["issues"])
+
+    tampered_output = {**record, "outputs": {"status": "APPROVED"}}
+    checked_output = verify_engineering_assurance_record(tampered_output)
+    assert any("Output snapshot hash" in issue for issue in checked_output["issues"])
+
+
+def test_engineering_assurance_requires_known_model_nonempty_inputs_and_non_live_user_provenance():
+    from shoir_resource_intelligence import build_engineering_assurance_record
+
+    kwargs = {
+        "input_snapshot": {"quantity": 1},
+        "output_snapshot": {"result": 1},
+        "actor": "synthetic-engineer",
+        "provenance": "SYNTHETIC",
+    }
+    with pytest.raises(ResourceValidationError, match="Unknown engineering model"):
+        build_engineering_assurance_record(model_id="unregistered.v1", **kwargs)
+    with pytest.raises(ResourceValidationError, match="non-empty object"):
+        build_engineering_assurance_record(model_id="resource_balance.v1", **{**kwargs, "input_snapshot": {}})
+    with pytest.raises(ResourceValidationError, match="LIVE requires a verified connector"):
+        build_engineering_assurance_record(model_id="resource_balance.v1", **{**kwargs, "provenance": "LIVE"})
+
+
+def test_engineering_assurance_envelope_rejects_unsupported_snapshot_objects():
+    from shoir_resource_intelligence import build_engineering_assurance_record
+
+    with pytest.raises(ResourceValidationError, match="Unsupported assurance snapshot value type"):
+        build_engineering_assurance_record(
+            model_id="resource_balance.v1",
+            input_snapshot={"unsupported": object()},
+            output_snapshot={"result": 1},
+            actor="synthetic-engineer",
+            provenance="SYNTHETIC",
         )
