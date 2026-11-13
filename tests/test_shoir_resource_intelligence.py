@@ -1070,3 +1070,73 @@ def test_performance_persistence_monitor_requires_unique_ascending_timezone_awar
             ],
             usage_unit="m3", production_unit="tonne",
         )
+
+
+def test_period_aligned_optimizer_solves_each_period_within_its_own_supply_pool():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    supplies = [
+        {**_supply("S-MON", 100), "period_id": "2026-11-16"},
+        {**_supply("S-TUE", 60), "period_id": "2026-11-17"},
+    ]
+    demands = [
+        {**_demand("D-MON", 80), "period_id": "2026-11-16"},
+        {**_demand("D-TUE", 50), "period_id": "2026-11-17"},
+    ]
+    routes = [
+        {**_route("S-MON", "D-MON"), "capacity": 90, "period_id": "2026-11-16"},
+        {**_route("S-TUE", "D-TUE"), "capacity": 55, "period_id": "2026-11-17"},
+    ]
+    result = optimize_period_aligned_resource_network(supplies, demands, routes)
+    assert result["status"] == "OPTIMAL_BY_PERIOD"
+    assert result["period_count"] == 2
+    assert len(result["allocations"]) == 2
+    assert {item["period_id"] for item in result["allocations"]} == {"2026-11-16", "2026-11-17"}
+    assert result["storage_or_carryover"] == "NOT_MODELED"
+
+
+def test_period_aligned_optimizer_does_not_carry_surplus_into_a_later_period():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    supplies = [
+        {**_supply("S-MON", 100), "period_id": "2026-11-16"},
+    ]
+    demands = [
+        {**_demand("D-TUE", 80), "period_id": "2026-11-17"},
+    ]
+    routes = [
+        {**_route("S-MON", "D-TUE"), "period_id": "2026-11-17"},
+    ]
+    result = optimize_period_aligned_resource_network(
+        supplies, demands, routes, allow_shortage=True,
+    )
+    assert result["status"] == "FEASIBLE_WITH_SHORTAGE"
+    assert result["allocations"] == []
+    assert result["unmet_demand_total"] == pytest.approx(80)
+    assert result["unused_supply_periods"] == ["2026-11-16"]
+    assert result["periods"][0]["period_id"] == "2026-11-17"
+
+
+def test_period_aligned_optimizer_rejects_missing_period_identifiers():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    with pytest.raises(ResourceValidationError, match="period_id"):
+        optimize_period_aligned_resource_network(
+            [_supply()],
+            [{**_demand(), "period_id": "2026-11-16"}],
+            [],
+        )
+
+
+def test_period_aligned_optimizer_keeps_period_route_capacity_and_quality_gates():
+    from shoir_resource_intelligence import optimize_period_aligned_resource_network
+
+    supply = {**_supply(quality={"pH": 3.0}), "period_id": "2026-11-16"}
+    demand = {
+        **_demand(limits={"pH": {"min": 6.5, "max": 8.5}}),
+        "period_id": "2026-11-16",
+    }
+    route = {**_route(), "capacity": 40, "period_id": "2026-11-16"}
+    result = optimize_period_aligned_resource_network([supply], [demand], [route])
+    assert result["status"] == "INFEASIBLE"
+    assert result["periods"][0]["rejected_routes"][0]["status"] == "TECHNICALLY_INCOMPATIBLE"
