@@ -15,6 +15,7 @@ import pandas as pd
 
 from shoir_resource_intelligence import (
     PROVENANCE_VALUES,
+    USER_INPUT_PROVENANCE_VALUES,
     ResourceValidationError,
     validate_resource_passport,
     validate_import_rows,
@@ -247,7 +248,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             source_equipment = st.text_input("Originating equipment / asset")
             quality_json = st.text_area("Measured quality properties (JSON object)", value="{}", height=90)
             c5, c6 = st.columns(2)
-            provenance = c5.selectbox("Data provenance", list(PROVENANCE_VALUES), index=2)
+            provenance = c5.selectbox("Data provenance", list(USER_INPUT_PROVENANCE_VALUES), index=1)
             measured_at = c6.text_input("Measurement timestamp (ISO-8601 with timezone)", value="")
             c7, c8 = st.columns(2)
             temperature = c7.text_input("Temperature °C (optional)", value="")
@@ -318,7 +319,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         c3, c4 = st.columns(2)
         balance_unit = c3.text_input("Common unit", key="sri_loss_unit")
         tolerance = c4.text_input("Balance tolerance (%)", value="1.0", key="sri_loss_tolerance")
-        loss_provenance = st.selectbox("Measurement provenance", list(PROVENANCE_VALUES), index=1, key="sri_loss_provenance")
+        loss_provenance = st.selectbox("Measurement provenance", list(USER_INPUT_PROVENANCE_VALUES), index=0, key="sri_loss_provenance")
         if st.button("Calculate resource balance", key="sri_run_loss"):
             try:
                 result = detect_resource_loss(
