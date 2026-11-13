@@ -154,10 +154,10 @@ def assess_resource_compatibility(
 
     violations: list[str] = []
     for property_name, bounds in limits.items():
-        if property_name not in quality:
+        if property_name not in quality and property_name not in supply:
             return {
                 "status": "INSUFFICIENT_DATA",
-                "reasons": [f"Supply quality is missing required property: {property_name}."],
+                "reasons": [f"Supply measurement is missing required property: {property_name}."],
                 "qualification_is_user_asserted": False,
             }
         if not isinstance(bounds, Mapping):
@@ -166,7 +166,8 @@ def assess_resource_compatibility(
                 "reasons": [f"Buyer limits for {property_name} must be an object."],
                 "qualification_is_user_asserted": False,
             }
-        value = _number(quality[property_name], f"supply.quality.{property_name}")
+        raw_value = quality[property_name] if property_name in quality else supply[property_name]
+        value = _number(raw_value, f"supply.{property_name}")
         lower = _number(bounds["min"], f"demand.quality_limits.{property_name}.min") if bounds.get("min") is not None else None
         upper = _number(bounds["max"], f"demand.quality_limits.{property_name}.max") if bounds.get("max") is not None else None
         if lower is None and upper is None:
@@ -235,7 +236,7 @@ def calculate_resource_balance(
         raise ResourceValidationError("input_quantity must be greater than zero.")
     difference = incoming - outgoing
     difference_percent = 100.0 * difference / incoming
-    anomaly = difference_percent > tolerance
+    anomaly = abs(difference_percent) > tolerance
     return {
         "status": "ANOMALY_SUSPECTED" if anomaly else "WITHIN_TOLERANCE",
         "input_quantity": incoming,
@@ -267,7 +268,11 @@ def detect_resource_loss(
     if provenance not in PROVENANCE_VALUES:
         raise ResourceValidationError("Unknown evidence provenance.")
     result.update({
-        "finding_type": "SUSPECTED_RESOURCE_LOSS" if result["status"] == "ANOMALY_SUSPECTED" else "NO_MATERIAL_ANOMALY",
+        "finding_type": (
+            "SUSPECTED_RESOURCE_LOSS" if result["unreconciled_quantity"] > 0
+            else "UNRECONCILED_BALANCE" if result["status"] == "ANOMALY_SUSPECTED"
+            else "NO_MATERIAL_ANOMALY"
+        ),
         "evidence_provenance": provenance,
         "confirmation_status": "NOT_CONFIRMED",
     })
@@ -326,7 +331,7 @@ def optimize_resource_network(
             laboratory_test_required=bool(raw.get("laboratory_test_required", False)),
             engineering_review_required=bool(raw.get("engineering_review_required", False)),
         )
-        if compatibility["status"] not in {"TECHNICALLY_COMPATIBLE", "COMPATIBLE_SUBJECT_TO_TREATMENT"}:
+        if compatibility["status"] != "TECHNICALLY_COMPATIBLE":
             rejected_routes.append({"supply_id": sid, "demand_id": did, **compatibility})
             continue
         cost = (
@@ -652,14 +657,20 @@ def forecast_resource_quality(
     if timestamps != sorted(timestamps) or len(set(timestamps)) != len(timestamps):
         raise ResourceValidationError("Quality observations must have unique, ascending timestamps.")
     split = max(int(len(values) * 0.8), 10)
-    x = np.arange(len(values), dtype=float)
+    parsed_times = [datetime.fromisoformat(value) for value in timestamps]
+    start_time = parsed_times[0]
+    x = np.asarray([(value - start_time).total_seconds() / 86400.0 for value in parsed_times], dtype=float)
+    intervals = np.diff(x)
+    if np.any(intervals <= 0):
+        raise ResourceValidationError("Quality timestamps must advance in time.")
     coefficients = np.polyfit(x[:split], values[:split], 1)
     holdout_prediction = np.polyval(coefficients, x[split:])
     holdout_error = values[split:] - holdout_prediction
     mae = float(np.mean(np.abs(holdout_error)))
     fitted = np.polyval(coefficients, x[:split])
     residual_std = float(np.std(values[:split] - fitted, ddof=2)) if split > 2 else 0.0
-    next_value = float(np.polyval(coefficients, len(values)))
+    forecast_step_days = float(np.median(intervals))
+    next_value = float(np.polyval(coefficients, x[-1] + forecast_step_days))
     band = 1.96 * residual_std
     return {
         "status": "EXPLORATORY_FORECAST_NOT_VALIDATED",
