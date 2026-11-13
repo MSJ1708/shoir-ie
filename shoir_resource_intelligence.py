@@ -2692,6 +2692,16 @@ ENGINEERING_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "assumptions": ["Baseline and reporting periods have comparable boundaries"],
         "limitations": ["No operating condition adjustment or causal attribution"],
     },
+    "interval_robust_network.v1": {
+        "name": "Conservative interval-stress resource network optimization",
+        "version": "1.0.0",
+        "method": "Baseline and lower-supply / higher-demand transportation LP comparison",
+        "formula": "stressed_supply = baseline_supply * (1 - supply_uncertainty_fraction); stressed_demand = baseline_demand * (1 + demand_uncertainty_fraction)",
+        "input_units": ["Resource flow unit", "One common declared currency", "Uncertainty fractions 0–1"],
+        "output_units": ["Baseline/stressed allocated flow", "Unmet quantity", "Declared currency objective"],
+        "assumptions": ["Fractions are user-entered conservative bounds, not fitted distributions"],
+        "limitations": ["No probability, correlation, calibrated confidence or non-anticipative robust commitment is estimated"],
+    },
 }
 
 
