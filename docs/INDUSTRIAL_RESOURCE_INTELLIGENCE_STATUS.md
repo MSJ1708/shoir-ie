@@ -61,7 +61,7 @@ The labels below follow the master prompt's completion vocabulary. **PARTIALLY_I
 | Production and maintenance-aware optimizer | NOT_IMPLEMENTED | — | The current LP is a single-period flow allocation; no production/MRO calendar or asset availability constraints are included. |
 | Uncertainty-aware optimization | NOT_IMPLEMENTED | Forecast intervals are displayed separately; they are not used in an optimizer. | Needs data-backed uncertainty distributions/scenarios, robust/stochastic formulations and validation. |
 | Investment prioritization | NOT_IMPLEMENTED | — | Needs approved cost/benefit inputs, engineering feasibility, safety, risk, portfolio constraints and reproducible financial metric policy. |
-| Performance persistence monitor | PARTIALLY_IMPLEMENTED | Production-normalized usage-intensity comparison between baseline and reporting period; output is explicitly not independently verified. | No continuous monitoring, operating-condition adjustment, degradation detection, persistence alerts, project implementation record or verified savings lifecycle. |
+| Performance persistence monitor | PARTIALLY_IMPLEMENTED | Dated usage/production observations are normalized against a declared baseline; consecutive periods beyond a configured degradation threshold trigger PERSISTENCE_ALERT. | No continuous sensor feed, operating-condition/product-mix adjustment, degradation causality, project implementation register, managed scheduled monitoring or independently verified savings lifecycle. |
 | Engineering knowledge/model assurance | PARTIALLY_IMPLEMENTED | Calculation methods are deterministic, inspectable and covered by tests; limits and assumptions are returned in outputs. | No versioned standards library, calculation-method approval register, qualified references or full model registry integration. |
 
 ## 4. Engineering method boundaries
@@ -97,6 +97,10 @@ The LP is single-period and deterministic. It allocates only through routes that
 ### Forecasting and reliability
 
 Quality forecasting requires a minimum history and includes a chronological holdout error, but remains an exploratory linear trend with an approximate residual interval. Historical supply reliability is an empirical pass rate only. Neither output claims future probability or an operational service-level guarantee.
+
+### Performance persistence
+
+The monitor requires a declared baseline and dated usage/production observations. It computes resource intensity per unit of production and flags repeated periods above a configured degradation threshold. A lower observed intensity is not a verified saving, and a higher intensity is not attributed to a root cause. Operating hours, product mix, quality and other changed operating conditions are not normalized in this version.
 
 ### Bottlenecks and infrastructure
 
@@ -147,6 +151,7 @@ The new test file `tests/test_shoir_resource_intelligence.py` includes coverage 
 - Transfer-neutral network financial value and non-self-certification of independent verification.
 - Exchange agreement draft approval-reference states and delivery quantity/quality/certificate evidence checks.
 - Passport revision hash-chain creation, continuity verification, tamper detection and refusal to extend a broken chain.
+- Dated production-normalized performance monitoring, consecutive degradation alert and timestamp validation.
 - Downstream dependency graph traversal without causality claims.
 - Insufficient-data and time-aware exploratory forecast behavior.
 - Historical delivery pass rate without a future probability.
