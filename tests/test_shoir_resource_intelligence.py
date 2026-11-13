@@ -1,0 +1,298 @@
+"""Independent regression tests for the Industrial Resource Intelligence foundation."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from shoir_resource_intelligence import (
+    ResourceValidationError,
+    assess_resource_compatibility,
+    calculate_exchange_value,
+    calculate_resource_balance,
+    calculate_supply_reliability,
+    detect_resource_loss,
+    evaluate_safety_gate,
+    forecast_resource_quality,
+    optimize_resource_network,
+    propagate_network_impact,
+    rank_resource_cascade,
+    simulate_supplier_disruption,
+    validate_import_rows,
+    validate_resource_passport,
+)
+
+
+def _supply(resource_id="S1", quantity=100.0, quality=None):
+    return {
+        "resource_id": resource_id,
+        "facility_id": "FAC-A",
+        "name": "Recovered water",
+        "resource_type": "Water",
+        "available_quantity": quantity,
+        "unit": "m3/day",
+        "quality": quality or {"pH": 7.0, "TDS_mg_l": 250.0},
+        "provenance": "IMPORTED",
+    }
+
+
+def _demand(demand_id="D1", quantity=60.0, limits=None):
+    return {
+        "demand_id": demand_id,
+        "name": "Process water requirement",
+        "resource_type": "Water",
+        "required_quantity": quantity,
+        "unit": "m3/day",
+        "quality_limits": limits or {"pH": {"min": 6.5, "max": 8.5}, "TDS_mg_l": {"max": 500}},
+    }
+
+
+def _route(supply_id="S1", demand_id="D1", cost=2.0):
+    return {"supply_id": supply_id, "demand_id": demand_id, "unit_cost": cost}
+
+
+def test_resource_passport_normalizes_provenance_and_requires_real_inputs():
+    passport = validate_resource_passport({
+        "facility_id": "FAC-A",
+        "name": "Recovered process water",
+        "resource_type": "Water",
+        "available_quantity": "120",
+        "unit": "m3/day",
+        "quality": {"pH": "7.2"},
+        "provenance": "imported",
+        "measured_at": "2026-11-12T10:00:00+03:00",
+    })
+    assert passport["available_quantity"] == 120
+    assert passport["provenance"] == "IMPORTED"
+    assert passport["quality"] == {"pH": 7.2}
+    assert passport["measured_at"].endswith("+00:00")
+
+
+@pytest.mark.parametrize("bad", [0, -1, "not-a-number", float("inf"), float("nan")])
+def test_resource_passport_rejects_nonpositive_or_nonfinite_quantity(bad):
+    with pytest.raises(ResourceValidationError):
+        validate_resource_passport({
+            "facility_id": "FAC-A", "name": "Water", "resource_type": "Water",
+            "available_quantity": bad, "unit": "m3/day", "provenance": "MANUAL",
+        })
+
+
+def test_resource_balance_reconciles_same_unit_and_exposes_signed_difference():
+    result = calculate_resource_balance(100, 92, unit="m3/day", tolerance_percent=5)
+    assert result["status"] == "ANOMALY_SUSPECTED"
+    assert result["unreconciled_quantity"] == 8
+    assert result["difference_percent"] == 8
+
+
+def test_resource_loss_screen_never_confirms_a_loss_from_a_balance_anomaly():
+    result = detect_resource_loss(100, 80, unit="kg", evidence_provenance="LIVE")
+    assert result["finding_type"] == "SUSPECTED_RESOURCE_LOSS"
+    assert result["confirmation_status"] == "NOT_CONFIRMED"
+
+
+def test_compatibility_rejects_different_units_without_implicit_conversion():
+    result = assess_resource_compatibility(_supply(), {**_demand(), "unit": "L/s"})
+    assert result["status"] == "TECHNICALLY_INCOMPATIBLE"
+
+
+def test_compatibility_fails_closed_when_required_quality_property_is_missing():
+    result = assess_resource_compatibility(
+        _supply(quality={"pH": 7.0}),
+        _demand(limits={"TDS_mg_l": {"max": 500}}),
+    )
+    assert result["status"] == "INSUFFICIENT_DATA"
+
+
+def test_compatibility_identifies_out_of_spec_material_as_incompatible():
+    result = assess_resource_compatibility(
+        _supply(quality={"pH": 4.0}),
+        _demand(limits={"pH": {"min": 6.5, "max": 8.5}}),
+    )
+    assert result["status"] == "TECHNICALLY_INCOMPATIBLE"
+
+
+def test_compatibility_treatment_requires_residual_quality_and_recorded_evidence():
+    result = assess_resource_compatibility(
+        _supply(quality={"pH": 4.0}),
+        _demand(limits={"pH": {"min": 6.5, "max": 8.5}}),
+        treatment_plan={
+            "residual_quality": {"pH": 7.0},
+            "qualification_evidence": "LAB-REPORT-17",
+            "qualified_by": "Named engineer",
+        },
+    )
+    assert result["status"] == "COMPATIBLE_SUBJECT_TO_TREATMENT"
+    assert result["qualification_is_user_asserted"] is True
+    assert "not been independently verified" in result["verification_warning"]
+
+
+def test_compatibility_lab_and_engineering_hold_statuses_are_explicit():
+    supply, demand = _supply(), _demand()
+    assert assess_resource_compatibility(supply, demand, laboratory_test_required=True)["status"] == "REQUIRES_LAB_TESTING"
+    assert assess_resource_compatibility(supply, demand, engineering_review_required=True)["status"] == "REQUIRES_ENGINEERING_REVIEW"
+
+
+def test_network_lp_respects_supply_capacity_and_fully_reconciles_demand():
+    result = optimize_resource_network([_supply()], [_demand()], [_route()])
+    assert result["status"] == "OPTIMAL"
+    assert result["allocations"][0]["quantity"] == pytest.approx(60)
+    assert result["objective_cost"] == pytest.approx(120)
+
+
+def test_network_lp_returns_infeasible_instead_of_overallocating_shared_supply():
+    demands = [_demand("D1", 80), _demand("D2", 80)]
+    routes = [_route("S1", "D1"), _route("S1", "D2")]
+    result = optimize_resource_network([_supply(quantity=100)], demands, routes)
+    assert result["status"] == "INFEASIBLE"
+    assert result["allocations"] == []
+
+
+def test_network_lp_rejects_route_when_quality_gate_fails():
+    result = optimize_resource_network(
+        [_supply(quality={"pH": 3.0})],
+        [_demand(limits={"pH": {"min": 6.5, "max": 8.5}})],
+        [_route()],
+    )
+    assert result["status"] == "INFEASIBLE"
+    assert result["rejected_routes"][0]["status"] == "TECHNICALLY_INCOMPATIBLE"
+
+
+def test_supplier_disruption_reports_shortage_without_inventing_recovery_time():
+    result = simulate_supplier_disruption(
+        [_supply(quantity=100)], [_demand(quantity=80)], [_route()],
+        supplier_id="S1", supply_reduction_fraction=0.5,
+    )
+    assert result["allocation_result"]["status"] == "FEASIBLE_WITH_SHORTAGE"
+    assert result["allocation_result"]["unmet_demand"][0]["quantity"] == pytest.approx(30)
+    assert result["recovery_time"] is None
+
+
+def test_safety_gate_blocks_critical_failure_even_when_references_are_recorded():
+    result = evaluate_safety_gate(
+        critical_failure=True,
+        laboratory_required=True,
+        laboratory_passed=True,
+        engineering_approval_reference="ENG-1",
+        safety_approval_reference="HSE-1",
+        environmental_approval_reference="ENV-1",
+    )
+    assert result["status"] == "REJECTED"
+    assert result["operational_authorization"] is False
+
+
+def test_safety_gate_does_not_promote_missing_approval_references():
+    result = evaluate_safety_gate(
+        critical_failure=False,
+        laboratory_required=True,
+        laboratory_passed=None,
+    )
+    assert result["status"] == "APPROVAL_PENDING"
+    assert len(result["blockers"]) == 4
+
+
+def test_network_value_excludes_internal_transfer_from_network_benefit():
+    result = calculate_exchange_value(
+        avoided_disposal_cost=100,
+        supplier_sale_revenue=20,
+        supplier_preparation_cost=10,
+        supplier_testing_cost=5,
+        supplier_handling_delivery_cost=5,
+        avoided_alternative_purchase_cost=200,
+        buyer_treatment_cost=50,
+        buyer_transport_cost=10,
+        buyer_testing_cost=5,
+        buyer_additional_operating_cost=5,
+        currency="SAR",
+        evidence_status="INDEPENDENTLY_VERIFIED",
+    )
+    assert result["supplier_benefit"] == pytest.approx(100)
+    assert result["buyer_benefit"] == pytest.approx(130)
+    assert result["network_benefit_transfer_neutral"] == pytest.approx(210)
+    assert result["evidence_status"] == "MEASURED_PENDING_INDEPENDENT_EVIDENCE"
+    assert result["independent_verification"] == "NOT_ESTABLISHED"
+
+
+def test_dependency_propagation_is_downstream_and_does_not_claim_causality():
+    result = propagate_network_impact(
+        [{"from": "A", "to": "B"}, {"from": "B", "to": "C"}, {"from": "X", "to": "Y"}],
+        affected_node="A",
+    )
+    assert result["affected_nodes"] == ["B", "C"]
+    assert result["causality_verified"] is False
+
+
+def test_quality_forecast_refuses_insufficient_history_and_reports_backtest_when_available():
+    assert forecast_resource_quality([])["status"] == "INSUFFICIENT_DATA"
+    observations = [
+        {"timestamp": f"2026-01-{day:02d}T00:00:00+00:00", "value": 7.0 + day * 0.01}
+        for day in range(1, 26)
+    ]
+    result = forecast_resource_quality(observations)
+    assert result["status"] == "EXPLORATORY_FORECAST_NOT_VALIDATED"
+    assert result["holdout_sample_count"] == 5
+    assert result["prediction_interval_approx_95"][0] <= result["forecast"] <= result["prediction_interval_approx_95"][1]
+
+
+def test_supply_reliability_reports_empirical_history_not_future_probability():
+    history = [
+        {"delivered_quantity": 100, "required_quantity": 100, "quality_pass": True}
+        for _ in range(20)
+    ]
+    result = calculate_supply_reliability(history)
+    assert result["historical_pass_rate"] == 1
+    assert result["future_reliability_probability"] is None
+
+
+def test_cascade_ranks_prevention_before_external_exchange_and_disposal():
+    result = rank_resource_cascade([
+        {"opportunity_id": "C", "action": "DISPOSE"},
+        {"opportunity_id": "B", "action": "EXTERNAL_EXCHANGE"},
+        {"opportunity_id": "A", "action": "PREVENT"},
+    ])
+    assert [x["action"] for x in result] == ["PREVENT", "EXTERNAL_EXCHANGE", "DISPOSE"]
+
+
+def test_import_validation_preserves_invalid_source_rows_and_does_not_mutate_them():
+    row = {
+        "facility_id": "FAC-A", "name": "Water", "resource_type": "Water",
+        "available_quantity": -1, "unit": "m3/day", "provenance": "IMPORTED",
+    }
+    original = dict(row)
+    result = validate_import_rows([row])
+    assert result["status"] == "INVALID"
+    assert row == original
+    assert result["source_rows_modified"] is False
+
+
+def test_workbench_discovery_alias_launch_and_entitlement(tmp_path, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    page = Path(__file__).resolve().parents[1] / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "resource-intelligence-test"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.text_input(key="workbench_module_search").set_value("IEIT")
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    selector = at.selectbox(key="workbench_module_selector")
+    assert "Resource Intelligence · Industrial Resource Intelligence" in selector.options
+    selector.select("Resource Intelligence · Industrial Resource Intelligence")
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Industrial Resource Intelligence" in item.value for item in at.subheader)
+
+    # The same route is not discoverable through the available module menu to Starter.
+    denied = AppTest.from_file(page, default_timeout=60)
+    denied.session_state["current_user"] = "resource-starter-test"
+    denied.session_state["authenticated"] = True
+    denied.session_state["user_tier"] = "Starter"
+    denied.run(timeout=60)
+    assert not denied.exception, "\\n".join(str(error.value) for error in denied.exception)
+    denied.text_input(key="workbench_module_search").set_value("industrial symbiosis")
+    denied.run(timeout=60)
+    assert not denied.exception, "\\n".join(str(error.value) for error in denied.exception)
+    assert any("Enterprise" in warning.value for warning in denied.warning)
