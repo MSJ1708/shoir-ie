@@ -1968,3 +1968,36 @@ def test_resource_import_validation_rejects_duplicate_passport_ids_without_mutat
     assert "Duplicate resource_id" in result["rejected"][0]["reason"]
     assert rows == original
     assert result["source_rows_modified"] is False
+
+
+def test_standalone_compatibility_result_preserves_declared_input_provenance():
+    result = assess_resource_compatibility(_supply(), _demand())
+    assert result["status"] == "TECHNICALLY_COMPATIBLE"
+    assert result["input_provenance"] == {
+        "supply": "IMPORTED",
+        "demand": "MANUAL",
+    }
+
+
+def test_compatibility_does_not_invent_missing_provenance_and_rejects_unverified_live():
+    raw_supply = {
+        "resource_type": "Water",
+        "available_quantity": 10,
+        "unit": "m3/day",
+        "quality": {"pH": 7.0},
+    }
+    raw_demand = {
+        "resource_type": "Water",
+        "unit": "m3/day",
+        "quality_limits": {"pH": {"min": 6.5, "max": 8.5}},
+    }
+    result = assess_resource_compatibility(raw_supply, raw_demand)
+    assert result["input_provenance"] == {
+        "supply": "NOT_DECLARED",
+        "demand": "NOT_DECLARED",
+    }
+    with pytest.raises(ResourceValidationError, match="LIVE is not accepted"):
+        assess_resource_compatibility(
+            {**raw_supply, "provenance": "LIVE"},
+            {**raw_demand, "provenance": "MANUAL"},
+        )
