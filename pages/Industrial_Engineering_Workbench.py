@@ -3236,6 +3236,11 @@ if selected == "Excel Intelligence":
     # This dedicated Data route reuses the governed Excel runtime and its
     # server-side premium entitlement check in industrial_platform.render_module.
     render_module(selected, RAW_TIER, USER)
+elif selected == "Industrial Resource Intelligence":
+    # Keep the flagship resource system inside the existing Workbench and
+    # enforce the same Enterprise tier boundary used by the module selector.
+    from shoir_resource_intelligence_ui import render_resource_intelligence_workbench
+    render_resource_intelligence_workbench(st, user=USER, tier=RAW_TIER)
 elif selected == "Engineering Validation Center":
     st.subheader("🔎 Engineering Validation Center")
     st.caption("Validate schema, missingness, duplicates, types, units, ranges and cross-table references before running engineering logic.")
