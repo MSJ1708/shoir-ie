@@ -1029,9 +1029,9 @@ def test_performance_persistence_monitor_flags_repeated_normalized_degradation()
     from shoir_resource_intelligence import monitor_resource_intensity_persistence
 
     observations = [
-        {"timestamp": "2026-11-01T00:00:00+00:00", "usage": 110, "production": 100},
-        {"timestamp": "2026-11-08T00:00:00+00:00", "usage": 112, "production": 100},
-        {"timestamp": "2026-11-15T00:00:00+00:00", "usage": 90, "production": 100},
+        {"timestamp": "2026-11-01T00:00:00+00:00", "usage": 90, "production": 100},
+        {"timestamp": "2026-11-08T00:00:00+00:00", "usage": 110, "production": 100},
+        {"timestamp": "2026-11-15T00:00:00+00:00", "usage": 112, "production": 100},
     ]
     result = monitor_resource_intensity_persistence(
         baseline_usage=100,
@@ -1055,7 +1055,10 @@ def test_performance_persistence_monitor_requires_unique_ascending_timezone_awar
     with pytest.raises(ResourceValidationError, match="timezone-aware"):
         monitor_resource_intensity_persistence(
             100, 100,
-            [{"timestamp": "2026-11-01", "usage": 100, "production": 100}],
+            [
+                {"timestamp": "2026-11-01", "usage": 100, "production": 100},
+                {"timestamp": "2026-11-02", "usage": 100, "production": 100},
+            ],
             usage_unit="m3", production_unit="tonne",
         )
     with pytest.raises(ResourceValidationError, match="unique, ascending"):
