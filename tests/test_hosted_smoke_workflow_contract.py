@@ -122,3 +122,15 @@ def test_tab_bar_layout_validator_allows_desktop_whitespace_when_not_clipped():
     }
     _validate_tab_bar_layout(layout, 1440)
 
+
+
+def test_local_runtime_smoke_covers_all_three_release_viewports():
+    smoke = (ROOT / "scripts" / "live_deployment_smoke.py").read_text(encoding="utf-8")
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert '("desktop", {"width": 1440, "height": 1000})' in smoke
+    assert '("tablet", {"width": 768, "height": 1024})' in smoke
+    assert '("mobile", {"width": 390, "height": 844})' in smoke
+    assert "artifacts/live-deployment-smoke/desktop.png" in workflow
+    assert "artifacts/live-deployment-smoke/tablet.png" in workflow
+    assert "artifacts/live-deployment-smoke/mobile.png" in workflow
