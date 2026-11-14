@@ -10459,6 +10459,17 @@ else:
                 st.error("The Industrial Operating System encountered a recoverable rendering issue. Your workspace data was not discarded.")
                 with st.expander("Technical diagnostic"):
                     st.code(f"{type(exc).__name__}: {exc}")
+            try:
+                from shoir_industrial_intelligence import render_industrial_intelligence_suite
+                render_industrial_intelligence_suite(
+                    st,
+                    st.session_state.get("current_user", "unknown"),
+                    tier_val,
+                )
+            except Exception as exc:
+                st.error("Industrial Intelligence Suite could not be loaded safely.")
+                with st.expander("Industrial Intelligence diagnostic"):
+                    st.code(f"{type(exc).__name__}: {exc}")
         else:
             st.warning("Industrial Operating System requires the Enterprise tier.")
     # Global Project + Digital Thread is cross-module and therefore uses its
