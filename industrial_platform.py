@@ -2290,12 +2290,14 @@ def render_module(module: str, tier: str, username: str):
             key="data_platform_upload",
             help="Excel sheets are normalized to separate CSV dataset versions. The original workbook is not overwritten.",
         )
+        platform_state = _industrial_platform_session_state()
         current_workspace = str(
-            _industrial_platform_session_state().get("shoir_workspace_name")
-            or _industrial_platform_session_state().get("workspace")
-            or _industrial_platform_session_state().get("active_workspace_name")
+            platform_state.get("shoir_workspace_name")
+            or platform_state.get("workspace")
+            or platform_state.get("active_workspace_name")
             or "default"
         )
+        dataset_scope = _dataset_scope_from_session(platform_state, username)
         staging_environment = False
         staging_token = str(
             _industrial_platform_session_state().get("remote_session_token") or ""
@@ -2419,6 +2421,11 @@ def render_module(module: str, tier: str, username: str):
                             st.success(f"Registered immutable dataset version {version}.")
                         else:
                             st.success(f"Registered dataset {dataset_id}.")
+                        lineage_status = state.get("shoir_dataset_lineage_invalidation", {})
+                        if isinstance(lineage_status, Mapping) and str(lineage_status.get("status") or "").endswith("FAILED"):
+                            st.error("The dataset was registered, but previous dependent analyses could not be invalidated. Dependent engineering record creation is blocked. Review the lineage status before continuing.")
+                        elif state.get("shoir_dataset_lineage_blocked") is True:
+                            st.error("The dataset version is saved but lineage has not been accepted; dependent engineering records remain blocked.")
                         _render_dataset_profile(
                             frame,
                             str(sheet_name),
@@ -2431,6 +2438,28 @@ def render_module(module: str, tier: str, username: str):
                 st.error(f"Dataset import/registration failed safely: {exc}")
 
         st.markdown("### Registered dataset catalogue")
+        active_dependency = platform_state.get("shoir_active_dataset_dependency")
+        lineage_blocked = platform_state.get("shoir_dataset_lineage_blocked") is True
+        if isinstance(active_dependency, Mapping):
+            st.caption(
+                "Active dataset dependency: "
+                f"{active_dependency.get('dataset_id')} · version {active_dependency.get('version')} · "
+                f"SHA-256 {str(active_dependency.get('data_hash') or '')[:16]}…"
+            )
+            if not bool(active_dependency.get("current_version_verified")):
+                st.error("A historical dataset version is loaded. New dependent engineering records are blocked until the current dataset head is loaded.")
+            elif lineage_blocked:
+                st.error("Dataset lineage invalidation has not been confirmed. New engineering records are blocked until the stale-dependency check succeeds.")
+            tracking_enabled = st.checkbox(
+                "Attach the active dataset version to new Industrial Intelligence / Digital Thread records",
+                value=bool(platform_state.get("shoir_dataset_dependency_tracking_enabled", True)),
+                disabled=lineage_blocked or not bool(active_dependency.get("current_version_verified")),
+                key="data_platform_dataset_lineage_tracking",
+                help="The saved record stores the immutable dataset ID, version, content hash and version fingerprint. A later dataset version marks old dependent records and Digital Thread nodes stale.",
+            )
+            platform_state["shoir_dataset_dependency_tracking_enabled"] = bool(tracking_enabled)
+        else:
+            st.info("Load or register a managed dataset version to enable automatic dataset-to-analysis lineage.")
         catalog = pd.DataFrame()
         version_records: list[dict[str, Any]] = []
         if staging_environment:
@@ -2448,6 +2477,7 @@ def render_module(module: str, tier: str, username: str):
                         current_workspace,
                         "dataset",
                         5000,
+                        **dataset_scope,
                     )
                     catalog_rows = []
                     for record in records:
@@ -2499,6 +2529,7 @@ def render_module(module: str, tier: str, username: str):
                             current_workspace,
                             "dataset_version",
                             10000,
+                            **dataset_scope,
                         )
                         for record in records:
                             payload = record.get("payload_json") or {}
