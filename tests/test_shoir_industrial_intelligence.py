@@ -480,15 +480,38 @@ def test_actual_benefit_requires_independent_reviewer_and_evidence(monkeypatch):
     assert review["status"] == "VERIFIED_BY_INDEPENDENT_REVIEWER"
 
 
-def test_cause_effect_candidates_do_not_claim_confirmed_causation(monkeypatch):
-    _configure_personal_session(monkeypatch)
+def test_cause_effect_candidates_require_separate_independent_review_to_confirm(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-cause-author", "owner")
     record = ii.record_cause_effect_investigation(
-        "synthetic-owner", "Enterprise", "Yield variation investigation",
+        "synthetic-cause-author", "Enterprise", "Yield variation investigation",
         ["Yield decreased after a material batch change."],
-        [{"from": "material lot", "to": "yield variation", "supporting_evidence": ["SYNTHETIC:batch-log"], "contradicting_evidence": [], "validation_status": "SUSPECTED"}],
+        [{"from": "material lot", "to": "yield variation", "supporting_evidence": [], "contradicting_evidence": [], "validation_status": "SUSPECTED"}],
     )
     assert record["payload"]["causal_claim"] == "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED"
     assert record["payload"]["candidate_relationships"][0]["validation_status"] == "SUSPECTED"
+    with pytest.raises(ii.IndustrialIntelligenceError, match="SUSPECTED or SUPPORTED"):
+        ii.record_cause_effect_investigation(
+            "synthetic-cause-author", "Enterprise", "Invalid self-confirmed investigation",
+            ["Observation"], [{"from": "A", "to": "B", "supporting_evidence": ["any-string"], "validation_status": "CONFIRMED"}],
+        )
+    session["current_user"] = "synthetic-cause-approver"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "approver", "status": "active",
+            }]
+        },
+    )
+    evidence = ii.create_record("synthetic-cause-approver", "Enterprise", "evidence", "Causal review source", {"review": "synthetic independent evidence"}, provenance="SYNTHETIC")
+    review = ii.review_cause_effect_investigation(
+        "synthetic-cause-approver", "Enterprise", record["record_id"], 0,
+        "CONFIRMED", [evidence["record_id"]], "Reviewed supporting and counter-evidence.",
+    )
+    assert review["decision"] == "CONFIRMED"
+    assert review["review_record"]["payload"]["confirmation_scope"] == "THIS_REVIEWED_RELATIONSHIP_ONLY"
 
 
 def test_copilot_retrieves_authorized_records_with_citations(monkeypatch):
@@ -500,12 +523,31 @@ def test_copilot_retrieves_authorized_records_with_citations(monkeypatch):
     assert "not an AI-generated" in result["answer_boundary"]
 
 
-def test_risk_barrier_record_remains_a_screen_not_formal_safety_approval(monkeypatch):
-    _configure_personal_session(monkeypatch)
-    evidence = ii.create_record("synthetic-owner", "Enterprise", "evidence", "Barrier inspection", {"inspection": "synthetic passed"}, provenance="SYNTHETIC")
+def test_risk_barrier_effectiveness_requires_independent_review(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-risk-author", "owner")
+    evidence = ii.create_record("synthetic-risk-author", "Enterprise", "evidence", "Barrier inspection", {"inspection": "synthetic passed"}, provenance="SYNTHETIC")
     record = ii.record_risk_barrier(
-        "synthetic-owner", "Enterprise", "Synthetic pressure excursion", 4, 3,
-        [{"barrier_id": "B-01", "owner": "engineer-01", "evidence_id": evidence["record_id"], "status": "EFFECTIVE"}],
+        "synthetic-risk-author", "Enterprise", "Synthetic pressure excursion", 4, 3,
+        [{"barrier_id": "B-01", "owner": "synthetic-engineer", "evidence_id": evidence["record_id"], "status": "EFFECTIVE"}],
     )
     assert record["payload"]["formal_safety_approval"] is False
-    assert record["payload"]["barriers"][0]["counts_as_effective"] is True
+    assert record["payload"]["barriers"][0]["counts_as_effective"] is False
+    assert record["payload"]["residual_screening_score"] == pytest.approx(12)
+    session["current_user"] = "synthetic-risk-approver"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "approver", "status": "active",
+            }]
+        },
+    )
+    review_evidence = ii.create_record("synthetic-risk-approver", "Enterprise", "evidence", "Independent barrier reinspection", {"result": "synthetic verification"}, provenance="SYNTHETIC")
+    review = ii.review_barrier_effectiveness(
+        "synthetic-risk-approver", "Enterprise", record["record_id"], "B-01",
+        "VERIFIED_EFFECTIVE", review_evidence["record_id"], "Independent check passed.",
+    )
+    assert review["residual_screening_score"] == pytest.approx(4.8)
+    assert review["formal_safety_approval"] is False
