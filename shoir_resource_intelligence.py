@@ -102,7 +102,7 @@ def _utc_timestamp(value: Any, field: str) -> str | None:
     except (TypeError, ValueError) as exc:
         raise ResourceValidationError(f"{field} must be an ISO-8601 timestamp.") from exc
     if parsed.tzinfo is None:
-        raise ResourceValidationError(f"{field} must include a timezone offset.")
+        raise ResourceValidationError(f"{field} must be a timezone-aware ISO-8601 timestamp and include a timezone offset.")
     return parsed.astimezone(timezone.utc).isoformat()
 
 
@@ -140,7 +140,7 @@ def validate_resource_passport(payload: Mapping[str, Any]) -> dict[str, Any]:
     approval_status = (_optional_text(payload.get("approval_status")) or "DRAFT").upper()
     if approval_status not in {"DRAFT", "PENDING"}:
         raise ResourceValidationError(
-            "Resource passports may only be created as DRAFT or PENDING. "
+            "approval_status must be DRAFT or PENDING. "
             "APPROVED/REJECTED requires an authenticated review workflow that is not implemented here."
         )
     normalized_quality = {
@@ -2061,6 +2061,16 @@ def optimize_single_contaminant_water_reuse(
                 "reason": "A user-confirmed physical connection and evidence reference are required.",
             })
             continue
+        # Validate an asserted physical route's required capacity before its
+        # provenance metadata so an incomplete confirmed route reports the
+        # missing engineering constraint directly (without weakening trust gates).
+        capacity = _number(
+            connection.get("capacity"),
+            f"connections[{index}].capacity",
+            minimum=0,
+        )
+        if capacity <= 0:
+            continue
         connection_provenance = _validated_input_provenance(
             connection.get("provenance"), f"connections[{index}].provenance"
         )
@@ -2071,13 +2081,6 @@ def optimize_single_contaminant_water_reuse(
                 "reason": "Stale physical connection evidence cannot be optimized.",
                 "provenance": connection_provenance,
             })
-            continue
-        capacity = _number(
-            connection.get("capacity"),
-            f"connections[{index}].capacity",
-            minimum=0,
-        )
-        if capacity <= 0:
             continue
         eligible_connections.append({
             "source_id": source_id,
