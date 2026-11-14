@@ -1172,6 +1172,118 @@ def test_performance_persistence_monitor_requires_unique_ascending_timezone_awar
         )
 
 
+
+
+def test_production_maintenance_optimizer_reduces_capacity_then_reports_resource_supported_output():
+    import shoir_resource_intelligence as resource
+
+    result = resource.optimize_production_maintenance_aware_resource_network(
+        supplies=[{
+            "resource_id": "WATER-SUPPLY", "period_id": "SHIFT-A",
+            "resource_type": "water", "available_quantity": 200,
+            "unit": "m3", "quality": {}, "provenance": "SYNTHETIC",
+        }],
+        production_plans=[{
+            "plan_id": "PLAN-A", "asset_id": "LINE-01", "period_id": "SHIFT-A",
+            "planned_quantity": 150, "production_unit": "tonne",
+            "planned_operating_hours": 8, "maximum_production_rate_per_hour": 20,
+            "source_reference": "SYNTHETIC:production-plan-A", "provenance": "SYNTHETIC",
+        }],
+        maintenance_windows=[{
+            "maintenance_id": "MNT-A", "asset_id": "LINE-01", "period_id": "SHIFT-A",
+            "downtime_hours": 2, "status": "CONFIRMED",
+            "source_reference": "SYNTHETIC:maintenance-A", "provenance": "SYNTHETIC",
+        }],
+        resource_requirements=[{
+            "requirement_id": "REQ-WATER", "plan_id": "PLAN-A",
+            "resource_type": "water", "unit": "m3",
+            "quantity_per_production_unit": 2, "quality_limits": {},
+            "source_reference": "SYNTHETIC:water-intensity", "provenance": "SYNTHETIC",
+        }],
+        routes=[{
+            "supply_id": "WATER-SUPPLY", "demand_id": "REQ-WATER", "period_id": "SHIFT-A",
+            "connection_confirmed": True, "connection_evidence_reference": "SYNTHETIC:route-A",
+            "provenance": "SYNTHETIC", "capacity": 200,
+            "unit_cost": 0.5, "treatment_cost_per_unit": 0,
+            "transport_cost_per_unit": 0, "currency": "SAR",
+        }],
+        allow_shortage=True,
+        shortage_penalty_per_unit=1000,
+        shortage_penalty_currency="SAR",
+    )
+
+    assert result["method"] == "PERIOD_ALIGNED_LP_WITH_MAINTENANCE_AVAILABILITY"
+    plan = result["production_plans"][0]
+    assert plan["production_capacity_after_maintenance"] == pytest.approx(120)
+    assert plan["maintenance_curtailed_quantity"] == pytest.approx(30)
+    assert plan["resource_supported_production_quantity"] == pytest.approx(100)
+    assert plan["resource_curtailed_quantity"] == pytest.approx(20)
+    assert plan["total_curtailed_quantity_vs_plan"] == pytest.approx(50)
+    assert plan["resource_requirements"][0]["allocated_quantity"] == pytest.approx(200)
+    assert plan["resource_requirements"][0]["unmet_quantity"] == pytest.approx(40)
+    assert result["operational_authorization"] is False
+
+
+def test_production_maintenance_optimizer_requires_a_declared_window_for_every_asset_period():
+    import shoir_resource_intelligence as resource
+
+    with pytest.raises(resource.ResourceValidationError, match="maintenance availability record"):
+        resource.optimize_production_maintenance_aware_resource_network(
+            supplies=[],
+            production_plans=[{
+                "plan_id": "PLAN-A", "asset_id": "LINE-01", "period_id": "SHIFT-A",
+                "planned_quantity": 10, "production_unit": "tonne",
+                "planned_operating_hours": 8, "maximum_production_rate_per_hour": 2,
+                "source_reference": "SYNTHETIC:plan", "provenance": "SYNTHETIC",
+            }],
+            maintenance_windows=[],
+            resource_requirements=[{
+                "requirement_id": "REQ-A", "plan_id": "PLAN-A",
+                "resource_type": "water", "unit": "m3",
+                "quantity_per_production_unit": 1,
+                "source_reference": "SYNTHETIC:requirement", "provenance": "SYNTHETIC",
+            }],
+            routes=[],
+        )
+
+
+def test_production_maintenance_optimizer_rejects_duplicate_or_overlong_downtime():
+    import shoir_resource_intelligence as resource
+
+    plan = {
+        "plan_id": "PLAN-A", "asset_id": "LINE-01", "period_id": "SHIFT-A",
+        "planned_quantity": 10, "production_unit": "tonne",
+        "planned_operating_hours": 8, "maximum_production_rate_per_hour": 2,
+        "source_reference": "SYNTHETIC:plan", "provenance": "SYNTHETIC",
+    }
+    requirement = {
+        "requirement_id": "REQ-A", "plan_id": "PLAN-A",
+        "resource_type": "water", "unit": "m3",
+        "quantity_per_production_unit": 1,
+        "source_reference": "SYNTHETIC:requirement", "provenance": "SYNTHETIC",
+    }
+    window = {
+        "maintenance_id": "MNT-A", "asset_id": "LINE-01", "period_id": "SHIFT-A",
+        "downtime_hours": 2, "status": "CONFIRMED",
+        "source_reference": "SYNTHETIC:maintenance", "provenance": "SYNTHETIC",
+    }
+    with pytest.raises(resource.ResourceValidationError, match="Overlapping or duplicate"):
+        resource.optimize_production_maintenance_aware_resource_network(
+            supplies=[], production_plans=[plan],
+            maintenance_windows=[window, {**window, "maintenance_id": "MNT-B"}],
+            resource_requirements=[requirement], routes=[], allow_shortage=True,
+            shortage_penalty_per_unit=1, shortage_penalty_currency="SAR",
+        )
+    with pytest.raises(resource.ResourceValidationError, match="exceeds planned operating hours"):
+        resource.optimize_production_maintenance_aware_resource_network(
+            supplies=[], production_plans=[plan],
+            maintenance_windows=[{**window, "downtime_hours": 9}],
+            resource_requirements=[requirement], routes=[], allow_shortage=True,
+            shortage_penalty_per_unit=1, shortage_penalty_currency="SAR",
+        )
+
+
+
 def test_period_aligned_optimizer_solves_each_period_within_its_own_supply_pool():
     from shoir_resource_intelligence import optimize_period_aligned_resource_network
 

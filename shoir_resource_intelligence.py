@@ -775,6 +775,367 @@ def optimize_resource_network(
     }
 
 
+
+def optimize_production_maintenance_aware_resource_network(
+    supplies: Sequence[Mapping[str, Any]],
+    production_plans: Sequence[Mapping[str, Any]],
+    maintenance_windows: Sequence[Mapping[str, Any]],
+    resource_requirements: Sequence[Mapping[str, Any]],
+    routes: Sequence[Mapping[str, Any]],
+    *,
+    allow_shortage: bool = False,
+    shortage_penalty_per_unit: float | None = None,
+    shortage_penalty_currency: str | None = None,
+) -> dict[str, Any]:
+    """Allocate resource supplies against production demand reduced by maintenance downtime.
+
+    The function requires one aggregate maintenance availability record per
+    asset/period, derives resource demand from explicit per-unit consumption,
+    and delegates allocation to the existing period-aligned transportation LP.
+    It is a planning calculation, not a maintenance scheduler or plant control.
+    """
+    if not production_plans:
+        raise ResourceValidationError("At least one production plan is required.")
+    if not maintenance_windows:
+        raise ResourceValidationError(
+            "Explicit maintenance availability records are required for every production asset and period."
+        )
+    if not resource_requirements:
+        raise ResourceValidationError("At least one resource requirement is required.")
+    if not isinstance(allow_shortage, bool):
+        raise ResourceValidationError("allow_shortage must be an explicit boolean.")
+
+    def object_rows(values: Sequence[Mapping[str, Any]], label: str) -> list[dict[str, Any]]:
+        if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+            raise ResourceValidationError(f"{label} must be a list of objects.")
+        rows = []
+        for index, value in enumerate(values, start=1):
+            if not isinstance(value, Mapping):
+                raise ResourceValidationError(f"{label}[{index}] must be an object.")
+            rows.append(dict(value))
+        return rows
+
+    plans = object_rows(production_plans, "production_plans")
+    maintenance = object_rows(maintenance_windows, "maintenance_windows")
+    requirements = object_rows(resource_requirements, "resource_requirements")
+    plan_by_id: dict[str, dict[str, Any]] = {}
+    asset_periods: set[tuple[str, str]] = set()
+
+    for index, row in enumerate(plans, start=1):
+        plan_id = _text(row.get("plan_id"), f"production_plans[{index}].plan_id")
+        if plan_id in plan_by_id:
+            raise ResourceValidationError(f"Duplicate production plan identifier: {plan_id}.")
+        asset_id = _text(row.get("asset_id"), f"production plan {plan_id}.asset_id")
+        period_id = _text(row.get("period_id"), f"production plan {plan_id}.period_id")
+        asset_period = (asset_id, period_id)
+        if asset_period in asset_periods:
+            raise ResourceValidationError(
+                f"Only one aggregate production plan per asset and period is supported: {asset_id}/{period_id}."
+            )
+        asset_periods.add(asset_period)
+        planned_quantity = _number(
+            row.get("planned_quantity"), f"production plan {plan_id}.planned_quantity", minimum=0
+        )
+        if planned_quantity <= 0:
+            raise ResourceValidationError(f"Production plan {plan_id}.planned_quantity must be greater than zero.")
+        planned_hours = _number(
+            row.get("planned_operating_hours"),
+            f"production plan {plan_id}.planned_operating_hours",
+            minimum=0,
+        )
+        if planned_hours <= 0:
+            raise ResourceValidationError(f"Production plan {plan_id}.planned_operating_hours must be greater than zero.")
+        max_rate = _number(
+            row.get("maximum_production_rate_per_hour"),
+            f"production plan {plan_id}.maximum_production_rate_per_hour",
+            minimum=0,
+        )
+        if max_rate <= 0:
+            raise ResourceValidationError(
+                f"Production plan {plan_id}.maximum_production_rate_per_hour must be greater than zero."
+            )
+        production_unit = _text(row.get("production_unit"), f"production plan {plan_id}.production_unit")
+        provenance = _validated_input_provenance(
+            row.get("provenance"), f"production plan {plan_id}.provenance"
+        )
+        if provenance == "STALE":
+            raise ResourceValidationError(f"Production plan {plan_id} is stale and cannot be used as current input.")
+        source_reference = _text(row.get("source_reference"), f"production plan {plan_id}.source_reference")
+        plan_by_id[plan_id] = {
+            "plan_id": plan_id,
+            "asset_id": asset_id,
+            "period_id": period_id,
+            "planned_quantity": planned_quantity,
+            "planned_operating_hours": planned_hours,
+            "maximum_production_rate_per_hour": max_rate,
+            "production_unit": production_unit,
+            "provenance": provenance,
+            "source_reference": source_reference,
+            "maximum_quantity_before_maintenance": min(planned_quantity, planned_hours * max_rate),
+        }
+
+    maintenance_by_asset_period: dict[tuple[str, str], dict[str, Any]] = {}
+    allowed_maintenance_states = {"SCHEDULED", "CONFIRMED", "COMPLETED", "NO_PLANNED_DOWNTIME"}
+    for index, row in enumerate(maintenance, start=1):
+        maintenance_id = _text(row.get("maintenance_id"), f"maintenance_windows[{index}].maintenance_id")
+        asset_id = _text(row.get("asset_id"), f"maintenance window {maintenance_id}.asset_id")
+        period_id = _text(row.get("period_id"), f"maintenance window {maintenance_id}.period_id")
+        key = (asset_id, period_id)
+        if key not in asset_periods:
+            raise ResourceValidationError(
+                f"Maintenance window {maintenance_id} has no matching production plan for {asset_id}/{period_id}."
+            )
+        if key in maintenance_by_asset_period:
+            raise ResourceValidationError(
+                f"Overlapping or duplicate maintenance windows are not accepted for {asset_id}/{period_id}; "
+                "supply one aggregate downtime-hours record per asset and period."
+            )
+        downtime = _number(
+            row.get("downtime_hours"), f"maintenance window {maintenance_id}.downtime_hours", minimum=0
+        )
+        state = str(row.get("status") or "").strip().upper()
+        if state not in allowed_maintenance_states:
+            raise ResourceValidationError(
+                f"Maintenance window {maintenance_id}.status must be one of {sorted(allowed_maintenance_states)}."
+            )
+        if state == "NO_PLANNED_DOWNTIME" and downtime != 0:
+            raise ResourceValidationError(
+                f"Maintenance window {maintenance_id} marked NO_PLANNED_DOWNTIME must have zero downtime_hours."
+            )
+        provenance = _validated_input_provenance(
+            row.get("provenance"), f"maintenance window {maintenance_id}.provenance"
+        )
+        if provenance == "STALE":
+            raise ResourceValidationError(
+                f"Maintenance window {maintenance_id} is stale and cannot reduce current capacity."
+            )
+        evidence = _text(
+            row.get("source_reference"), f"maintenance window {maintenance_id}.source_reference"
+        )
+        maintenance_by_asset_period[key] = {
+            "maintenance_id": maintenance_id,
+            "asset_id": asset_id,
+            "period_id": period_id,
+            "downtime_hours": downtime,
+            "status": state,
+            "provenance": provenance,
+            "source_reference": evidence,
+        }
+
+    missing_maintenance = sorted(asset_periods - set(maintenance_by_asset_period))
+    if missing_maintenance:
+        raise ResourceValidationError(
+            "A maintenance availability record is required for every asset/period: "
+            + ", ".join(f"{asset}/{period}" for asset, period in missing_maintenance[:10])
+            + ". Use NO_PLANNED_DOWNTIME with zero hours and a source reference when no downtime is declared."
+        )
+
+    plan_capacity: dict[str, dict[str, Any]] = {}
+    for plan_id, plan in plan_by_id.items():
+        window = maintenance_by_asset_period[(plan["asset_id"], plan["period_id"])]
+        if window["downtime_hours"] > plan["planned_operating_hours"] + 1e-9:
+            raise ResourceValidationError(
+                f"Maintenance downtime exceeds planned operating hours for asset {plan['asset_id']} "
+                f"in period {plan['period_id']}."
+            )
+        available_hours = max(0.0, plan["planned_operating_hours"] - window["downtime_hours"])
+        capacity_after_maintenance = min(
+            plan["planned_quantity"],
+            available_hours * plan["maximum_production_rate_per_hour"],
+        )
+        plan_capacity[plan_id] = {
+            **plan,
+            "maintenance_id": window["maintenance_id"],
+            "maintenance_status": window["status"],
+            "maintenance_source_reference": window["source_reference"],
+            "maintenance_provenance": window["provenance"],
+            "maintenance_downtime_hours": window["downtime_hours"],
+            "available_operating_hours": available_hours,
+            "production_capacity_after_maintenance": capacity_after_maintenance,
+            "maintenance_curtailed_quantity": max(
+                0.0, plan["maximum_quantity_before_maintenance"] - capacity_after_maintenance
+            ),
+        }
+
+    requirement_by_id: dict[str, dict[str, Any]] = {}
+    requirements_by_plan: dict[str, list[dict[str, Any]]] = {plan_id: [] for plan_id in plan_by_id}
+    period_demands: list[dict[str, Any]] = []
+    for index, row in enumerate(requirements, start=1):
+        requirement_id = _text(row.get("requirement_id"), f"resource_requirements[{index}].requirement_id")
+        if requirement_id in requirement_by_id:
+            raise ResourceValidationError(f"Duplicate resource requirement identifier: {requirement_id}.")
+        plan_id = _text(row.get("plan_id"), f"resource requirement {requirement_id}.plan_id")
+        if plan_id not in plan_by_id:
+            raise ResourceValidationError(f"Resource requirement {requirement_id} references unknown plan {plan_id}.")
+        resource_type = _text(row.get("resource_type"), f"resource requirement {requirement_id}.resource_type")
+        unit = _text(row.get("unit"), f"resource requirement {requirement_id}.unit")
+        rate = _number(
+            row.get("quantity_per_production_unit"),
+            f"resource requirement {requirement_id}.quantity_per_production_unit",
+            minimum=0,
+        )
+        if rate <= 0:
+            raise ResourceValidationError(
+                f"Resource requirement {requirement_id}.quantity_per_production_unit must be greater than zero."
+            )
+        provenance = _validated_input_provenance(
+            row.get("provenance"), f"resource requirement {requirement_id}.provenance"
+        )
+        if provenance == "STALE":
+            raise ResourceValidationError(f"Resource requirement {requirement_id} is stale.")
+        source_reference = _text(row.get("source_reference"), f"resource requirement {requirement_id}.source_reference")
+        plan = plan_capacity[plan_id]
+        required_quantity = plan["production_capacity_after_maintenance"] * rate
+        requirement = {
+            "requirement_id": requirement_id,
+            "plan_id": plan_id,
+            "period_id": plan["period_id"],
+            "resource_type": resource_type,
+            "unit": unit,
+            "quantity_per_production_unit": rate,
+            "required_quantity": required_quantity,
+            "provenance": provenance,
+            "source_reference": source_reference,
+            "quality_limits": dict(row.get("quality_limits") or {}),
+        }
+        requirement_by_id[requirement_id] = requirement
+        requirements_by_plan[plan_id].append(requirement)
+        if required_quantity > 1e-12:
+            period_demands.append({
+                "demand_id": requirement_id,
+                "period_id": plan["period_id"],
+                "resource_type": resource_type,
+                "required_quantity": required_quantity,
+                "unit": unit,
+                "quality_limits": requirement["quality_limits"],
+                "provenance": provenance,
+            })
+
+    plans_without_requirements = sorted(
+        plan_id for plan_id, rows in requirements_by_plan.items() if not rows
+    )
+    if plans_without_requirements:
+        raise ResourceValidationError(
+            "Every production plan requires at least one resource requirement: "
+            + ", ".join(plans_without_requirements[:10])
+        )
+
+    if not period_demands:
+        return {
+            "status": "NO_PRODUCTION_CAPACITY",
+            "method": "PERIOD_ALIGNED_LP_WITH_MAINTENANCE_AVAILABILITY",
+            "production_plans": [
+                {
+                    "plan_id": plan_id,
+                    "asset_id": plan["asset_id"],
+                    "period_id": plan["period_id"],
+                    "planned_quantity": plan["planned_quantity"],
+                    "production_capacity_after_maintenance": 0.0,
+                    "maintenance_curtailed_quantity": plan["planned_quantity"],
+                    "resource_supported_production_quantity": 0.0,
+                    "resource_curtailed_quantity": 0.0,
+                    "production_unit": plan["production_unit"],
+                }
+                for plan_id, plan in plan_capacity.items()
+            ],
+            "period_resource_optimization": None,
+            "allocations": [],
+            "operational_authorization": False,
+            "limitations": [
+                "All supplied production plans have zero production capacity after declared maintenance downtime.",
+                "Maintenance records are user-entered and are not independently verified.",
+            ],
+        }
+
+    period_result = optimize_period_aligned_resource_network(
+        supplies,
+        period_demands,
+        routes,
+        allow_shortage=allow_shortage,
+        shortage_penalty_per_unit=shortage_penalty_per_unit,
+        shortage_penalty_currency=shortage_penalty_currency,
+    )
+
+    served_by_requirement: dict[str, float] = {}
+    for allocation in period_result.get("allocations", []):
+        requirement_id = str(allocation.get("demand_id") or "")
+        served_by_requirement[requirement_id] = (
+            served_by_requirement.get(requirement_id, 0.0)
+            + float(allocation.get("allocated_quantity") or 0.0)
+        )
+
+    production_summaries = []
+    for plan_id, plan in plan_capacity.items():
+        served_requirements = []
+        production_supported_limits = []
+        capacity = plan["production_capacity_after_maintenance"]
+        for requirement in requirements_by_plan[plan_id]:
+            required = float(requirement["required_quantity"])
+            served = min(required, served_by_requirement.get(requirement["requirement_id"], 0.0))
+            rate = float(requirement["quantity_per_production_unit"])
+            supported_by_requirement = min(capacity, served / rate) if rate > 0 else 0.0
+            if required > 1e-12:
+                production_supported_limits.append(supported_by_requirement)
+            served_requirements.append({
+                "requirement_id": requirement["requirement_id"],
+                "resource_type": requirement["resource_type"],
+                "unit": requirement["unit"],
+                "required_quantity": required,
+                "allocated_quantity": served,
+                "unmet_quantity": max(0.0, required - served),
+                "quantity_per_production_unit": rate,
+                "production_supported_by_this_resource": supported_by_requirement,
+                "source_reference": requirement["source_reference"],
+                "provenance": requirement["provenance"],
+            })
+        supported_production = (
+            min(production_supported_limits)
+            if production_supported_limits else capacity
+        )
+        resource_curtailed = max(0.0, capacity - supported_production)
+        production_summaries.append({
+            "plan_id": plan_id,
+            "asset_id": plan["asset_id"],
+            "period_id": plan["period_id"],
+            "planned_quantity": plan["planned_quantity"],
+            "maximum_quantity_before_maintenance": plan["maximum_quantity_before_maintenance"],
+            "production_capacity_after_maintenance": capacity,
+            "resource_supported_production_quantity": supported_production,
+            "maintenance_curtailed_quantity": plan["maintenance_curtailed_quantity"],
+            "resource_curtailed_quantity": resource_curtailed,
+            "total_curtailed_quantity_vs_plan": max(0.0, plan["planned_quantity"] - supported_production),
+            "planned_operating_hours": plan["planned_operating_hours"],
+            "maintenance_downtime_hours": plan["maintenance_downtime_hours"],
+            "available_operating_hours": plan["available_operating_hours"],
+            "maintenance_status": plan["maintenance_status"],
+            "maintenance_source_reference": plan["maintenance_source_reference"],
+            "maintenance_provenance": plan["maintenance_provenance"],
+            "production_unit": plan["production_unit"],
+            "resource_requirements": served_requirements,
+        })
+
+    return {
+        "status": period_result.get("status"),
+        "method": "PERIOD_ALIGNED_LP_WITH_MAINTENANCE_AVAILABILITY",
+        "period_resource_optimization": period_result,
+        "production_plans": production_summaries,
+        "allocations": period_result.get("allocations", []),
+        "objective_cost": period_result.get("objective_cost"),
+        "objective_cost_currency": period_result.get("objective_cost_currency"),
+        "unmet_resource_demand_total": period_result.get("unmet_demand_total", 0.0),
+        "maintenance_windows_are_user_declared": True,
+        "operational_authorization": False,
+        "limitations": [
+            "One aggregate maintenance-hours record is required per asset and period; overlapping windows are rejected rather than double-counted.",
+            "This derives resource availability and supported production after supplied maintenance downtime; it does not schedule maintenance tasks or optimize maintenance crew/resources.",
+            "Production plans are aggregate time buckets; sequencing, setup/changeover, workforce, storage, inventory carryover and machine routing are not modeled.",
+            "The optimization is a time-bucketed transportation LP, not a complete MES/APS or plant digital twin.",
+            "Maintenance, production, resource and route evidence is user-entered and requires independent engineering review.",
+        ],
+    }
+
+
+
 def optimize_interval_robust_resource_network(
     supplies: Sequence[Mapping[str, Any]],
     demands: Sequence[Mapping[str, Any]],

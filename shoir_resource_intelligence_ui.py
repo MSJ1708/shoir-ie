@@ -26,6 +26,7 @@ from shoir_resource_intelligence import (
     optimize_resource_network,
     optimize_interval_robust_resource_network,
     optimize_period_aligned_resource_network,
+    optimize_production_maintenance_aware_resource_network,
     simulate_supplier_disruption,
     simulate_resource_network_scenario,
     evaluate_safety_gate,
@@ -805,6 +806,93 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
                 _render_result(st, "Period-aligned optimization result", results["period_optimization"])
                 st.warning("Period alignment does not establish a physical connection, storage availability, production schedule or maintenance approval.")
 
+        with st.expander("Production and maintenance-aware resource planning"):
+            st.caption(
+                "Derive resource requirements from planned production, reduce production capacity by explicit maintenance downtime, "
+                "then allocate each required resource inside its own period. One aggregate maintenance record is required per asset/period."
+            )
+            pm_supplies_text = st.text_area(
+                "Available resource supplies JSON",
+                value="[]",
+                key="sri_pm_supplies",
+                height=100,
+                help='Each row: resource_id, period_id, resource_type, available_quantity, unit, quality, provenance.',
+            )
+            pm_plans_text = st.text_area(
+                "Production plans JSON",
+                value="[]",
+                key="sri_pm_production_plans",
+                height=100,
+                help='Each row: plan_id, asset_id, period_id, planned_quantity, production_unit, planned_operating_hours, maximum_production_rate_per_hour, source_reference, provenance.',
+            )
+            pm_maintenance_text = st.text_area(
+                "Maintenance availability windows JSON",
+                value="[]",
+                key="sri_pm_maintenance",
+                height=100,
+                help='One row per asset/period: maintenance_id, asset_id, period_id, downtime_hours, status (SCHEDULED/CONFIRMED/COMPLETED/NO_PLANNED_DOWNTIME), source_reference, provenance.',
+            )
+            pm_requirements_text = st.text_area(
+                "Resource requirements per production unit JSON",
+                value="[]",
+                key="sri_pm_requirements",
+                height=100,
+                help='Each row: requirement_id, plan_id, resource_type, unit, quantity_per_production_unit, quality_limits, source_reference, provenance.',
+            )
+            pm_routes_text = st.text_area(
+                "Confirmed resource routes JSON",
+                value="[]",
+                key="sri_pm_routes",
+                height=100,
+                help='Each row: supply_id, demand_id (matching requirement_id), period_id, connection_confirmed=true, connection_evidence_reference, provenance, capacity, unit_cost, treatment_cost_per_unit, transport_cost_per_unit, currency.',
+            )
+            allow_pm_shortage = st.checkbox(
+                "Allow unmet resource demand and show supported production",
+                value=True,
+                key="sri_pm_allow_shortage",
+            )
+            pm_penalty_col1, pm_penalty_col2 = st.columns(2)
+            pm_shortage_penalty = pm_penalty_col1.text_input(
+                "Shortage penalty per unit (required when shortage is allowed)",
+                key="sri_pm_shortage_penalty",
+            )
+            pm_shortage_currency = pm_penalty_col2.text_input(
+                "Shortage penalty currency (3-letter code)",
+                key="sri_pm_shortage_currency",
+            )
+            if st.button("Optimize production with maintenance availability", key="sri_run_pm_optimizer"):
+                try:
+                    results["production_maintenance_optimization"] = (
+                        optimize_production_maintenance_aware_resource_network(
+                            _json_array(pm_supplies_text, "Production-aware supplies"),
+                            _json_array(pm_plans_text, "Production plans"),
+                            _json_array(pm_maintenance_text, "Maintenance availability windows"),
+                            _json_array(pm_requirements_text, "Production resource requirements"),
+                            _json_array(pm_routes_text, "Production-aware routes"),
+                            allow_shortage=allow_pm_shortage,
+                            shortage_penalty_per_unit=(
+                                _finite_float(pm_shortage_penalty, "Shortage penalty", minimum=0)
+                                if allow_pm_shortage else None
+                            ),
+                            shortage_penalty_currency=(
+                                pm_shortage_currency if allow_pm_shortage else None
+                            ),
+                        )
+                    )
+                    st.session_state[STATE_PREFIX + "results"] = results
+                except Exception as exc:
+                    st.error(f"Production/maintenance-aware optimization failed safely: {exc}")
+            if "production_maintenance_optimization" in results:
+                _render_result(
+                    st,
+                    "Production and maintenance-aware resource allocation",
+                    results["production_maintenance_optimization"],
+                )
+                st.warning(
+                    "This is a user-entered, period-bucketed planning result. It does not schedule maintenance work, "
+                    "verify the physical route or authorize plant operations."
+                )
+
         with st.expander("Conservative uncertainty / interval-stress optimization"):
             st.caption(
                 "Enter explicit maximum supply reductions and demand increases. "
@@ -1463,6 +1551,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "Engineering compatibility": ("compatibility", "compatibility_screen.v1"),
             "Single-period resource optimization": ("optimization", "resource_network_lp.v1"),
             "Period-aligned resource optimization": ("period_optimization", "period_network_lp.v1"),
+            "Production and maintenance-aware resource optimization": ("production_maintenance_optimization", "production_maintenance_resource_lp.v1"),
             "Conservative interval-stress optimization": ("robust_optimization", "interval_robust_network.v1"),
             "Single-contaminant water reuse": ("water_reuse_screen", "water_reuse_lp.v1"),
             "Energy balance": ("energy_balance", "energy_balance.v1"),
