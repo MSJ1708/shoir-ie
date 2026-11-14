@@ -45,6 +45,7 @@ from shoir_resource_intelligence import (
     calculate_energy_balance,
     screen_waste_heat_recovery,
     optimize_single_contaminant_water_reuse,
+    optimize_multi_contaminant_water_reuse,
     validate_exchange_agreement,
     assess_exchange_delivery,
     ENGINEERING_MODEL_REGISTRY,
@@ -537,6 +538,59 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             if "water_reuse_screen" in results:
                 _render_result(st, "Water reuse allocation", results["water_reuse_screen"])
                 st.warning("This one-contaminant allocation is not treatment qualification or authorization to reuse water.")
+
+            with st.expander("Multi-contaminant blended-quality water reuse"):
+                st.caption(
+                    "Screen several declared contaminants together. Every source and sink must provide matching units and values/limits for every listed contaminant; physical connections still require explicit confirmation and evidence."
+                )
+                multi_sources = st.text_area(
+                    "Multi-contaminant sources JSON",
+                    value="[]",
+                    key="sri_multi_water_sources",
+                    height=100,
+                    help='Each row: source_id, available_flow, flow_unit, quality object, quality_units object, provenance.',
+                )
+                multi_sinks = st.text_area(
+                    "Multi-contaminant sinks JSON",
+                    value="[]",
+                    key="sri_multi_water_sinks",
+                    height=100,
+                    help='Each row: sink_id, required_flow, flow_unit, quality_limits object (contaminant: {min?, max?}), quality_units object, provenance.',
+                )
+                multi_connections = st.text_area(
+                    "Multi-contaminant physical connections JSON",
+                    value="[]",
+                    key="sri_multi_water_connections",
+                    height=100,
+                    help='Each row: source_id, sink_id, connection_confirmed=true, connection_evidence_reference, capacity, provenance.',
+                )
+                multi_units = st.text_area(
+                    "Declared contaminant units JSON",
+                    value='{"TDS":"mg/L","COD":"mg/L"}',
+                    key="sri_multi_water_units",
+                    height=75,
+                    help="All sources and sinks must use exactly these contaminant names and units.",
+                )
+                multi_flow_unit = st.text_input(
+                    "Multi-contaminant flow unit",
+                    value="m3/day",
+                    key="sri_multi_water_flow_unit",
+                )
+                if st.button("Optimize multi-contaminant water reuse", key="sri_run_multi_water_reuse"):
+                    try:
+                        results["multi_contaminant_water_reuse"] = optimize_multi_contaminant_water_reuse(
+                            _json_array(multi_sources, "Multi-contaminant sources"),
+                            _json_array(multi_sinks, "Multi-contaminant sinks"),
+                            _json_array(multi_connections, "Multi-contaminant connections"),
+                            contaminant_units=_json_object(multi_units, "Contaminant units"),
+                            flow_unit=multi_flow_unit,
+                        )
+                        st.session_state[STATE_PREFIX + "results"] = results
+                    except Exception as exc:
+                        st.error(f"Multi-contaminant water reuse failed safely: {exc}")
+                if "multi_contaminant_water_reuse" in results:
+                    _render_result(st, "Multi-contaminant reuse result", results["multi_contaminant_water_reuse"])
+                    st.warning("This is a perfect-mixing screening LP; it is not treatment design, regulatory compliance or permission to reuse water.")
 
     with tabs[3]:
         st.markdown("#### Engineering compatibility screen")
@@ -1554,6 +1608,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             "Production and maintenance-aware resource optimization": ("production_maintenance_optimization", "production_maintenance_resource_lp.v1"),
             "Conservative interval-stress optimization": ("robust_optimization", "interval_robust_network.v1"),
             "Single-contaminant water reuse": ("water_reuse_screen", "water_reuse_lp.v1"),
+            "Multi-contaminant water reuse": ("multi_contaminant_water_reuse", "multi_contaminant_water_reuse.v1"),
             "Energy balance": ("energy_balance", "energy_balance.v1"),
             "Waste-heat screen": ("heat_recovery_screen", "waste_heat_screen.v1"),
             "Quality trend forecast": ("quality_forecast", "quality_trend.v1"),

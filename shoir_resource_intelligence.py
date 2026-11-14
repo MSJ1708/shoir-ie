@@ -2338,6 +2338,367 @@ def assess_infrastructure_route(route: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def optimize_multi_contaminant_water_reuse(
+    sources: Sequence[Mapping[str, Any]],
+    sinks: Sequence[Mapping[str, Any]],
+    connections: Sequence[Mapping[str, Any]],
+    *,
+    contaminant_units: Mapping[str, str],
+    flow_unit: str,
+) -> dict[str, Any]:
+    """Maximize preliminary reuse flow while satisfying several blended-quality limits.
+
+    The LP assumes perfect mixing and linear concentration blending for each
+    declared contaminant. It does not model chemical interaction, treatment,
+    reaction, pathogens, biological limits, water standards or permits.
+    """
+    if not sources or not sinks:
+        raise ResourceValidationError("At least one water source and one demand sink are required.")
+    if not isinstance(contaminant_units, Mapping) or not contaminant_units:
+        raise ResourceValidationError("contaminant_units must declare at least one contaminant and exact unit.")
+    flow_label = _text(flow_unit, "flow_unit")
+    units: dict[str, str] = {}
+    for raw_name, raw_unit in contaminant_units.items():
+        contaminant_name = _text(raw_name, "contaminant name")
+        if contaminant_name in units:
+            raise ResourceValidationError(f"Duplicate contaminant name: {contaminant_name}.")
+        units[contaminant_name] = _text(raw_unit, f"contaminant_units.{contaminant_name}")
+
+    def validate_unit_map(raw: Any, label: str) -> dict[str, str]:
+        if not isinstance(raw, Mapping):
+            raise ResourceValidationError(f"{label} must be an object mapping contaminant to declared unit.")
+        normalized = {
+            _text(name, f"{label} contaminant"): _text(unit, f"{label}.{name} unit")
+            for name, unit in raw.items()
+        }
+        if set(normalized) != set(units):
+            missing = sorted(set(units) - set(normalized))
+            extra = sorted(set(normalized) - set(units))
+            raise ResourceValidationError(
+                f"{label} must contain exactly the declared contaminants; missing={missing}, extra={extra}."
+            )
+        for name, expected_unit in units.items():
+            if normalized[name].casefold() != expected_unit.casefold():
+                raise ResourceValidationError(
+                    f"{label} unit for {name} does not match the declared {expected_unit}."
+                )
+        return normalized
+
+    source_map: dict[str, dict[str, Any]] = {}
+    for index, source in enumerate(sources, start=1):
+        if not isinstance(source, Mapping):
+            raise ResourceValidationError(f"sources[{index}] must be an object.")
+        source_id = _text(source.get("source_id"), f"sources[{index}].source_id")
+        if source_id in source_map:
+            raise ResourceValidationError(f"Duplicate water source identifier: {source_id}.")
+        unit = _text(source.get("flow_unit"), f"water source {source_id}.flow_unit")
+        if unit.casefold() != flow_label.casefold():
+            raise ResourceValidationError(f"Water source {source_id} flow unit does not match {flow_label}.")
+        provenance = _validated_input_provenance(
+            source.get("provenance"), f"water source {source_id}.provenance"
+        )
+        if provenance == "STALE":
+            raise ResourceValidationError(f"Water source {source_id} has STALE provenance.")
+        if provenance == "LIVE":
+            raise ResourceValidationError(
+                f"Water source {source_id} cannot claim LIVE without a separately verified connector."
+            )
+        quality = source.get("quality")
+        if not isinstance(quality, Mapping):
+            raise ResourceValidationError(f"Water source {source_id}.quality must be an object.")
+        quality_units = validate_unit_map(source.get("quality_units"), f"water source {source_id}.quality_units")
+        normalized_quality = {
+            contaminant: _number(
+                quality.get(contaminant),
+                f"water source {source_id}.quality.{contaminant}",
+                minimum=0,
+            )
+            for contaminant in units
+        }
+        source_map[source_id] = {
+            "source_id": source_id,
+            "available_flow": _number(
+                source.get("available_flow"), f"water source {source_id}.available_flow", minimum=0
+            ),
+            "flow_unit": unit,
+            "quality": normalized_quality,
+            "quality_units": quality_units,
+            "provenance": provenance,
+        }
+
+    sink_map: dict[str, dict[str, Any]] = {}
+    for index, sink in enumerate(sinks, start=1):
+        if not isinstance(sink, Mapping):
+            raise ResourceValidationError(f"sinks[{index}] must be an object.")
+        sink_id = _text(sink.get("sink_id"), f"sinks[{index}].sink_id")
+        if sink_id in sink_map:
+            raise ResourceValidationError(f"Duplicate water sink identifier: {sink_id}.")
+        unit = _text(sink.get("flow_unit"), f"water sink {sink_id}.flow_unit")
+        if unit.casefold() != flow_label.casefold():
+            raise ResourceValidationError(f"Water sink {sink_id} flow unit does not match {flow_label}.")
+        provenance = _validated_input_provenance(
+            sink.get("provenance"), f"water sink {sink_id}.provenance"
+        )
+        if provenance == "STALE":
+            raise ResourceValidationError(f"Water sink {sink_id} has STALE provenance.")
+        if provenance == "LIVE":
+            raise ResourceValidationError(
+                f"Water sink {sink_id} cannot claim LIVE without a separately verified connector."
+            )
+        limits = sink.get("quality_limits")
+        if not isinstance(limits, Mapping) or set(limits) != set(units):
+            raise ResourceValidationError(
+                f"Water sink {sink_id}.quality_limits must declare bounds for every contaminant."
+            )
+        quality_units = validate_unit_map(sink.get("quality_units"), f"water sink {sink_id}.quality_units")
+        normalized_limits = {}
+        for contaminant in units:
+            bound = limits.get(contaminant)
+            if not isinstance(bound, Mapping):
+                raise ResourceValidationError(
+                    f"Water sink {sink_id} quality limit for {contaminant} must be an object."
+                )
+            minimum = (
+                _number(bound.get("min"), f"sink {sink_id}.{contaminant}.min", minimum=0)
+                if bound.get("min") is not None else None
+            )
+            maximum = (
+                _number(bound.get("max"), f"sink {sink_id}.{contaminant}.max", minimum=0)
+                if bound.get("max") is not None else None
+            )
+            if minimum is None and maximum is None:
+                raise ResourceValidationError(
+                    f"Water sink {sink_id} needs at least one min/max bound for {contaminant}."
+                )
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise ResourceValidationError(
+                    f"Water sink {sink_id} has an inverted min/max bound for {contaminant}."
+                )
+            normalized_limits[contaminant] = {"min": minimum, "max": maximum}
+        required_flow = _number(
+            sink.get("required_flow"), f"water sink {sink_id}.required_flow", minimum=0
+        )
+        if required_flow <= 0:
+            raise ResourceValidationError(f"Water sink {sink_id}.required_flow must be greater than zero.")
+        sink_map[sink_id] = {
+            "sink_id": sink_id,
+            "required_flow": required_flow,
+            "flow_unit": unit,
+            "quality_limits": normalized_limits,
+            "quality_units": quality_units,
+            "provenance": provenance,
+        }
+
+    eligible_edges: list[dict[str, Any]] = []
+    rejected_connections: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for index, connection in enumerate(connections, start=1):
+        if not isinstance(connection, Mapping):
+            raise ResourceValidationError(f"connections[{index}] must be an object.")
+        source_id = _text(connection.get("source_id"), f"connections[{index}].source_id")
+        sink_id = _text(connection.get("sink_id"), f"connections[{index}].sink_id")
+        if source_id not in source_map or sink_id not in sink_map:
+            raise ResourceValidationError(
+                f"Connection references unknown source or sink: {source_id} -> {sink_id}."
+            )
+        if (source_id, sink_id) in seen_pairs:
+            raise ResourceValidationError(f"Duplicate water reuse connection: {source_id} -> {sink_id}.")
+        seen_pairs.add((source_id, sink_id))
+        confirmed = connection.get("connection_confirmed")
+        if not isinstance(confirmed, bool):
+            raise ResourceValidationError("connection_confirmed must be an explicit boolean.")
+        evidence = _optional_text(connection.get("connection_evidence_reference"))
+        if not confirmed or not evidence:
+            rejected_connections.append({
+                "source_id": source_id,
+                "sink_id": sink_id,
+                "status": "BLOCKED_NO_CONFIRMED_PHYSICAL_CONNECTION",
+                "reason": "A user-confirmed physical connection and evidence reference are required.",
+            })
+            continue
+        provenance = _validated_input_provenance(
+            connection.get("provenance"), f"connection {source_id}->{sink_id}.provenance"
+        )
+        if provenance == "STALE":
+            rejected_connections.append({
+                "source_id": source_id,
+                "sink_id": sink_id,
+                "status": "BLOCKED_STALE_CONNECTION_EVIDENCE",
+            })
+            continue
+        if provenance == "LIVE":
+            raise ResourceValidationError(
+                f"Connection {source_id}->{sink_id} cannot claim LIVE without a separately verified connector."
+            )
+        capacity = _number(
+            connection.get("capacity"), f"connection {source_id}->{sink_id}.capacity", minimum=0
+        )
+        if capacity <= 0:
+            continue
+        eligible_edges.append({
+            "source_id": source_id,
+            "sink_id": sink_id,
+            "capacity": min(
+                capacity,
+                source_map[source_id]["available_flow"],
+                sink_map[sink_id]["required_flow"],
+            ),
+            "connection_evidence_reference": evidence,
+            "connection_provenance": provenance,
+        })
+
+    if not eligible_edges:
+        return {
+            "status": "NO_CONFIRMED_REUSE_CONNECTION",
+            "contaminants": list(units),
+            "allocations": [],
+            "total_reuse_flow": 0.0,
+            "rejected_connections": rejected_connections,
+            "operational_authorization": False,
+        }
+
+    objective = -np.ones(len(eligible_edges), dtype=float)
+    a_ub: list[list[float]] = []
+    b_ub: list[float] = []
+    for source_id, source in source_map.items():
+        a_ub.append([
+            1.0 if edge["source_id"] == source_id else 0.0 for edge in eligible_edges
+        ])
+        b_ub.append(source["available_flow"])
+    for sink_id, sink in sink_map.items():
+        a_ub.append([
+            1.0 if edge["sink_id"] == sink_id else 0.0 for edge in eligible_edges
+        ])
+        b_ub.append(sink["required_flow"])
+        for contaminant, limits_for_contaminant in sink["quality_limits"].items():
+            maximum = limits_for_contaminant["max"]
+            minimum = limits_for_contaminant["min"]
+            if maximum is not None:
+                a_ub.append([
+                    source_map[edge["source_id"]]["quality"][contaminant] - maximum
+                    if edge["sink_id"] == sink_id else 0.0
+                    for edge in eligible_edges
+                ])
+                b_ub.append(0.0)
+            if minimum is not None:
+                a_ub.append([
+                    minimum - source_map[edge["source_id"]]["quality"][contaminant]
+                    if edge["sink_id"] == sink_id else 0.0
+                    for edge in eligible_edges
+                ])
+                b_ub.append(0.0)
+
+    solved = linprog(
+        c=objective,
+        A_ub=np.asarray(a_ub, dtype=float),
+        b_ub=np.asarray(b_ub, dtype=float),
+        bounds=[(0, edge["capacity"]) for edge in eligible_edges],
+        method="highs",
+    )
+    if not solved.success:
+        return {
+            "status": "OPTIMIZATION_FAILED",
+            "solver_message": str(solved.message),
+            "contaminants": list(units),
+            "allocations": [],
+            "total_reuse_flow": 0.0,
+            "rejected_connections": rejected_connections,
+            "operational_authorization": False,
+        }
+
+    allocations = []
+    source_flow = {key: 0.0 for key in source_map}
+    sink_flow = {key: 0.0 for key in sink_map}
+    sink_loads = {sink_id: {contaminant: 0.0 for contaminant in units} for sink_id in sink_map}
+    flow_violations = []
+    quality_violations = []
+    for index, edge in enumerate(eligible_edges):
+        flow = float(solved.x[index])
+        if flow <= 1e-8:
+            continue
+        source_flow[edge["source_id"]] += flow
+        sink_flow[edge["sink_id"]] += flow
+        source_quality = source_map[edge["source_id"]]["quality"]
+        for contaminant in units:
+            sink_loads[edge["sink_id"]][contaminant] += flow * source_quality[contaminant]
+        allocations.append({
+            **edge,
+            "allocated_flow": flow,
+            "flow_unit": flow_label,
+            "source_quality": dict(source_quality),
+            "source_quality_units": dict(source_map[edge["source_id"]]["quality_units"]),
+            "source_provenance": source_map[edge["source_id"]]["provenance"],
+            "sink_provenance": sink_map[edge["sink_id"]]["provenance"],
+        })
+
+    quality_checks = []
+    for source_id, flow in source_flow.items():
+        if flow > source_map[source_id]["available_flow"] + 1e-7:
+            flow_violations.append(f"Source flow exceeded: {source_id}.")
+    for sink_id, flow in sink_flow.items():
+        sink = sink_map[sink_id]
+        if flow > sink["required_flow"] + 1e-7:
+            flow_violations.append(f"Sink flow exceeded: {sink_id}.")
+        if flow <= 1e-8:
+            continue
+        for contaminant, limits_for_contaminant in sink["quality_limits"].items():
+            blended = sink_loads[sink_id][contaminant] / flow
+            minimum = limits_for_contaminant["min"]
+            maximum = limits_for_contaminant["max"]
+            if minimum is not None and blended < minimum - 1e-7:
+                quality_violations.append(f"{sink_id}:{contaminant}:below_minimum")
+            if maximum is not None and blended > maximum + 1e-7:
+                quality_violations.append(f"{sink_id}:{contaminant}:above_maximum")
+            quality_checks.append({
+                "sink_id": sink_id,
+                "contaminant": contaminant,
+                "blended_concentration": blended,
+                "minimum": minimum,
+                "maximum": maximum,
+                "concentration_unit": units[contaminant],
+            })
+    for edge, amount in zip(eligible_edges, solved.x):
+        if float(amount) > edge["capacity"] + 1e-7:
+            flow_violations.append(
+                f"Connection capacity exceeded: {edge['source_id']} -> {edge['sink_id']}."
+            )
+    total_flow = float(sum(sink_flow.values()))
+    if flow_violations or quality_violations:
+        status = "VALIDATION_FAILED"
+    elif total_flow <= 1e-8:
+        status = "NO_QUALIFIED_REUSE"
+    else:
+        status = "PRELIMINARY_MULTI_CONTAMINANT_REUSE_ALLOCATION"
+
+    return {
+        "status": status,
+        "method": "MULTI_CONTAMINANT_BLENDED_QUALITY_MAX_FLOW_LP",
+        "contaminants": list(units),
+        "contaminant_units": dict(units),
+        "flow_unit": flow_label,
+        "total_reuse_flow": total_flow,
+        "allocations": allocations,
+        "source_flow_totals": source_flow,
+        "sink_flow_totals": sink_flow,
+        "sink_quality_checks": quality_checks,
+        "rejected_connections": rejected_connections,
+        "solver": "scipy.optimize.linprog(method=highs)",
+        "flow_violations": flow_violations,
+        "quality_violations": quality_violations,
+        "physical_connection_confirmation_is_user_asserted": True,
+        "perfect_mixing_assumption": True,
+        "operational_authorization": False,
+        "limitations": [
+            "Linear perfect-mixing model for the declared contaminant concentrations only.",
+            "No chemical interaction, precipitation, reaction, treatment unit, pathogen, toxicity, process-specific or regulatory water-quality model.",
+            "Connection and source records are user-entered; evidence references are not independently verified.",
+            "This is not a multi-contaminant water-pinch study, exchanger/treatment design or authorization to reuse water.",
+        ],
+    }
+
+
+
 def optimize_single_contaminant_water_reuse(
     sources: Sequence[Mapping[str, Any]],
     sinks: Sequence[Mapping[str, Any]],
@@ -3039,6 +3400,16 @@ ENGINEERING_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "output_units": ["Preliminary reused flow", "Blended concentration"],
         "assumptions": ["Perfect mixing", "Exactly one contaminant", "Explicit user-confirmed physical connections"],
         "limitations": ["Not multi-contaminant water pinch, treatment design or reuse approval"],
+    },
+    "multi_contaminant_water_reuse.v1": {
+        "name": "Multi-contaminant blended-quality water-reuse LP",
+        "version": "1.0.0",
+        "method": "Maximum-flow linear program with per-sink, per-contaminant blended concentration bounds",
+        "formula": "Maximize reuse flow subject to source/sink/connection capacities and linearized blended min/max concentration limits for every declared contaminant",
+        "input_units": ["One exact flow unit", "Exact units for every declared contaminant"],
+        "output_units": ["Preliminary reused flow", "Per-sink blended concentrations by contaminant"],
+        "assumptions": ["Perfect mixing", "Declared contaminants cover the modeled quality requirements", "Physical connections are explicitly confirmed by the caller"],
+        "limitations": ["No chemical interaction, treatment design, pathogen/toxicity model, water-pinch study or reuse approval"],
     },
     "energy_balance.v1": {
         "name": "Same-boundary energy balance",

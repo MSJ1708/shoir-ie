@@ -706,6 +706,113 @@ def test_exchange_agreement_requires_valid_quality_bounds_and_approval_reference
         validate_exchange_agreement(bad)
 
 
+
+
+def test_multi_contaminant_water_reuse_enforces_each_blended_quality_limit():
+    from shoir_resource_intelligence import optimize_multi_contaminant_water_reuse
+
+    result = optimize_multi_contaminant_water_reuse(
+        sources=[
+            {
+                "source_id": "SOURCE-A", "available_flow": 5, "flow_unit": "m3/day",
+                "quality": {"TDS": 10, "COD": 5},
+                "quality_units": {"TDS": "mg/L", "COD": "mg/L"},
+                "provenance": "SYNTHETIC",
+            },
+            {
+                "source_id": "SOURCE-B", "available_flow": 5, "flow_unit": "m3/day",
+                "quality": {"TDS": 2, "COD": 19},
+                "quality_units": {"TDS": "mg/L", "COD": "mg/L"},
+                "provenance": "SYNTHETIC",
+            },
+        ],
+        sinks=[
+            {
+                "sink_id": "SINK-01", "required_flow": 10, "flow_unit": "m3/day",
+                "quality_limits": {"TDS": {"max": 6}, "COD": {"max": 12}},
+                "quality_units": {"TDS": "mg/L", "COD": "mg/L"},
+                "provenance": "SYNTHETIC",
+            },
+        ],
+        connections=[
+            {
+                "source_id": "SOURCE-A", "sink_id": "SINK-01",
+                "connection_confirmed": True, "connection_evidence_reference": "SYNTHETIC:PIPE-A",
+                "capacity": 5, "provenance": "SYNTHETIC",
+            },
+            {
+                "source_id": "SOURCE-B", "sink_id": "SINK-01",
+                "connection_confirmed": True, "connection_evidence_reference": "SYNTHETIC:PIPE-B",
+                "capacity": 5, "provenance": "SYNTHETIC",
+            },
+        ],
+        contaminant_units={"TDS": "mg/L", "COD": "mg/L"},
+        flow_unit="m3/day",
+    )
+    assert result["status"] == "PRELIMINARY_MULTI_CONTAMINANT_REUSE_ALLOCATION"
+    assert result["total_reuse_flow"] == pytest.approx(10)
+    by_contaminant = {row["contaminant"]: row for row in result["sink_quality_checks"]}
+    assert by_contaminant["TDS"]["blended_concentration"] == pytest.approx(6)
+    assert by_contaminant["COD"]["blended_concentration"] == pytest.approx(12)
+    assert result["operational_authorization"] is False
+    assert result["perfect_mixing_assumption"] is True
+
+
+def test_multi_contaminant_water_reuse_rejects_unit_mismatch_and_stale_input():
+    from shoir_resource_intelligence import optimize_multi_contaminant_water_reuse
+
+    source = {
+        "source_id": "SOURCE-A", "available_flow": 10, "flow_unit": "m3/day",
+        "quality": {"TDS": 5}, "quality_units": {"TDS": "mg/L"},
+        "provenance": "SYNTHETIC",
+    }
+    sink = {
+        "sink_id": "SINK-01", "required_flow": 10, "flow_unit": "m3/day",
+        "quality_limits": {"TDS": {"max": 10}}, "quality_units": {"TDS": "mg/L"},
+        "provenance": "SYNTHETIC",
+    }
+    connection = {
+        "source_id": "SOURCE-A", "sink_id": "SINK-01",
+        "connection_confirmed": True, "connection_evidence_reference": "SYNTHETIC:PIPE",
+        "capacity": 10, "provenance": "SYNTHETIC",
+    }
+    with pytest.raises(ResourceValidationError, match="does not match"):
+        optimize_multi_contaminant_water_reuse(
+            [{**source, "quality_units": {"TDS": "g/L"}}], [sink], [connection],
+            contaminant_units={"TDS": "mg/L"}, flow_unit="m3/day",
+        )
+    with pytest.raises(ResourceValidationError, match="STALE"):
+        optimize_multi_contaminant_water_reuse(
+            [{**source, "provenance": "STALE"}], [sink], [connection],
+            contaminant_units={"TDS": "mg/L"}, flow_unit="m3/day",
+        )
+
+
+def test_multi_contaminant_water_reuse_requires_explicit_confirmed_connections():
+    from shoir_resource_intelligence import optimize_multi_contaminant_water_reuse
+
+    result = optimize_multi_contaminant_water_reuse(
+        sources=[{
+            "source_id": "SOURCE-A", "available_flow": 10, "flow_unit": "m3/day",
+            "quality": {"TDS": 5}, "quality_units": {"TDS": "mg/L"}, "provenance": "SYNTHETIC",
+        }],
+        sinks=[{
+            "sink_id": "SINK-01", "required_flow": 10, "flow_unit": "m3/day",
+            "quality_limits": {"TDS": {"max": 10}}, "quality_units": {"TDS": "mg/L"},
+            "provenance": "SYNTHETIC",
+        }],
+        connections=[{
+            "source_id": "SOURCE-A", "sink_id": "SINK-01", "connection_confirmed": False,
+            "connection_evidence_reference": "", "capacity": 10, "provenance": "SYNTHETIC",
+        }],
+        contaminant_units={"TDS": "mg/L"}, flow_unit="m3/day",
+    )
+    assert result["status"] == "NO_CONFIRMED_REUSE_CONNECTION"
+    assert result["allocations"] == []
+    assert result["operational_authorization"] is False
+
+
+
 def test_water_reuse_lp_maximizes_flow_while_respecting_blended_quality_limit():
     from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
 
