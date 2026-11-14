@@ -121,6 +121,29 @@ Registered evidence means an evidence record ID or source reference already exis
 15. Shift Handover carries unresolved issues in a persistent organization-scoped record. A separately authenticated incoming shift owner can acknowledge each issue, but acknowledgement is not issue closure; similar issue text does not establish common cause.
 16. Benchmarking suppresses misleading comparisons when required definitions, units, periods or denominators are incompatible.
 
+## Tool delivery status matrix
+
+The following is the code-delivery status on this candidate branch. All sixteen tools have an executable deterministic analysis engine and are registered under the existing Workbench. This status is not a statement that their plant/browser workflows have passed staging.
+
+| Code | Tool | Current status |
+|---|---|---|
+| II-001 | Industrial Operations Mission Control | IMPLEMENTED — VALIDATION PENDING |
+| II-002 | Industrial Process Mining and Hidden Inefficiency Intelligence | IMPLEMENTED — VALIDATION PENDING |
+| II-003 | Engineering Change Impact Twin | IMPLEMENTED — VALIDATION PENDING |
+| II-004 | Shutdown and Turnaround Intelligence Optimizer | IMPLEMENTED — VALIDATION PENDING |
+| II-005 | Industrial Data Trust and Measurement Reconciliation Engine | IMPLEMENTED — VALIDATION PENDING |
+| II-006 | Asset Reliability Mission Board | IMPLEMENTED — VALIDATION PENDING |
+| II-007 | Production Yield and Process Variability Intelligence | IMPLEMENTED — VALIDATION PENDING |
+| II-008 | New Factory Commissioning and Production Ramp-up Intelligence | IMPLEMENTED — VALIDATION PENDING |
+| II-009 | Industrial Experimentation and Process Improvement Laboratory | IMPLEMENTED — VALIDATION PENDING |
+| II-010 | Technical Procurement and Supplier Engineering Assurance | IMPLEMENTED — VALIDATION PENDING |
+| II-011 | Industrial Energy Flexibility and Peak-Demand Optimizer | IMPLEMENTED — VALIDATION PENDING |
+| II-012 | Critical Spare Parts and Multi-Site Inventory Intelligence | IMPLEMENTED — VALIDATION PENDING |
+| II-013 | Industrial OT Asset and Configuration Assurance | IMPLEMENTED — VALIDATION PENDING |
+| II-014 | Product and Batch Genealogy Intelligence | IMPLEMENTED — VALIDATION PENDING |
+| II-015 | Intelligent Shift Handover and Operational Learning | IMPLEMENTED — VALIDATION PENDING |
+| II-016 | Industrial Benchmarking and Improvement Radar | IMPLEMENTED — VALIDATION PENDING |
+
 ## Eight shared intelligence capabilities
 
 | Capability | Foundation implementation | Important boundary |
@@ -181,7 +204,7 @@ Each provides focus tools, starter KPIs and an explicit industry warning. Templa
 
 ## Acceptance test inventory
 
-\`tests/test_shoir_industrial_intelligence.py\` currently defines **55 tests**. It includes coverage for:
+\`tests/test_shoir_industrial_intelligence.py\` currently defines **56 tests**. It includes coverage for:
 
 - 16-tool catalogue cardinality, stable II-001–II-016 IDs and exact/alias search.
 - All 16 deterministic analysis engines and their expected synthetic acceptance cases.
@@ -205,6 +228,7 @@ Each provides focus tools, starter KPIs and an explicit industry warning. Templa
 - Provenance/source metadata validation.
 - Persistence failure behaviour.
 - Personal/organization scope and Viewer restrictions.
+- Server entitlement derives from authenticated session tier, not caller-supplied tier argument.
 - Organization-switch isolation and no cross-tenant payload copying.
 - Evidence-backed Digital Thread relationship creation.
 - Event → entity → action → approval → implementation → independent verification.
