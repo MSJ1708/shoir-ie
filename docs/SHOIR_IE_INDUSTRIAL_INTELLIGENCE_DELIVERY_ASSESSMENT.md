@@ -214,3 +214,21 @@ A full-suite pass is necessary but not sufficient. No test result should be infe
 Do not merge this PR, apply production migrations, deploy production Edge Functions, change protected-branch rules, use the protected Enterprise Admin identity for testing, or claim live SAP/Oracle/REST/OIDC/MFA/backups/plant telemetry without real configuration and evidence.
 
 The 16 tools and eight shared services are a meaningful, committed foundation in the candidate. The correct delivery wording today is **“foundation implemented; automated and hosted acceptance pending”**, not “fully verified,” “production-ready,” or “all acceptance complete.”
+
+
+---
+
+## 9. Post-audit candidate changes reviewed on 2026-11-14
+
+The source branch continued to receive follow-on changes after the original `e04de7c` source audit. The following code and regression tests were inspected at candidate head `cd77aab60e4ee7e85c4510ae6b4e418a8c091ed5`:
+
+- **Copilot evidence privacy:** returned citations expose `source_reference_present` rather than forwarding the raw source URL. The regression test now supplies a URL containing user information and an API-key-like query value and asserts neither is returned.
+- **Record/graph persistence rollback:** `create_record` now snapshots the Digital Thread graph and restores graph state if the managed workspace save fails. A dedicated test verifies that both the record and graph node are absent after a failed save.
+- **Digital Thread edge rollback:** relationship creation restores the previous graph edges when the managed save is rejected; a dedicated regression test covers this failure.
+- **Data Trust reconciliation proposals:** the engine can calculate a residual assigned to an explicitly selected input/output/loss stream, but returns it as `PROPOSED_NOT_APPLIED_NOT_VERIFIED`, requires approval and preserves the original measurements. Tests cover correct residual math, no mutation and rejection of a negative proposed value.
+- **Persistent shift handover:** shared handovers require an organization workspace, store each unresolved issue, permit only a separate incoming acknowledgement record, prevent the creator from acknowledging their own handover, and keep an acknowledged issue open until a separate closure/verification process. Tests cover successful/duplicate/self acknowledgement and rejection in a personal workspace.
+- **Energy scheduling honesty:** the tool now identifies its method as `DETERMINISTIC_TARIFF_GREEDY`, returns `optimality_guarantee: false`, and explicitly says global minimum cost is not guaranteed. Regression assertions verify that limitation.
+
+These changes improve the foundation and address earlier gaps in persistence rollback, safe measurement reconciliation, privacy and acknowledgement semantics. They do not resolve dataset-version dependency invalidation or hosted Digital Thread acceptance.
+
+At head `cd77aab60e4ee7e85c4510ae6b4e418a8c091ed5`, eight required GitHub Actions workflow runs were again observed queued, and the separate live-deployment smoke job was skipped. The later exact head must still have a complete set of successful required checks and inspected artifacts before any passing status is recorded.
