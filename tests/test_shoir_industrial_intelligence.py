@@ -627,3 +627,40 @@ def test_risk_barrier_effectiveness_requires_independent_review(monkeypatch):
     )
     assert review["residual_screening_score"] == pytest.approx(4.8)
     assert review["formal_safety_approval"] is False
+
+
+
+def test_analysis_handoff_adds_sheet_and_preserves_existing_workbook(monkeypatch):
+    import pandas as pd
+    session = _configure_personal_session(monkeypatch, "synthetic-workbook-user", "owner")
+    session["industrial_workbook"] = {"Existing Data": pd.DataFrame({"Value": [1, 2]})}
+    session["industrial_workbook_formulas"] = {"Existing Data": {}}
+    result = ii.analyze_tool("yield-intelligence", _payloads()["yield-intelligence"])
+    handoff = ii.send_analysis_to_workbook(
+        "synthetic-workbook-user", "Enterprise", "yield-intelligence",
+        _payloads()["yield-intelligence"], result, "SYNTHETIC",
+    )
+    workbook = session["industrial_workbook"]
+    assert "Existing Data" in workbook
+    assert workbook["Existing Data"]["Value"].tolist() == [1, 2]
+    assert handoff["workbook_sheet"] in workbook
+    sheet = workbook[handoff["workbook_sheet"]]
+    assert {"Input", "Result", "Governance"}.issubset(set(sheet["Section"]))
+    assert handoff["record_id"]
+    assert handoff["workbook_sheet"] in session["industrial_workbook_formulas"]
+
+
+def test_analysis_handoff_initializes_standard_workbook_tabs_without_removing_tabs(monkeypatch):
+    session = _configure_personal_session(monkeypatch, "synthetic-new-workbook-user", "owner")
+    result = ii.analyze_tool("mission-control", _payloads()["mission-control"])
+    handoff = ii.send_analysis_to_workbook(
+        "synthetic-new-workbook-user", "Enterprise", "mission-control",
+        _payloads()["mission-control"], result, "SYNTHETIC",
+    )
+    expected = {
+        "Inputs", "Data", "Calculations", "KPIs", "Simulation",
+        "Optimization", "Scenarios", "Decisions", "Dashboard",
+    }
+    assert expected.issubset(set(session["industrial_workbook"]))
+    assert handoff["workbook_sheet"] in session["industrial_workbook"]
+    assert session["industrial_workbook"][handoff["workbook_sheet"]]["Field"].str.contains("input_units|event_id", regex=True).any()
