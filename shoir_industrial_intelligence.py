@@ -441,6 +441,7 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise IndustrialIntelligenceError("Data Trust requires a non-empty measurements list.")
     originals = []
     missing_measurements = []
+    missing_timestamps = []
     by_meter: dict[str, list[dict[str, Any]]] = defaultdict(list)
     synchronization_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for index, item in enumerate(measurements, start=1):
@@ -452,8 +453,9 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
         value = None if value_missing else _finite(raw_value, f"measurement {index} value")
         unit = _required_text(item.get("unit"), f"measurement {index} unit", 40)
         source = _required_text(item.get("source"), f"measurement {index} source")
-        timestamp = _iso_timestamp(item.get("timestamp"), f"measurement {index} timestamp")
-        ts = timestamp.isoformat()
+        raw_timestamp = item.get("timestamp")
+        timestamp_missing = raw_timestamp is None or (isinstance(raw_timestamp, str) and not raw_timestamp.strip())
+        ts = None if timestamp_missing else _iso_timestamp(raw_timestamp, f"measurement {index} timestamp").isoformat()
         row = {
             "meter_id": meter, "value": value, "unit": unit, "source": source,
             "timestamp": ts, "provenance": _provenance(item.get("provenance")),
@@ -462,7 +464,9 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
         originals.append(row)
         if value_missing:
             missing_measurements.append({"meter_id": meter, "source": source, "timestamp": ts, "unit": unit})
-        else:
+        if timestamp_missing:
+            missing_timestamps.append({"meter_id": meter, "source": source, "value": value, "unit": unit})
+        if not value_missing:
             by_meter[meter].append(row)
         if row["synchronization_group"]:
             synchronization_groups[row["synchronization_group"]].append(row)
@@ -484,17 +488,19 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
             if spread > tolerance:
                 conflicts.append({"meter_id": meter, "reason": "CONFLICTING_READINGS", "spread_pct": spread, "tolerance_pct": tolerance})
         if len(rows) >= 3:
-            ordered = sorted(rows, key=lambda row: row["timestamp"])
-            observed_values = [float(row["value"]) for row in ordered]
-            span_minutes = (_iso_timestamp(ordered[-1]["timestamp"], "measurement timestamp") - _iso_timestamp(ordered[0]["timestamp"], "measurement timestamp")).total_seconds() / 60.0
-            if span_minutes >= stuck_min_span and max(observed_values) - min(observed_values) <= stuck_tolerance:
-                stuck_sensor_candidates.append({
-                    "meter_id": meter,
-                    "reading_count": len(ordered),
-                    "span_minutes": span_minutes,
-                    "constant_value": observed_values[0],
-                    "classification": "STUCK_SENSOR_CANDIDATE",
-                })
+            timed_rows = sorted([row for row in rows if row["timestamp"]], key=lambda row: row["timestamp"])
+            if len(timed_rows) >= 3:
+                observed_timed_values = [float(row["value"]) for row in timed_rows]
+                span_minutes = (_iso_timestamp(timed_rows[-1]["timestamp"], "measurement timestamp") - _iso_timestamp(timed_rows[0]["timestamp"], "measurement timestamp")).total_seconds() / 60.0
+                if span_minutes >= stuck_min_span and max(observed_timed_values) - min(observed_timed_values) <= stuck_tolerance:
+                    stuck_sensor_candidates.append({
+                        "meter_id": meter,
+                        "reading_count": len(timed_rows),
+                        "span_minutes": span_minutes,
+                        "constant_value": observed_timed_values[0],
+                        "classification": "STUCK_SENSOR_CANDIDATE",
+                    })
+            observed_values = [float(row["value"]) for row in rows]
             if len(observed_values) >= 4:
                 ordered_values = sorted(observed_values)
                 # Use the standard linearly interpolated sample quartiles; a
@@ -506,7 +512,7 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
                 iqr = q3 - q1
                 if iqr > 0:
                     low_fence, high_fence = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-                    for row in ordered:
+                    for row in rows:
                         numeric_value = float(row["value"])
                         if numeric_value < low_fence or numeric_value > high_fence:
                             outlier_candidates.append({
@@ -523,12 +529,15 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
     for group_id, rows in synchronization_groups.items():
         if len(rows) < 2:
             continue
-        times = [_iso_timestamp(row["timestamp"], "synchronized measurement timestamp") for row in rows]
-        spread_seconds = (max(times) - min(times)).total_seconds()
-        if spread_seconds > sync_tolerance_seconds:
+        timed_rows = [row for row in rows if row["timestamp"]]
+        missing_count = len(rows) - len(timed_rows)
+        times = [_iso_timestamp(row["timestamp"], "synchronized measurement timestamp") for row in timed_rows]
+        spread_seconds = (max(times) - min(times)).total_seconds() if len(times) >= 2 else 0.0
+        if missing_count or spread_seconds > sync_tolerance_seconds:
             timestamp_sync_conflicts.append({
                 "synchronization_group": group_id,
                 "spread_seconds": spread_seconds,
+                "missing_timestamp_count": missing_count,
                 "tolerance_seconds": sync_tolerance_seconds,
                 "meter_ids": sorted({row["meter_id"] for row in rows}),
                 "classification": "TIMESTAMP_SYNCHRONIZATION_CONFLICT",
@@ -581,13 +590,14 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "assumptions": ["Only the explicitly selected target measurement absorbs the full balance residual.", "No uncertainty weighting or calibration correction is inferred.", "This proposal does not alter the original measurement."],
             })
     review_required = bool(
-        conflicts or missing_measurements or stuck_sensor_candidates or outlier_candidates
+        conflicts or missing_measurements or missing_timestamps or stuck_sensor_candidates or outlier_candidates
         or timestamp_sync_conflicts or any(not row["closes"] for row in balances)
     )
     return {
         "status": "REVIEW_REQUIRED" if review_required else "NO_CONFIGURED_CONFLICTS_DETECTED",
         "original_measurements": originals,
         "missing_measurements": missing_measurements,
+        "missing_timestamps": missing_timestamps,
         "meter_conflicts": conflicts,
         "stuck_sensor_candidates": stuck_sensor_candidates,
         "outlier_candidates": outlier_candidates,
