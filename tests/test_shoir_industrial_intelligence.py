@@ -747,13 +747,13 @@ def test_turnaround_shared_multiskill_resource_is_never_double_booked():
     assert result["makespan_hours"] == pytest.approx(7)
 
 
-def test_workspace_switch_save_preserves_records_in_previous_organization(monkeypatch):
+def test_workspace_switch_save_never_copies_prior_organization_rows(monkeypatch):
     session = _configure_org_session(monkeypatch, "synthetic-multi-org-user", "owner")
     org_a = "00000000-0000-4000-8000-000000000001"
-    workspace_a = "00000000-0000-4000-8000-000000000002"
     org_b = "00000000-0000-4000-8000-000000000099"
     workspace_b = "00000000-0000-4000-8000-000000000098"
     record_a = ii.create_record("synthetic-multi-org-user", "Enterprise", "note", "Organization A record", {"org": "A"})
+    assert record_a["organization_id"] == org_a
 
     session["shoir_active_organization_workspace"] = {
         "organization_id": org_b, "organization_workspace_id": workspace_b,
@@ -770,14 +770,9 @@ def test_workspace_switch_save_preserves_records_in_previous_organization(monkey
     )
     record_b = ii.create_record("synthetic-multi-org-user", "Enterprise", "note", "Organization B record", {"org": "B"})
     raw = session[ii.STATE_PREFIX + "records"]
-    assert {item["organization_id"] for item in raw} == {org_a, org_b}
+    assert {item["organization_id"] for item in raw} == {org_b}
+    assert record_a["record_id"] not in {item["record_id"] for item in raw}
     assert {item["record_id"] for item in ii.list_records("synthetic-multi-org-user", "Enterprise")} == {record_b["record_id"]}
-
-    session["shoir_active_organization_workspace"] = {
-        "organization_id": org_a, "organization_workspace_id": workspace_a,
-    }
-    visible_a = ii.list_records("synthetic-multi-org-user", "Enterprise")
-    assert [item["record_id"] for item in visible_a] == [record_a["record_id"]]
 
 
 def test_workbench_search_does_not_select_suite_when_query_is_empty():
