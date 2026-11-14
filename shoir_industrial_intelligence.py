@@ -1334,10 +1334,9 @@ def review_barrier_effectiveness(
     if any(
         row.get("risk_record_id") == str(risk_record_id)
         and row.get("barrier_id") == key
-        and row.get("reviewer") == access["actor"]
         for row in prior
     ):
-        raise IndustrialIntelligenceError("This reviewer has already reviewed the selected barrier.")
+        raise IndustrialIntelligenceError("This barrier already has an independent review. Create a separately versioned risk record before reassessment.")
     review = {
         "review_id": "IIB-" + uuid.uuid4().hex[:12].upper(),
         "organization_id": access["organization_id"],
@@ -1492,6 +1491,13 @@ def review_cause_effect_investigation(
     if status not in {"CONFIRMED", "REJECTED"}:
         raise IndustrialIntelligenceError("Independent cause-effect review decision must be CONFIRMED or REJECTED.")
     refs = _require_evidence_refs(verification_evidence, "Independent cause-effect review")
+    if any(
+        item.get("record_type") == "cause_effect_review"
+        and item.get("payload", {}).get("investigation_record_id") == str(investigation_record_id)
+        and item.get("payload", {}).get("relationship_index") == int(relationship_index)
+        for item in records
+    ):
+        raise IndustrialIntelligenceError("This candidate relationship already has an independent review. Create a new versioned investigation for reassessment.")
     if status == "CONFIRMED" and not (candidate.get("supporting_evidence") or refs):
         raise IndustrialIntelligenceError("Confirming a causal relationship requires supporting evidence.")
     review = create_record(
@@ -1643,8 +1649,8 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 raise IndustrialIntelligenceError("The selected record does not contain a reusable JSON object.")
             ui.session_state[f"shoir_ii_input_{selected_id}"] = json.dumps(candidate, ensure_ascii=False, indent=2)
             ui.session_state[f"shoir_ii_provenance_{selected_id}"] = source_record.get("provenance", "IMPORTED")
-            ui.session_state[f"shoir_ii_source_{selected_id}"] = source_record.get("source_ref") or selected_record
-            ui.success(f"Loaded authorized record {selected_record}. Review the fields before running.")
+            ui.session_state[f"shoir_ii_source_{selected_id}"] = source_record.get("source_ref") or selected_saved_record
+            ui.success(f"Loaded authorized record {selected_saved_record}. Review the fields before running.")
         except Exception as exc:
             ui.error(f"Saved record could not be reused: {exc}")
     defaults = json.dumps(_sample_input(selected_id), ensure_ascii=False, indent=2)
@@ -1667,6 +1673,41 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         ui.markdown("#### Analysis result")
         ui.json(_record_to_json(last.get("result", {})))
         ui.caption(f"Input provenance: {last.get('provenance')} · Model: {last.get('result', {}).get('model_version')} · Input hash: {last.get('result', {}).get('input_hash')}")
+        export_bundle = {
+            "tool_id": selected_id,
+            "tool_name": definition["name"],
+            "input": last.get("input", {}),
+            "result": last.get("result", {}),
+            "provenance": last.get("provenance"),
+            "source_ref": last.get("source_ref"),
+            "exported_at": _utc_now(),
+            "export_status": "MODEL_OUTPUT_NOT_INDEPENDENTLY_VERIFIED",
+        }
+        ui.download_button(
+            "Download analysis and evidence JSON",
+            data=json.dumps(_record_to_json(export_bundle), ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name=f"shoir_ie_{selected_id}_evidence.json",
+            mime="application/json",
+            key=f"shoir_ii_export_json_{selected_id}",
+        )
+        try:
+            from industrial_operating_system import render_exports
+            input_table = pd.DataFrame([
+                {"Field": str(key), "Value": json.dumps(_record_to_json(value), ensure_ascii=False) if isinstance(value, (Mapping, list, tuple)) else str(value)}
+                for key, value in last.get("input", {}).items()
+            ])
+            summary_table = pd.DataFrame([
+                {"Field": str(key), "Value": json.dumps(_record_to_json(value), ensure_ascii=False) if isinstance(value, (Mapping, list, tuple)) else str(value)}
+                for key, value in last.get("result", {}).items()
+                if not isinstance(value, list)
+            ])
+            output_tables = [("Input Contract", input_table), ("Result Summary", summary_table)]
+            for result_key, result_value in last.get("result", {}).items():
+                if isinstance(result_value, list) and result_value and all(isinstance(item, Mapping) for item in result_value):
+                    output_tables.append((str(result_key)[:31], pd.DataFrame([_record_to_json(item) for item in result_value]).head(10000)))
+            render_exports(definition["name"], output_tables, [], tier, username)
+        except Exception as exc:
+            ui.warning(f"Shared Excel/PDF/PowerPoint export is not available for this result: {exc}")
         if ui.button("Save analysis and add it to the Digital Thread", key=f"shoir_ii_save_{selected_id}"):
             try:
                 saved = create_record(username, tier, "tool_analysis", definition["name"], {"tool_id": selected_id, "input": last["input"], "result": last["result"], "thread_node_type": THREAD_NODE_TYPES[selected_id]}, provenance=last["provenance"], source_ref=last.get("source_ref") or "")
@@ -1780,7 +1821,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         with c2:
             action_priority = ui.selectbox("Priority", ["LOW", "MEDIUM", "HIGH", "CRITICAL"], key="shoir_ii_action_priority")
             expected_result = ui.text_area("Expected result", key="shoir_ii_action_expected")
-            action_evidence = ui.text_input("Evidence references, comma-separated", key="shoir_ii_action_evidence")
+            action_evidence = ui.text_input("Registered evidence record ID(s) / source refs, comma-separated", key="shoir_ii_action_evidence")
         if ui.button("Create proposed action", key="shoir_ii_action_create"):
             try:
                 created = create_action(username, tier, action_title, action_owner, action_due, action_priority, expected_result, [item.strip() for item in action_evidence.split(",") if item.strip()])
