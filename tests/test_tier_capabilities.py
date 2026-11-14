@@ -255,7 +255,7 @@ def test_all_app_subscription_features_have_explicit_matching_shared_policies():
 
     assert len(minimum) == 97
     assert report["status"] == "COMPLETE"
-    assert report["total_modules"] == 96
+    assert report["total_modules"] == 97
     assert report["unmapped_modules"] == []
     assert report["invalid_policy_modules"] == []
     assert all(
