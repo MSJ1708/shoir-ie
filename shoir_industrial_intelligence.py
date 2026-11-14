@@ -41,6 +41,14 @@ VISUAL_STATE_KEYS = {
 PROVENANCE = (
     "LIVE", "IMPORTED", "MANUAL", "SYNTHETIC", "SIMULATED", "MOCK", "STALE",
 )
+THREAD_ENTITY_TYPES = (
+    "Organization", "Facility", "ProductionLine", "Process", "Asset",
+    "Equipment", "Instrument", "Product", "Batch", "Material", "Supplier",
+    "Order", "WorkOrder", "WorkPackage", "Workforce", "Document", "Dataset",
+    "Event", "Quality", "Maintenance", "Energy", "Cost", "KPI", "Model",
+    "Experiment", "Scenario", "Decision", "Action", "Approval", "Evidence",
+    "Risk", "Control", "Project", "Outcome",
+)
 PROVENANCE_RELIABILITY = {
     "LIVE": "Source freshness and connector health still require validation.",
     "IMPORTED": "Imported source; validate schema, timestamp, units and completeness.",
@@ -1303,7 +1311,19 @@ def add_relationship(username: str, tier: str, source_id: str, target_id: str, r
     _save_state_list(username, tier, "edges", edges)
     import shoir_digital_thread as thread
     thread.ensure_thread_state(username)
-    thread._upsert_edge(nodes[source].get("thread_node_id", source), nodes[target].get("thread_node_id", target), relation_name, state, {"evidence_refs": refs, "industrial_edge_id": edge_id})
+    thread._upsert_edge(
+        nodes[source].get("thread_node_id", source),
+        nodes[target].get("thread_node_id", target),
+        relation_name,
+        state,
+        {
+            "evidence_refs": refs,
+            "industrial_edge_id": edge_id,
+            "organization_id": access["organization_id"],
+            "workspace_id": access["workspace_id"],
+            "workspace_scope": access["scope"],
+        },
+    )
     from workspace_persistence import save_user_workspace
     if not save_user_workspace(username, st.session_state):
         edges.pop()
@@ -2136,7 +2156,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         col1, col2 = ui.columns(2)
         with col1:
             ui.markdown("#### Register an industrial entity")
-            entity_type = ui.selectbox("Entity type", ["Facility", "ProductionLine", "Process", "Asset", "Equipment", "Instrument", "Material", "Product", "Batch", "Supplier", "WorkOrder", "Project", "Document"], key="shoir_ii_entity_type")
+            entity_type = ui.selectbox("Entity type", list(THREAD_ENTITY_TYPES), key="shoir_ii_entity_type")
             entity_id = ui.text_input("Stable entity ID", key="shoir_ii_entity_id")
             entity_name = ui.text_input("Entity display name", key="shoir_ii_entity_name")
             entity_json = ui.text_area("Entity attributes JSON", value="{}", key="shoir_ii_entity_attrs", height=100)
