@@ -1116,3 +1116,23 @@ def test_shift_handover_is_rejected_in_personal_workspace(monkeypatch):
             "Shift A", "Shift B",
             [{"issue_id": "ISSUE-1", "status": "OPEN"}],
         )
+
+
+
+def test_enterprise_entitlement_uses_authenticated_session_tier_not_caller_argument(monkeypatch):
+    session = _configure_personal_session(monkeypatch, "synthetic-starter-user", "owner")
+    session["user_tier"] = "Starter"
+    with pytest.raises(PermissionError, match="authenticated account's existing Enterprise"):
+        ii.list_records("synthetic-starter-user", "Enterprise")
+    with pytest.raises(PermissionError, match="authenticated account's existing Enterprise"):
+        ii.create_record(
+            "synthetic-starter-user", "Enterprise", "note",
+            "Attempted tier escalation", {"value": "blocked"},
+        )
+    assert ii._state_list("records") == []
+    session["user_tier"] = "Enterprise Plus"
+    record = ii.create_record(
+        "synthetic-starter-user", "Enterprise Plus", "note",
+        "Authorized enterprise-plus record", {"value": "allowed"},
+    )
+    assert record["record_id"]
