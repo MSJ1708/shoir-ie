@@ -708,7 +708,7 @@ def _spare_parts(payload: Mapping[str, Any]) -> dict[str, Any]:
     destination = payload.get("destination")
     if not isinstance(source, Mapping) or not isinstance(destination, Mapping):
         raise IndustrialIntelligenceError("Source and destination inventory objects are required.")
-    compatible = bool(payload.get("compatible"))
+    compatible = payload.get("compatible") is True
     source_on = _finite(source.get("on_hand"), "source on_hand", minimum=0)
     source_min = _finite(source.get("minimum_stock"), "source minimum_stock", minimum=0)
     dest_on = _finite(destination.get("on_hand"), "destination on_hand", minimum=0)
@@ -888,7 +888,7 @@ def _session_authorize(username: str, tier: str, action: str = "read") -> dict[s
         response = account_store.edge_organization_action("org_list_session", actor, token)
         organizations = response.get("organizations", [])
         membership = next((item for item in organizations if isinstance(item, dict) and str(item.get("organization_id")) == organization_id), None)
-        if not membership or str(membership.get("status", "active")).casefold() != "active":
+        if not membership or str(membership.get("status") or "").casefold() != "active":
             raise PermissionError("Active organization membership could not be verified.")
         role = str(membership.get("role") or "").casefold()
         scope = {"organization_id": organization_id, "workspace_id": workspace_id, "scope": "ORGANIZATION"}
@@ -897,9 +897,16 @@ def _session_authorize(username: str, tier: str, action: str = "read") -> dict[s
         scope = {"organization_id": None, "workspace_id": str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or "personal"), "scope": "PERSONAL"}
     if not role:
         raise PermissionError("The current workspace role is missing; access is denied.")
-    read_roles = {"owner", "admin", "administrator", "enterprise admin", "engineer", "approver", "viewer", "manager", "planner", "user", "member"}
-    write_roles = {"owner", "admin", "administrator", "enterprise admin", "engineer", "approver", "manager", "planner", "user", "member"}
-    approve_roles = {"owner", "admin", "administrator", "enterprise admin", "approver"}
+    if scope["scope"] == "ORGANIZATION":
+        read_roles = {"owner", "admin", "administrator", "enterprise admin", "engineer", "approver", "viewer"}
+        write_roles = {"owner", "admin", "administrator", "enterprise admin", "engineer", "approver"}
+        approve_roles = {"owner", "admin", "administrator", "enterprise admin", "approver"}
+    else:
+        # Personal workspaces retain the account roles used by the existing login
+        # and subscription flows; organization writes use the stricter five-role map.
+        read_roles = {"owner", "admin", "administrator", "enterprise admin", "engineer", "approver", "viewer", "manager", "planner", "user", "member"}
+        write_roles = {"owner", "admin", "administrator", "enterprise admin", "engineer", "approver", "manager", "planner", "user", "member"}
+        approve_roles = {"owner", "admin", "administrator", "enterprise admin", "approver"}
     if action == "read" and role not in read_roles:
         raise PermissionError("The current workspace role cannot read Industrial Intelligence records.")
     if action == "write" and role not in write_roles:
@@ -962,6 +969,8 @@ def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, An
 
 
 def _require_evidence_refs(evidence_refs: Sequence[str], label: str) -> list[str]:
+    if isinstance(evidence_refs, (str, bytes)) or not isinstance(evidence_refs, Sequence):
+        raise IndustrialIntelligenceError(f"{label} evidence references must be a list of registered record IDs or source references.")
     refs = [_required_text(item, f"{label} evidence reference", 240) for item in evidence_refs]
     if not refs:
         raise IndustrialIntelligenceError(f"{label} requires at least one evidence reference.")
@@ -1262,6 +1271,8 @@ def create_operational_event(username: str, tier: str, event_type: str, descript
     _session_authorize(username, tier, "write")
     event_time = _iso_timestamp(timestamp, "event timestamp").isoformat() if timestamp else _utc_now()
     refs = [_required_text(item, "evidence reference", 240) for item in evidence_refs]
+    if refs:
+        refs = _require_evidence_refs(refs, "Operational event")
     event = create_record(username, tier, "operational_event", event_type, {"event_type": _required_text(event_type, "event_type"), "description": _required_text(description, "description", 4000), "entity_id": str(entity_id or "").strip(), "event_timestamp": event_time, "evidence_refs": refs, "thread_node_type": "Event"}, provenance, entity_id=entity_id)
     events = list(_state_list("events"))
     events.append({**event, "event_timestamp": event_time})
@@ -1346,6 +1357,8 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
         raise PermissionError("Use approve_action so the authenticated approver, role and audit record are enforced.")
     if target in {"IN_PROGRESS", "IMPLEMENTED"} and action.get("status") not in {"APPROVED", "IN_PROGRESS"}:
         raise PermissionError("An action must have the required independent approvals before implementation.")
+    if target == "CLOSED" and action.get("status") != "VERIFIED":
+        raise PermissionError("An action can only be closed after independent verification.")
     if target == "VERIFIED":
         if action.get("status") != "IMPLEMENTED":
             raise PermissionError("An action must be recorded as IMPLEMENTED before independent verification.")
