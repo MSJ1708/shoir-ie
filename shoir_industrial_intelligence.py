@@ -1626,32 +1626,64 @@ def mark_dataset_dependents_stale(
                 f"Workspace record {record.get('record_id') or index} has a malformed dataset dependency list."
             )
         stale = []
+        existing_markers = record.get("stale_dataset_dependencies", [])
+        if not isinstance(existing_markers, list):
+            existing_markers = []
+        matched_existing_stale_marker = False
         for dependency in dependencies:
             if not isinstance(dependency, Mapping):
                 raise IndustrialIntelligenceError("A saved dataset dependency is malformed.")
             if str(dependency.get("dataset_id") or "").strip().upper() != normalized_id:
                 continue
+            previous_data_hash = str(dependency.get("data_hash") or "").strip().lower()
+            previous_fingerprint = str(dependency.get("version_fingerprint") or "").strip().lower()
             if (
                 dependency.get("version") != current_version
-                or str(dependency.get("data_hash") or "").strip().lower() != data_hash
-                or str(dependency.get("version_fingerprint") or "").strip().lower() != fingerprint
+                or previous_data_hash != data_hash
+                or previous_fingerprint != fingerprint
             ):
-                stale.append({
+                marker = {
                     "dataset_id": normalized_id,
                     "previous_version": dependency.get("version"),
                     "current_version": current_version,
-                    "previous_data_hash": str(dependency.get("data_hash") or "") or None,
+                    "previous_data_hash": previous_data_hash or None,
+                    "previous_version_fingerprint": previous_fingerprint or None,
                     "current_data_hash": data_hash,
+                    "current_version_fingerprint": fingerprint,
                     "reason": "The dataset head no longer matches the immutable version used by this record.",
-                })
-        if stale:
+                }
+                already_recorded = any(
+                    isinstance(existing_marker, Mapping)
+                    and str(existing_marker.get("dataset_id") or "").strip().upper() == normalized_id
+                    and existing_marker.get("previous_version") == marker["previous_version"]
+                    and str(existing_marker.get("previous_data_hash") or "").strip().lower() == previous_data_hash
+                    and (
+                        not previous_fingerprint
+                        or str(existing_marker.get("previous_version_fingerprint") or "").strip().lower() == previous_fingerprint
+                    )
+                    and existing_marker.get("current_version") == current_version
+                    and str(existing_marker.get("current_data_hash") or "").strip().lower() == data_hash
+                    and (
+                        not existing_marker.get("current_version_fingerprint")
+                        or str(existing_marker.get("current_version_fingerprint") or "").strip().lower() == fingerprint
+                    )
+                    for existing_marker in [*existing_markers, *stale]
+                )
+                if already_recorded:
+                    matched_existing_stale_marker = True
+                else:
+                    stale.append(marker)
+        if stale or matched_existing_stale_marker:
+            was_already_stale = (
+                str(record.get("record_status") or "").upper() == "STALE"
+                or str(record.get("dataset_dependency_status") or "").upper() == "STALE"
+            )
             record["record_status"] = "STALE"
             record["dataset_dependency_status"] = "STALE"
-            existing = record.get("stale_dataset_dependencies", [])
-            record["stale_dataset_dependencies"] = (existing if isinstance(existing, list) else []) + stale
-            record["stale_detected_at"] = _utc_now()
+            record["stale_dataset_dependencies"] = [*existing_markers, *stale]
+            record.setdefault("stale_detected_at", _utc_now())
             record_id = str(record.get("record_id") or "").strip()
-            if record_id:
+            if record_id and not was_already_stale:
                 stale_ids.append(record_id)
         updated.append(record)
     return updated, stale_ids
