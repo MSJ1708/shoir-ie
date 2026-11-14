@@ -588,3 +588,77 @@ def test_platform_record_payload_rejects_bare_dob_key_on_python_and_edge():
     # matching a literal backslash sequence.
     assert r"\bdob\b" in edge_source
     assert r"\\bdob\\b" not in edge_source
+
+
+def test_edge_list_platform_records_forwards_authorized_organization_workspace_scope(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        store, "_edge_call",
+        lambda action, payload: calls.append((action, dict(payload))) or {
+            "ok": True, "records": [], "has_more": False, "next_offset": 0,
+        },
+    )
+    result = store.edge_list_platform_records(
+        "synthetic-user", "opaque-session-token", "workspace-name",
+        "dataset", 100,
+        organization_id="00000000-0000-4000-8000-000000000001",
+        organization_workspace_id="00000000-0000-4000-8000-000000000002",
+    )
+    assert result == []
+    assert calls[0][1]["organization_id"].endswith("0001")
+    assert calls[0][1]["organization_workspace_id"].endswith("0002")
+
+
+def test_dataset_upload_forwards_authorized_organization_scope(monkeypatch):
+    import hashlib
+    import durable_account_store as store
+    import requests
+
+    raw = b"asset_id,units\\nA-1,10\\n"
+    calls = []
+    monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
+
+    def edge(action, payload):
+        calls.append((action, dict(payload)))
+        if action == "dataset_upload_create":
+            return {
+                "ok": True,
+                "upload_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/upload/sign/shoir-industrial-datasets/tmp/workspace/DS-ABCDEF012345/upload.csv?token=opaque",
+                "upload_path": "tmp/workspace/DS-ABCDEF012345/upload.csv",
+            }
+        return {"ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}}
+
+    monkeypatch.setattr(store, "_edge_call", edge)
+    monkeypatch.setattr(
+        requests, "put",
+        lambda *_args, **_kwargs: type("Response", (), {"status_code": 200, "text": ""})(),
+    )
+    store.edge_upload_and_register_dataset_version(
+        "synthetic-user", "opaque-session-token", "workspace-name",
+        "DS-ABCDEF012345", "Production", "production.csv", raw,
+        hashlib.sha256(raw).hexdigest(), "c" * 64, 1, 2,
+        {"asset_id": {"dtype": "object"}}, [],
+        organization_id="00000000-0000-4000-8000-000000000001",
+        organization_workspace_id="00000000-0000-4000-8000-000000000002",
+    )
+    for _, payload in calls:
+        assert payload["organization_id"].endswith("0001")
+        assert payload["organization_workspace_id"].endswith("0002")
+
+
+def test_download_edge_response_includes_verified_head_and_version_fingerprints():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    action = source.split('if (action === "dataset_download_url") {', 1)[1].split(
+        'if (action === "dataset_upload_create") {', 1
+    )[0]
+    assert 'record_type", "dataset"' in action
+    assert "currentVersion" in action
+    assert "version_fingerprint:" in action
+    assert "current_version:" in action
+    assert "is_current_version:" in action
+    assert "source_name:" in action
+    assert 'resolveManagedWorkspaceKey(' in action
+
