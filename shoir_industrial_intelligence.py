@@ -465,6 +465,7 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
             if spread > tolerance:
                 conflicts.append({"meter_id": meter, "reason": "CONFLICTING_READINGS", "spread_pct": spread, "tolerance_pct": tolerance})
     balances = []
+    reconciliation_proposals = []
     for index, stream in enumerate(payload.get("balances", []), start=1):
         if not isinstance(stream, Mapping):
             raise IndustrialIntelligenceError(f"Balance {index} must be an object.")
@@ -473,14 +474,51 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
         losses = _finite(stream.get("losses", 0), f"balance {index} losses", minimum=0)
         tolerance = _finite(stream.get("tolerance", 0), f"balance {index} tolerance", minimum=0)
         residual = incoming - outgoing - losses
-        balances.append({"name": str(stream.get("name") or f"Balance {index}"), "unit": _required_text(stream.get("unit"), f"balance {index} unit"), "input": incoming, "output": outgoing, "losses": losses, "residual": residual, "tolerance": tolerance, "closes": abs(residual) <= tolerance})
+        balance_name = str(stream.get("name") or f"Balance {index}")
+        unit = _required_text(stream.get("unit"), f"balance {index} unit")
+        balance_result = {"name": balance_name, "unit": unit, "input": incoming, "output": outgoing, "losses": losses, "residual": residual, "tolerance": tolerance, "closes": abs(residual) <= tolerance}
+        balances.append(balance_result)
+        reconciliation = stream.get("reconciliation")
+        if reconciliation is not None:
+            if not isinstance(reconciliation, Mapping):
+                raise IndustrialIntelligenceError(f"Balance {index} reconciliation must be an object.")
+            target = str(reconciliation.get("adjustment_target") or "").casefold()
+            if target not in {"input", "output", "losses"}:
+                raise IndustrialIntelligenceError(f"Balance {index} reconciliation adjustment_target must be input, output or losses.")
+            originals_by_field = {"input": incoming, "output": outgoing, "losses": losses}
+            if target == "input":
+                proposed_value = outgoing + losses
+            elif target == "output":
+                proposed_value = incoming - losses
+            else:
+                proposed_value = incoming - outgoing
+            if proposed_value < 0:
+                raise IndustrialIntelligenceError(f"Balance {index} proposed {target} reconciliation would be negative and is rejected.")
+            original_target = originals_by_field[target]
+            reconciliation_proposals.append({
+                "balance_name": balance_name,
+                "unit": unit,
+                "method": "RESIDUAL_ASSIGNED_TO_EXPLICITLY_SELECTED_MEASUREMENT",
+                "adjustment_target": target,
+                "original_values": {"input": incoming, "output": outgoing, "losses": losses},
+                "proposed_values": {**originals_by_field, target: proposed_value},
+                "original_target_value": original_target,
+                "proposed_target_value": proposed_value,
+                "adjustment": proposed_value - original_target,
+                "original_residual": residual,
+                "proposed_residual": 0.0,
+                "status": "PROPOSED_NOT_APPLIED_NOT_VERIFIED",
+                "approval_required": True,
+                "assumptions": ["Only the explicitly selected target measurement absorbs the full balance residual.", "No uncertainty weighting or calibration correction is inferred.", "This proposal does not alter the original measurement."],
+            })
     return {
         "status": "REVIEW_REQUIRED" if conflicts or any(not row["closes"] for row in balances) else "NO_CONFIGURED_CONFLICTS_DETECTED",
         "original_measurements": originals,
         "meter_conflicts": conflicts,
         "balances": balances,
+        "reconciliation_proposals": reconciliation_proposals,
         "originals_modified": False,
-        "limitations": ["No original value is overwritten or averaged.", "No unit conversion, sensor calibration or uncertainty model is inferred.", "Absence of detected conflicts does not prove instrument calibration or overall data fitness."],
+        "limitations": ["No original value is overwritten or averaged.", "Reconciliation proposals assign the residual only to an explicitly selected measurement and require human review.", "No unit conversion, sensor calibration or uncertainty model is inferred.", "Absence of detected conflicts does not prove instrument calibration or overall data fitness."],
     }
 
 
