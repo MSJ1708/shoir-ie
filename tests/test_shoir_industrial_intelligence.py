@@ -728,3 +728,60 @@ def test_live_operational_event_requires_source_reference_and_keeps_source_times
     assert event["source_ref"] == "TEST-DCS:EVENT-001"
     assert event["source_timestamp"] == "2026-11-01T08:00:00+00:00"
     assert event["provenance"] == "LIVE"
+
+
+
+def test_turnaround_shared_multiskill_resource_is_never_double_booked():
+    result = ii.analyze_tool("turnaround", {
+        "tasks": [
+            {"task_id": "MECH", "duration_hours": 4, "skill": "mechanical"},
+            {"task_id": "ELEC", "duration_hours": 3, "skill": "electrical"},
+        ],
+        "resources": [{"id": "TECH-01", "skills": ["mechanical", "electrical"]}],
+    })
+    assert result["status"] == "FEASIBLE"
+    rows = sorted(result["scheduled_tasks"], key=lambda item: item["start_hour"])
+    assert len(rows) == 2
+    assert rows[0]["resource_id"] == rows[1]["resource_id"] == "TECH-01"
+    assert rows[1]["start_hour"] >= rows[0]["finish_hour"]
+    assert result["makespan_hours"] == pytest.approx(7)
+
+
+def test_workspace_switch_save_preserves_records_in_previous_organization(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-multi-org-user", "owner")
+    org_a = "00000000-0000-4000-8000-000000000001"
+    workspace_a = "00000000-0000-4000-8000-000000000002"
+    org_b = "00000000-0000-4000-8000-000000000099"
+    workspace_b = "00000000-0000-4000-8000-000000000098"
+    record_a = ii.create_record("synthetic-multi-org-user", "Enterprise", "note", "Organization A record", {"org": "A"})
+
+    session["shoir_active_organization_workspace"] = {
+        "organization_id": org_b, "organization_workspace_id": workspace_b,
+    }
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [
+                {"organization_id": org_a, "role": "owner", "status": "active"},
+                {"organization_id": org_b, "role": "owner", "status": "active"},
+            ]
+        },
+    )
+    record_b = ii.create_record("synthetic-multi-org-user", "Enterprise", "note", "Organization B record", {"org": "B"})
+    raw = session[ii.STATE_PREFIX + "records"]
+    assert {item["organization_id"] for item in raw} == {org_a, org_b}
+    assert {item["record_id"] for item in ii.list_records("synthetic-multi-org-user", "Enterprise")} == {record_b["record_id"]}
+
+    session["shoir_active_organization_workspace"] = {
+        "organization_id": org_a, "organization_workspace_id": workspace_a,
+    }
+    visible_a = ii.list_records("synthetic-multi-org-user", "Enterprise")
+    assert [item["record_id"] for item in visible_a] == [record_a["record_id"]]
+
+
+def test_workbench_search_does_not_select_suite_when_query_is_empty():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
+    assert "_ii_matches = _search_industrial_tools(q) if q else []" in source
