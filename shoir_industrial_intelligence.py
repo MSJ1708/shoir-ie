@@ -1355,6 +1355,13 @@ def _record_to_json(value: Any) -> Any:
 
 def render_industrial_intelligence_suite(streamlit_module, username: str, tier: str) -> None:
     ui = streamlit_module
+    pending_tool_id = ui.session_state.pop("shoir_pending_industrial_tool", None)
+    if pending_tool_id in {item["id"] for item in TOOL_CATALOG}:
+        # Workbench search can deep-link to a specialist capability without
+        # changing the existing navigation or creating a duplicate page.
+        ui.session_state["shoir_ii_tool_search"] = ""
+        ui.session_state["shoir_ii_suite_filter"] = "All suites"
+        ui.session_state["shoir_ii_selected_tool"] = pending_tool_id
     ui.markdown("## Industrial Intelligence Suite")
     ui.caption("Six connected suites · 16 deterministic tool engines · shared evidence, Digital Thread, decisions, actions and model governance.")
     try:
@@ -1384,7 +1391,10 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
     if not search_results:
         ui.info("No tool matches this search. Try an equipment, process, data trust, turnaround, genealogy or energy term.")
         return
-    selected_id = ui.selectbox("Open tool", [item["id"] for item in search_results], format_func=lambda value: next(item["name"] for item in search_results if item["id"] == value), key="shoir_ii_selected_tool")
+    tool_options = [item["id"] for item in search_results]
+    if ui.session_state.get("shoir_ii_selected_tool") not in tool_options:
+        ui.session_state["shoir_ii_selected_tool"] = tool_options[0]
+    selected_id = ui.selectbox("Open tool", tool_options, format_func=lambda value: next(item["name"] for item in search_results if item["id"] == value), key="shoir_ii_selected_tool")
     definition = tool_definition(selected_id)
     ui.markdown(f"### {definition['name']}")
     ui.write(definition["purpose"])
