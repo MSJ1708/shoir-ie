@@ -1251,14 +1251,88 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
                 evidence_valid = True
             except IndustrialIntelligenceError:
                 evidence_valid = False
-        valid = bool(owner and evidence_valid and state == "EFFECTIVE")
-        rows.append({"barrier_id": _required_text(barrier.get("barrier_id"), f"barrier {index} barrier_id"), "owner": owner or None, "evidence_id": evidence or None, "status": state, "counts_as_effective": valid})
-        effectiveness.append(1.0 if valid else 0.0)
+        barrier_id = _required_text(barrier.get("barrier_id"), f"barrier {index} barrier_id")
+        # User-reported EFFECTIVE is not independently verified. Only the separate
+        # reviewer workflow may count a barrier toward the reviewed screening score.
+        rows.append({"barrier_id": barrier_id, "owner": owner or None, "evidence_id": evidence or None, "evidence_registered": evidence_valid, "reported_status": state, "status": "EFFECTIVENESS_NOT_INDEPENDENTLY_REVIEWED", "counts_as_effective": False})
+        effectiveness.append(0.0)
     initial = sev * like
     reduction = sum(effectiveness) / len(effectiveness) if effectiveness else 0.0
     residual = initial * (1.0 - 0.6 * reduction)
     record = create_record(username, tier, "risk_barrier_assurance", hazard, {"hazard": _required_text(hazard, "hazard"), "severity": sev, "likelihood": like, "initial_screening_score": initial, "barriers": rows, "residual_screening_score": residual, "formal_safety_approval": False}, "MANUAL")
     return record
+
+
+def review_barrier_effectiveness(
+    username: str,
+    tier: str,
+    risk_record_id: str,
+    barrier_id: str,
+    decision: str,
+    evidence_ref: str,
+    reviewer_comment: str = "",
+) -> dict[str, Any]:
+    access = _session_authorize(username, tier, "approve")
+    records = list(_state_list("records"))
+    risk_record = next(
+        (item for item in records if item.get("record_id") == str(risk_record_id) and item.get("record_type") == "risk_barrier_assurance"),
+        None,
+    )
+    if not risk_record:
+        raise IndustrialIntelligenceError("Risk/barrier record does not exist in this workspace.")
+    if str(risk_record.get("created_by", "")).casefold() == access["actor"].casefold():
+        raise PermissionError("The risk/barrier record creator cannot independently review its barriers.")
+    key = _required_text(barrier_id, "barrier_id")
+    barriers = risk_record.get("payload", {}).get("barriers", [])
+    barrier = next((item for item in barriers if str(item.get("barrier_id")) == key), None)
+    if not barrier:
+        raise IndustrialIntelligenceError("Barrier ID does not exist in the selected risk record.")
+    if str(barrier.get("owner") or "").casefold() == access["actor"].casefold():
+        raise PermissionError("The barrier owner cannot independently review their own barrier.")
+    status = str(decision or "").upper()
+    if status not in {"VERIFIED_EFFECTIVE", "NOT_EFFECTIVE"}:
+        raise IndustrialIntelligenceError("Barrier review decision must be VERIFIED_EFFECTIVE or NOT_EFFECTIVE.")
+    ref = _require_evidence_refs([evidence_ref], "Independent barrier review")[0]
+    prior = _state_list("barrier_reviews")
+    if any(
+        row.get("risk_record_id") == str(risk_record_id)
+        and row.get("barrier_id") == key
+        and row.get("reviewer") == access["actor"]
+        for row in prior
+    ):
+        raise IndustrialIntelligenceError("This reviewer has already reviewed the selected barrier.")
+    review = {
+        "review_id": "IIB-" + uuid.uuid4().hex[:12].upper(),
+        "risk_record_id": str(risk_record_id),
+        "barrier_id": key,
+        "decision": status,
+        "evidence_ref": ref,
+        "reviewer": access["actor"],
+        "role": access["role"],
+        "comment": str(reviewer_comment or "")[:2000],
+        "reviewed_at": _utc_now(),
+    }
+    prior.append(review)
+    _save_state_list(username, tier, "barrier_reviews", prior, action="approve")
+    reviewed = [row for row in prior if row.get("risk_record_id") == str(risk_record_id)]
+    effective_ids = {row["barrier_id"] for row in reviewed if row.get("decision") == "VERIFIED_EFFECTIVE"}
+    initial = _finite(risk_record.get("payload", {}).get("initial_screening_score"), "initial screening score", minimum=0)
+    residual = initial * (1.0 - 0.6 * len(effective_ids) / max(1, len(barriers)))
+    review_record = create_record(
+        username, tier, "risk_barrier_review", f"Barrier review {key}",
+        {
+            "risk_record_id": str(risk_record_id),
+            "barrier_id": key,
+            "decision": status,
+            "evidence_ref": ref,
+            "reviewer": access["actor"],
+            "residual_screening_score": residual,
+            "formal_safety_approval": False,
+        },
+        "MANUAL",
+    )
+    _append_audit(username, tier, "risk_barrier.independent_review", review_record["record_id"], review)
+    return {"review": copy.deepcopy(review), "review_record": review_record, "residual_screening_score": residual, "formal_safety_approval": False}
 
 
 def record_benefit(username: str, tier: str, project: str, metric: str, baseline: float, actual: float, unit: str, evidence_refs: Sequence[str]) -> dict[str, Any]:
