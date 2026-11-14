@@ -444,7 +444,7 @@ def test_action_approval_is_independent_and_verification_follows_implementation(
         "2026-12-03T00:00:00Z", "MEDIUM", "Evidence is attached.",
     )
     with pytest.raises(ii.IndustrialIntelligenceError, match="registered evidence"):
-        ii.approve_action("synthetic-owner", "Enterprise", no_evidence_action["action_id"])
+        ii.approve_action("synthetic-approver", "Enterprise", no_evidence_action["action_id"])
     ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "IN_PROGRESS")
     ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "IMPLEMENTED", "Inspection executed")
     with pytest.raises(PermissionError, match="only be closed after independent verification"):
