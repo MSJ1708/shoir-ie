@@ -1166,3 +1166,70 @@ def test_data_trust_detects_missing_stuck_outlier_and_timestamp_sync_candidates(
     assert result["original_measurements"][8]["value"] is None
     assert payload["measurements"] == originals
     assert result["originals_modified"] is False
+
+
+
+def test_experimentation_generates_fractional_factorial_with_resolution():
+    result = ii.analyze_tool("experimentation", {
+        "factors": ["A", "B", "C", "D"],
+        "design_type": "FRACTIONAL_2_LEVEL",
+        "generators": {"D": "A*B*C"},
+    })
+    assert result["status"] == "EXPERIMENT_DESIGN_GENERATED"
+    assert result["run_count"] == 8
+    assert result["resolution"] == 4
+    for row in result["design"]:
+        assert row["D"] == row["A"] * row["B"] * row["C"]
+
+
+def test_experimentation_builds_and_fits_central_composite_response_surface():
+    base = {
+        "factors": ["temperature", "speed"],
+        "design_type": "CENTRAL_COMPOSITE",
+        "center_points": 4,
+    }
+    design = ii.analyze_tool("experimentation", base)
+    assert design["run_count"] == 12
+    assert design["alpha"] == pytest.approx(2 ** 0.5)
+    runs = []
+    for point in design["design"]:
+        x = point["temperature"]
+        y = point["speed"]
+        runs.append({
+            **point,
+            "response": 5 + 2*x - 3*y + 0.5*(x**2) + 0.25*(y**2) + 1.0*x*y,
+        })
+    fitted = ii.analyze_tool("experimentation", {**base, "runs": runs})
+    assert fitted["status"] == "RESPONSE_SURFACE_MODEL_FITTED"
+    assert fitted["r_squared"] == pytest.approx(1.0)
+    assert fitted["coefficients"]["linear:temperature"] == pytest.approx(2.0)
+    assert fitted["coefficients"]["linear:speed"] == pytest.approx(-3.0)
+    assert fitted["coefficients"]["quadratic:temperature"] == pytest.approx(0.5)
+    assert fitted["coefficients"]["quadratic:speed"] == pytest.approx(0.25)
+    assert fitted["coefficients"]["interaction:temperature*speed"] == pytest.approx(1.0)
+    assert fitted["sensitivity_ranking"][0]["factor"] == "speed"
+
+
+def test_experimentation_runs_explicit_one_sample_t_test():
+    result = ii.analyze_tool("experimentation", {
+        "factors": ["temperature", "speed"],
+        "statistical_test": {
+            "test": "ONE_SAMPLE_T_TEST",
+            "sample": [1, 2, 3, 4, 5],
+            "reference_value": 0,
+            "alpha": 0.05,
+        },
+    })
+    assert result["statistical_test"]["test"] == "ONE_SAMPLE_T_TEST"
+    assert result["statistical_test"]["p_value"] < 0.05
+    assert result["statistical_test"]["reject_null_at_alpha"] is True
+    assert result["statistical_test"]["status"] == "STATISTICAL_TEST_CALCULATED_NOT_CAUSAL_PROOF"
+
+
+def test_experimentation_rejects_fractional_generators_with_unresolved_cycles():
+    with pytest.raises(ii.IndustrialIntelligenceError, match="dependency cycle"):
+        ii.analyze_tool("experimentation", {
+            "factors": ["A", "B"],
+            "design_type": "FRACTIONAL_2_LEVEL",
+            "generators": {"A": "B", "B": "A"},
+        })
