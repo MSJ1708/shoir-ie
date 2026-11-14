@@ -1326,6 +1326,115 @@ def create_operational_event(username: str, tier: str, event_type: str, descript
     return copy.deepcopy(event)
 
 
+def create_decision(
+    username: str,
+    tier: str,
+    title: str,
+    context: str,
+    options: Sequence[Mapping[str, Any]],
+    recommended_option_id: str,
+    rationale: str,
+    evidence_refs: Sequence[str],
+) -> dict[str, Any]:
+    access = _session_authorize(username, tier, "write")
+    if isinstance(options, (str, bytes)) or not isinstance(options, Sequence) or len(options) < 2:
+        raise IndustrialIntelligenceError("A decision requires at least two structured options.")
+    normalized_options = []
+    option_ids = set()
+    for index, option in enumerate(options, start=1):
+        if not isinstance(option, Mapping):
+            raise IndustrialIntelligenceError(f"Decision option {index} must be an object.")
+        option_id = _required_text(option.get("option_id"), f"decision option {index} option_id", 80)
+        if option_id in option_ids:
+            raise IndustrialIntelligenceError("Decision option IDs must be unique.")
+        option_ids.add(option_id)
+        normalized_options.append({
+            "option_id": option_id,
+            "label": _required_text(option.get("label"), f"decision option {index} label", 180),
+            "description": str(option.get("description") or "")[:2000],
+            "expected_impact": _json_safe(option.get("expected_impact") or {}),
+            "risk_notes": str(option.get("risk_notes") or "")[:2000],
+        })
+    recommended = _required_text(recommended_option_id, "recommended_option_id", 80)
+    if recommended not in option_ids:
+        raise IndustrialIntelligenceError("The recommended option must match one of the registered option IDs.")
+    refs = _require_evidence_refs(evidence_refs, "Decision proposal")
+    decision = create_record(
+        username,
+        tier,
+        "industrial_decision",
+        title,
+        {
+            "title": _required_text(title, "decision title"),
+            "context": _required_text(context, "decision context", 4000),
+            "options": normalized_options,
+            "recommended_option_id": recommended,
+            "rationale": _required_text(rationale, "decision rationale", 4000),
+            "evidence_refs": refs,
+            "status": "PENDING_INDEPENDENT_REVIEW",
+            "thread_node_type": "Decision",
+        },
+        "MANUAL",
+    )
+    _append_audit(username, tier, "decision.proposed", decision["record_id"], {
+        "recommended_option_id": recommended,
+        "evidence_refs": refs,
+    })
+    return decision
+
+
+def review_decision(
+    username: str,
+    tier: str,
+    decision_record_id: str,
+    decision: str,
+    verification_evidence: Sequence[str],
+    reviewer_comment: str = "",
+) -> dict[str, Any]:
+    access = _session_authorize(username, tier, "approve")
+    records = list(_state_list("records"))
+    original = next(
+        (item for item in records if item.get("record_id") == str(decision_record_id) and item.get("record_type") == "industrial_decision"),
+        None,
+    )
+    if not original:
+        raise IndustrialIntelligenceError("Decision proposal does not exist in this workspace.")
+    if str(original.get("created_by", "")).casefold() == access["actor"].casefold():
+        raise PermissionError("The decision author cannot independently approve their own decision.")
+    if any(
+        item.get("record_type") == "decision_review"
+        and item.get("payload", {}).get("decision_record_id") == str(decision_record_id)
+        for item in records
+    ):
+        raise IndustrialIntelligenceError("This decision already has an independent review. Create a versioned proposal for reconsideration.")
+    status = str(decision or "").upper()
+    if status not in {"APPROVED", "REJECTED"}:
+        raise IndustrialIntelligenceError("Decision review must be APPROVED or REJECTED.")
+    refs = _require_evidence_refs(verification_evidence, "Independent decision review")
+    review = create_record(
+        username,
+        tier,
+        "decision_review",
+        f"Decision review · {original['name']}",
+        {
+            "decision_record_id": str(decision_record_id),
+            "review_decision": status,
+            "reviewer": access["actor"],
+            "role": access["role"],
+            "evidence_refs": refs,
+            "comment": str(reviewer_comment or "")[:3000],
+            "thread_node_type": "Decision",
+        },
+        "MANUAL",
+    )
+    _append_audit(username, tier, "decision.independently_reviewed", str(decision_record_id), {
+        "review_record_id": review["record_id"],
+        "review_decision": status,
+        "reviewer": access["actor"],
+    })
+    return {"decision_record_id": str(decision_record_id), "review_record": review, "status": status}
+
+
 def create_action(username: str, tier: str, title: str, owner: str, due_date: str, priority: str, expected_result: str, evidence_refs: Sequence[str] = (), created_by: str | None = None, required_approvals: int = 1) -> dict[str, Any]:
     access = _session_authorize(username, tier, "write")
     due = _iso_timestamp(due_date, "action due_date").date().isoformat()
