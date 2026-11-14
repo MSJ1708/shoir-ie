@@ -966,25 +966,29 @@ def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, An
     snapshot = copy.deepcopy(st.session_state.get(storage_key, []))
     if not isinstance(snapshot, list):
         snapshot = []
-    actor_fields = ("created_by", "owner", "actor", "reviewer")
-    def belongs_to_active_scope(item: Any) -> bool:
-        if not isinstance(item, Mapping):
-            return False
-        if access["scope"] == "ORGANIZATION":
-            return (
-                str(item.get("organization_id") or "") == str(access["organization_id"])
-                and str(item.get("workspace_id") or "") == str(access["workspace_id"])
-            )
-        return (
-            item.get("organization_id") is None
+    # A managed workspace snapshot is tenant-scoped. Never carry records from a
+    # different organization/workspace into the active organization's serialized
+    # session payload. The previous workspace's copy remains durable in its own
+    # remote snapshot and is restored when that workspace is opened again.
+    if access["scope"] == "ORGANIZATION":
+        scoped_rows = [
+            item for item in rows
+            if isinstance(item, Mapping)
+            and str(item.get("organization_id") or "") == str(access["organization_id"])
+            and str(item.get("workspace_id") or "") == str(access["workspace_id"])
+        ]
+    else:
+        actor_fields = ("created_by", "owner", "actor", "reviewer")
+        scoped_rows = [
+            item for item in rows
+            if isinstance(item, Mapping)
+            and item.get("organization_id") is None
             and str(item.get("workspace_id") or "") == str(access["workspace_id"])
             and any(str(item.get(field) or "").casefold() == access["actor"].casefold() for field in actor_fields)
-        )
-    retained = [item for item in snapshot if not belongs_to_active_scope(item)]
-    merged = retained + copy.deepcopy(rows)
-    if len(merged) > MAX_RECORDS:
-        raise IndustrialIntelligenceError(f"{key} exceeds the {MAX_RECORDS} retained-record limit.")
-    st.session_state[storage_key] = merged
+        ]
+    if len(scoped_rows) > MAX_RECORDS:
+        raise IndustrialIntelligenceError(f"{key} exceeds the {MAX_RECORDS} active-workspace record limit.")
+    st.session_state[storage_key] = copy.deepcopy(scoped_rows)
     try:
         from workspace_persistence import save_user_workspace
         saved = save_user_workspace(username, st.session_state)
@@ -1716,7 +1720,7 @@ def thread_snapshot(username: str, tier: str) -> dict[str, Any]:
     all_edges = copy.deepcopy(thread.st.session_state.get(thread._keys()["edges"], []))
     allowed_node_ids = {
         str(row.get("thread_node_id") or "")
-        for collection in ("records", "nodes", "actions")
+        for collection in ("records", "nodes", "actions", "models")
         for row in _state_list(collection)
         if str(row.get("thread_node_id") or "")
     }
