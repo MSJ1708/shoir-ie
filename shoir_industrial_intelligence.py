@@ -1385,6 +1385,7 @@ def approve_action(username: str, tier: str, action_id: str, comment: str = "") 
     index = actions.index(next(item for item in actions if item.get("action_id") == str(action_id)))
     actions[index] = action
     _save_state_list(username, tier, "actions", actions, action="approve")
+    _sync_thread_node(username, tier, "Action", action["title"], action_id, action["status"].title(), {"owner": action["owner"], "status": action["status"], "approval_count": len(approvals), "organization_id": access["organization_id"], "workspace_id": access["workspace_id"]})
     _append_audit(username, tier, "action.approved", action_id, {"approver": access["actor"], "approval_count": len(approvals), "status": action["status"]})
     return copy.deepcopy(action)
 
@@ -1422,6 +1423,7 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     action["updated_at"] = _utc_now()
     actions[index] = action
     _save_state_list(username, tier, "actions", actions)
+    _sync_thread_node(username, tier, "Action", action["title"], action_id, target.title(), {"owner": action["owner"], "status": target, "verification": action.get("verification")})
     _append_audit(username, tier, "action.status_changed", action_id, {"status": target, "actual_result": actual_result if target == "VERIFIED" else None})
     return copy.deepcopy(action)
 
@@ -1452,7 +1454,7 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
     initial = sev * like
     reduction = sum(effectiveness) / len(effectiveness) if effectiveness else 0.0
     residual = initial * (1.0 - 0.6 * reduction)
-    record = create_record(username, tier, "risk_barrier_assurance", hazard, {"hazard": _required_text(hazard, "hazard"), "severity": sev, "likelihood": like, "initial_screening_score": initial, "barriers": rows, "residual_screening_score": residual, "formal_safety_approval": False}, "MANUAL")
+    record = create_record(username, tier, "risk_barrier_assurance", hazard, {"hazard": _required_text(hazard, "hazard"), "severity": sev, "likelihood": like, "initial_screening_score": initial, "barriers": rows, "residual_screening_score": residual, "formal_safety_approval": False, "thread_node_type": "Risk"}, "MANUAL")
     return record
 
 
@@ -1517,6 +1519,7 @@ def review_barrier_effectiveness(
         {
             "risk_record_id": str(risk_record_id),
             "barrier_id": key,
+            "thread_node_type": "Risk",
             "decision": status,
             "evidence_ref": ref,
             "reviewer": access["actor"],
@@ -1534,7 +1537,7 @@ def record_benefit(username: str, tier: str, project: str, metric: str, baseline
     base = _finite(baseline, "baseline")
     value = _finite(actual, "actual")
     refs = [_required_text(item, "benefit evidence reference", 240) for item in evidence_refs]
-    return create_record(username, tier, "benefit_realization", project, {"project": _required_text(project, "project"), "metric": _required_text(metric, "metric"), "baseline": base, "actual": value, "unit": _required_text(unit, "unit", 40), "delta": value - base, "evidence_refs": refs, "benefit_status": "ACTUAL_RECORDED_UNVERIFIED", "realized_financial_savings_claimed": False}, "MANUAL")
+    return create_record(username, tier, "benefit_realization", project, {"project": _required_text(project, "project"), "metric": _required_text(metric, "metric"), "baseline": base, "actual": value, "unit": _required_text(unit, "unit", 40), "delta": value - base, "evidence_refs": refs, "benefit_status": "ACTUAL_RECORDED_UNVERIFIED", "realized_financial_savings_claimed": False, "thread_node_type": "Outcome"}, "MANUAL")
 
 
 def verify_benefit_record(username: str, tier: str, record_id: str, verification_evidence: Sequence[str], reviewer_comment: str = "") -> dict[str, Any]:
@@ -1583,6 +1586,12 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
     record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": _hash_payload(definition), "assumptions": [_required_text(item, "model assumption", 500) for item in assumptions], "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
     models.append(record)
     _save_state_list(username, tier, "models", models)
+    record["thread_node_id"] = _sync_thread_node(
+        username, tier, "Model", f"{model_id} · {version_id}", record["model_id"],
+        "Registered", {"version": version_id, "definition_hash": record["definition_hash"], "status": record["status"]},
+    )
+    models[-1] = record
+    _save_state_list(username, tier, "models", models)
     _append_audit(username, tier, "model.version_registered", record["model_id"], {"version": version_id, "definition_hash": record["definition_hash"]})
     return copy.deepcopy(record)
 
@@ -1602,6 +1611,7 @@ def validate_model_version(username: str, tier: str, model_id: str, reviewer_com
     model["review"] = {"reviewer": access["actor"], "comment": str(reviewer_comment or "")[:2000], "reviewed_at": _utc_now()}
     models[index] = model
     _save_state_list(username, tier, "models", models, action="approve")
+    _sync_thread_node(username, tier, "Model", f"{model['name']} · {model['version']}", model_id, "Validated", {"version": model["version"], "definition_hash": model["definition_hash"], "status": model["status"], "reviewer": access["actor"]})
     _append_audit(username, tier, "model.version_validated", model_id, model["review"])
     return copy.deepcopy(model)
 
@@ -1619,7 +1629,7 @@ def record_cause_effect_investigation(username: str, tier: str, title: str, obse
         if validation == "SUPPORTED":
             evidence = _require_evidence_refs(evidence, f"Cause-effect candidate {index}")
         links.append({"from": _required_text(item.get("from"), "candidate from"), "to": _required_text(item.get("to"), "candidate to"), "relationship": str(item.get("relationship") or "POSSIBLE_CAUSE"), "supporting_evidence": evidence, "contradicting_evidence": counter, "validation_status": validation})
-    return create_record(username, tier, "cause_effect_investigation", title, {"title": _required_text(title, "title"), "observations": [_required_text(item, "observation", 1000) for item in observations], "candidate_relationships": links, "causal_claim": "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED"}, "MANUAL")
+    return create_record(username, tier, "cause_effect_investigation", title, {"title": _required_text(title, "title"), "observations": [_required_text(item, "observation", 1000) for item in observations], "candidate_relationships": links, "causal_claim": "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED", "thread_node_type": "Decision"}, "MANUAL")
 
 
 def review_cause_effect_investigation(
@@ -1671,6 +1681,7 @@ def review_cause_effect_investigation(
             "role": access["role"],
             "comment": str(reviewer_comment or "")[:2000],
             "confirmation_scope": "THIS_REVIEWED_RELATIONSHIP_ONLY",
+            "thread_node_type": "Decision",
         },
         "MANUAL",
     )
