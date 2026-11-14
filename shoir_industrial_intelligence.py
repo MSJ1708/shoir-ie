@@ -254,13 +254,17 @@ def _process_mining(payload: Mapping[str, Any]) -> dict[str, Any]:
     inter_event = 0.0
     variants: dict[tuple[str, ...], int] = defaultdict(int)
     transitions: dict[tuple[str, str], int] = defaultdict(int)
+    transition_elapsed: dict[tuple[str, str], list[float]] = defaultdict(list)
+    case_elapsed: list[float] = []
     repeated = []
     deviations = []
     for case_id, rows in grouped.items():
         rows.sort(key=lambda item: item["_ts"])
         activities = tuple(item["activity"] for item in rows)
         variants[activities] += 1
-        total_elapsed += max(0.0, (rows[-1]["_ts"] - rows[0]["_ts"]).total_seconds() / 60.0)
+        case_duration = max(0.0, (rows[-1]["_ts"] - rows[0]["_ts"]).total_seconds() / 60.0)
+        total_elapsed += case_duration
+        case_elapsed.append(case_duration)
         seen = set()
         for activity in activities:
             if activity in seen:
@@ -269,26 +273,47 @@ def _process_mining(payload: Mapping[str, Any]) -> dict[str, Any]:
         for left, right in zip(rows, rows[1:]):
             delta = max(0.0, (right["_ts"] - left["_ts"]).total_seconds() / 60.0)
             inter_event += delta
-            transitions[(left["activity"], right["activity"])] += 1
+            transition_key = (left["activity"], right["activity"])
+            transitions[transition_key] += 1
+            transition_elapsed[transition_key].append(delta)
             explicit_wait += _finite(right.get("explicit_wait_minutes", 0), f"event {case_id} explicit_wait_minutes", minimum=0)
         approved = payload.get("approved_sequence")
         if isinstance(approved, list) and approved and list(activities) != [str(item) for item in approved]:
             deviations.append({"case_id": case_id, "actual_sequence": list(activities), "approved_sequence": list(approved)})
     variant_rows = [{"variant": " → ".join(key), "cases": count} for key, count in sorted(variants.items(), key=lambda item: (-item[1], item[0]))]
-    transition_rows = [{"from": key[0], "to": key[1], "occurrences": count} for key, count in sorted(transitions.items(), key=lambda item: (-item[1], item[0]))]
+    transition_rows = [
+        {
+            "from": key[0],
+            "to": key[1],
+            "occurrences": count,
+            "total_inter_event_elapsed_minutes": sum(transition_elapsed[key]),
+            "mean_inter_event_elapsed_minutes": float(pd.Series(transition_elapsed[key]).mean()),
+            "median_inter_event_elapsed_minutes": float(pd.Series(transition_elapsed[key]).median()),
+            "maximum_inter_event_elapsed_minutes": max(transition_elapsed[key]),
+            "classification": "ELAPSED_TIME_TRANSITION_NOT_CONFIRMED_WAIT",
+        }
+        for key, count in sorted(transitions.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    high_elapsed = sorted(
+        transition_rows,
+        key=lambda row: (-row["mean_inter_event_elapsed_minutes"], -row["occurrences"], row["from"], row["to"]),
+    )[:10]
     return {
         "status": "EVENT_LOG_ANALYZED",
         "event_count": len(normalized),
         "case_count": len(grouped),
         "variant_count": len(variants),
-        "median_case_elapsed_minutes": float(pd.Series([max(0.0, (sorted(rows, key=lambda r: r["_ts"])[-1]["_ts"] - sorted(rows, key=lambda r: r["_ts"])[0]["_ts"]).total_seconds() / 60.0) for rows in grouped.values()]).median()),
+        "total_case_elapsed_minutes": total_elapsed,
+        "average_case_elapsed_minutes": float(pd.Series(case_elapsed).mean()),
+        "median_case_elapsed_minutes": float(pd.Series(case_elapsed).median()),
         "total_inter_event_elapsed_minutes": inter_event,
         "explicitly_recorded_wait_minutes": explicit_wait,
         "rework_candidates": repeated,
         "conformance_deviations": deviations,
         "variants": variant_rows,
         "directly_follows": transition_rows,
-        "limitations": ["Inter-event elapsed time is not automatically waiting time.", "Repeated activities are candidates for review, not proven rework.", "Correlation and sequence deviation do not establish root cause."],
+        "high_elapsed_transition_candidates": high_elapsed,
+        "limitations": ["Inter-event elapsed time is not automatically waiting time or bottleneck duration.", "High elapsed transitions require process-context review and are not confirmed constraints.", "Repeated activities are candidates for review, not proven rework.", "Correlation and sequence deviation do not establish root cause."],
     }
 
 
