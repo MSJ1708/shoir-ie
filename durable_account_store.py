@@ -1372,6 +1372,8 @@ def edge_download_dataset_version(
     workspace: str,
     dataset_id: str,
     version: int | None = None,
+    organization_id: str = "",
+    organization_workspace_id: str = "",
 ) -> tuple[bytes, dict[str, Any]]:
     """Download a registered dataset from private storage and verify its SHA-256."""
     import hashlib
@@ -1386,6 +1388,8 @@ def edge_download_dataset_version(
         "username": str(username).strip(),
         "token": str(token),
         "workspace": str(workspace or "default").strip(),
+        "organization_id": str(organization_id or "").strip(),
+        "organization_workspace_id": str(organization_workspace_id or "").strip(),
         "dataset_id": str(dataset_id),
         "version": version,
     })
@@ -1427,6 +1431,8 @@ def edge_upload_and_register_dataset_version(
     schema: Mapping[str, Any],
     transformations: Sequence[Mapping[str, Any]] = (),
     content_type: str = "text/csv",
+    organization_id: str = "",
+    organization_workspace_id: str = "",
 ) -> dict[str, Any]:
     """Upload a bounded dataset file to private staging storage, then server-verify and register it."""
     import hashlib
@@ -1449,6 +1455,8 @@ def edge_upload_and_register_dataset_version(
         "username": str(username).strip(),
         "token": str(token),
         "workspace": str(workspace or "default").strip(),
+        "organization_id": str(organization_id or "").strip(),
+        "organization_workspace_id": str(organization_workspace_id or "").strip(),
         "dataset_id": str(dataset_id),
         "data_hash": actual_hash,
     })
@@ -1475,6 +1483,8 @@ def edge_upload_and_register_dataset_version(
         "username": str(username).strip(),
         "token": str(token),
         "workspace": str(workspace or "default").strip(),
+        "organization_id": str(organization_id or "").strip(),
+        "organization_workspace_id": str(organization_workspace_id or "").strip(),
         "dataset_id": str(dataset_id),
         "upload_path": str(upload.get("upload_path") or ""),
         "name": str(name)[:200],
@@ -1581,6 +1591,8 @@ def edge_list_platform_records(
     record_type: str = "",
     limit: int = 100,
     entity_key: str = "",
+    organization_id: str = "",
+    organization_workspace_id: str = "",
 ) -> list[dict[str, Any]]:
     """List workspace records using bounded server-filtered pages."""
     import re
@@ -1609,6 +1621,8 @@ def edge_list_platform_records(
             "username": user,
             "token": bearer,
             "workspace": scope,
+            "organization_id": str(organization_id or "").strip(),
+            "organization_workspace_id": str(organization_workspace_id or "").strip(),
             "record_type": kind,
             "entity_key": key,
             "limit": page_limit,
