@@ -1252,3 +1252,137 @@ def test_experimentation_rejects_fractional_generators_with_unresolved_cycles():
             "design_type": "FRACTIONAL_2_LEVEL",
             "generators": {"A": "B", "B": "A"},
         })
+
+
+def test_active_dataset_dependency_is_attached_to_saved_records_and_thread_nodes(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF123456",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+
+    record = ii.create_record(
+        "synthetic-owner", "Enterprise", "tool_analysis", "Linked yield analysis",
+        {"result": {"yield_pct": 95}, "thread_node_type": "Calculation"},
+        provenance="SYNTHETIC",
+    )
+    assert record["dataset_dependency_status"] == "CURRENT"
+    assert record["dataset_dependencies"][0]["dataset_id"] == "DS-ABCDEF123456"
+    assert record["dataset_dependencies"][0]["version"] == 1
+    node = next(
+        item for item in session["global_thread_nodes"]
+        if item.get("metadata", {}).get("industrial_record_id") == record["record_id"]
+    )
+    assert node["metadata"]["dataset_dependency_status"] == "CURRENT"
+
+
+def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF123456",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    record = ii.create_record(
+        "synthetic-owner", "Enterprise", "tool_analysis", "Old version analysis",
+        {"input": {"rows": 5}, "result": {"yield_pct": 95}},
+        provenance="SYNTHETIC",
+    )
+    original_payload = record["payload"].copy()
+
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF123456", 2, "c" * 64, "d" * 64,
+    )
+    assert result["status"] == "DEPENDENTS_MARKED_STALE"
+    assert result["stale_record_ids"] == [record["record_id"]]
+    stale = next(
+        item for item in ii.list_records("synthetic-owner", "Enterprise")
+        if item["record_id"] == record["record_id"]
+    )
+    assert stale["record_status"] == "STALE"
+    assert stale["dataset_dependency_status"] == "STALE"
+    assert stale["payload"] == original_payload
+    node = next(
+        item for item in session["global_thread_nodes"]
+        if item.get("metadata", {}).get("industrial_record_id") == record["record_id"]
+    )
+    assert node["status"] == "Stale"
+    assert node["metadata"]["dataset_dependency_status"] == "STALE"
+    with pytest.raises(ii.IndustrialIntelligenceError, match="stale dataset-derived evidence"):
+        ii._require_evidence_refs([record["record_id"]], "Decision evidence")
+
+
+def test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_records():
+    source_records = [
+        {
+            "record_id": "IIR-OLD-1",
+            "record_status": "RECORDED",
+            "payload": {"input": {"value": 10}, "result": {"value": 20}},
+            "dataset_dependencies": [{
+                "dataset_id": "DS-ABCDEF123456",
+                "version": 1,
+                "data_hash": "a" * 64,
+                "version_fingerprint": "b" * 64,
+            }],
+        },
+        {
+            "record_id": "IIR-OTHER-1",
+            "record_status": "RECORDED",
+            "payload": {"result": {"value": 30}},
+            "dataset_dependencies": [{
+                "dataset_id": "DS-123456ABCDEF",
+                "version": 1,
+                "data_hash": "e" * 64,
+                "version_fingerprint": "f" * 64,
+            }],
+        },
+    ]
+    updated, stale_ids = ii.mark_dataset_dependents_stale(
+        source_records, "DS-ABCDEF123456", 2, "c" * 64, "d" * 64,
+    )
+    assert stale_ids == ["IIR-OLD-1"]
+    assert updated[0]["record_status"] == "STALE"
+    assert updated[0]["payload"] == source_records[0]["payload"]
+    assert updated[0]["dataset_dependencies"][0]["version"] == 1
+    assert updated[1] == source_records[1]
+    again, stale_again = ii.mark_dataset_dependents_stale(
+        updated, "DS-ABCDEF123456", 2, "c" * 64, "d" * 64,
+    )
+    assert stale_again == []
+    assert again[0]["record_status"] == "STALE"
+
+
+def test_dataset_dependency_cannot_cross_organization_or_workspace_boundaries(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-owner", "owner")
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF123456",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": "00000000-0000-4000-8000-000000000099",
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic.csv",
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    with pytest.raises(PermissionError, match="different organization"):
+        ii.create_record(
+            "synthetic-owner", "Enterprise", "tool_analysis", "Cross-organization dependency",
+            {"result": {"value": 1}}, provenance="SYNTHETIC",
+        )
+
