@@ -146,16 +146,16 @@ The following is the code-delivery status on this candidate branch. All sixteen 
 
 ## Eight shared intelligence capabilities
 
-| Capability | Foundation implementation | Important boundary |
+| Capability | Foundation implementation | Current status | Important boundary |
 |---|---|---|
-| A. Industrial Cause-and-Effect Intelligence | Investigation records, observations, candidate relationships, supporting and contradicting evidence, independent review record | A candidate can be SUSPECTED or SUPPORTED; only an independent evidence-backed review can confirm/reject that candidate |
-| B. Industrial Risk and Barrier Assurance | Risk screen, barrier owners, evidence references, independent barrier-effectiveness review and audit trail | Not formal safety/process-safety approval; a user-entered EFFECTIVE status cannot reduce the reviewed screen |
-| C. Engineering Knowledge Graph | Existing Digital Thread node/edge graph, full entity vocabulary, scoped relationships and evidence requirements | No separate graph database; relationships only connect registered active-workspace entities |
-| D. Industrial Decision and Action Management | Decision proposal with options/recommendation/rationale/evidence, independent APPROVED/REJECTED review, assigned actions, approval, implementation and verification | Decision author/action creator cannot independently approve or verify their own record; action closure follows independent verification |
-| E. Industrial Investment and Benefits Realization | Baseline/actual/delta record with source evidence, separate independent review and audit trail | Actual record is unverified until separately reviewed; no automatic realized-savings/ROI claim |
-| F. Engineering Model Validation and Registry | Immutable model/version identity, contract hash over definition/assumptions/tests, actual-versus-expected checks and independent review | All test cases must pass and a different authorized reviewer must provide registered evidence |
-| G. Operational Event Intelligence | Provenance-bearing event record, source timestamp, entity reference, workspace scope and timeline list | No claim of live telemetry unless a configured source has supplied the record |
-| H. Industrial Knowledge Copilot | Workspace-scoped evidence retrieval, record citations, linked Digital Thread context and connection to existing AI Copilot | Evidence is bounded/redacted before provider prompt use; retrieved records are not an automatic causal answer and Copilot cannot approve/execute actions |
+| A. Industrial Cause-and-Effect Intelligence | Investigation records, observations, candidate relationships, supporting and contradicting evidence, independent review record | IMPLEMENTED — VALIDATION PENDING | A candidate can be SUSPECTED or SUPPORTED; only an independent evidence-backed review can confirm/reject that candidate |
+| B. Industrial Risk and Barrier Assurance | Risk screen, barrier owners, evidence references, independent barrier-effectiveness review and audit trail | IMPLEMENTED — VALIDATION PENDING | Not formal safety/process-safety approval; a user-entered EFFECTIVE status cannot reduce the reviewed screen |
+| C. Engineering Knowledge Graph | Existing Digital Thread node/edge graph, full entity vocabulary, scoped relationships and evidence requirements | IMPLEMENTED — VALIDATION PENDING | No separate graph database; relationships only connect registered active-workspace entities |
+| D. Industrial Decision and Action Management | Decision proposal with options/recommendation/rationale/evidence, independent APPROVED/REJECTED review, assigned actions, approval, implementation and verification | IMPLEMENTED — VALIDATION PENDING | Decision author/action creator cannot independently approve or verify their own record; action closure follows independent verification |
+| E. Industrial Investment and Benefits Realization | Baseline/actual/delta record with source evidence, separate independent review and audit trail | IMPLEMENTED — VALIDATION PENDING | Actual record is unverified until separately reviewed; no automatic realized-savings/ROI claim |
+| F. Engineering Model Validation and Registry | Immutable model/version identity, contract hash over definition/assumptions/tests, actual-versus-expected checks and independent review | IMPLEMENTED — VALIDATION PENDING | All test cases must pass and a different authorized reviewer must provide registered evidence |
+| G. Operational Event Intelligence | Provenance-bearing event record, source timestamp, entity reference, workspace scope and timeline list | IMPLEMENTED — VALIDATION PENDING | No claim of live telemetry unless a configured source has supplied the record |
+| H. Industrial Knowledge Copilot | Workspace-scoped evidence retrieval, record citations, linked Digital Thread context and connection to existing AI Copilot | IMPLEMENTED — VALIDATION PENDING | Evidence is bounded/redacted before provider prompt use; retrieved records are not an automatic causal answer and Copilot cannot approve/execute actions |
 
 ## Industrial Digital Thread
 
@@ -177,7 +177,7 @@ The suite can connect:
 - outcome records and independent benefit review;
 - relevant record nodes and linked Digital Thread edges in Copilot evidence context.
 
-The existing Digital Thread graph remains the canonical UI/data structure. This feature does not introduce an unrelated graph database.
+The existing Digital Thread graph remains the canonical UI/data structure. Its shared entity/relationship service, workspace scoping, evidence checks and linked record snapshots are IMPLEMENTED — VALIDATION PENDING. Staging browser journeys, actual organization-switch restore, RLS, Arabic/RTL and responsive validation remain pending. This feature does not introduce an unrelated graph database.
 
 ## Existing application integrations
 
