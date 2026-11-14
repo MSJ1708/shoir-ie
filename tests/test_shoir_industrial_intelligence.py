@@ -1229,7 +1229,7 @@ def test_experimentation_runs_explicit_one_sample_t_test():
 def test_experimentation_rejects_fractional_generators_with_unresolved_cycles():
     with pytest.raises(ii.IndustrialIntelligenceError, match="dependency cycle"):
         ii.analyze_tool("experimentation", {
-            "factors": ["A", "B"],
+            "factors": ["A", "B", "C"],
             "design_type": "FRACTIONAL_2_LEVEL",
             "generators": {"A": "B", "B": "A"},
         })
