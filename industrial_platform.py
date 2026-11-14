@@ -227,6 +227,124 @@ def _industrial_platform_session_state():
     return streamlit.session_state
 
 
+
+
+def _dataset_scope_from_session(state: Mapping[str, Any], username: str) -> dict[str, str]:
+    """Resolve optional organization workspace fields from the authenticated UI session."""
+    context = state.get("shoir_active_organization_workspace")
+    if context is None:
+        return {}
+    if not isinstance(context, Mapping):
+        raise PermissionError("The active organization workspace context is invalid.")
+    organization_id = str(context.get("organization_id") or "").strip()
+    organization_workspace_id = str(context.get("organization_workspace_id") or "").strip()
+    actor = str(state.get("current_user") or "").strip()
+    if not organization_id or not organization_workspace_id:
+        raise PermissionError("The active organization workspace identifiers are incomplete.")
+    if state.get("authenticated") is not True or actor.casefold() != str(username or "").strip().casefold():
+        raise PermissionError("The requested dataset actor does not match the authenticated organization workspace.")
+    return {
+        "organization_id": organization_id,
+        "organization_workspace_id": organization_workspace_id,
+    }
+
+
+def _activate_registered_dataset_dependency(
+    state: dict[str, Any],
+    username: str,
+    workspace: str,
+    source_name: str,
+    registration: Mapping[str, Any],
+    scope: Mapping[str, str],
+) -> dict[str, Any] | None:
+    """Attach the verified dataset head to future engineering records and invalidate older outputs."""
+    import re
+
+    dataset_id = str(registration.get("dataset_id") or "").strip().upper()
+    version = registration.get("version")
+    data_hash = str(registration.get("data_hash") or "").strip().lower()
+    fingerprint = str(registration.get("version_fingerprint") or "").strip().lower()
+    if (
+        not re.fullmatch(r"DS-[A-F0-9]{12,32}", dataset_id)
+        or isinstance(version, bool) or not isinstance(version, int) or version < 1
+        or not re.fullmatch(r"[0-9a-f]{64}", data_hash)
+        or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+    ):
+        state["shoir_dataset_lineage_blocked"] = True
+        state["shoir_dataset_lineage_invalidation"] = {
+            "status": "BLOCKED_MISSING_VERIFIED_VERSION_METADATA",
+            "dataset_id": dataset_id or None,
+            "version": version,
+        }
+        return None
+
+    context = state.get("shoir_active_organization_workspace")
+    organization_id = str(scope.get("organization_id") or "").strip() or None
+    workspace_id = str(
+        scope.get("organization_workspace_id")
+        or workspace
+        or "default"
+    ).strip()
+    dependency = {
+        "dataset_id": dataset_id,
+        "version": version,
+        "data_hash": data_hash,
+        "version_fingerprint": fingerprint,
+        "organization_id": organization_id,
+        "workspace_id": workspace_id,
+        "source_name": str(source_name or "")[:240],
+        "registered_at": str(registration.get("registered_at") or "")[:80] or None,
+        "current_version_verified": True,
+    }
+
+    invalidation = {"status": "NOT_REQUIRED_OR_NO_NEW_VERSION"}
+    if bool(registration.get("created_new_version")) and version > 1:
+        if (
+            state.get("authenticated") is True
+            and str(state.get("current_user") or "").strip().casefold() == str(username).strip().casefold()
+            and tier_allows(str(state.get("user_tier") or "Starter"), "Enterprise")
+        ):
+            try:
+                from shoir_industrial_intelligence import invalidate_dataset_dependents
+                invalidation = invalidate_dataset_dependents(
+                    username,
+                    str(state.get("user_tier") or "Enterprise"),
+                    dataset_id,
+                    version,
+                    data_hash,
+                    fingerprint,
+                )
+            except Exception as exc:
+                invalidation = {
+                    "status": "INVALIDATION_FAILED",
+                    "dataset_id": dataset_id,
+                    "current_version": version,
+                    "error": str(exc)[:500],
+                }
+                state["shoir_dataset_lineage_blocked"] = True
+        else:
+            invalidation = {
+                "status": "INVALIDATION_NOT_RUN_NO_AUTHENTICATED_ENTERPRISE_SESSION",
+                "dataset_id": dataset_id,
+                "current_version": version,
+            }
+            state["shoir_dataset_lineage_blocked"] = True
+
+    if invalidation.get("status") not in {
+        "DEPENDENTS_MARKED_STALE",
+        "NO_STALE_DEPENDENTS",
+        "NOT_REQUIRED_OR_NO_NEW_VERSION",
+    }:
+        state["shoir_dataset_lineage_blocked"] = True
+    else:
+        state["shoir_dataset_lineage_blocked"] = False
+
+    state["shoir_active_dataset_dependency"] = dependency
+    state["shoir_dataset_dependency_tracking_enabled"] = True
+    state["shoir_dataset_lineage_invalidation"] = invalidation
+    return dependency
+
+
 def _activate_dataset_for_shared_workspace(
     df: pd.DataFrame,
     filename: str,
@@ -290,6 +408,8 @@ def register_dataset(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 
+    state = _industrial_platform_session_state()
+    dataset_scope = _dataset_scope_from_session(state, username)
     try:
         from durable_account_store import APP_ENVIRONMENT, edge_upload_and_register_dataset_version
     except Exception:
@@ -315,11 +435,18 @@ def register_dataset(
             column_count=int(len(df.columns)),
             schema=schema,
             transformations=transform_log,
+            **dataset_scope,
         )
-        registration = result.get("registration") or {}
-        _industrial_platform_session_state()["data_platform_latest_registration"] = dict(registration)
-        _industrial_platform_session_state()["data_platform_latest_dataset_id"] = resolved_dataset_id
-        _industrial_platform_session_state()["data_platform_latest_version"] = int(registration.get("version") or 1)
+        registration = dict(result.get("registration") or {})
+        registration.setdefault("dataset_id", resolved_dataset_id)
+        registration.setdefault("data_hash", data_hash)
+        registration.setdefault("version_fingerprint", fingerprint)
+        state["data_platform_latest_registration"] = dict(registration)
+        state["data_platform_latest_dataset_id"] = resolved_dataset_id
+        state["data_platform_latest_version"] = int(registration.get("version") or 1)
+        _activate_registered_dataset_dependency(
+            state, username, workspace, source_name, registration, dataset_scope
+        )
         return resolved_dataset_id
 
     # Initialise the local schema before standalone registration. The app shell
@@ -345,6 +472,8 @@ def load_registered_dataset(
     """Load a selected immutable staging dataset version and verify its bytes."""
     from durable_account_store import APP_ENVIRONMENT, edge_download_dataset_version
 
+    state = _industrial_platform_session_state()
+    dataset_scope = _dataset_scope_from_session(state, username)
     if str(APP_ENVIRONMENT).casefold() != "staging":
         raise RuntimeError("Managed dataset loading is currently available through staging persistence.")
     content, metadata = edge_download_dataset_version(
@@ -353,6 +482,7 @@ def load_registered_dataset(
         workspace=workspace,
         dataset_id=dataset_id,
         version=version,
+        **dataset_scope,
     )
     frame = pd.read_csv(io.BytesIO(content))
     if len(frame) != int(metadata.get("row_count") or 0):
@@ -361,15 +491,46 @@ def load_registered_dataset(
         raise RuntimeError("Downloaded dataset column count does not match its registered metadata.")
     version = int(metadata.get("version") or 1)
     signature = str(metadata.get("data_hash") or "")
+    version_fingerprint = str(metadata.get("version_fingerprint") or "")
+    if not bool(metadata.get("is_current_version")) or version != int(metadata.get("current_version") or 0):
+        state["shoir_dataset_lineage_blocked"] = True
+    registration = {
+        "dataset_id": dataset_id,
+        "version": version,
+        "data_hash": signature,
+        "version_fingerprint": version_fingerprint,
+        "registered_at": metadata.get("registered_at"),
+        "created_new_version": False,
+    }
     _activate_dataset_for_shared_workspace(
         frame,
         filename=dataset_id,
         sheet=f"Version {version}",
         signature=signature,
     )
-    state = _industrial_platform_session_state()
+    state["data_platform_latest_registration"] = dict(registration)
     state["data_platform_latest_dataset_id"] = dataset_id
     state["data_platform_latest_version"] = version
+    if bool(metadata.get("is_current_version")) and version == int(metadata.get("current_version") or 0):
+        _activate_registered_dataset_dependency(
+            state, username, workspace, str(metadata.get("source_name") or dataset_id),
+            registration, dataset_scope,
+        )
+    else:
+        historical_dependency = {
+            "dataset_id": dataset_id,
+            "version": version,
+            "data_hash": signature,
+            "version_fingerprint": version_fingerprint,
+            "organization_id": str(dataset_scope.get("organization_id") or "").strip() or None,
+            "workspace_id": str(dataset_scope.get("organization_workspace_id") or workspace or "default"),
+            "source_name": str(metadata.get("source_name") or dataset_id)[:240],
+            "registered_at": str(metadata.get("registered_at") or "")[:80] or None,
+            "current_version_verified": False,
+        }
+        state["shoir_active_dataset_dependency"] = historical_dependency
+        state["shoir_dataset_dependency_tracking_enabled"] = True
+        state["shoir_dataset_lineage_blocked"] = True
     state["shoir_data_provenance"] = "IMPORTED"
     state["shoir_active_dataset_id"] = dataset_id
     state["shoir_active_dataset_version"] = version
