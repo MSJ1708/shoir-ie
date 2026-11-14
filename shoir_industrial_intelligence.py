@@ -1074,6 +1074,102 @@ def create_record(
     return copy.deepcopy(record)
 
 
+def send_analysis_to_workbook(
+    username: str,
+    tier: str,
+    tool_id: str,
+    inputs: Mapping[str, Any],
+    result: Mapping[str, Any],
+    provenance: str,
+    source_ref: str = "",
+) -> dict[str, Any]:
+    """Save a result as a new sheet in the existing Industrial Workbook session.
+
+    Existing sheets are never renamed or removed. On a new workbook, the
+    platform's standard nine engineering tabs are initialized.
+    """
+    _session_authorize(username, tier, "write")
+    from shoir_industrial_workbook import WORKBOOK_STATE_KEY, FORMULA_STATE_KEY
+
+    tool = tool_definition(tool_id)
+    saved_record = create_record(
+        username,
+        tier,
+        "tool_analysis",
+        tool["name"],
+        {
+            "tool_id": tool_id,
+            "input": _json_safe(inputs),
+            "result": _json_safe(result),
+            "input_hash": _hash_payload(inputs),
+            "result_hash": _hash_payload(result),
+            "thread_node_type": THREAD_NODE_TYPES[tool_id],
+        },
+        provenance=provenance,
+        source_ref=source_ref,
+    )
+    previous_book = st.session_state.get(WORKBOOK_STATE_KEY)
+    previous_formulas = st.session_state.get(FORMULA_STATE_KEY)
+    if previous_book is None:
+        workbook = {
+            name: pd.DataFrame()
+            for name in (
+                "Inputs", "Data", "Calculations", "KPIs", "Simulation",
+                "Optimization", "Scenarios", "Decisions", "Dashboard",
+            )
+        }
+    elif isinstance(previous_book, Mapping):
+        workbook = {
+            str(name): frame.copy(deep=True) if isinstance(frame, pd.DataFrame) else pd.DataFrame(frame)
+            for name, frame in previous_book.items()
+        }
+    else:
+        raise IndustrialIntelligenceError("The active Industrial Workbook state is not a workbook mapping.")
+    suffix = str(saved_record["record_id"]).replace("IIR-", "")[:10].lower()
+    sheet_name = f"II_{tool_id[:12]}_{suffix}"[:31]
+    if sheet_name in workbook:
+        raise IndustrialIntelligenceError("The generated workbook sheet name already exists; save the analysis again for a new record ID.")
+    rows = []
+    for section, values in (("Input", inputs), ("Result", result)):
+        for field, value in values.items():
+            rendered = (
+                json.dumps(_json_safe(value), ensure_ascii=False, sort_keys=True)
+                if isinstance(value, (Mapping, list, tuple))
+                else str(value)
+            )
+            rows.append({"Section": section, "Field": str(field), "Value": rendered})
+    rows.extend([
+        {"Section": "Governance", "Field": "Record ID", "Value": saved_record["record_id"]},
+        {"Section": "Governance", "Field": "Tool ID", "Value": tool_id},
+        {"Section": "Governance", "Field": "Provenance", "Value": _provenance(provenance)},
+        {"Section": "Governance", "Field": "Source Reference", "Value": str(source_ref or "")},
+        {"Section": "Governance", "Field": "Input Hash", "Value": saved_record["payload"]["input_hash"]},
+        {"Section": "Governance", "Field": "Model Version", "Value": str(result.get("model_version") or "UNSPECIFIED")},
+        {"Section": "Governance", "Field": "Independent Verification", "Value": "NOT_VERIFIED"},
+    ])
+    workbook[sheet_name] = pd.DataFrame(rows, columns=["Section", "Field", "Value"])
+    formulas = dict(previous_formulas) if isinstance(previous_formulas, Mapping) else {}
+    formulas[sheet_name] = {}
+    st.session_state[WORKBOOK_STATE_KEY] = workbook
+    st.session_state[FORMULA_STATE_KEY] = formulas
+    try:
+        from workspace_persistence import save_user_workspace
+        if not save_user_workspace(username, st.session_state):
+            raise RuntimeError(str(st.session_state.get("_workspace_save_error") or "Managed workspace did not confirm the Industrial Workbook update."))
+    except Exception:
+        if previous_book is None:
+            st.session_state.pop(WORKBOOK_STATE_KEY, None)
+        else:
+            st.session_state[WORKBOOK_STATE_KEY] = previous_book
+        if previous_formulas is None:
+            st.session_state.pop(FORMULA_STATE_KEY, None)
+        else:
+            st.session_state[FORMULA_STATE_KEY] = previous_formulas
+        raise
+    _append_audit(username, tier, "workbook.analysis_handoff", saved_record["record_id"], {"tool_id": tool_id, "sheet_name": sheet_name})
+    return {"record_id": saved_record["record_id"], "workbook_sheet": sheet_name, "workbook_sheet_count": len(workbook), "preserved_sheets": list(workbook)}
+
+
 def list_records(username: str, tier: str, record_type: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
     _session_authorize(username, tier, "read")
     if isinstance(limit, bool) or not 1 <= int(limit) <= 1000:
