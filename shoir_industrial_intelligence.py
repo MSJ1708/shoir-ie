@@ -1046,14 +1046,23 @@ def _sync_thread_node(username: str, tier: str, node_type: str, name: str, recor
     _session_authorize(username, tier, "write")
     import shoir_digital_thread as thread
     thread.ensure_thread_state(username)
+    organization_id = str(access["organization_id"] or "")
+    workspace_id = str(access["workspace_id"] or "")
+    scope_namespace = f"{organization_id or access['actor']}::{workspace_id}"
     node_id = thread._upsert_node(
         node_type,
         name,
-        source="industrial-intelligence:" + record_id,
+        source=f"industrial-intelligence:{scope_namespace}:{record_id}",
         module=MODULE_NAME,
         status=status,
-        metadata={"industrial_record_id": record_id, **_json_safe(metadata)},
-        identity_key=record_id,
+        metadata={
+            "industrial_record_id": record_id,
+            "organization_id": organization_id or None,
+            "workspace_id": workspace_id,
+            "workspace_scope": access["scope"],
+            **_json_safe(metadata),
+        },
+        identity_key=f"{scope_namespace}:{record_id}",
     )
     return node_id
 
@@ -1345,8 +1354,13 @@ def create_action(username: str, tier: str, title: str, owner: str, due_date: st
     actions = list(_state_list("actions"))
     actions.append(row)
     _save_state_list(username, tier, "actions", actions)
+    row["thread_node_id"] = _sync_thread_node(
+        username, tier, "Action", row["title"], action_id, "Proposed",
+        {"owner": row["owner"], "status": row["status"]},
+    )
+    actions[-1] = row
+    _save_state_list(username, tier, "actions", actions)
     _append_audit(username, tier, "action.created", action_id, {"owner": row["owner"], "due_date": due, "priority": row["priority"]})
-    _sync_thread_node(username, tier, "Action", row["title"], action_id, "Proposed", {"owner": row["owner"], "status": row["status"]})
     return copy.deepcopy(row)
 
 
@@ -1687,9 +1701,33 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
 def thread_snapshot(username: str, tier: str) -> dict[str, Any]:
     _session_authorize(username, tier, "read")
     import shoir_digital_thread as thread
-    nodes = copy.deepcopy(thread.st.session_state.get(thread._keys()["nodes"], []))
-    edges = copy.deepcopy(thread.st.session_state.get(thread._keys()["edges"], []))
-    return {"node_count": len(nodes), "edge_count": len(edges), "nodes": nodes, "edges": edges, "record_nodes": len(_state_list("nodes")), "record_relationships": len(_state_list("edges"))}
+    all_nodes = copy.deepcopy(thread.st.session_state.get(thread._keys()["nodes"], []))
+    all_edges = copy.deepcopy(thread.st.session_state.get(thread._keys()["edges"], []))
+    allowed_node_ids = {
+        str(row.get("thread_node_id") or "")
+        for collection in ("records", "nodes", "actions")
+        for row in _state_list(collection)
+        if str(row.get("thread_node_id") or "")
+    }
+    nodes = [
+        node for node in all_nodes
+        if str(node.get("node_id") or "") in allowed_node_ids
+    ]
+    visible_ids = {str(node.get("node_id") or "") for node in nodes}
+    edges = [
+        edge for edge in all_edges
+        if str(edge.get("source_id") or "") in visible_ids
+        and str(edge.get("target_id") or "") in visible_ids
+        and str(edge.get("source_id") or "") != str(edge.get("target_id") or "")
+    ]
+    return {
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
+        "record_nodes": len(_state_list("nodes")),
+        "record_relationships": len(_state_list("edges")),
+    }
 
 
 def _sample_input(tool_id: str) -> dict[str, Any]:
