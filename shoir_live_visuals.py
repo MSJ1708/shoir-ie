@@ -52,6 +52,7 @@ _MODULE_KEYS = {
     "Advanced Engineering Copilot": ["copilot_orchestrator_run", "copilot_orchestrator_figure_json", "copilot_staged_decision_id", "copilot_orchestrator_export", "copilot_clean_audit"],
     "MILP Solvers": ["milp_result_df", "milp_summary_df", "milp_allocation_flow_df"],
     "Industrial Data Model & Digital Thread": ["thread_df", "thread_rel"],
+    "Industrial Resource Intelligence": ["shoir_resource_intelligence_passports", "shoir_resource_intelligence_demands", "shoir_resource_intelligence_routes", "shoir_resource_intelligence_results", "shoir_resource_intelligence_agreements", "shoir_resource_intelligence_deliveries"],
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
     "Manufacturing Execution System": ["mes_wo_df", "mes_events_df", "mes_oee_df", "mes_oee_result"],
     "Quality Engineering & Reliability": ["quality_df", "quality_spc_result", "quality_limits_result", "msa_df", "anova_df", "fmea_df", "fmea_result"],
