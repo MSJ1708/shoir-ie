@@ -89,11 +89,11 @@ Registered evidence means an evidence record ID or source reference already exis
 | II-002 | Operations Intelligence | Industrial Process Mining and Hidden Inefficiency Intelligence | Event-log chronology, variants, directly-follows transitions, explicit wait minutes, repeated-activity candidates and conformance |
 | II-003 | Engineering Intelligence | Engineering Change Impact Twin | Directed dependency traversal and change-impact review register |
 | II-004 | Maintenance and Project Intelligence | Shutdown and Turnaround Intelligence Optimizer | Deterministic precedence/skill/resource schedule, one resource availability clock across skills, permit/inspection/SIMOPS/safety gates |
-| II-005 | Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | Measurement conflicts, unit-group checks, balance residuals and optional non-destructive residual-to-selected-stream proposals |
+| II-005 | Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | Missing-value/timestamp checks, synchronization groups, meter conflicts, stuck/outlier candidates, balance residuals and non-destructive reconciliation proposals |
 | II-006 | Maintenance and Project Intelligence | Asset Reliability Mission Board | Transparent criticality/history heuristic and supplied production dependencies |
 | II-007 | Production and Quality Intelligence | Production Yield and Process Variability Intelligence | First-pass yield, recovered rework, final yield, scrap and count reconciliation |
 | II-008 | Maintenance and Project Intelligence | New Factory Commissioning and Production Ramp-up Intelligence | Fail-closed required-check/evidence readiness gate |
-| II-009 | Engineering Intelligence | Industrial Experimentation and Process Improvement Laboratory | Reproducible two-level factorial design and first-order least-squares fit |
+| II-009 | Engineering Intelligence | Industrial Experimentation and Process Improvement Laboratory | Full/fractional factorial, central-composite response-surface design, least-squares fitting, sensitivity ranking and optional t-test/ANOVA |
 | II-010 | Supply Chain and Procurement Intelligence | Technical Procurement and Supplier Engineering Assurance | Requirement-to-offer compliance, deviation and evidence coverage |
 | II-011 | Energy and Enterprise Assurance | Industrial Energy Flexibility and Peak-Demand Optimizer | Deterministic tariff-ordered greedy placement within declared windows and capacities; global cost optimality is not guaranteed |
 | II-012 | Supply Chain and Procurement Intelligence | Critical Spare Parts and Multi-Site Inventory Intelligence | Compatibility, source minimum stock and destination inventory constraints |
@@ -108,11 +108,11 @@ Registered evidence means an evidence record ID or source reference already exis
 2. Process Mining treats elapsed event time as elapsed time; it counts waiting only when an explicit source field provides it.
 3. Engineering Change reports only supplied dependency edges. Missing dependencies are not guessed.
 4. Turnaround scheduling uses supplied task, resource, skill and constraint data. It does not infer site calendars, labor agreements, weather, lifting constraints, permit authority or all SIMOPS rules; it does not authorize work.
-5. Data Trust flags supplied conflicts and balance residuals. It can create an explicitly targeted residual-assignment proposal, but that proposal is not applied, is not verified, and leaves original readings unchanged. It does not invent calibration uncertainty.
+5. Data Trust flags missing values/timestamps, synchronization-group gaps, unit conflicts, conflicting meter readings, flatline candidates, IQR outlier candidates and balance residuals. It can create an explicitly targeted residual-assignment proposal, but that proposal is not applied, is not verified, and leaves original readings unchanged. It does not infer calibration uncertainty.
 6. Asset Reliability does not produce a guaranteed failure date or remaining useful life.
 7. Yield calculations require consistent product/batch boundaries and units.
 8. Commissioning status is readiness for authorized review, not statutory or formal system acceptance.
-9. DOE results are bounded by the supplied design and fitted model; first-order fit does not establish causality or omitted interactions.
+9. DOE supports full and generator-based fractional two-level designs, central-composite response-surface designs, first-order or quadratic least-squares fits, sensitivity ranking and optional one-sample/two-sample t-tests or one-way ANOVA. Fractional designs carry generator aliasing; quadratic fits are bounded by the observed region; p-values do not establish causality. Randomization and study-design adequacy still require review.
 10. Procurement Assurance only evaluates claims and evidence IDs supplied by the user; missing substantiation remains unverified.
 11. Energy Flexibility uses supplied tariffs/windows/capacities and a deterministic tariff-ordered greedy allocator. Feasibility is checked, but a globally minimum-cost schedule is not guaranteed; the tool does not dispatch plant equipment.
 12. Spare Parts reports eligibility or rejection; it does not execute a stock transfer.
@@ -204,7 +204,7 @@ Each provides focus tools, starter KPIs and an explicit industry warning. Templa
 
 ## Acceptance test inventory
 
-\`tests/test_shoir_industrial_intelligence.py\` currently defines **56 tests**. It includes coverage for:
+\`tests/test_shoir_industrial_intelligence.py\` currently defines **61 tests**. It includes coverage for:
 
 - 16-tool catalogue cardinality, stable II-001–II-016 IDs and exact/alias search.
 - All 16 deterministic analysis engines and their expected synthetic acceptance cases.
@@ -213,11 +213,11 @@ Each provides focus tools, starter KPIs and an explicit industry warning. Templa
 - Process mining elapsed time, explicit waits, rework/repeated activities and conformance.
 - Engineering Change dependency traversal.
 - Turnaround feasible/infeasible schedules and global resource non-overlap across multiple skills.
-- Measurement conflicts, original-value retention, explicit reconciliation proposals and rejection of negative proposed values.
+- Measurement conflicts, missing timestamps, incomplete synchronization groups, stuck/outlier candidates, original-value retention and non-destructive reconciliation proposal checks.
 - Asset priority and dependency outputs.
 - Yield arithmetic and reconciliation.
 - Commissioning fail-closed readiness.
-- Reproducible experiment design.
+- Full and fractional factorial design, fractional resolution, central-composite response-surface fitting, sensitivity ranking and one-sample t-test.
 - Supplier claim compliance and missing evidence.
 - Energy capacity/window constraints and an explicit assertion that greedy allocation carries no global optimality guarantee.
 - Spare-part compatibility and source minimum stock.
