@@ -28,9 +28,12 @@ def test_thread_export_frames_are_tabular():
 
 def test_thread_vocabulary_covers_full_decision_spine():
     expected = {
-        "Dataset", "Asset", "Process", "Product", "Material", "Order",
-        "Workforce", "Quality", "Maintenance", "Energy", "Cost", "Scenario",
-        "KPI", "Model", "Experiment", "Decision", "Outcome",
+        "Organization", "Facility", "ProductionLine", "Process", "Asset",
+        "Equipment", "Instrument", "Product", "Batch", "Material", "Supplier",
+        "Order", "WorkOrder", "WorkPackage", "Workforce", "Document", "Dataset",
+        "Event", "Quality", "Maintenance", "Energy", "Cost", "KPI", "Model",
+        "Experiment", "Scenario", "Decision", "Action", "Approval", "Evidence",
+        "Risk", "Control", "Project", "Outcome",
     }
     from shoir_digital_thread import THREAD_TYPES
     assert set(THREAD_TYPES) == expected
