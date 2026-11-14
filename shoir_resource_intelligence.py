@@ -2686,7 +2686,7 @@ ENGINEERING_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "method": "Source/sink temperature difference check",
         "formula": "temperature_margin = source_temperature - sink_temperature - minimum_approach_temperature",
         "input_units": ["°C", "kW", "h/year"],
-        "output_units": ["°C", "kWh/year", declared currency when caller supplies a value factor],
+        "output_units": ["°C", "kWh/year", "declared currency when a value factor is supplied"],
         "assumptions": ["User-entered heat-source rate and annual hours"],
         "limitations": ["Not heat-exchanger network design or verified recovered energy"],
     },
