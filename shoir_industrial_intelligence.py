@@ -1656,6 +1656,156 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     return copy.deepcopy(action)
 
 
+def record_shift_handover(
+    username: str,
+    tier: str,
+    outgoing_shift: str,
+    incoming_shift: str,
+    issues: Sequence[Mapping[str, Any]],
+    incoming_shift_owner: str = "",
+    provenance: str = "MANUAL",
+    source_ref: str = "",
+) -> dict[str, Any]:
+    access = _session_authorize(username, tier, "write")
+    if access["scope"] != "ORGANIZATION":
+        raise PermissionError("Shared shift handover requires an active organization workspace.")
+    if isinstance(issues, (str, bytes)) or not isinstance(issues, Sequence) or not issues:
+        raise IndustrialIntelligenceError("Shift handover requires a non-empty issue list.")
+    normalized = []
+    seen = set()
+    for index, issue in enumerate(issues, start=1):
+        if not isinstance(issue, Mapping):
+            raise IndustrialIntelligenceError(f"Handover issue {index} must be an object.")
+        issue_id = _required_text(issue.get("issue_id"), f"handover issue {index} issue_id", 120)
+        if issue_id in seen:
+            raise IndustrialIntelligenceError(f"Duplicate handover issue ID: {issue_id}.")
+        seen.add(issue_id)
+        status = str(issue.get("status") or "OPEN").upper()
+        if status not in {"OPEN", "IN_PROGRESS", "BLOCKED", "IMPLEMENTED", "VERIFIED", "CLOSED"}:
+            raise IndustrialIntelligenceError(f"Unsupported handover issue status: {status}.")
+        normalized.append({
+            "issue_id": issue_id,
+            "owner": str(issue.get("owner") or "").strip() or None,
+            "status": status,
+            "description": str(issue.get("description") or "")[:2000],
+            "source_record_id": str(issue.get("source_record_id") or "").strip() or None,
+            "acknowledged_by_incoming": False,
+        })
+    payload = {
+        "outgoing_shift": _required_text(outgoing_shift, "outgoing_shift", 120),
+        "incoming_shift": _required_text(incoming_shift, "incoming_shift", 120),
+        "incoming_shift_owner": str(incoming_shift_owner or "").strip() or None,
+        "issues": normalized,
+        "handover_status": "ACKNOWLEDGEMENT_REQUIRED",
+        "acknowledgement_is_not_issue_closure": True,
+        "thread_node_type": "Event",
+    }
+    return create_record(
+        username, tier, "shift_handover", payload["outgoing_shift"] + " → " + payload["incoming_shift"],
+        payload, provenance=provenance, source_ref=source_ref,
+    )
+
+
+def acknowledge_shift_handover(
+    username: str,
+    tier: str,
+    handover_record_id: str,
+    issue_id: str,
+    acknowledgement_comment: str = "",
+    evidence_refs: Sequence[str] = (),
+) -> dict[str, Any]:
+    access = _session_authorize(username, tier, "write")
+    if access["scope"] != "ORGANIZATION":
+        raise PermissionError("Shared shift acknowledgement requires an active organization workspace.")
+    records = list(_state_list("records"))
+    handover = next(
+        (item for item in records if item.get("record_id") == str(handover_record_id) and item.get("record_type") == "shift_handover"),
+        None,
+    )
+    if not handover:
+        raise IndustrialIntelligenceError("Shift handover does not exist in this workspace.")
+    if str(handover.get("created_by") or "").casefold() == access["actor"].casefold():
+        raise PermissionError("The outgoing-shift handover creator cannot acknowledge their own handover.")
+    payload = handover.get("payload", {})
+    nominated_owner = str(payload.get("incoming_shift_owner") or "").strip()
+    if nominated_owner and nominated_owner.casefold() != access["actor"].casefold():
+        raise PermissionError("Only the nominated incoming-shift owner may acknowledge this handover.")
+    issue = next((item for item in payload.get("issues", []) if str(item.get("issue_id")) == str(issue_id)), None)
+    if not issue:
+        raise IndustrialIntelligenceError("Issue does not exist in the selected handover.")
+    if str(issue.get("status") or "").upper() in {"CLOSED", "VERIFIED"}:
+        raise IndustrialIntelligenceError("A closed or verified issue does not require handover acknowledgement.")
+    if any(
+        item.get("record_type") == "shift_handover_acknowledgement"
+        and item.get("payload", {}).get("handover_record_id") == str(handover_record_id)
+        and item.get("payload", {}).get("issue_id") == str(issue_id)
+        for item in records
+    ):
+        raise IndustrialIntelligenceError("This handover issue has already been acknowledged.")
+    refs = _require_evidence_refs(evidence_refs, "Shift handover acknowledgement") if evidence_refs else []
+    acknowledgement = create_record(
+        username,
+        tier,
+        "shift_handover_acknowledgement",
+        f"Acknowledgement · {issue_id}",
+        {
+            "handover_record_id": str(handover_record_id),
+            "issue_id": str(issue_id),
+            "incoming_shift": str(payload.get("incoming_shift") or ""),
+            "acknowledged_by": access["actor"],
+            "acknowledgement_comment": str(acknowledgement_comment or "")[:2000],
+            "evidence_refs": refs,
+            "status": "ACKNOWLEDGED_NOT_CLOSED",
+            "thread_node_type": "Event",
+        },
+        "MANUAL",
+    )
+    _append_audit(username, tier, "shift_handover.issue_acknowledged", str(handover_record_id), {
+        "issue_id": str(issue_id), "acknowledged_by": access["actor"], "acknowledgement_record_id": acknowledgement["record_id"],
+    })
+    return acknowledgement
+
+
+def shift_handover_status(username: str, tier: str, handover_record_id: str) -> dict[str, Any]:
+    _session_authorize(username, tier, "read")
+    records = list(_state_list("records"))
+    handover = next(
+        (item for item in records if item.get("record_id") == str(handover_record_id) and item.get("record_type") == "shift_handover"),
+        None,
+    )
+    if not handover:
+        raise IndustrialIntelligenceError("Shift handover does not exist in this workspace.")
+    acknowledgements = {
+        str(item.get("payload", {}).get("issue_id")): item
+        for item in records
+        if item.get("record_type") == "shift_handover_acknowledgement"
+        and item.get("payload", {}).get("handover_record_id") == str(handover_record_id)
+    }
+    issue_rows = []
+    for issue in handover.get("payload", {}).get("issues", []):
+        issue_id = str(issue.get("issue_id"))
+        ack = acknowledgements.get(issue_id)
+        issue_rows.append({
+            **dict(issue),
+            "acknowledgement_status": "ACKNOWLEDGED" if ack else "AWAITING_ACKNOWLEDGEMENT",
+            "acknowledged_by": ack.get("payload", {}).get("acknowledged_by") if ack else None,
+            "acknowledgement_record_id": ack.get("record_id") if ack else None,
+            "issue_closed": str(issue.get("status") or "").upper() in {"CLOSED", "VERIFIED"},
+        })
+    open_issues = [item for item in issue_rows if not item["issue_closed"]]
+    pending = [item for item in open_issues if item["acknowledgement_status"] != "ACKNOWLEDGED"]
+    return {
+        "handover_record_id": str(handover_record_id),
+        "outgoing_shift": handover.get("payload", {}).get("outgoing_shift"),
+        "incoming_shift": handover.get("payload", {}).get("incoming_shift"),
+        "status": "ACKNOWLEDGEMENT_REQUIRED" if pending else ("ACKNOWLEDGED_OPEN_ITEMS_REMAIN" if open_issues else "NO_OPEN_ITEMS"),
+        "issues": issue_rows,
+        "pending_acknowledgement_count": len(pending),
+        "open_issue_count": len(open_issues),
+        "acknowledgement_closes_issue": False,
+    }
+
+
 def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, likelihood: int, barriers: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     sev = _finite(severity, "severity", minimum=1, maximum=5)
     like = _finite(likelihood, "likelihood", minimum=1, maximum=5)
