@@ -1714,10 +1714,10 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         if isinstance(cluster_result, dict):
             summary = cluster_result.get("summary", {})
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Facilities", int(summary.get("facility_count", 0)))
+            k1.metric("Facilities", int(summary.get("shared_facility_count", 0)))
             k2.metric("Shared candidates", int(summary.get("cross_company_candidate_count", 0)))
-            k3.metric("Active commitments", int(summary.get("active_commitment_count", 0)))
-            k4.metric("Overcommitments", int(summary.get("overcommitment_count", 0)))
+            k3.metric("Active commitments", int(summary.get("shared_active_commitment_count", 0)))
+            k4.metric("Overcommitments", int(summary.get("shared_overcommitment_count", 0)))
             st.markdown("**Shared resource offers**")
             offers = cluster_result.get("cross_company_shared_offers", [])
             st.dataframe(pd.DataFrame(offers), use_container_width=True, hide_index=True)
