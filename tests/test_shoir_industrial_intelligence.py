@@ -150,6 +150,11 @@ def test_process_mining_separates_elapsed_and_explicit_wait_and_flags_rework_can
     result = ii.analyze_tool("process-mining", _payloads()["process-mining"])
     assert result["case_count"] == 1
     assert result["total_inter_event_elapsed_minutes"] == pytest.approx(180)
+    assert result["total_case_elapsed_minutes"] == pytest.approx(180)
+    assert result["average_case_elapsed_minutes"] == pytest.approx(180)
+    assert result["directly_follows"][0]["mean_inter_event_elapsed_minutes"] > 0
+    assert all(item["classification"] == "ELAPSED_TIME_TRANSITION_NOT_CONFIRMED_WAIT" for item in result["directly_follows"])
+    assert result["high_elapsed_transition_candidates"]
     assert result["explicitly_recorded_wait_minutes"] == pytest.approx(20)
     assert result["rework_candidates"] == [
         {"case_id": "C1", "activity": "Inspect", "classification": "REPEATED_ACTIVITY_CANDIDATE"}
