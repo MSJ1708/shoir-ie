@@ -1559,6 +1559,15 @@ def render_module(module: str, tier: str, username: str):
         render_capacity_recovery(tier, username)
         return
 
+    if module == "Industrial Operating System":
+        # Keep the established Operating System screen and compose the new
+        # Industrial Intelligence Suite inside its existing Workbench route.
+        from industrial_operating_system import render_industrial_operating_system
+        render_industrial_operating_system(tier, username)
+        from shoir_industrial_intelligence import render_industrial_intelligence_suite
+        render_industrial_intelligence_suite(st, username, tier)
+        return
+
     # The investor Control Center has its own scenario controls and should
     # open directly into the command experience instead of the generic import
     # surface. Specialist modules continue to use the shared import/activate UX.
