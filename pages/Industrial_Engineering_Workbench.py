@@ -288,6 +288,34 @@ if search.strip():
         if not _resource_row.empty and "Industrial Resource Intelligence" not in set(filtered["Module"]):
             filtered = pd.concat([filtered, _resource_row], ignore_index=True).drop_duplicates(subset=["Module"])
 
+    # Industrial Intelligence tool names and aliases launch through the existing
+    # Enterprise Industrial Operating System route, never a duplicate page.
+    _ii_matches = []
+    try:
+        from shoir_industrial_intelligence import search_tools as _search_industrial_tools
+        _ii_matches = _search_industrial_tools(q)
+    except Exception:
+        _ii_matches = []
+    if _ii_matches:
+        if not tier_allows(RAW_TIER, "Enterprise"):
+            st.warning("🔒 The Industrial Intelligence Suite requires the Enterprise capability level.")
+            st.session_state.pop("shoir_pending_industrial_tool", None)
+        else:
+            _ii_row = available.loc[available["Module"] == "Industrial Operating System"]
+            if not _ii_row.empty and "Industrial Operating System" not in set(filtered["Module"]):
+                filtered = pd.concat([filtered, _ii_row], ignore_index=True).drop_duplicates(subset=["Module"])
+            exact_match = next(
+                (
+                    item for item in _ii_matches
+                    if q == item["name"].casefold()
+                    or q in {alias.casefold() for alias in item["aliases"]}
+                ),
+                _ii_matches[0],
+            )
+            st.session_state["shoir_pending_industrial_tool"] = exact_match["id"]
+    else:
+        st.session_state.pop("shoir_pending_industrial_tool", None)
+
 labels = filtered["Module"].tolist()
 if not labels:
     st.sidebar.warning("No modules match the current filter.")
