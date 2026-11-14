@@ -923,13 +923,18 @@ def analyze_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _session_authorize(username: str, tier: str, action: str = "read") -> dict[str, Any]:
-    from shoir_tier_capabilities import tier_allows
+    from shoir_tier_capabilities import normalize_tier, tier_allows
     actor = str(st.session_state.get("current_user") or "").strip()
     requested = str(username or "").strip()
     if st.session_state.get("authenticated") is not True or not actor or actor.casefold() in {"guest", "guest visitor", "anonymous"} or actor.casefold() != requested.casefold():
         raise PermissionError("An authenticated session matching the requested account is required.")
-    if not tier_allows(str(tier or ""), "Enterprise"):
-        raise PermissionError("Industrial Intelligence Suite requires the existing Enterprise capability level.")
+    # The caller's tier argument is a routing hint, not an authorization source.
+    # Enforce the tier held by the authenticated session so a forged Enterprise
+    # argument cannot elevate a Starter/Pro/Professional account.
+    session_tier = normalize_tier(str(st.session_state.get("user_tier") or "Starter"))
+    requested_tier = normalize_tier(str(tier or "Starter"))
+    if not tier_allows(session_tier, "Enterprise") or not tier_allows(requested_tier, "Enterprise"):
+        raise PermissionError("Industrial Intelligence Suite requires the authenticated account's existing Enterprise capability level.")
     context = st.session_state.get("shoir_active_organization_workspace")
     if context is not None:
         if not isinstance(context, dict):
