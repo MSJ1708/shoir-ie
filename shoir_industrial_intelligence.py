@@ -465,6 +465,7 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(measurements, list) or not measurements:
         raise IndustrialIntelligenceError("Data Trust requires a non-empty measurements list.")
     originals = []
+    normalized_measurements = []
     missing_measurements = []
     missing_timestamps = []
     by_meter: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -486,7 +487,10 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
             "timestamp": ts, "provenance": _provenance(item.get("provenance")),
             "synchronization_group": str(item.get("synchronization_group") or "").strip() or None,
         }
-        originals.append(row)
+        # Keep the exact submitted measurement snapshot separate from the
+        # normalized working row used for calculations and timestamp checks.
+        originals.append(_json_safe(dict(item)))
+        normalized_measurements.append(row)
         if value_missing:
             missing_measurements.append({"meter_id": meter, "source": source, "timestamp": ts, "unit": unit})
         if timestamp_missing:

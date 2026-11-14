@@ -189,6 +189,7 @@ def test_data_trust_flags_conflict_and_never_changes_originals():
     assert result["status"] == "REVIEW_REQUIRED"
     assert result["meter_conflicts"][0]["reason"] == "CONFLICTING_READINGS"
     assert result["original_measurements"] == original
+    assert payload["measurements"] == original
     assert result["originals_modified"] is False
     assert result["balances"][0]["closes"] is False
 
@@ -246,6 +247,14 @@ def test_energy_flexibility_respects_capacity_and_selects_low_cost_period():
     assert any("global minimum-cost" in item for item in result["limitations"])
     payload = _payloads()["energy-flexibility"]
     payload["periods"][1]["capacity_kwh"] = 80
+    fallback = ii.analyze_tool("energy-flexibility", payload)
+    assert fallback["status"] == "FEASIBLE"
+    assert fallback["allocations"][0]["period_id"] == "P1"
+    assert fallback["period_summary"][0]["total_kwh"] == pytest.approx(100)
+
+    # Only call the schedule infeasible after every allowed period is unable
+    # to host the load; a valid higher-tariff fallback must remain available.
+    payload["periods"][0]["capacity_kwh"] = 80
     failed = ii.analyze_tool("energy-flexibility", payload)
     assert failed["status"] == "INFEASIBLE"
     assert failed["unallocated_loads"]
