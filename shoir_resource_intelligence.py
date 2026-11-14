@@ -3288,6 +3288,47 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
             "validity_status": window_state,
         }
 
+    def shareable_facility(facility_id: str) -> bool:
+        facility = facility_state[facility_id]
+        return (
+            facility["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and facility["status"] == "ACTIVE"
+            and facility["window_state"] == "CURRENT"
+        )
+
+    def shareable_resource(row: Mapping[str, Any]) -> bool:
+        return (
+            shareable_facility(str(row["facility_id"]))
+            and row["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and row["validity_status"] == "CURRENT"
+            and row["provenance"] != "STALE"
+        )
+
+    shareable_nodes: set[str] = set()
+    for facility_id in facilities:
+        if shareable_facility(facility_id):
+            shareable_nodes.add(f"facility:{facility_id}")
+    for supply_id, row in normalized_supplies.items():
+        if shareable_resource(row):
+            shareable_nodes.add(f"supply:{supply_id}")
+    for demand_id, row in normalized_demands.items():
+        if shareable_resource(row):
+            shareable_nodes.add(f"demand:{demand_id}")
+    for route_id, row in normalized_routes.items():
+        supply_row = normalized_supplies[row["supply_id"]]
+        demand_row = normalized_demands[row["demand_id"]]
+        if (
+            row["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and row["validity_status"] == "CURRENT"
+            and row["provenance"] != "STALE"
+            and shareable_resource(supply_row)
+            and shareable_resource(demand_row)
+        ):
+            shareable_nodes.add(f"route:{route_id}")
+    for asset_id, row in normalized_infrastructure.items():
+        if shareable_facility(row["facility_id"]) and row["disclosure_scope"] == "SHARED_WITH_CLUSTER" and row["validity_status"] == "CURRENT" and row["provenance"] != "STALE":
+            shareable_nodes.add(f"infrastructure:{asset_id}")
+
     supply_commitments: dict[str, float] = {key: 0.0 for key in normalized_supplies}
     demand_commitments: dict[str, float] = {key: 0.0 for key in normalized_demands}
     commitment_rows = []
@@ -3315,50 +3356,65 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
         approval_reference = _text(
             row.get("approval_reference"), f"active commitment {commitment_id}.approval_reference"
         )
+        commitment_scope, commitment_share_ref = disclosure(row, f"active commitment {commitment_id}")
         start, end, window_state = validity(row, f"active commitment {commitment_id}")
         if window_state == "CURRENT":
             supply_commitments[supply_id] += quantity
             demand_commitments[demand_id] += quantity
-        commitment_rows.append({
-            "commitment_id": commitment_id,
-            "supply_id": supply_id,
-            "demand_id": demand_id,
-            "quantity": quantity,
-            "unit": unit,
-            "validity_status": window_state,
-            "approval_reference_present": bool(approval_reference),
-            "approval_reference_verification": "NOT_PERFORMED",
-        })
+        if (
+            window_state == "CURRENT"
+            and commitment_scope == "SHARED_WITH_CLUSTER"
+            and f"supply:{supply_id}" in shareable_nodes
+            and f"demand:{demand_id}" in shareable_nodes
+        ):
+            commitment_rows.append({
+                "commitment_alias": "EXCHANGE-" + hashlib.sha256(commitment_id.encode("utf-8")).hexdigest()[:12].upper(),
+                "supply_alias": "OFFER-" + hashlib.sha256(supply_id.encode("utf-8")).hexdigest()[:12].upper(),
+                "demand_alias": "NEED-" + hashlib.sha256(demand_id.encode("utf-8")).hexdigest()[:12].upper(),
+                "quantity": quantity,
+                "unit": unit,
+                "validity_status": window_state,
+                "sharing_reference_present": bool(commitment_share_ref),
+                "approval_reference_present": bool(approval_reference),
+                "approval_reference_verification": "NOT_PERFORMED",
+            })
 
     overcommitments = []
+    private_overcommitment_count = 0
     remaining_supply: dict[str, float] = {}
     for supply_id, supply in normalized_supplies.items():
         committed = supply_commitments[supply_id]
         available = float(supply["available_quantity"])
         remaining_supply[supply_id] = max(0.0, available - committed)
         if committed > available + 1e-9:
-            overcommitments.append({
-                "record_type": "SUPPLY",
-                "record_id": supply_id,
-                "committed_quantity": committed,
-                "declared_quantity": available,
-                "unit": supply["unit"],
-                "status": "OVERCOMMITTED",
-            })
+            if f"supply:{supply_id}" in shareable_nodes:
+                overcommitments.append({
+                    "record_type": "SUPPLY",
+                    "record_alias": "OFFER-" + hashlib.sha256(supply_id.encode("utf-8")).hexdigest()[:12].upper(),
+                    "committed_quantity": committed,
+                    "declared_quantity": available,
+                    "unit": supply["unit"],
+                    "status": "OVERCOMMITTED",
+                })
+            else:
+                private_overcommitment_count += 1
     remaining_demand: dict[str, float] = {}
     for demand_id, demand in normalized_demands.items():
         committed = demand_commitments[demand_id]
         required = float(demand["required_quantity"])
         remaining_demand[demand_id] = max(0.0, required - committed)
         if committed > required + 1e-9:
-            overcommitments.append({
-                "record_type": "DEMAND",
-                "record_id": demand_id,
-                "committed_quantity": committed,
-                "declared_quantity": required,
-                "unit": demand["unit"],
-                "status": "OVERCOMMITTED",
-            })
+            if f"demand:{demand_id}" in shareable_nodes:
+                overcommitments.append({
+                    "record_type": "DEMAND",
+                    "record_alias": "NEED-" + hashlib.sha256(demand_id.encode("utf-8")).hexdigest()[:12].upper(),
+                    "committed_quantity": committed,
+                    "declared_quantity": required,
+                    "unit": demand["unit"],
+                    "status": "OVERCOMMITTED",
+                })
+            else:
+                private_overcommitment_count += 1
 
     node_types: dict[str, str] = {}
     for record_id in facilities:
@@ -3381,9 +3437,11 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
                 f"dependency_edges[{index}] refers to a node that is not registered in this cluster model."
             )
         relation = _text(row.get("relationship"), f"dependency_edges[{index}].relationship")
+        if source_id not in shareable_nodes or target_id not in shareable_nodes:
+            continue
         dependency_edges.append({
-            "source_node_id": source_id,
-            "target_node_id": target_id,
+            "source_node_alias": "NODE-" + hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:12].upper(),
+            "target_node_alias": "NODE-" + hashlib.sha256(target_id.encode("utf-8")).hexdigest()[:12].upper(),
             "relationship": relation,
             "direction": "EXPLICIT_USER_ENTERED",
             "causality": "NOT_ESTABLISHED",
@@ -3408,16 +3466,14 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
             and demand["disclosure_scope"] == "SHARED_WITH_CLUSTER"
             and route["disclosure_scope"] == "SHARED_WITH_CLUSTER"
         )
+        if not shared_scope:
+            # Do not reveal the existence or identity of a private route.
+            continue
+        route_alias = "ROUTE-" + hashlib.sha256(route_id.encode("utf-8")).hexdigest()[:12].upper()
         if not cross_organization:
             rejected_routes.append({
-                "route_id": route_id,
+                "route_alias": route_alias,
                 "status": "INTERNAL_ROUTE_NOT_A_CROSS_COMPANY_MATCH",
-            })
-            continue
-        if not shared_scope:
-            rejected_routes.append({
-                "route_id": route_id,
-                "status": "NOT_SHARED_BY_ALL_PARTICIPANTS",
             })
             continue
         if not all((
@@ -3427,13 +3483,13 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
             demand["validity_status"] == "CURRENT",
             route["validity_status"] == "CURRENT",
         )):
-            rejected_routes.append({"route_id": route_id, "status": "OUTSIDE_VALIDITY_WINDOW"})
+            rejected_routes.append({"route_alias": route_alias, "status": "OUTSIDE_VALIDITY_WINDOW"})
             continue
         if not route["connection_confirmed"] or route["provenance"] == "STALE":
-            rejected_routes.append({"route_id": route_id, "status": "PHYSICAL_ROUTE_NOT_CURRENTLY_QUALIFIED"})
+            rejected_routes.append({"route_alias": route_alias, "status": "PHYSICAL_ROUTE_NOT_CURRENTLY_QUALIFIED"})
             continue
         if supply["provenance"] == "STALE" or demand["provenance"] == "STALE":
-            rejected_routes.append({"route_id": route_id, "status": "STALE_RESOURCE_EVIDENCE"})
+            rejected_routes.append({"route_alias": route_alias, "status": "STALE_RESOURCE_EVIDENCE"})
             continue
         if route["capacity"] <= 0 or remaining_supply[route["supply_id"]] <= 0 or remaining_demand[route["demand_id"]] <= 0:
             rejected_routes.append({"route_id": route_id, "status": "NO_REMAINING_CAPACITY"})
@@ -3446,7 +3502,7 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
         matches.append({
             "cluster_match_id": "MATCH-" + hashlib.sha256(route_id.encode("utf-8")).hexdigest()[:12].upper(),
-            "route_id": route_id,
+            "route_alias": route_alias,
             "resource_type": supply["resource_type"],
             "unit": supply["unit"],
             "screening_capacity": screened_capacity,
@@ -3508,15 +3564,15 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
         "as_of": as_of_text,
         "model_scope": "EXPLICIT_INPUT_TIME_AWARE_CLUSTER_GRAPH",
         "summary": {
-            "facility_count": len(facilities),
-            "supply_record_count": len(normalized_supplies),
-            "demand_record_count": len(normalized_demands),
-            "route_count": len(normalized_routes),
-            "infrastructure_count": len(normalized_infrastructure),
-            "dependency_edge_count": len(dependency_edges),
-            "active_commitment_count": len(commitment_rows),
+            "shared_facility_count": sum(1 for key in facilities if f"facility:{key}" in shareable_nodes),
+            "shared_supply_count": sum(1 for key in normalized_supplies if f"supply:{key}" in shareable_nodes),
+            "shared_demand_count": sum(1 for key in normalized_demands if f"demand:{key}" in shareable_nodes),
+            "shared_route_count": sum(1 for key in normalized_routes if f"route:{key}" in shareable_nodes),
+            "shared_infrastructure_count": sum(1 for key in normalized_infrastructure if f"infrastructure:{key}" in shareable_nodes),
+            "shared_dependency_edge_count": len(dependency_edges),
+            "shared_active_commitment_count": len(commitment_rows),
             "cross_company_candidate_count": len(matches),
-            "overcommitment_count": len(overcommitments),
+            "shared_overcommitment_count": len(overcommitments),
         },
         "cross_company_shared_offers": public_offers,
         "cross_company_shared_needs": public_needs,
@@ -3525,6 +3581,7 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
         "active_commitment_screen": commitment_rows,
         "overcommitments": overcommitments,
         "dependency_edges": dependency_edges,
+        "private_conflicts_withheld": private_overcommitment_count,
         "infrastructure_screen": [
             {
                 "infrastructure_alias": "INFRA-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:10].upper(),
