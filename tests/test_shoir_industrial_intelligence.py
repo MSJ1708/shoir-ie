@@ -793,3 +793,92 @@ def test_workbench_search_does_not_select_suite_when_query_is_empty():
     root = Path(__file__).resolve().parents[1]
     source = (root / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
     assert "_ii_matches = _search_industrial_tools(q) if q else []" in source
+
+
+
+def test_decision_proposal_requires_registered_evidence_and_independent_review(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-decision-author", "owner")
+    evidence = ii.create_record(
+        "synthetic-decision-author", "Enterprise", "evidence",
+        "Decision engineering basis", {"document": "synthetic alternatives study"},
+        provenance="SYNTHETIC",
+    )
+    decision = ii.create_decision(
+        "synthetic-decision-author", "Enterprise", "Cooling pump replacement",
+        "Choose a replacement pump for the synthetic cooling line.",
+        [
+            {"option_id": "A", "label": "Repair existing pump", "expected_impact": {"capex": 10}},
+            {"option_id": "B", "label": "Replace pump", "expected_impact": {"capex": 25}},
+        ],
+        "B", "Option B has the stronger lifecycle case under the supplied assumptions.",
+        [evidence["record_id"]],
+    )
+    assert decision["payload"]["status"] == "PENDING_INDEPENDENT_REVIEW"
+    with pytest.raises(PermissionError, match="cannot independently approve"):
+        ii.review_decision(
+            "synthetic-decision-author", "Enterprise", decision["record_id"],
+            "APPROVED", [evidence["record_id"]],
+        )
+    with pytest.raises(ii.IndustrialIntelligenceError, match="option IDs must be unique"):
+        ii.create_decision(
+            "synthetic-decision-author", "Enterprise", "Invalid duplicate options",
+            "Context",
+            [
+                {"option_id": "A", "label": "Option A"},
+                {"option_id": "A", "label": "Option A duplicate"},
+            ],
+            "A", "Rationale", [evidence["record_id"]],
+        )
+
+    session["current_user"] = "synthetic-decision-approver"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "approver", "status": "active",
+            }]
+        },
+    )
+    reviewer_evidence = ii.create_record(
+        "synthetic-decision-approver", "Enterprise", "evidence",
+        "Independent decision review", {"review": "synthetic review evidence"},
+        provenance="SYNTHETIC",
+    )
+    reviewed = ii.review_decision(
+        "synthetic-decision-approver", "Enterprise", decision["record_id"],
+        "APPROVED", [reviewer_evidence["record_id"]], "Independent review completed.",
+    )
+    assert reviewed["status"] == "APPROVED"
+    with pytest.raises(ii.IndustrialIntelligenceError, match="already has an independent review"):
+        ii.review_decision(
+            "synthetic-decision-approver", "Enterprise", decision["record_id"],
+            "REJECTED", [reviewer_evidence["record_id"]],
+        )
+
+
+def test_action_state_machine_rejects_backwards_transitions(monkeypatch):
+    _configure_org_session(monkeypatch, "synthetic-action-author", "owner")
+    evidence = ii.create_record(
+        "synthetic-action-author", "Enterprise", "evidence", "Action source",
+        {"source": "synthetic"}, provenance="SYNTHETIC",
+    )
+    action = ii.create_action(
+        "synthetic-action-author", "Enterprise", "Complete maintenance task",
+        "synthetic-maintenance-engineer", "2026-12-10T00:00:00Z",
+        "HIGH", "Maintenance complete", [evidence["record_id"]],
+    )
+    with pytest.raises(PermissionError, match="Invalid action transition"):
+        ii.update_action(
+            "synthetic-action-author", "Enterprise", action["action_id"], "IN_PROGRESS",
+        )
+
+
+def test_benefit_record_rejects_unregistered_actual_evidence(monkeypatch):
+    _configure_personal_session(monkeypatch, "synthetic-benefit-user", "owner")
+    with pytest.raises(ii.IndustrialIntelligenceError, match="not registered in this workspace"):
+        ii.record_benefit(
+            "synthetic-benefit-user", "Enterprise", "Pump project", "kWh/m3",
+            1.2, 1.1, "kWh/m3", ["SYNTHETIC:not-registered"],
+        )
