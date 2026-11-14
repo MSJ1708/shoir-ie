@@ -2142,7 +2142,7 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
             "name": row.get("name"),
             "created_at": row.get("created_at"),
             "provenance": row.get("provenance"),
-            "source_ref": row.get("source_ref"),
+            "source_reference_present": bool(row.get("source_ref")),
             "source_timestamp": row.get("source_timestamp"),
             "payload": _copilot_safe_payload(row.get("payload", {})),
             "match_score": score,
