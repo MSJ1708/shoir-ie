@@ -1405,12 +1405,24 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     allowed = {"PROPOSED", "PENDING_APPROVAL", "APPROVED", "IN_PROGRESS", "IMPLEMENTED", "CLOSED", "VERIFIED", "BLOCKED"}
     if target not in allowed:
         raise IndustrialIntelligenceError(f"Unsupported action status: {target}.")
+    current = str(action.get("status") or "").upper()
     if target == "APPROVED":
         raise PermissionError("Use approve_action so the authenticated approver, role and audit record are enforced.")
-    if target in {"IN_PROGRESS", "IMPLEMENTED"} and action.get("status") not in {"APPROVED", "IN_PROGRESS"}:
-        raise PermissionError("An action must have the required independent approvals before implementation.")
-    if target == "CLOSED" and action.get("status") != "VERIFIED":
-        raise PermissionError("An action can only be closed after independent verification.")
+    transitions = {
+        "PROPOSED": {"BLOCKED"},
+        "PENDING_APPROVAL": {"BLOCKED"},
+        "APPROVED": {"IN_PROGRESS", "BLOCKED"},
+        "IN_PROGRESS": {"IMPLEMENTED", "BLOCKED"},
+        "IMPLEMENTED": {"BLOCKED", "VERIFIED"},
+        "VERIFIED": {"CLOSED"},
+        "BLOCKED": {str(action.get("blocked_from_status") or "").upper()},
+    }
+    if target not in transitions.get(current, set()):
+        raise PermissionError(f"Invalid action transition: {current} → {target}.")
+    if target == "BLOCKED":
+        action["blocked_from_status"] = current
+    elif current == "BLOCKED":
+        action.pop("blocked_from_status", None)
     if target == "VERIFIED":
         if action.get("status") != "IMPLEMENTED":
             raise PermissionError("An action must be recorded as IMPLEMENTED before independent verification.")
@@ -1540,7 +1552,7 @@ def record_benefit(username: str, tier: str, project: str, metric: str, baseline
     """Record an actual outcome without self-certifying a realized benefit."""
     base = _finite(baseline, "baseline")
     value = _finite(actual, "actual")
-    refs = [_required_text(item, "benefit evidence reference", 240) for item in evidence_refs]
+    refs = _require_evidence_refs(evidence_refs, "Actual benefit record")
     return create_record(username, tier, "benefit_realization", project, {"project": _required_text(project, "project"), "metric": _required_text(metric, "metric"), "baseline": base, "actual": value, "unit": _required_text(unit, "unit", 40), "delta": value - base, "evidence_refs": refs, "benefit_status": "ACTUAL_RECORDED_UNVERIFIED", "realized_financial_savings_claimed": False, "thread_node_type": "Outcome"}, "MANUAL")
 
 
@@ -1586,8 +1598,15 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
             passed = math.isclose(float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-9)
         else:
             passed = expected == actual
-        tests.append({"test_id": _required_text(case.get("test_id"), f"model test {index} test_id"), "expected": expected, "actual": actual, "passed": bool(passed), "evidence_id": str(case.get("evidence_id") or "").strip() or None})
-    record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": _hash_payload(definition), "assumptions": [_required_text(item, "model assumption", 500) for item in assumptions], "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
+        test_evidence = str(case.get("evidence_id") or "").strip()
+        if test_evidence:
+            _require_evidence_refs([test_evidence], f"Model test {index}")
+        tests.append({"test_id": _required_text(case.get("test_id"), f"model test {index} test_id"), "expected": expected, "actual": actual, "passed": bool(passed), "evidence_id": test_evidence or None})
+    normalized_assumptions = [_required_text(item, "model assumption", 500) for item in assumptions]
+    if not tests:
+        raise IndustrialIntelligenceError("At least one expected-versus-actual model test case is required.")
+    definition_hash = _hash_payload({"definition": definition, "assumptions": normalized_assumptions, "test_cases": tests})
+    record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": definition_hash, "assumptions": normalized_assumptions, "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
     models.append(record)
     _save_state_list(username, tier, "models", models)
     record["thread_node_id"] = _sync_thread_node(
@@ -1600,7 +1619,7 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
     return copy.deepcopy(record)
 
 
-def validate_model_version(username: str, tier: str, model_id: str, reviewer_comment: str = "") -> dict[str, Any]:
+def validate_model_version(username: str, tier: str, model_id: str, verification_evidence: Sequence[str], reviewer_comment: str = "") -> dict[str, Any]:
     access = _session_authorize(username, tier, "approve")
     models = list(_state_list("models"))
     index = next((i for i, item in enumerate(models) if item.get("model_id") == model_id), None)
@@ -1611,8 +1630,9 @@ def validate_model_version(username: str, tier: str, model_id: str, reviewer_com
         raise IndustrialIntelligenceError("A model cannot be validated until all registered test cases pass.")
     if model.get("owner", "").casefold() == access["actor"].casefold():
         raise PermissionError("The model author cannot independently approve the model version.")
+    refs = _require_evidence_refs(verification_evidence, "Independent model validation")
     model["status"] = "VALIDATED_BY_REVIEWER"
-    model["review"] = {"reviewer": access["actor"], "comment": str(reviewer_comment or "")[:2000], "reviewed_at": _utc_now()}
+    model["review"] = {"reviewer": access["actor"], "evidence_refs": refs, "comment": str(reviewer_comment or "")[:2000], "reviewed_at": _utc_now()}
     models[index] = model
     _save_state_list(username, tier, "models", models, action="approve")
     _sync_thread_node(username, tier, "Model", f"{model['name']} · {model['version']}", model_id, "Validated", {"version": model["version"], "definition_hash": model["definition_hash"], "status": model["status"], "reviewer": access["actor"]})
