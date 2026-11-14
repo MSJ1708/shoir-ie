@@ -410,10 +410,14 @@ def test_live_and_stale_records_require_source_reference_and_timestamp(monkeypat
 
 def test_action_approval_is_independent_and_verification_follows_implementation(monkeypatch):
     session = _configure_org_session(monkeypatch, "synthetic-owner", "owner")
+    action_evidence = ii.create_record(
+        "synthetic-owner", "Enterprise", "evidence", "Pump inspection baseline",
+        {"scope": "Synthetic maintenance request evidence"}, provenance="SYNTHETIC",
+    )
     action = ii.create_action(
         "synthetic-owner", "Enterprise", "Inspect Pump 01", "synthetic-engineer",
         "2026-12-01T00:00:00Z", "HIGH", "Inspection report recorded.",
-        ["SYNTHETIC:baseline"], required_approvals=1,
+        [action_evidence["record_id"]], required_approvals=1,
     )
     with pytest.raises(PermissionError, match="cannot approve their own"):
         ii.approve_action("synthetic-owner", "Enterprise", action["action_id"])
