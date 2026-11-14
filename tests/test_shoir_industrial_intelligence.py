@@ -439,8 +439,16 @@ def test_action_approval_is_independent_and_verification_follows_implementation(
     assert approved["status"] == "APPROVED"
     with pytest.raises(PermissionError, match="must be recorded as IMPLEMENTED"):
         ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "VERIFIED", "Done", ["SYNTHETIC:verification"])
+    no_evidence_action = ii.create_action(
+        "synthetic-approver", "Enterprise", "Investigate missing evidence", "synthetic-engineer",
+        "2026-12-03T00:00:00Z", "MEDIUM", "Evidence is attached.",
+    )
+    with pytest.raises(ii.IndustrialIntelligenceError, match="registered evidence"):
+        ii.approve_action("synthetic-owner", "Enterprise", no_evidence_action["action_id"])
     ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "IN_PROGRESS")
     ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "IMPLEMENTED", "Inspection executed")
+    with pytest.raises(PermissionError, match="only be closed after independent verification"):
+        ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "CLOSED")
     verification_evidence = ii.create_record("synthetic-approver", "Enterprise", "evidence", "Independent inspection verification", {"result": "PASS"}, provenance="SYNTHETIC")
     verified = ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "VERIFIED", "Inspection passed", [verification_evidence["record_id"]])
     assert verified["status"] == "VERIFIED"
@@ -690,3 +698,21 @@ def test_existing_workbench_route_reaches_suite_before_generic_fallback():
     assert suite_route < generic_fallback
     assert "render_industrial_intelligence_suite(st, username, tier)" in platform_source[suite_route:generic_fallback]
     assert "render_industrial_intelligence_suite(" in app_source
+
+
+
+def test_live_operational_event_requires_source_reference_and_keeps_source_timestamp(monkeypatch):
+    _configure_personal_session(monkeypatch, "synthetic-live-event-user", "owner")
+    with pytest.raises(ii.IndustrialIntelligenceError, match="source reference"):
+        ii.create_operational_event(
+            "synthetic-live-event-user", "Enterprise", "PUMP_TRIP",
+            "Synthetic test event", "PUMP-01", "2026-11-01T08:00:00Z", "LIVE",
+        )
+    event = ii.create_operational_event(
+        "synthetic-live-event-user", "Enterprise", "PUMP_TRIP",
+        "Synthetic fixture of a source-recorded event", "PUMP-01",
+        "2026-11-01T08:00:00Z", "LIVE", source_ref="TEST-DCS:EVENT-001",
+    )
+    assert event["source_ref"] == "TEST-DCS:EVENT-001"
+    assert event["source_timestamp"] == "2026-11-01T08:00:00+00:00"
+    assert event["provenance"] == "LIVE"
