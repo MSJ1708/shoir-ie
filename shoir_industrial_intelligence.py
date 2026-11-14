@@ -388,6 +388,10 @@ def _turnaround(payload: Mapping[str, Any]) -> dict[str, Any]:
             unscheduled.append({"task_id": task_id, "reason": f"No qualified resource is configured for skill {skill}."})
             continue
         duration = _finite(task.get("duration_hours"), f"Task {task_id} duration_hours", minimum=0.000001)
+        blocked_dependencies = [str(dep) for dep in task.get("dependencies", []) if str(dep) not in result_by_id]
+        if blocked_dependencies:
+            unscheduled.append({"task_id": task_id, "reason": "A prerequisite task is not schedulable.", "blocked_dependencies": blocked_dependencies})
+            continue
         dependency_finish = max((result_by_id[str(dep)]["finish_hour"] for dep in task.get("dependencies", [])), default=0.0)
         resource = min(options, key=lambda item: (max(item["available_at"], dependency_finish), item["id"]))
         start = max(resource["available_at"], dependency_finish, _finite(task.get("earliest_start_hour", 0), f"Task {task_id} earliest_start_hour", minimum=0))
@@ -654,6 +658,8 @@ def _energy_flexibility(payload: Mapping[str, Any]) -> dict[str, Any]:
         period_rows[period_id] = {"tariff": _finite(item.get("tariff"), f"{period_id} tariff", minimum=0), "capacity_kwh": _finite(item.get("capacity_kwh"), f"{period_id} capacity_kwh", minimum=0), "base_kwh": _finite(item.get("base_kwh", 0), f"{period_id} base_kwh", minimum=0), "scheduled_kwh": 0.0}
     allocations = []
     infeasible = []
+    if any(not isinstance(item, Mapping) for item in loads):
+        raise IndustrialIntelligenceError("Each load must be an object.")
     ordered_loads = sorted(loads, key=lambda item: (bool(item.get("flexible")), _required_text(item.get("load_id"), "load_id")))
     for load in ordered_loads:
         if not isinstance(load, Mapping):
@@ -1201,18 +1207,33 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
     return record
 
 
-def record_benefit(username: str, tier: str, project: str, metric: str, baseline: float, actual: float, unit: str, evidence_refs: Sequence[str], reviewer: str = "", independently_verified: bool = False) -> dict[str, Any]:
+def record_benefit(username: str, tier: str, project: str, metric: str, baseline: float, actual: float, unit: str, evidence_refs: Sequence[str]) -> dict[str, Any]:
+    """Record an actual outcome without self-certifying a realized benefit."""
     base = _finite(baseline, "baseline")
     value = _finite(actual, "actual")
     refs = [_required_text(item, "benefit evidence reference", 240) for item in evidence_refs]
-    status = "VERIFIED_REALIZED" if independently_verified and reviewer and refs else "ACTUAL_RECORDED_UNVERIFIED"
-    if independently_verified:
-        access = _session_authorize(username, tier, "approve")
-        if str(reviewer).casefold() != access["actor"].casefold():
-            raise PermissionError("The reviewer must match the authenticated approver.")
-        if reviewer.casefold() == str(st.session_state.get("current_user") or "").casefold() and not refs:
-            raise IndustrialIntelligenceError("Independent benefit verification requires source evidence.")
-    return create_record(username, tier, "benefit_realization", project, {"project": _required_text(project, "project"), "metric": _required_text(metric, "metric"), "baseline": base, "actual": value, "unit": _required_text(unit, "unit", 40), "delta": value - base, "evidence_refs": refs, "reviewer": reviewer or None, "benefit_status": status, "realized_financial_savings_claimed": False if status != "VERIFIED_REALIZED" else None}, "MANUAL")
+    return create_record(username, tier, "benefit_realization", project, {"project": _required_text(project, "project"), "metric": _required_text(metric, "metric"), "baseline": base, "actual": value, "unit": _required_text(unit, "unit", 40), "delta": value - base, "evidence_refs": refs, "benefit_status": "ACTUAL_RECORDED_UNVERIFIED", "realized_financial_savings_claimed": False}, "MANUAL")
+
+
+def verify_benefit_record(username: str, tier: str, record_id: str, verification_evidence: Sequence[str], reviewer_comment: str = "") -> dict[str, Any]:
+    access = _session_authorize(username, tier, "approve")
+    records = list(_state_list("records"))
+    record = next((item for item in records if item.get("record_id") == str(record_id) and item.get("record_type") == "benefit_realization"), None)
+    if not record:
+        raise IndustrialIntelligenceError("Benefit record does not exist in this workspace.")
+    if str(record.get("created_by", "")).casefold() == access["actor"].casefold():
+        raise PermissionError("The benefit record creator cannot independently verify the outcome.")
+    refs = [_required_text(item, "verification evidence reference", 240) for item in verification_evidence]
+    if not refs:
+        raise IndustrialIntelligenceError("Independent benefit verification requires source evidence.")
+    verifications = list(_state_list("benefit_verifications"))
+    if any(item.get("record_id") == str(record_id) for item in verifications):
+        raise IndustrialIntelligenceError("A verification decision already exists for this benefit record.")
+    review = {"verification_id": "IIV-" + uuid.uuid4().hex[:12].upper(), "record_id": str(record_id), "reviewer": access["actor"], "role": access["role"], "evidence_refs": refs, "comment": str(reviewer_comment or "")[:2000], "status": "VERIFIED_BY_INDEPENDENT_REVIEWER", "reviewed_at": _utc_now()}
+    verifications.append(review)
+    _save_state_list(username, tier, "benefit_verifications", verifications, action="approve")
+    _append_audit(username, tier, "benefit.independently_verified", str(record_id), review)
+    return copy.deepcopy(review)
 
 
 def register_model_version(username: str, tier: str, name: str, version: str, model_type: str, definition: Mapping[str, Any], assumptions: Sequence[str], test_cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -1526,6 +1547,19 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 ui.success(f"Recorded {benefit['record_id']} as {benefit['payload']['benefit_status']}.")
             except Exception as exc:
                 ui.error(f"Benefit record was not saved: {exc}")
+        benefit_records = [item for item in _state_list("records") if item.get("record_type") == "benefit_realization"]
+        unverified_benefits = [item for item in benefit_records if not any(v.get("record_id") == item.get("record_id") for v in _state_list("benefit_verifications"))]
+        if unverified_benefits:
+            ui.markdown("#### Independent benefit review")
+            benefit_to_review = ui.selectbox("Benefit record", [item["record_id"] for item in unverified_benefits], key="shoir_ii_benefit_review_id")
+            review_evidence = ui.text_input("Independent verification evidence references", key="shoir_ii_benefit_review_refs")
+            review_comment = ui.text_input("Reviewer comment", key="shoir_ii_benefit_review_comment")
+            if ui.button("Independently verify benefit (Owner/Admin/Approver)", key="shoir_ii_benefit_review"):
+                try:
+                    review = verify_benefit_record(username, tier, benefit_to_review, [item.strip() for item in review_evidence.split(",") if item.strip()], review_comment)
+                    ui.success(f"Independent review recorded: {review['verification_id']}.")
+                except Exception as exc:
+                    ui.error(f"Independent review was not recorded: {exc}")
 
     with workspace_tabs[3]:
         ui.markdown("#### Industry configuration")
