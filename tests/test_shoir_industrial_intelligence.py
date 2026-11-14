@@ -100,15 +100,27 @@ def _payloads():
     }
 
 
-def test_catalog_contains_all_16_tools_and_search_aliases():
+def test_catalog_contains_16_unique_tools_and_non_overlapping_stable_ids():
+    from shoir_tool_registry import TOOL_TARGETS
+
     assert len(ii.TOOL_CATALOG) == 16
     assert len({tool["id"] for tool in ii.TOOL_CATALOG}) == 16
+    assert len({tool["tool_code"] for tool in ii.TOOL_CATALOG}) == 16
+    legacy_ids = {tool["tool_id"] for tool in TOOL_TARGETS}
+    new_ids = {tool["tool_code"] for tool in ii.TOOL_CATALOG}
+    assert len(legacy_ids) == 100
+    assert legacy_ids == {f"T{index:03d}" for index in range(1, 101)}
+    assert not legacy_ids.intersection(new_ids)
+    assert new_ids == {f"II-{index:03d}" for index in range(1, 17)}
     assert sum(len(suite["tools"]) for suite in ii.SUITES) == 16
     assert len(ii.SUITES) == 6
     assert len(ii.SHARED_CAPABILITIES) == 8
     assert len(ii.INDUSTRY_TEMPLATES) == 5
     assert ii.search_tools("turnaround recovery optimizer")[0]["id"] == "turnaround"
     assert any(item["id"] == "data-trust" for item in ii.search_tools("measurement reconciliation"))
+    assert ii.tool_definition("II-001")["id"] == "mission-control"
+    assert ii.search_tools("II-016")[0]["id"] == "benchmarking"
+    assert ii.analyze_tool("II-001", _payloads()["mission-control"])["tool_code"] == "II-001"
 
 
 @pytest.mark.parametrize("tool_id", [tool["id"] for tool in ii.TOOL_CATALOG])
