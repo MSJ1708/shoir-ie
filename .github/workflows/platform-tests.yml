@@ -2,9 +2,13 @@ name: Shoir-IE Platform Tests
 
 on:
   push:
-    branches: ["feature/**"]
+    branches: ["main", "staging-e2e-20261019"]
   pull_request:
-    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
+    branches: ["main", "staging-e2e-20261019"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

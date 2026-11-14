@@ -2,12 +2,12 @@ name: Production v9 compatibility security backport
 
 on:
   pull_request:
-    branches: ["main", "staging-e2e-20261019", "feat/shoir-ie-release-hardening-20261105"]
+    branches: ["main", "staging-e2e-20261019"]
     paths:
       - "supabase/production-backports/shoir-persistence-v9/**"
       - ".github/workflows/production-v9-security-backport.yml"
   push:
-    branches: ["feat/**", "fix/**", "staging-e2e-20261019"]
+    branches: ["main", "staging-e2e-20261019"]
     paths:
       - "supabase/production-backports/shoir-persistence-v9/**"
       - ".github/workflows/production-v9-security-backport.yml"
@@ -15,6 +15,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   production-v9-security-backport:

@@ -2,8 +2,14 @@ name: Shoir-IE validation
 
 on:
   push:
+    branches: ["main", "staging-e2e-20261019"]
   pull_request:
+    branches: ["main", "staging-e2e-20261019"]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
