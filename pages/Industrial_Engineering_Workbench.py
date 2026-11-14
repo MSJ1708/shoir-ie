@@ -273,17 +273,20 @@ if search.strip():
         "resource passport", "industrial resource loss", "resource efficiency",
         "resource recovery", "resource cascade optimization", "waste heat recovery",
         "water reuse", "industrial resource optimization", "industrial resource resilience",
+        "industrial symbiosis",
         "resource quality forecasting", "supplier reliability", "resource matching",
         "industrial network optimization", "industrial cluster intelligence",
         "ذكاء الموارد الصناعية", "تبادل الموارد الصناعية", "استعادة الموارد", "كفاءة الموارد",
     )
     _resource_alias_match = any(q in alias or alias in q for alias in _resource_aliases)
+    # Explain the entitlement boundary whenever a user searches a resource alias,
+    # even when a different category filter hides the module row.
+    if _resource_alias_match and not tier_allows(RAW_TIER, "Enterprise"):
+        st.warning("🔒 Industrial Resource Intelligence requires the Enterprise capability level.")
     if _resource_alias_match and category in {"All", "Resource Intelligence"}:
         _resource_row = available.loc[available["Module"] == "Industrial Resource Intelligence"]
         if not _resource_row.empty and "Industrial Resource Intelligence" not in set(filtered["Module"]):
             filtered = pd.concat([filtered, _resource_row], ignore_index=True).drop_duplicates(subset=["Module"])
-        if not tier_allows(RAW_TIER, "Enterprise"):
-            st.sidebar.warning("🔒 Industrial Resource Intelligence requires the Enterprise capability level.")
 
 labels = filtered["Module"].tolist()
 if not labels:
@@ -1936,6 +1939,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     evaluate_kpi_alerts,
                                 )
                                 from shoir_resilience_suite import simulate_disruption_scenarios
+from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
                                 if selected_tool["tool_id"] == "T007":
                                     result = classify_diagnostic(diagnostic_inspector_text)
                                     result["reported_subsystem"] = diagnostic_category
@@ -2396,7 +2400,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         not isinstance(item, dict) for item in existing_open_alerts
                                     ):
                                         raise ValueError("Saved KPI alert state is invalid; clear the existing alert state and rerun.")
-                                    result = evaluate_kpi_alerts({
+                                    result = evaluate_kpi_alerts_with_dedup({
                                         "kpis": evaluator_records,
                                         "as_of": kpi_as_of.strip() or None,
                                         "existing_alerts": existing_open_alerts,
