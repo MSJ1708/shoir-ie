@@ -664,3 +664,29 @@ def test_analysis_handoff_initializes_standard_workbook_tabs_without_removing_ta
     assert expected.issubset(set(session["industrial_workbook"]))
     assert handoff["workbook_sheet"] in session["industrial_workbook"]
     assert session["industrial_workbook"][handoff["workbook_sheet"]]["Field"].str.contains("input_units|event_id", regex=True).any()
+
+
+
+def test_all_tool_names_and_aliases_are_searchable():
+    for tool in ii.TOOL_CATALOG:
+        exact = ii.search_tools(tool["name"])
+        assert any(item["id"] == tool["id"] for item in exact), tool["name"]
+        for alias in tool["aliases"]:
+            results = ii.search_tools(alias)
+            assert any(item["id"] == tool["id"] for item in results), (tool["id"], alias)
+
+
+def test_existing_workbench_route_reaches_suite_before_generic_fallback():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    workbench_source = (root / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
+    platform_source = (root / "industrial_platform.py").read_text(encoding="utf-8")
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+    assert "search_tools(q)" in workbench_source
+    assert 'st.session_state["shoir_pending_industrial_tool"] = exact_match["id"]' in workbench_source
+    dispatcher_start = platform_source.index("def render_module(")
+    suite_route = platform_source.index('if module == "Industrial Operating System":', dispatcher_start)
+    generic_fallback = platform_source.index("render_module_data_exchange(module, st, tier, username)", dispatcher_start)
+    assert suite_route < generic_fallback
+    assert "render_industrial_intelligence_suite(st, username, tier)" in platform_source[suite_route:generic_fallback]
+    assert "render_industrial_intelligence_suite(" in app_source
