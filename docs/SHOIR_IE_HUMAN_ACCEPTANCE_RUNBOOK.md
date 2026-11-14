@@ -171,7 +171,7 @@ supabase db push --remote
 
 Then deploy only the persistence function to staging:
 ```bash
-supabase functions deploy shoir-persistence --project-ref hfhrosthswcybccepmak --use-api --no-verify-jwt
+supabase functions deploy shoir-persistence --remote=hfhrosthswcybccepmak --use-api --no-verify-jwt
 ```
 
 The explicit `--no-verify-jwt` preserves the existing staging function's configured platform-JWT behavior. The function relies on its application-level session-token validation, which must remain covered by the security tests and authenticated E2E workflow. Do not use the flag for other functions or environments without reviewing their authentication design.
