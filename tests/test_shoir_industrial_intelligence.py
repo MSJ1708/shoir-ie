@@ -1040,3 +1040,64 @@ def test_data_trust_reconciliation_rejects_negative_proposed_values():
     }
     with pytest.raises(ii.IndustrialIntelligenceError, match="would be negative"):
         ii.analyze_tool("data-trust", payload)
+
+
+
+def test_shift_handover_persists_unresolved_issues_and_requires_incoming_acknowledgement(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-outgoing-supervisor", "owner")
+    handover = ii.record_shift_handover(
+        "synthetic-outgoing-supervisor", "Enterprise",
+        "Night Shift", "Day Shift",
+        [
+            {"issue_id": "ISSUE-101", "owner": "synthetic-maintenance", "status": "OPEN", "description": "Pump vibration requires inspection."},
+            {"issue_id": "ISSUE-102", "owner": "synthetic-process", "status": "IN_PROGRESS", "description": "Cooling water balance investigation."},
+        ],
+        incoming_shift_owner="synthetic-incoming-supervisor",
+        provenance="SYNTHETIC",
+    )
+    pending = ii.shift_handover_status("synthetic-outgoing-supervisor", "Enterprise", handover["record_id"])
+    assert pending["status"] == "ACKNOWLEDGEMENT_REQUIRED"
+    assert pending["pending_acknowledgement_count"] == 2
+
+    with pytest.raises(PermissionError, match="cannot acknowledge their own"):
+        ii.acknowledge_shift_handover(
+            "synthetic-outgoing-supervisor", "Enterprise", handover["record_id"], "ISSUE-101",
+        )
+
+    session["current_user"] = "synthetic-incoming-supervisor"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "engineer", "status": "active",
+            }]
+        },
+    )
+    ack = ii.acknowledge_shift_handover(
+        "synthetic-incoming-supervisor", "Enterprise", handover["record_id"],
+        "ISSUE-101", "Received and assigned for inspection.",
+    )
+    assert ack["payload"]["status"] == "ACKNOWLEDGED_NOT_CLOSED"
+    updated = ii.shift_handover_status(
+        "synthetic-incoming-supervisor", "Enterprise", handover["record_id"],
+    )
+    assert updated["pending_acknowledgement_count"] == 1
+    first_issue = next(item for item in updated["issues"] if item["issue_id"] == "ISSUE-101")
+    assert first_issue["acknowledgement_status"] == "ACKNOWLEDGED"
+    assert first_issue["issue_closed"] is False
+    with pytest.raises(ii.IndustrialIntelligenceError, match="already been acknowledged"):
+        ii.acknowledge_shift_handover(
+            "synthetic-incoming-supervisor", "Enterprise", handover["record_id"], "ISSUE-101",
+        )
+
+
+def test_shift_handover_is_rejected_in_personal_workspace(monkeypatch):
+    _configure_personal_session(monkeypatch, "synthetic-personal-shift-user", "owner")
+    with pytest.raises(PermissionError, match="requires an active organization workspace"):
+        ii.record_shift_handover(
+            "synthetic-personal-shift-user", "Enterprise",
+            "Shift A", "Shift B",
+            [{"issue_id": "ISSUE-1", "status": "OPEN"}],
+        )
