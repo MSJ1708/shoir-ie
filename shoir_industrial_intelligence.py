@@ -1267,13 +1267,14 @@ def add_relationship(username: str, tier: str, source_id: str, target_id: str, r
     return copy.deepcopy(edge)
 
 
-def create_operational_event(username: str, tier: str, event_type: str, description: str, entity_id: str = "", timestamp: str | None = None, provenance: str = "MANUAL", evidence_refs: Sequence[str] = ()) -> dict[str, Any]:
+def create_operational_event(username: str, tier: str, event_type: str, description: str, entity_id: str = "", timestamp: str | None = None, provenance: str = "MANUAL", evidence_refs: Sequence[str] = (), source_ref: str = "") -> dict[str, Any]:
     _session_authorize(username, tier, "write")
     event_time = _iso_timestamp(timestamp, "event timestamp").isoformat() if timestamp else _utc_now()
     refs = [_required_text(item, "evidence reference", 240) for item in evidence_refs]
     if refs:
         refs = _require_evidence_refs(refs, "Operational event")
-    event = create_record(username, tier, "operational_event", event_type, {"event_type": _required_text(event_type, "event_type"), "description": _required_text(description, "description", 4000), "entity_id": str(entity_id or "").strip(), "event_timestamp": event_time, "evidence_refs": refs, "thread_node_type": "Event"}, provenance, entity_id=entity_id)
+    event_payload = {"event_type": _required_text(event_type, "event_type"), "description": _required_text(description, "description", 4000), "entity_id": str(entity_id or "").strip(), "event_timestamp": event_time, "source_timestamp": event_time, "evidence_refs": refs, "thread_node_type": "Event"}
+    event = create_record(username, tier, "operational_event", event_type, event_payload, provenance, source_ref=source_ref, entity_id=entity_id)
     events = list(_state_list("events"))
     events.append({**event, "event_timestamp": event_time})
     _save_state_list(username, tier, "events", events)
@@ -1326,6 +1327,7 @@ def approve_action(username: str, tier: str, action_id: str, comment: str = "") 
         raise IndustrialIntelligenceError("Action does not exist in this workspace.")
     if action.get("status") not in {"PROPOSED", "PENDING_APPROVAL"}:
         raise IndustrialIntelligenceError("Only proposed actions can receive approval.")
+    _require_evidence_refs(action.get("evidence_refs", []), "Action approval")
     if str(action.get("created_by", "")).casefold() == access["actor"].casefold():
         raise PermissionError("The action creator cannot approve their own action.")
     approvals = list(action.get("approvals", []))
@@ -1518,6 +1520,8 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
         raise IndustrialIntelligenceError("Model version is immutable and already exists.")
     if not isinstance(test_cases, Sequence) or isinstance(test_cases, (str, bytes)):
         raise IndustrialIntelligenceError("Model test_cases must be a sequence of test-case objects.")
+    if isinstance(assumptions, (str, bytes)) or not isinstance(assumptions, Sequence):
+        raise IndustrialIntelligenceError("Model assumptions must be a sequence of text statements.")
     tests = []
     for index, case in enumerate(test_cases, start=1):
         if not isinstance(case, Mapping):
