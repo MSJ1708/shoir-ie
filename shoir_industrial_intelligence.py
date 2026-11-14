@@ -924,6 +924,28 @@ def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, An
         raise
 
 
+def _require_evidence_refs(evidence_refs: Sequence[str], label: str) -> list[str]:
+    refs = [_required_text(item, f"{label} evidence reference", 240) for item in evidence_refs]
+    if not refs:
+        raise IndustrialIntelligenceError(f"{label} requires at least one evidence reference.")
+    records = _state_list("records")
+    available = set()
+    for record in records:
+        record_id = str(record.get("record_id") or "").strip()
+        source_ref = str(record.get("source_ref") or "").strip()
+        if record_id:
+            available.add(record_id)
+        if source_ref:
+            available.add(source_ref)
+    missing = sorted(set(refs) - available)
+    if missing:
+        raise IndustrialIntelligenceError(
+            f"{label} references evidence that is not registered in this workspace: {missing}. "
+            "Register the source as an evidence record first."
+        )
+    return refs
+
+
 def _append_audit(username: str, tier: str, event_type: str, record_id: str, payload: Mapping[str, Any]) -> str:
     access = _session_authorize(username, tier, "write")
     audits = list(_state_list("audit"))
@@ -1034,12 +1056,23 @@ def add_entity(username: str, tier: str, entity_type: str, entity_id: str, name:
     if existing:
         raise IndustrialIntelligenceError(f"Entity {business_id} already exists; create a versioned change record instead of overwriting it.")
     attrs = _json_safe(attributes)
+    provenance_value = _provenance(provenance)
+    source_ref = str(attrs.get("source_ref") or "").strip()
+    source_timestamp = str(attrs.get("source_timestamp") or "").strip()
+    if provenance_value in {"LIVE", "IMPORTED", "STALE"} and not source_ref:
+        raise IndustrialIntelligenceError(f"{provenance_value} entities require source_ref in attributes.")
+    if provenance_value in {"LIVE", "STALE"} and not source_timestamp:
+        raise IndustrialIntelligenceError(f"{provenance_value} entities require source_timestamp in attributes.")
+    if source_timestamp:
+        _iso_timestamp(source_timestamp, "entity source_timestamp")
     record = {
         "entity_id": business_id,
         "entity_type": node_type,
         "name": _required_text(name, "entity name", 180),
         "attributes": attrs,
-        "provenance": _provenance(provenance),
+        "source_ref": source_ref or None,
+        "source_timestamp": source_timestamp or None,
+        "provenance": provenance_value,
         "organization_id": access["organization_id"],
         "workspace_id": access["workspace_id"],
         "created_by": access["actor"],
@@ -1070,8 +1103,8 @@ def add_relationship(username: str, tier: str, source_id: str, target_id: str, r
     if state not in {"CONFIRMED", "SUSPECTED", "PROPOSED"}:
         raise IndustrialIntelligenceError("Relationship status must be CONFIRMED, SUSPECTED or PROPOSED.")
     refs = [_required_text(item, "evidence reference", 240) for item in evidence_refs]
-    if state == "CONFIRMED" and not refs:
-        raise IndustrialIntelligenceError("A CONFIRMED relationship requires at least one evidence reference.")
+    if state == "CONFIRMED":
+        refs = _require_evidence_refs(refs, "A CONFIRMED relationship")
     edge_id = "IIE-" + hashlib.sha256(f"{source}|{target}|{relation_name}".encode("utf-8")).hexdigest()[:14].upper()
     edges = list(_state_list("edges"))
     existing = next((item for item in edges if item.get("edge_id") == edge_id), None)
@@ -1181,8 +1214,8 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     if target == "VERIFIED":
         if action.get("status") != "IMPLEMENTED":
             raise PermissionError("An action must be recorded as IMPLEMENTED before independent verification.")
-        refs = [_required_text(item, "verification evidence reference", 240) for item in verification_evidence]
-        if not refs or not str(actual_result or "").strip():
+        refs = _require_evidence_refs(verification_evidence, "Verified action closure")
+        if not str(actual_result or "").strip():
             raise IndustrialIntelligenceError("Verified closure requires an actual result and verification evidence.")
         if str(action.get("created_by", "")).casefold() == access["actor"].casefold():
             raise PermissionError("The action creator cannot independently verify their own outcome.")
@@ -1209,7 +1242,14 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
         owner = str(barrier.get("owner") or "").strip()
         evidence = str(barrier.get("evidence_id") or "").strip()
         state = str(barrier.get("status") or "UNKNOWN").upper()
-        valid = bool(owner and evidence and state == "EFFECTIVE")
+        evidence_valid = False
+        if evidence:
+            try:
+                _require_evidence_refs([evidence], f"Barrier {index}")
+                evidence_valid = True
+            except IndustrialIntelligenceError:
+                evidence_valid = False
+        valid = bool(owner and evidence_valid and state == "EFFECTIVE")
         rows.append({"barrier_id": _required_text(barrier.get("barrier_id"), f"barrier {index} barrier_id"), "owner": owner or None, "evidence_id": evidence or None, "status": state, "counts_as_effective": valid})
         effectiveness.append(1.0 if valid else 0.0)
     initial = sev * like
@@ -1235,9 +1275,7 @@ def verify_benefit_record(username: str, tier: str, record_id: str, verification
         raise IndustrialIntelligenceError("Benefit record does not exist in this workspace.")
     if str(record.get("created_by", "")).casefold() == access["actor"].casefold():
         raise PermissionError("The benefit record creator cannot independently verify the outcome.")
-    refs = [_required_text(item, "verification evidence reference", 240) for item in verification_evidence]
-    if not refs:
-        raise IndustrialIntelligenceError("Independent benefit verification requires source evidence.")
+    refs = _require_evidence_refs(verification_evidence, "Independent benefit verification")
     verifications = list(_state_list("benefit_verifications"))
     if any(item.get("record_id") == str(record_id) for item in verifications):
         raise IndustrialIntelligenceError("A verification decision already exists for this benefit record.")
@@ -1304,10 +1342,10 @@ def record_cause_effect_investigation(username: str, tier: str, title: str, obse
         evidence = [_required_text(value, "evidence reference", 240) for value in item.get("supporting_evidence", [])]
         counter = [_required_text(value, "counter-evidence reference", 240) for value in item.get("contradicting_evidence", [])]
         validation = str(item.get("validation_status") or "SUSPECTED").upper()
-        if validation not in {"SUSPECTED", "SUPPORTED", "CONFIRMED"}:
-            raise IndustrialIntelligenceError("Cause-effect validation_status must be SUSPECTED, SUPPORTED or CONFIRMED.")
-        if validation == "CONFIRMED" and (not evidence or not item.get("independent_review")):
-            raise IndustrialIntelligenceError("A confirmed causal relationship requires supporting evidence and independent review.")
+        if validation not in {"SUSPECTED", "SUPPORTED"}:
+            raise IndustrialIntelligenceError("Cause-effect links must be recorded as SUSPECTED or SUPPORTED; confirmation requires a separate independent review workflow.")
+        if validation == "SUPPORTED":
+            evidence = _require_evidence_refs(evidence, f"Cause-effect candidate {index}")
         links.append({"from": _required_text(item.get("from"), "candidate from"), "to": _required_text(item.get("to"), "candidate to"), "relationship": str(item.get("relationship") or "POSSIBLE_CAUSE"), "supporting_evidence": evidence, "contradicting_evidence": counter, "validation_status": validation})
     return create_record(username, tier, "cause_effect_investigation", title, {"title": _required_text(title, "title"), "observations": [_required_text(item, "observation", 1000) for item in observations], "candidate_relationships": links, "causal_claim": "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED"}, "MANUAL")
 
