@@ -50,7 +50,7 @@ Original measurement inputs are not silently changed by Data Trust. Process even
 
 ## Six suites and 16 tool engines
 
-The catalogue and search aliases are maintained in TOOL_CATALOG. Tool analysis is available through analyze_tool(tool_id, payload). Results include status, calculation timestamp, core version, input hash and limitations.
+The catalogue and search aliases are maintained in TOOL_CATALOG. Each specialist capability has a stable II-001 through II-016 identifier, separate from the existing T001 through T100 registry; both namespaces are tested for uniqueness and non-overlap. Tool analysis is available through analyze_tool(tool_id_or_code, payload). Results include status, calculation timestamp, core version, input hash and limitations.
 
 | Suite | Tool | Deterministic foundation |
 |---|---|---|
@@ -101,6 +101,7 @@ The shared service module currently provides:
 - Immutable model-version registration with definition hash, assumptions and expected-versus-actual test comparisons; a different authorized reviewer is required to validate.
 - Operational event records and event timeline state.
 - Evidence retrieval context for the existing Copilot; record IDs are citations, not a generated AI conclusion.
+- Analysis handoff to the existing Industrial Workbook. The service preserves existing workbook sheets, initializes the nine standard engineering tabs only for a new workbook, adds a provenance/hash-labelled result sheet, and persists through the active managed workspace.
 
 The Copilot context service retrieves only records available in the current authorized workspace. It does not invent records, assert a root cause, approve an engineering change, or execute a plant action.
 
