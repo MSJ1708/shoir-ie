@@ -1282,6 +1282,18 @@ def test_active_dataset_dependency_is_attached_to_saved_records_and_thread_nodes
         if item.get("metadata", {}).get("industrial_record_id") == record["record_id"]
     )
     assert node["metadata"]["dataset_dependency_status"] == "CURRENT"
+    assert len(record["dataset_thread_nodes"]) == 1
+    dataset_node_id = record["dataset_thread_nodes"][0]
+    dataset_node = next(item for item in session["global_thread_nodes"] if item["node_id"] == dataset_node_id)
+    assert dataset_node["node_type"] == "Dataset"
+    assert dataset_node["metadata"]["dataset_id"] == "DS-ABCDEF123456"
+    assert dataset_node["metadata"]["version"] == 1
+    assert any(
+        edge.get("source_id") == dataset_node_id
+        and edge.get("target_id") == record["thread_node_id"]
+        and edge.get("relation") == "INPUT_TO"
+        for edge in session["global_thread_edges"]
+    )
 
 
 def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(monkeypatch):
@@ -1323,6 +1335,26 @@ def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(
     )
     assert node["status"] == "Stale"
     assert node["metadata"]["dataset_dependency_status"] == "STALE"
+    dataset_node = next(
+        item for item in session["global_thread_nodes"]
+        if item.get("node_type") == "Dataset"
+        and item.get("metadata", {}).get("dataset_id") == "DS-ABCDEF123456"
+    )
+    assert dataset_node["status"] == "Superseded"
+    assert dataset_node["metadata"]["dataset_dependency_status"] == "SUPERSEDED"
+    current_dataset_node = next(
+        item for item in session["global_thread_nodes"]
+        if item.get("node_type") == "Dataset"
+        and item.get("metadata", {}).get("dataset_id") == "DS-ABCDEF123456"
+        and item.get("metadata", {}).get("version") == 2
+    )
+    assert current_dataset_node["status"] == "Current"
+    assert any(
+        edge.get("source_id") == dataset_node["node_id"]
+        and edge.get("target_id") == node["node_id"]
+        and edge.get("relation") == "INPUT_TO"
+        for edge in session["global_thread_edges"]
+    )
     with pytest.raises(ii.IndustrialIntelligenceError, match="stale dataset-derived evidence"):
         ii._require_evidence_refs([record["record_id"]], "Decision evidence")
 
