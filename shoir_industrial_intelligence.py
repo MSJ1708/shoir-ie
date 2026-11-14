@@ -1850,7 +1850,34 @@ def review_cause_effect_investigation(
     return {"review_record": review, "decision": status, "source_investigation_id": str(investigation_record_id)}
 
 
-def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 15) -> dict[str, Any]:
+def _copilot_safe_payload(value: Any, max_chars: int = 2400) -> Any:
+    """Redact credential-like fields and bound data sent to a configured AI provider."""
+    sensitive_tokens = ("password", "secret", "token", "api_key", "apikey", "credential", "private_key", "access_key", "authorization", "cookie")
+    def redact(item: Any, depth: int = 0) -> Any:
+        if depth > 8:
+            return "[DEPTH_LIMIT]"
+        if isinstance(item, Mapping):
+            safe = {}
+            for key, nested in item.items():
+                label = str(key)
+                if any(token in label.casefold() for token in sensitive_tokens):
+                    safe[label] = "[REDACTED]"
+                else:
+                    safe[label] = redact(nested, depth + 1)
+            return safe
+        if isinstance(item, (list, tuple)):
+            return [redact(nested, depth + 1) for nested in list(item)[:100]]
+        if isinstance(item, str):
+            return item[:1000]
+        return _json_safe(item)
+    cleaned = redact(value)
+    encoded = json.dumps(cleaned, ensure_ascii=False, default=str)
+    if len(encoded) > max_chars:
+        return {"truncated": True, "preview": encoded[:max_chars]}
+    return cleaned
+
+
+def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 10) -> dict[str, Any]:
     _session_authorize(username, tier, "read")
     term = str(query or "").strip().casefold()
     if not term:
@@ -1859,15 +1886,51 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
     tokens = [token for token in re.findall(r"[a-z0-9_-]{3,}", term) if token]
     matches = []
     for row in records:
-        haystack = json.dumps({"name": row.get("name"), "type": row.get("record_type"), "payload": row.get("payload")}, ensure_ascii=False, default=str).casefold()
+        searchable = {"name": row.get("name"), "type": row.get("record_type"), "payload": row.get("payload")}
+        haystack = json.dumps(searchable, ensure_ascii=False, default=str).casefold()
         score = sum(1 for token in tokens if token in haystack)
         if score:
             matches.append((score, row))
     matches.sort(key=lambda item: (-item[0], str(item[1].get("created_at") or "")))
+    selected_rows = matches[:max(1, min(15, int(limit)))]
     results = []
-    for score, row in matches[:max(1, min(50, int(limit)))]:
-        results.append({"citation_id": row.get("record_id"), "record_type": row.get("record_type"), "name": row.get("name"), "created_at": row.get("created_at"), "provenance": row.get("provenance"), "source_ref": row.get("source_ref"), "payload": row.get("payload"), "match_score": score})
-    return {"status": "EVIDENCE_RETRIEVED" if results else "INSUFFICIENT_MATCHING_EVIDENCE", "query": query, "citations": results, "answer_boundary": "This is evidence retrieval context, not an AI-generated causal conclusion. Cite record IDs and disclose missing evidence."}
+    matched_node_ids = set()
+    for score, row in selected_rows:
+        node_id = str(row.get("thread_node_id") or "")
+        if node_id:
+            matched_node_ids.add(node_id)
+        results.append({
+            "citation_id": row.get("record_id"),
+            "record_type": row.get("record_type"),
+            "name": row.get("name"),
+            "created_at": row.get("created_at"),
+            "provenance": row.get("provenance"),
+            "source_ref": row.get("source_ref"),
+            "source_timestamp": row.get("source_timestamp"),
+            "payload": _copilot_safe_payload(row.get("payload", {})),
+            "match_score": score,
+        })
+    graph = thread_snapshot(username, tier)
+    node_by_id = {str(item.get("node_id") or ""): item for item in graph.get("nodes", [])}
+    linked_edges = []
+    linked_ids = set(matched_node_ids)
+    for edge in graph.get("edges", []):
+        source = str(edge.get("source_id") or "")
+        target = str(edge.get("target_id") or "")
+        if source in matched_node_ids or target in matched_node_ids:
+            linked_edges.append(edge)
+            linked_ids.update((source, target))
+    linked_nodes = [
+        _copilot_safe_payload(node_by_id[node_id], 1200)
+        for node_id in linked_ids if node_id in node_by_id
+    ]
+    return {
+        "status": "EVIDENCE_RETRIEVED" if results else "INSUFFICIENT_MATCHING_EVIDENCE",
+        "query": query,
+        "citations": results,
+        "digital_thread": {"nodes": linked_nodes, "relationships": [_copilot_safe_payload(edge, 800) for edge in linked_edges[:40]]},
+        "answer_boundary": "This is workspace-scoped evidence retrieval, not an AI-generated causal conclusion. Cite record IDs, distinguish observed facts from hypotheses, and disclose missing or contradictory evidence.",
+    }
 
 
 def thread_snapshot(username: str, tier: str) -> dict[str, Any]:
