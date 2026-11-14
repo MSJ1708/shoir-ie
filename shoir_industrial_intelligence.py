@@ -1143,6 +1143,8 @@ def create_action(username: str, tier: str, title: str, owner: str, due_date: st
     if isinstance(required_approvals, bool) or not 1 <= int(required_approvals) <= 3:
         raise IndustrialIntelligenceError("required_approvals must be between 1 and 3.")
     refs = [_required_text(item, "evidence reference", 240) for item in evidence_refs]
+    if refs:
+        refs = _require_evidence_refs(refs, "Action")
     action_id = "IIA-" + uuid.uuid4().hex[:12].upper()
     row = {
         "action_id": action_id,
@@ -1515,13 +1517,38 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
             target_id = ui.selectbox("Target entity", target_options, key="shoir_ii_edge_target") if target_options else ""
             relation = ui.text_input("Relationship", value="DEPENDS_ON", key="shoir_ii_edge_relation")
             relation_status = ui.selectbox("Relationship status", ["CONFIRMED", "SUSPECTED", "PROPOSED"], key="shoir_ii_edge_status")
-            evidence = ui.text_input("Evidence reference(s), comma-separated", key="shoir_ii_edge_evidence")
+            evidence = ui.text_input("Evidence record ID(s) or registered source reference(s)", key="shoir_ii_edge_evidence")
             if ui.button("Create Digital Thread relationship", disabled=not source_id or not target_id, key="shoir_ii_edge_save"):
                 try:
                     edge = add_relationship(username, tier, source_id, target_id, relation, relation_status, [item.strip() for item in evidence.split(",") if item.strip()])
                     ui.success(f"Relationship {edge['edge_id']} saved.")
                 except Exception as exc:
                     ui.error(f"Relationship was not saved: {exc}")
+        ui.markdown("#### Register evidence in the active workspace")
+        ev1, ev2 = ui.columns(2)
+        with ev1:
+            evidence_name = ui.text_input("Evidence name", key="shoir_ii_evidence_name")
+            evidence_source = ui.text_input("Source reference / document ID", key="shoir_ii_evidence_source")
+            evidence_provenance = ui.selectbox("Evidence provenance", list(PROVENANCE), index=2, key="shoir_ii_evidence_provenance")
+        with ev2:
+            evidence_timestamp = ui.text_input("Source timestamp (timezone-aware ISO-8601)", key="shoir_ii_evidence_timestamp")
+            evidence_description = ui.text_area("Evidence description / scope", height=80, key="shoir_ii_evidence_description")
+            if ui.button("Register evidence record", key="shoir_ii_evidence_save"):
+                try:
+                    evidence_record = create_record(
+                        username, tier, "evidence", evidence_name,
+                        {"description": evidence_description, "thread_node_type": "Document", "source_timestamp": evidence_timestamp},
+                        provenance=evidence_provenance, source_ref=evidence_source,
+                    )
+                    ui.success(f"Evidence registered: {evidence_record['record_id']}. Use this ID on confirmed relationships and verification steps.")
+                except Exception as exc:
+                    ui.error(f"Evidence was not registered: {exc}")
+        evidence_records = [item for item in _state_list("records") if item.get("record_type") == "evidence"]
+        if evidence_records:
+            ui.dataframe(pd.DataFrame([
+                {"Evidence ID": item.get("record_id"), "Name": item.get("name"), "Source": item.get("source_ref"), "Provenance": item.get("provenance"), "Created": item.get("created_at")}
+                for item in evidence_records
+            ]), use_container_width=True, hide_index=True)
         try:
             graph = thread_snapshot(username, tier)
             ui.metric("Industrial entities", graph["record_nodes"])
@@ -1565,7 +1592,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                         ui.error(f"Approval was not recorded: {exc}")
             transition = ui.selectbox("Move action to", ["IN_PROGRESS", "IMPLEMENTED", "CLOSED", "VERIFIED", "BLOCKED"], key="shoir_ii_action_transition")
             actual = ui.text_area("Actual result / verification note", key="shoir_ii_action_actual")
-            verify_refs = ui.text_input("Verification evidence references", key="shoir_ii_verify_refs")
+            verify_refs = ui.text_input("Verification evidence record ID(s) / source references", key="shoir_ii_verify_refs")
             if ui.button("Update action status", key="shoir_ii_action_update"):
                 try:
                     updated = update_action(username, tier, selected_action, transition, actual, [item.strip() for item in verify_refs.split(",") if item.strip()])
