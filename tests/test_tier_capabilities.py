@@ -253,7 +253,7 @@ def test_all_app_subscription_features_have_explicit_matching_shared_policies():
     minimum = _app_minimum_tier_by_module()
     report = audit_module_entitlement_coverage(minimum.keys())
 
-    assert len(minimum) == 96
+    assert len(minimum) == 97
     assert report["status"] == "COMPLETE"
     assert report["total_modules"] == 96
     assert report["unmapped_modules"] == []
