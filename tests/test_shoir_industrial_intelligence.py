@@ -994,3 +994,49 @@ def test_digital_thread_edge_rolls_back_when_managed_save_fails(monkeypatch):
         )
     assert ii._state_list("edges") == before_edges
     assert session[thread._keys()["edges"]] == before_graph_edges
+
+
+
+def test_data_trust_proposes_explicit_balance_reconciliation_without_mutating_originals():
+    payload = {
+        "measurements": [
+            {"meter_id": "FM-REC-01", "value": 100, "unit": "m3/h", "source": "METER-A", "timestamp": "2026-10-01T08:00:00Z", "provenance": "SYNTHETIC"},
+        ],
+        "balances": [{
+            "name": "Synthetic cooling water balance",
+            "input": 100,
+            "output": 88,
+            "losses": 10,
+            "unit": "m3/h",
+            "tolerance": 0.5,
+            "reconciliation": {"adjustment_target": "output"},
+        }],
+    }
+    original_measurements = [dict(row) for row in payload["measurements"]]
+    original_balance = dict(payload["balances"][0])
+    result = ii.analyze_tool("data-trust", payload)
+    proposal = result["reconciliation_proposals"][0]
+    assert proposal["status"] == "PROPOSED_NOT_APPLIED_NOT_VERIFIED"
+    assert proposal["method"] == "RESIDUAL_ASSIGNED_TO_EXPLICITLY_SELECTED_MEASUREMENT"
+    assert proposal["original_target_value"] == pytest.approx(88)
+    assert proposal["proposed_target_value"] == pytest.approx(90)
+    assert proposal["adjustment"] == pytest.approx(2)
+    assert proposal["proposed_residual"] == pytest.approx(0)
+    assert proposal["approval_required"] is True
+    assert result["original_measurements"] == original_measurements
+    assert payload["balances"][0] == original_balance
+    assert result["originals_modified"] is False
+
+
+def test_data_trust_reconciliation_rejects_negative_proposed_values():
+    payload = {
+        "measurements": [
+            {"meter_id": "FM-REC-02", "value": 10, "unit": "m3/h", "source": "METER-B", "timestamp": "2026-10-01T08:00:00Z", "provenance": "SYNTHETIC"},
+        ],
+        "balances": [{
+            "name": "Impossible balance", "input": 10, "output": 15, "losses": 1,
+            "unit": "m3/h", "reconciliation": {"adjustment_target": "losses"},
+        }],
+    }
+    with pytest.raises(ii.IndustrialIntelligenceError, match="would be negative"):
+        ii.analyze_tool("data-trust", payload)
