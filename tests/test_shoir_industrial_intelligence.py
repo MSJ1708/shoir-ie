@@ -334,7 +334,8 @@ def test_confirmed_relationship_requires_existing_nodes_and_evidence(monkeypatch
     ii.add_entity("synthetic-owner", "Enterprise", "Process", "PROC-01", "Cooling", {"unit": "A"})
     with pytest.raises(ii.IndustrialIntelligenceError, match="evidence"):
         ii.add_relationship("synthetic-owner", "Enterprise", "ASSET-01", "PROC-01", "SERVES", "CONFIRMED", [])
-    edge = ii.add_relationship("synthetic-owner", "Enterprise", "ASSET-01", "PROC-01", "SERVES", "CONFIRMED", ["SYNTHETIC:relationship-test"])
+    evidence = ii.create_record("synthetic-owner", "Enterprise", "evidence", "Inspection report", {"source": "synthetic fixture"}, provenance="SYNTHETIC")
+    edge = ii.add_relationship("synthetic-owner", "Enterprise", "ASSET-01", "PROC-01", "SERVES", "CONFIRMED", [evidence["record_id"]])
     assert edge["status"] == "CONFIRMED"
     assert edge["evidence_refs"] == ["SYNTHETIC:relationship-test"]
 
@@ -414,7 +415,8 @@ def test_action_approval_is_independent_and_verification_follows_implementation(
         ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "VERIFIED", "Done", ["SYNTHETIC:verification"])
     ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "IN_PROGRESS")
     ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "IMPLEMENTED", "Inspection executed")
-    verified = ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "VERIFIED", "Inspection passed", ["SYNTHETIC:verification"])
+    verification_evidence = ii.create_record("synthetic-approver", "Enterprise", "evidence", "Independent inspection verification", {"result": "PASS"}, provenance="SYNTHETIC")
+    verified = ii.update_action("synthetic-approver", "Enterprise", action["action_id"], "VERIFIED", "Inspection passed", [verification_evidence["record_id"]])
     assert verified["status"] == "VERIFIED"
     assert verified["verification"]["verifier"] == "synthetic-approver"
 
@@ -473,7 +475,8 @@ def test_actual_benefit_requires_independent_reviewer_and_evidence(monkeypatch):
             }]
         },
     )
-    review = ii.verify_benefit_record("synthetic-benefit-approver", "Enterprise", record["record_id"], ["SYNTHETIC:independent-evidence"])
+    verification_evidence = ii.create_record("synthetic-benefit-approver", "Enterprise", "evidence", "Independent meter review", {"review": "synthetic independent review"}, provenance="SYNTHETIC")
+    review = ii.verify_benefit_record("synthetic-benefit-approver", "Enterprise", record["record_id"], [verification_evidence["record_id"]])
     assert review["status"] == "VERIFIED_BY_INDEPENDENT_REVIEWER"
 
 
@@ -499,9 +502,10 @@ def test_copilot_retrieves_authorized_records_with_citations(monkeypatch):
 
 def test_risk_barrier_record_remains_a_screen_not_formal_safety_approval(monkeypatch):
     _configure_personal_session(monkeypatch)
+    evidence = ii.create_record("synthetic-owner", "Enterprise", "evidence", "Barrier inspection", {"inspection": "synthetic passed"}, provenance="SYNTHETIC")
     record = ii.record_risk_barrier(
         "synthetic-owner", "Enterprise", "Synthetic pressure excursion", 4, 3,
-        [{"barrier_id": "B-01", "owner": "engineer-01", "evidence_id": "SYNTHETIC:inspection", "status": "EFFECTIVE"}],
+        [{"barrier_id": "B-01", "owner": "engineer-01", "evidence_id": evidence["record_id"], "status": "EFFECTIVE"}],
     )
     assert record["payload"]["formal_safety_approval"] is False
     assert record["payload"]["barriers"][0]["counts_as_effective"] is True
