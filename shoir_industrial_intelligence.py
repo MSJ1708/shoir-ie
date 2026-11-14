@@ -1671,15 +1671,6 @@ def invalidate_dataset_dependents(
     updated_records, stale_ids = mark_dataset_dependents_stale(
         previous_records, dataset_id, current_version, current_data_hash, current_version_fingerprint
     )
-    if not stale_ids:
-        return {
-            "status": "NO_STALE_DEPENDENTS",
-            "dataset_id": str(dataset_id).upper(),
-            "current_version": current_version,
-            "stale_record_count": 0,
-            "historical_outputs_preserved": True,
-        }
-
     graph_snapshot = _snapshot_thread_graph(username)
     try:
         stale_set = set(stale_ids)
@@ -1689,6 +1680,7 @@ def invalidate_dataset_dependents(
             current_version,
             current_data_hash,
             current_version_fingerprint,
+            access,
         )
         current_dependency = {
             "dataset_id": str(dataset_id).upper(),
@@ -1699,7 +1691,9 @@ def invalidate_dataset_dependents(
             "workspace_id": access["workspace_id"],
             "current_version_verified": True,
         }
-        _sync_dataset_thread_dependency(username, tier, current_dependency)
+        current_dataset_node_id = _sync_dataset_thread_dependency(
+            username, tier, current_dependency
+        )
         nodes = st.session_state.get(graph_snapshot["nodes_key"], [])
         for node in nodes:
             if not isinstance(node, Mapping):
@@ -1744,11 +1738,13 @@ def invalidate_dataset_dependents(
         _restore_thread_graph(graph_snapshot)
         raise
     return {
-        "status": "DEPENDENTS_MARKED_STALE",
+        "status": "DEPENDENTS_MARKED_STALE" if stale_ids else "NO_STALE_DEPENDENTS",
         "dataset_id": str(dataset_id).upper(),
         "current_version": current_version,
         "stale_record_count": len(stale_ids),
         "stale_record_ids": stale_ids,
+        "lineage_event_id": event_id,
+        "current_dataset_thread_node_id": current_dataset_node_id,
         "historical_outputs_preserved": True,
         "digital_thread_nodes_marked_stale": len(stale_ids),
         "superseded_dataset_version_nodes": superseded_dataset_nodes,
@@ -1853,6 +1849,7 @@ def _mark_dataset_thread_versions_superseded(
     current_version: int,
     current_data_hash: str,
     current_version_fingerprint: str,
+    access: Mapping[str, Any],
 ) -> int:
     """Keep historical dataset-version nodes but mark prior versions superseded."""
     import shoir_digital_thread as thread
@@ -1860,16 +1857,8 @@ def _mark_dataset_thread_versions_superseded(
     keys = thread.ensure_thread_state(username)
     nodes = st.session_state.get(keys["nodes"], [])
     updated = 0
-    active_org = st.session_state.get("shoir_active_organization_workspace")
-    organization_id = (
-        str(active_org.get("organization_id") or "").strip()
-        if isinstance(active_org, Mapping) else ""
-    )
-    workspace_id = (
-        str(active_org.get("organization_workspace_id") or "").strip()
-        if isinstance(active_org, Mapping)
-        else str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or "personal")
-    )
+    organization_id = str(access.get("organization_id") or "").strip()
+    workspace_id = str(access.get("workspace_id") or "").strip()
     for node in nodes:
         if not isinstance(node, Mapping):
             continue
