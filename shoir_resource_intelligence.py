@@ -3047,6 +3047,524 @@ def verify_engineering_assurance_record(record: Mapping[str, Any]) -> dict[str, 
     }
 
 
+
+
+def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a time-aware, disclosure-controlled industrial cluster graph.
+
+    This is a deterministic screening model over explicitly entered records. It
+    does not discover real participants, verify permits/routes, reserve supply,
+    certify chemistry, or authorize an industrial exchange.
+    """
+    if not isinstance(payload, Mapping):
+        raise ResourceValidationError("Cluster Twin input must be an object.")
+
+    as_of_text = _utc_timestamp(payload.get("as_of"), "as_of")
+    if not as_of_text:
+        raise ResourceValidationError("as_of must be an explicit timezone-aware ISO-8601 timestamp.")
+    as_of = datetime.fromisoformat(as_of_text)
+
+    def object_rows(name: str, *, required: bool = False, maximum: int = 20000) -> list[dict[str, Any]]:
+        raw = payload.get(name, [])
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+            raise ResourceValidationError(f"{name} must be a list of objects.")
+        if len(raw) > maximum:
+            raise ResourceValidationError(f"{name} may contain at most {maximum:,} records.")
+        if required and not raw:
+            raise ResourceValidationError(f"At least one {name} record is required.")
+        if any(not isinstance(item, Mapping) for item in raw):
+            raise ResourceValidationError(f"Every {name} item must be an object.")
+        return [dict(item) for item in raw]
+
+    def stable_id(row: Mapping[str, Any], fields: Sequence[str], label: str) -> str:
+        for field in fields:
+            value = _optional_text(row.get(field))
+            if value:
+                return _text(value, f"{label}.{field}")
+        raise ResourceValidationError(f"{label} requires a stable identifier ({' or '.join(fields)}).")
+
+    def disclosure(row: Mapping[str, Any], label: str) -> tuple[str, str | None]:
+        scope = str(row.get("disclosure_scope") or "PRIVATE").strip().upper()
+        if scope not in {"PRIVATE", "SHARED_WITH_CLUSTER"}:
+            raise ResourceValidationError(
+                f"{label}.disclosure_scope must be PRIVATE or SHARED_WITH_CLUSTER."
+            )
+        reference = _optional_text(row.get("sharing_approval_reference")) or None
+        if scope == "SHARED_WITH_CLUSTER" and not reference:
+            raise ResourceValidationError(
+                f"{label} cannot be shared without a sharing_approval_reference."
+            )
+        return scope, reference
+
+    def validity(row: Mapping[str, Any], label: str) -> tuple[str, str, str]:
+        start = _utc_timestamp(row.get("valid_from"), f"{label}.valid_from")
+        if not start:
+            raise ResourceValidationError(
+                f"{label}.valid_from is required; cluster availability must be time-bounded."
+            )
+        end = _utc_timestamp(row.get("valid_to"), f"{label}.valid_to")
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end) if end else None
+        if end_dt is not None and end_dt <= start_dt:
+            raise ResourceValidationError(f"{label}.valid_to must be later than valid_from.")
+        if as_of < start_dt:
+            state = "NOT_YET_VALID"
+        elif end_dt is not None and as_of >= end_dt:
+            state = "EXPIRED"
+        else:
+            state = "CURRENT"
+        return start, end or "", state
+
+    def provenance(row: Mapping[str, Any], label: str) -> str:
+        return _validated_input_provenance(row.get("provenance"), f"{label}.provenance")
+
+    def unique_records(
+        rows: Sequence[dict[str, Any]], fields: Sequence[str], label: str
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for index, row in enumerate(rows, start=1):
+            record_id = stable_id(row, fields, f"{label}[{index}]")
+            if record_id in result:
+                raise ResourceValidationError(f"Duplicate {label} identifier: {record_id}.")
+            result[record_id] = row
+        return result
+
+    raw_facilities = object_rows("facilities", required=True, maximum=5000)
+    raw_supplies = object_rows("supplies", maximum=10000)
+    raw_demands = object_rows("demands", maximum=10000)
+    raw_routes = object_rows("routes", maximum=20000)
+    raw_infrastructure = object_rows("infrastructure", maximum=10000)
+    raw_edges = object_rows("dependency_edges", maximum=30000)
+    raw_commitments = object_rows("active_commitments", maximum=20000)
+
+    facilities = unique_records(raw_facilities, ("facility_id", "id"), "facility")
+    supplies = unique_records(raw_supplies, ("supply_id", "resource_id", "id"), "supply")
+    demands = unique_records(raw_demands, ("demand_id", "id"), "demand")
+    routes = unique_records(raw_routes, ("route_id", "id"), "route")
+    infrastructure = unique_records(
+        raw_infrastructure, ("infrastructure_id", "asset_id", "id"), "infrastructure"
+    )
+
+    facility_state: dict[str, dict[str, Any]] = {}
+    for facility_id, row in facilities.items():
+        organization_id = _text(
+            row.get("organization_id"), f"facility {facility_id}.organization_id"
+        )
+        name = _text(row.get("name"), f"facility {facility_id}.name")
+        scope, share_ref = disclosure(row, f"facility {facility_id}")
+        _, _, window_state = validity(row, f"facility {facility_id}")
+        status = str(row.get("status") or "ACTIVE").strip().upper()
+        if status not in {"ACTIVE", "SUSPENDED", "CLOSED"}:
+            raise ResourceValidationError(
+                f"facility {facility_id}.status must be ACTIVE, SUSPENDED or CLOSED."
+            )
+        facility_state[facility_id] = {
+            "organization_id": organization_id,
+            "name": name,
+            "disclosure_scope": scope,
+            "sharing_reference": share_ref,
+            "window_state": window_state,
+            "status": status,
+        }
+
+    def normalize_resource_rows(
+        rows: Mapping[str, dict[str, Any]], label: str, quantity_field: str
+    ) -> dict[str, dict[str, Any]]:
+        normalized: dict[str, dict[str, Any]] = {}
+        for record_id, row in rows.items():
+            facility_id = _text(row.get("facility_id"), f"{label} {record_id}.facility_id")
+            if facility_id not in facility_state:
+                raise ResourceValidationError(
+                    f"{label} {record_id} refers to an unknown facility: {facility_id}."
+                )
+            resource_type = _text(row.get("resource_type"), f"{label} {record_id}.resource_type")
+            unit = _text(row.get("unit"), f"{label} {record_id}.unit")
+            quantity = _number(row.get(quantity_field), f"{label} {record_id}.{quantity_field}", minimum=0)
+            if quantity_field == "required_quantity" and quantity <= 0:
+                raise ResourceValidationError(f"{label} {record_id}.required_quantity must be greater than zero.")
+            scope, share_ref = disclosure(row, f"{label} {record_id}")
+            start, end, window_state = validity(row, f"{label} {record_id}")
+            source_provenance = provenance(row, f"{label} {record_id}")
+            if source_provenance == "LIVE":
+                raise ResourceValidationError(
+                    f"{label} {record_id} cannot claim LIVE without a separately verified connector."
+                )
+            quality = row.get("quality", row.get("quality_limits", {}))
+            if quality is None:
+                quality = {}
+            if not isinstance(quality, Mapping):
+                raise ResourceValidationError(f"{label} {record_id} quality information must be an object.")
+            normalized[record_id] = {
+                **row,
+                "record_id": record_id,
+                "facility_id": facility_id,
+                "organization_id": facility_state[facility_id]["organization_id"],
+                "resource_type": resource_type,
+                "unit": unit,
+                quantity_field: quantity,
+                "provenance": source_provenance,
+                "disclosure_scope": scope,
+                "sharing_approval_reference": share_ref,
+                "valid_from": start,
+                "valid_to": end or None,
+                "validity_status": window_state,
+            }
+        return normalized
+
+    normalized_supplies = normalize_resource_rows(supplies, "supply", "available_quantity")
+    normalized_demands = normalize_resource_rows(demands, "demand", "required_quantity")
+
+    normalized_routes: dict[str, dict[str, Any]] = {}
+    for route_id, row in routes.items():
+        supply_id = _text(row.get("supply_id"), f"route {route_id}.supply_id")
+        demand_id = _text(row.get("demand_id"), f"route {route_id}.demand_id")
+        if supply_id not in normalized_supplies or demand_id not in normalized_demands:
+            raise ResourceValidationError(
+                f"route {route_id} must refer to an existing supply and demand."
+            )
+        supply = normalized_supplies[supply_id]
+        demand = normalized_demands[demand_id]
+        connection_confirmed = row.get("connection_confirmed")
+        if not isinstance(connection_confirmed, bool):
+            raise ResourceValidationError(f"route {route_id}.connection_confirmed must be an explicit boolean.")
+        route_provenance = provenance(row, f"route {route_id}")
+        scope, share_ref = disclosure(row, f"route {route_id}")
+        start, end, window_state = validity(row, f"route {route_id}")
+        capacity = _number(row.get("capacity"), f"route {route_id}.capacity", minimum=0)
+        if capacity <= 0:
+            raise ResourceValidationError(f"route {route_id}.capacity must be greater than zero.")
+        if supply["resource_type"].casefold() != demand["resource_type"].casefold():
+            raise ResourceValidationError(f"route {route_id} connects unlike resource types.")
+        if supply["unit"].casefold() != demand["unit"].casefold():
+            raise ResourceValidationError(f"route {route_id} connects unlike units; explicit conversion is required.")
+        source_facility = _optional_text(row.get("source_facility_id")) or supply["facility_id"]
+        target_facility = _optional_text(row.get("target_facility_id")) or demand["facility_id"]
+        if source_facility != supply["facility_id"] or target_facility != demand["facility_id"]:
+            raise ResourceValidationError(f"route {route_id} facility endpoints do not match its supply and demand.")
+        route_evidence = _optional_text(row.get("connection_evidence_reference")) or None
+        if connection_confirmed and not route_evidence:
+            raise ResourceValidationError(
+                f"route {route_id} requires connection_evidence_reference when connection_confirmed is true."
+            )
+        normalized_routes[route_id] = {
+            **row,
+            "route_id": route_id,
+            "supply_id": supply_id,
+            "demand_id": demand_id,
+            "source_facility_id": source_facility,
+            "target_facility_id": target_facility,
+            "capacity": capacity,
+            "connection_confirmed": connection_confirmed,
+            "connection_evidence_reference": route_evidence,
+            "provenance": route_provenance,
+            "disclosure_scope": scope,
+            "sharing_approval_reference": share_ref,
+            "valid_from": start,
+            "valid_to": end or None,
+            "validity_status": window_state,
+        }
+
+    normalized_infrastructure: dict[str, dict[str, Any]] = {}
+    for asset_id, row in infrastructure.items():
+        facility_id = _text(row.get("facility_id"), f"infrastructure {asset_id}.facility_id")
+        if facility_id not in facility_state:
+            raise ResourceValidationError(f"infrastructure {asset_id} refers to an unknown facility.")
+        scope, share_ref = disclosure(row, f"infrastructure {asset_id}")
+        start, end, window_state = validity(row, f"infrastructure {asset_id}")
+        source_provenance = provenance(row, f"infrastructure {asset_id}")
+        capacity = _number(row.get("capacity"), f"infrastructure {asset_id}.capacity", minimum=0)
+        if capacity <= 0:
+            raise ResourceValidationError(f"infrastructure {asset_id}.capacity must be greater than zero.")
+        normalized_infrastructure[asset_id] = {
+            **row,
+            "infrastructure_id": asset_id,
+            "facility_id": facility_id,
+            "capacity": capacity,
+            "provenance": source_provenance,
+            "disclosure_scope": scope,
+            "sharing_approval_reference": share_ref,
+            "valid_from": start,
+            "valid_to": end or None,
+            "validity_status": window_state,
+        }
+
+    supply_commitments: dict[str, float] = {key: 0.0 for key in normalized_supplies}
+    demand_commitments: dict[str, float] = {key: 0.0 for key in normalized_demands}
+    commitment_rows = []
+    seen_commitment_ids: set[str] = set()
+    for index, row in enumerate(raw_commitments, start=1):
+        commitment_id = stable_id(row, ("commitment_id", "exchange_id", "id"), f"active_commitments[{index}]")
+        if commitment_id in seen_commitment_ids:
+            raise ResourceValidationError(f"Duplicate commitment identifier: {commitment_id}.")
+        seen_commitment_ids.add(commitment_id)
+        status = str(row.get("status") or "").strip().upper()
+        if status != "ACTIVE":
+            continue
+        supply_id = _text(row.get("supply_id"), f"commitment {commitment_id}.supply_id")
+        demand_id = _text(row.get("demand_id"), f"commitment {commitment_id}.demand_id")
+        if supply_id not in normalized_supplies or demand_id not in normalized_demands:
+            raise ResourceValidationError(f"active commitment {commitment_id} refers to an unknown supply or demand.")
+        quantity = _number(row.get("quantity"), f"commitment {commitment_id}.quantity", minimum=0)
+        if quantity <= 0:
+            raise ResourceValidationError(f"active commitment {commitment_id}.quantity must be greater than zero.")
+        unit = _text(row.get("unit"), f"commitment {commitment_id}.unit")
+        supply = normalized_supplies[supply_id]
+        demand = normalized_demands[demand_id]
+        if unit.casefold() != supply["unit"].casefold() or unit.casefold() != demand["unit"].casefold():
+            raise ResourceValidationError(f"active commitment {commitment_id} has an inconsistent unit.")
+        approval_reference = _text(
+            row.get("approval_reference"), f"active commitment {commitment_id}.approval_reference"
+        )
+        start, end, window_state = validity(row, f"active commitment {commitment_id}")
+        if window_state == "CURRENT":
+            supply_commitments[supply_id] += quantity
+            demand_commitments[demand_id] += quantity
+        commitment_rows.append({
+            "commitment_id": commitment_id,
+            "supply_id": supply_id,
+            "demand_id": demand_id,
+            "quantity": quantity,
+            "unit": unit,
+            "validity_status": window_state,
+            "approval_reference_present": bool(approval_reference),
+            "approval_reference_verification": "NOT_PERFORMED",
+        })
+
+    overcommitments = []
+    remaining_supply: dict[str, float] = {}
+    for supply_id, supply in normalized_supplies.items():
+        committed = supply_commitments[supply_id]
+        available = float(supply["available_quantity"])
+        remaining_supply[supply_id] = max(0.0, available - committed)
+        if committed > available + 1e-9:
+            overcommitments.append({
+                "record_type": "SUPPLY",
+                "record_id": supply_id,
+                "committed_quantity": committed,
+                "declared_quantity": available,
+                "unit": supply["unit"],
+                "status": "OVERCOMMITTED",
+            })
+    remaining_demand: dict[str, float] = {}
+    for demand_id, demand in normalized_demands.items():
+        committed = demand_commitments[demand_id]
+        required = float(demand["required_quantity"])
+        remaining_demand[demand_id] = max(0.0, required - committed)
+        if committed > required + 1e-9:
+            overcommitments.append({
+                "record_type": "DEMAND",
+                "record_id": demand_id,
+                "committed_quantity": committed,
+                "declared_quantity": required,
+                "unit": demand["unit"],
+                "status": "OVERCOMMITTED",
+            })
+
+    node_types: dict[str, str] = {}
+    for record_id in facilities:
+        node_types[f"facility:{record_id}"] = "FACILITY"
+    for record_id in normalized_supplies:
+        node_types[f"supply:{record_id}"] = "SUPPLY"
+    for record_id in normalized_demands:
+        node_types[f"demand:{record_id}"] = "DEMAND"
+    for record_id in normalized_routes:
+        node_types[f"route:{record_id}"] = "ROUTE"
+    for record_id in normalized_infrastructure:
+        node_types[f"infrastructure:{record_id}"] = "INFRASTRUCTURE"
+
+    dependency_edges = []
+    for index, row in enumerate(raw_edges, start=1):
+        source_id = _text(row.get("source_node_id"), f"dependency_edges[{index}].source_node_id")
+        target_id = _text(row.get("target_node_id"), f"dependency_edges[{index}].target_node_id")
+        if source_id not in node_types or target_id not in node_types:
+            raise ResourceValidationError(
+                f"dependency_edges[{index}] refers to a node that is not registered in this cluster model."
+            )
+        relation = _text(row.get("relationship"), f"dependency_edges[{index}].relationship")
+        dependency_edges.append({
+            "source_node_id": source_id,
+            "target_node_id": target_id,
+            "relationship": relation,
+            "direction": "EXPLICIT_USER_ENTERED",
+            "causality": "NOT_ESTABLISHED",
+        })
+
+    facility_is_current = {
+        key: value["status"] == "ACTIVE" and value["window_state"] == "CURRENT"
+        for key, value in facility_state.items()
+    }
+    matches = []
+    rejected_routes = []
+    for route_id, route in normalized_routes.items():
+        supply = normalized_supplies[route["supply_id"]]
+        demand = normalized_demands[route["demand_id"]]
+        source_facility = facility_state[supply["facility_id"]]
+        target_facility = facility_state[demand["facility_id"]]
+        cross_organization = supply["organization_id"] != demand["organization_id"]
+        shared_scope = (
+            source_facility["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and target_facility["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and supply["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and demand["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and route["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+        )
+        if not cross_organization:
+            rejected_routes.append({
+                "route_id": route_id,
+                "status": "INTERNAL_ROUTE_NOT_A_CROSS_COMPANY_MATCH",
+            })
+            continue
+        if not shared_scope:
+            rejected_routes.append({
+                "route_id": route_id,
+                "status": "NOT_SHARED_BY_ALL_PARTICIPANTS",
+            })
+            continue
+        if not all((
+            facility_is_current[supply["facility_id"]],
+            facility_is_current[demand["facility_id"]],
+            supply["validity_status"] == "CURRENT",
+            demand["validity_status"] == "CURRENT",
+            route["validity_status"] == "CURRENT",
+        )):
+            rejected_routes.append({"route_id": route_id, "status": "OUTSIDE_VALIDITY_WINDOW"})
+            continue
+        if not route["connection_confirmed"] or route["provenance"] == "STALE":
+            rejected_routes.append({"route_id": route_id, "status": "PHYSICAL_ROUTE_NOT_CURRENTLY_QUALIFIED"})
+            continue
+        if supply["provenance"] == "STALE" or demand["provenance"] == "STALE":
+            rejected_routes.append({"route_id": route_id, "status": "STALE_RESOURCE_EVIDENCE"})
+            continue
+        if route["capacity"] <= 0 or remaining_supply[route["supply_id"]] <= 0 or remaining_demand[route["demand_id"]] <= 0:
+            rejected_routes.append({"route_id": route_id, "status": "NO_REMAINING_CAPACITY"})
+            continue
+        compatibility = assess_resource_compatibility(supply, demand)
+        screened_capacity = min(
+            route["capacity"],
+            remaining_supply[route["supply_id"]],
+            remaining_demand[route["demand_id"]],
+        )
+        matches.append({
+            "cluster_match_id": "MATCH-" + hashlib.sha256(route_id.encode("utf-8")).hexdigest()[:12].upper(),
+            "route_id": route_id,
+            "resource_type": supply["resource_type"],
+            "unit": supply["unit"],
+            "screening_capacity": screened_capacity,
+            "source_facility_alias": "FAC-" + hashlib.sha256(supply["facility_id"].encode("utf-8")).hexdigest()[:10].upper(),
+            "destination_facility_alias": "FAC-" + hashlib.sha256(demand["facility_id"].encode("utf-8")).hexdigest()[:10].upper(),
+            "compatibility_status": compatibility["status"],
+            "compatibility_reasons": compatibility.get("reasons", []),
+            "sharing_reference_verification": "NOT_PERFORMED",
+            "route_evidence_verification": "NOT_PERFORMED",
+            "allocation_status": (
+                "ELIGIBLE_FOR_SEPARATE_ALLOCATION_REVIEW"
+                if compatibility["status"] == "TECHNICALLY_COMPATIBLE"
+                else "ENGINEERING_REVIEW_REQUIRED"
+            ),
+        })
+
+    public_offers = []
+    public_needs = []
+    for supply_id, supply in normalized_supplies.items():
+        facility = facility_state[supply["facility_id"]]
+        if (
+            facility["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and supply["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and facility_is_current[supply["facility_id"]]
+            and supply["validity_status"] == "CURRENT"
+            and supply["provenance"] != "STALE"
+            and remaining_supply[supply_id] > 0
+        ):
+            public_offers.append({
+                "offer_alias": "OFFER-" + hashlib.sha256(supply_id.encode("utf-8")).hexdigest()[:12].upper(),
+                "resource_type": supply["resource_type"],
+                "available_quantity_for_screening": remaining_supply[supply_id],
+                "unit": supply["unit"],
+                "provenance": supply["provenance"],
+                "disclosure_reference_present": True,
+            })
+    for demand_id, demand in normalized_demands.items():
+        facility = facility_state[demand["facility_id"]]
+        if (
+            facility["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and demand["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and facility_is_current[demand["facility_id"]]
+            and demand["validity_status"] == "CURRENT"
+            and demand["provenance"] != "STALE"
+            and remaining_demand[demand_id] > 0
+        ):
+            public_needs.append({
+                "need_alias": "NEED-" + hashlib.sha256(demand_id.encode("utf-8")).hexdigest()[:12].upper(),
+                "resource_type": demand["resource_type"],
+                "remaining_required_quantity_for_screening": remaining_demand[demand_id],
+                "unit": demand["unit"],
+                "provenance": demand["provenance"],
+                "disclosure_reference_present": True,
+            })
+
+    return {
+        "tool_id": "INDUSTRIAL_CLUSTER_TWIN",
+        "status": "CLUSTER_TWIN_SCREEN_CREATED",
+        "as_of": as_of_text,
+        "model_scope": "EXPLICIT_INPUT_TIME_AWARE_CLUSTER_GRAPH",
+        "summary": {
+            "facility_count": len(facilities),
+            "supply_record_count": len(normalized_supplies),
+            "demand_record_count": len(normalized_demands),
+            "route_count": len(normalized_routes),
+            "infrastructure_count": len(normalized_infrastructure),
+            "dependency_edge_count": len(dependency_edges),
+            "active_commitment_count": len(commitment_rows),
+            "cross_company_candidate_count": len(matches),
+            "overcommitment_count": len(overcommitments),
+        },
+        "cross_company_shared_offers": public_offers,
+        "cross_company_shared_needs": public_needs,
+        "cross_company_match_candidates": matches,
+        "rejected_or_hidden_routes": rejected_routes,
+        "active_commitment_screen": commitment_rows,
+        "overcommitments": overcommitments,
+        "dependency_edges": dependency_edges,
+        "infrastructure_screen": [
+            {
+                "infrastructure_alias": "INFRA-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:10].upper(),
+                "infrastructure_type": _optional_text(row.get("infrastructure_type")) or "NOT_DECLARED",
+                "capacity": row["capacity"],
+                "unit": _optional_text(row.get("unit")) or "NOT_DECLARED",
+                "validity_status": row["validity_status"],
+                "provenance": row["provenance"],
+                "disclosure_reference_present": row["disclosure_scope"] == "SHARED_WITH_CLUSTER",
+            }
+            for key, row in normalized_infrastructure.items()
+            if row["disclosure_scope"] == "SHARED_WITH_CLUSTER"
+            and facility_is_current[row["facility_id"]]
+            and row["validity_status"] == "CURRENT"
+            and row["provenance"] != "STALE"
+        ],
+        "operational_authorization": "NOT_GRANTED",
+        "resource_availability_verification": "NOT_PERFORMED",
+        "physical_route_verification": "NOT_PERFORMED",
+        "laboratory_and_process_qualification": "NOT_PERFORMED",
+        "sharing_approval_verification": "NOT_PERFORMED",
+        "independent_verification": "NOT_PERFORMED",
+        "live_participation_asserted": False,
+        "limitations": [
+            "This graph contains only records explicitly supplied to this calculation.",
+            "Disclosure references are caller-entered evidence references; their authenticity and legal scope are not verified.",
+            "A route confirmation is a caller assertion and does not prove that a physical connection exists or is available.",
+            "Compatibility results are screening candidates, not qualified process or safety approvals.",
+            "The graph is not geospatial; no distance, route, permit or infrastructure existence is inferred.",
+            "The model does not reserve supply, execute exchanges or authorize operational changes.",
+            "Dependency edges record asserted relationships and do not establish causality.",
+            "Overcommitments are surfaced as conflicts; existing commitments are not silently rewritten.",
+        ],
+        "warning": (
+            "Engineering discovery foundation only. Do not treat candidates as available supply, "
+            "approved exchanges, permitted infrastructure, verified compatibility or operational authorization."
+        ),
+    }
+
+
 def validate_import_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Validate imported passport records and reject duplicate resource IDs."""
     accepted, rejected = [], []
@@ -3094,5 +3612,5 @@ __all__ = [
     "assess_resource_substitution", "rank_resource_improvement_projects",
     "calculate_environmental_impact", "ENGINEERING_MODEL_REGISTRY",
     "build_engineering_assurance_record", "verify_engineering_assurance_record",
-    "validate_import_rows",
+    "validate_import_rows", "build_industrial_cluster_twin",
 ]
