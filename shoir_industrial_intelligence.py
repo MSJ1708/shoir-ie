@@ -1647,6 +1647,10 @@ def record_cause_effect_investigation(username: str, tier: str, title: str, obse
             raise IndustrialIntelligenceError(f"Candidate link {index} must be an object.")
         evidence = [_required_text(value, "evidence reference", 240) for value in item.get("supporting_evidence", [])]
         counter = [_required_text(value, "counter-evidence reference", 240) for value in item.get("contradicting_evidence", [])]
+        if evidence:
+            evidence = _require_evidence_refs(evidence, f"Cause-effect candidate {index} supporting")
+        if counter:
+            counter = _require_evidence_refs(counter, f"Cause-effect candidate {index} contradicting")
         validation = str(item.get("validation_status") or "SUSPECTED").upper()
         if validation not in {"SUSPECTED", "SUPPORTED"}:
             raise IndustrialIntelligenceError("Cause-effect links must be recorded as SUSPECTED or SUPPORTED; confirmation requires a separate independent review workflow.")
@@ -2146,9 +2150,15 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
             model_ids = [str(item.get("model_id")) for item in models if item.get("status") == "REGISTERED_UNVALIDATED"]
             if model_ids:
                 model_to_review = ui.selectbox("Model version to validate", model_ids, key="shoir_ii_model_review")
+                model_review_evidence = ui.text_input("Registered model validation evidence ID(s)", key="shoir_ii_model_review_evidence")
+                model_review_comment = ui.text_input("Independent model review comment", key="shoir_ii_model_review_comment")
                 if ui.button("Validate model version (independent approver)", key="shoir_ii_model_validate"):
                     try:
-                        validated = validate_model_version(username, tier, model_to_review)
+                        validated = validate_model_version(
+                            username, tier, model_to_review,
+                            [item.strip() for item in model_review_evidence.split(",") if item.strip()],
+                            model_review_comment,
+                        )
                         ui.success(f"Model status: {validated['status']}.")
                     except Exception as exc:
                         ui.error(f"Model version was not validated: {exc}")
