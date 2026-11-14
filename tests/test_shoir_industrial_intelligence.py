@@ -477,6 +477,56 @@ def test_model_validation_uses_actual_expected_values_and_independent_reviewer(m
     assert validated["status"] == "VALIDATED_BY_REVIEWER"
 
 
+def test_event_to_action_to_approval_to_verified_outcome_stays_linked(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-ops-owner", "owner")
+    asset = ii.add_entity("synthetic-ops-owner", "Enterprise", "Equipment", "PUMP-OPS-01", "Cooling Pump", {"line": "LINE-01"}, "SYNTHETIC")
+    line = ii.add_entity("synthetic-ops-owner", "Enterprise", "ProductionLine", "LINE-01", "Cooling Line", {"facility": "SITE-01"}, "SYNTHETIC")
+    relation_evidence = ii.create_record("synthetic-ops-owner", "Enterprise", "evidence", "Asset map", {"source": "synthetic fixture"}, provenance="SYNTHETIC")
+    ii.add_relationship("synthetic-ops-owner", "Enterprise", "PUMP-OPS-01", "LINE-01", "SUPPLIES_COOLING_TO", "CONFIRMED", [relation_evidence["record_id"]])
+    event = ii.create_operational_event(
+        "synthetic-ops-owner", "Enterprise", "UNPLANNED_DOWNTIME",
+        "Synthetic pump trip; production line stopped.", "PUMP-OPS-01",
+        "2026-10-15T08:00:00Z", "SYNTHETIC", [relation_evidence["record_id"]],
+    )
+    action = ii.create_action(
+        "synthetic-ops-owner", "Enterprise", "Inspect cooling pump",
+        "synthetic-maintenance-engineer", "2026-12-02T00:00:00Z",
+        "HIGH", "Inspection and corrective work completed.",
+        [relation_evidence["record_id"]],
+    )
+    assert event["record_id"]
+    assert action["status"] == "PROPOSED"
+
+    session["current_user"] = "synthetic-ops-approver"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "approver", "status": "active",
+            }]
+        },
+    )
+    approved = ii.approve_action("synthetic-ops-approver", "Enterprise", action["action_id"], "Approved for controlled inspection.")
+    assert approved["status"] == "APPROVED"
+    ii.update_action("synthetic-ops-approver", "Enterprise", action["action_id"], "IN_PROGRESS")
+    ii.update_action("synthetic-ops-approver", "Enterprise", action["action_id"], "IMPLEMENTED", "Inspection completed.")
+    verification = ii.create_record(
+        "synthetic-ops-approver", "Enterprise", "evidence",
+        "Post-action inspection results", {"result": "PASS", "event_reference": event["record_id"]},
+        provenance="SYNTHETIC",
+    )
+    verified = ii.update_action(
+        "synthetic-ops-approver", "Enterprise", action["action_id"],
+        "VERIFIED", "Post-action check passed.", [verification["record_id"]],
+    )
+    assert verified["status"] == "VERIFIED"
+    assert asset["thread_node_id"] and line["thread_node_id"]
+    assert any(item.get("record_id") == event["record_id"] for item in ii.list_records("synthetic-ops-approver", "Enterprise"))
+    assert any(item.get("action_id") == action["action_id"] for item in ii._state_list("actions"))
+
+
 def test_actual_benefit_requires_independent_reviewer_and_evidence(monkeypatch):
     session = _configure_org_session(monkeypatch, "synthetic-benefit-author", "owner")
     record = ii.record_benefit(
