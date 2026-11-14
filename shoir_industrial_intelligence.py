@@ -1426,6 +1426,55 @@ def record_cause_effect_investigation(username: str, tier: str, title: str, obse
     return create_record(username, tier, "cause_effect_investigation", title, {"title": _required_text(title, "title"), "observations": [_required_text(item, "observation", 1000) for item in observations], "candidate_relationships": links, "causal_claim": "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED"}, "MANUAL")
 
 
+def review_cause_effect_investigation(
+    username: str,
+    tier: str,
+    investigation_record_id: str,
+    relationship_index: int,
+    decision: str,
+    verification_evidence: Sequence[str],
+    reviewer_comment: str = "",
+) -> dict[str, Any]:
+    access = _session_authorize(username, tier, "approve")
+    records = list(_state_list("records"))
+    investigation = next(
+        (item for item in records if item.get("record_id") == str(investigation_record_id) and item.get("record_type") == "cause_effect_investigation"),
+        None,
+    )
+    if not investigation:
+        raise IndustrialIntelligenceError("Cause-and-effect investigation does not exist in this workspace.")
+    if str(investigation.get("created_by", "")).casefold() == access["actor"].casefold():
+        raise PermissionError("The investigation author cannot independently review its causal claims.")
+    links = investigation.get("payload", {}).get("candidate_relationships", [])
+    if isinstance(relationship_index, bool) or not 0 <= int(relationship_index) < len(links):
+        raise IndustrialIntelligenceError("relationship_index does not identify a candidate relationship.")
+    candidate = links[int(relationship_index)]
+    status = str(decision or "").upper()
+    if status not in {"CONFIRMED", "REJECTED"}:
+        raise IndustrialIntelligenceError("Independent cause-effect review decision must be CONFIRMED or REJECTED.")
+    refs = _require_evidence_refs(verification_evidence, "Independent cause-effect review")
+    if status == "CONFIRMED" and not (candidate.get("supporting_evidence") or refs):
+        raise IndustrialIntelligenceError("Confirming a causal relationship requires supporting evidence.")
+    review = create_record(
+        username, tier, "cause_effect_review",
+        f"Independent cause-effect review · {investigation.get('name')}",
+        {
+            "investigation_record_id": str(investigation_record_id),
+            "relationship_index": int(relationship_index),
+            "candidate_relationship": _json_safe(candidate),
+            "decision": status,
+            "supporting_evidence": refs,
+            "reviewer": access["actor"],
+            "role": access["role"],
+            "comment": str(reviewer_comment or "")[:2000],
+            "confirmation_scope": "THIS_REVIEWED_RELATIONSHIP_ONLY",
+        },
+        "MANUAL",
+    )
+    _append_audit(username, tier, "cause_effect.independent_review", review["record_id"], review["payload"])
+    return {"review_record": review, "decision": status, "source_investigation_id": str(investigation_record_id)}
+
+
 def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 15) -> dict[str, Any]:
     _session_authorize(username, tier, "read")
     term = str(query or "").strip().casefold()
