@@ -1784,7 +1784,7 @@ def create_record(
         raise IndustrialIntelligenceError(f"{provenance_value} records require an explicit source timestamp.")
     if source_timestamp:
         _iso_timestamp(source_timestamp, "source_timestamp")
-    if st.session_state.get("shoir_dataset_lineage_blocked") is True and st.session_state.get("shoir_dataset_dependency_tracking_enabled") is True:
+    if st.session_state.get("shoir_dataset_lineage_blocked") is True:
         raise IndustrialIntelligenceError(
             "Dataset lineage invalidation is unresolved. Saving new dataset-dependent results is blocked until the lineage check succeeds."
         )
