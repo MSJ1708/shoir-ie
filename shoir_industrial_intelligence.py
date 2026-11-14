@@ -1908,6 +1908,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         with event_col2:
             event_description = ui.text_area("Observed event description", height=80, key="shoir_ii_event_description")
             event_provenance = ui.selectbox("Event provenance", list(PROVENANCE), index=2, key="shoir_ii_event_provenance")
+            event_source_ref = ui.text_input("Original source reference (required for LIVE/IMPORTED/STALE)", key="shoir_ii_event_source")
             event_evidence = ui.text_input("Registered evidence IDs / source refs", key="shoir_ii_event_evidence")
         if ui.button("Record operational event", key="shoir_ii_event_save"):
             try:
@@ -1915,6 +1916,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                     username, tier, event_type, event_description, event_entity,
                     event_timestamp or None, event_provenance,
                     [item.strip() for item in event_evidence.split(",") if item.strip()],
+                    source_ref=event_source_ref,
                 )
                 ui.success(f"Operational event saved: {event['record_id']}.")
             except Exception as exc:
