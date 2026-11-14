@@ -1136,3 +1136,33 @@ def test_enterprise_entitlement_uses_authenticated_session_tier_not_caller_argum
         "Authorized enterprise-plus record", {"value": "allowed"},
     )
     assert record["record_id"]
+
+
+
+def test_data_trust_detects_missing_stuck_outlier_and_timestamp_sync_candidates():
+    payload = {
+        "measurements": [
+            {"meter_id": "STUCK-01", "value": 5, "unit": "m3/h", "source": "S1", "timestamp": "2026-10-01T08:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "STUCK-01", "value": 5, "unit": "m3/h", "source": "S1", "timestamp": "2026-10-01T09:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "STUCK-01", "value": 5, "unit": "m3/h", "source": "S1", "timestamp": "2026-10-01T10:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "OUTLIER-01", "value": 10, "unit": "kW", "source": "S2", "timestamp": "2026-10-01T08:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "OUTLIER-01", "value": 11, "unit": "kW", "source": "S2", "timestamp": "2026-10-01T09:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "OUTLIER-01", "value": 12, "unit": "kW", "source": "S2", "timestamp": "2026-10-01T10:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "OUTLIER-01", "value": 13, "unit": "kW", "source": "S2", "timestamp": "2026-10-01T11:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "OUTLIER-01", "value": 100, "unit": "kW", "source": "S2", "timestamp": "2026-10-01T12:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "MISSING-01", "value": None, "unit": "bar", "source": "S3", "timestamp": "2026-10-01T08:00:00Z", "provenance": "SYNTHETIC"},
+            {"meter_id": "SYNC-A", "value": 50, "unit": "m3/h", "source": "S4", "timestamp": "2026-10-01T08:00:00Z", "synchronization_group": "CUT-01", "provenance": "SYNTHETIC"},
+            {"meter_id": "SYNC-B", "value": 49, "unit": "m3/h", "source": "S5", "timestamp": "2026-10-01T08:10:00Z", "synchronization_group": "CUT-01", "provenance": "SYNTHETIC"},
+        ],
+    }
+    originals = [dict(row) for row in payload["measurements"]]
+    result = ii.analyze_tool("data-trust", payload)
+    assert result["status"] == "REVIEW_REQUIRED"
+    assert result["missing_measurements"][0]["meter_id"] == "MISSING-01"
+    assert result["stuck_sensor_candidates"][0]["meter_id"] == "STUCK-01"
+    assert result["outlier_candidates"][0]["meter_id"] == "OUTLIER-01"
+    assert result["outlier_candidates"][0]["value"] == pytest.approx(100)
+    assert result["timestamp_sync_conflicts"][0]["synchronization_group"] == "CUT-01"
+    assert result["original_measurements"][8]["value"] is None
+    assert payload["measurements"] == originals
+    assert result["originals_modified"] is False
