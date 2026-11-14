@@ -370,6 +370,28 @@ def test_shared_organization_role_is_revalidated_and_viewer_cannot_write(monkeyp
         ii.create_record("synthetic-org-viewer", "Enterprise", "note", "Denied", {})
 
 
+def test_organization_switch_filters_stale_in_memory_records(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-org-owner", "owner")
+    record = ii.create_record("synthetic-org-owner", "Enterprise", "note", "Organization A confidential", {"secret_scope": "A"})
+    assert ii.list_records("synthetic-org-owner", "Enterprise")[0]["record_id"] == record["record_id"]
+
+    other_org = "00000000-0000-4000-8000-000000000099"
+    other_workspace = "00000000-0000-4000-8000-000000000098"
+    session["shoir_active_organization_workspace"] = {
+        "organization_id": other_org,
+        "organization_workspace_id": other_workspace,
+        "display_name": "Synthetic Organization B",
+    }
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{"organization_id": other_org, "role": "owner", "status": "active"}]
+        },
+    )
+    assert ii.list_records("synthetic-org-owner", "Enterprise") == []
+
+
 def test_shared_workspace_write_fails_closed_when_managed_persistence_fails(monkeypatch):
     session = _configure_org_session(monkeypatch, "synthetic-org-engineer", "engineer")
     monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: False)
