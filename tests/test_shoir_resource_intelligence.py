@@ -1852,7 +1852,7 @@ def test_interval_robust_optimizer_rejects_uncertainty_fraction_above_one():
 def test_water_reuse_requires_explicit_physical_connection_capacity():
     from shoir_resource_intelligence import optimize_single_contaminant_water_reuse
 
-    with pytest.raises(ResourceValidationError, match="connections\[0\]\.capacity"):
+    with pytest.raises(ResourceValidationError, match=r"connections\[0\]\.capacity"):
         optimize_single_contaminant_water_reuse(
             [{"source_id": "S1", "available_flow": 10, "flow_unit": "m3/day", "concentration": 1, "concentration_unit": "mg/L", "provenance": "IMPORTED"}],
             [{"sink_id": "D1", "required_flow": 10, "flow_unit": "m3/day", "maximum_concentration": 5, "concentration_unit": "mg/L", "provenance": "MANUAL"}],
