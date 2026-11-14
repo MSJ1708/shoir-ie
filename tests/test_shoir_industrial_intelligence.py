@@ -1296,6 +1296,41 @@ def test_active_dataset_dependency_is_attached_to_saved_records_and_thread_nodes
     )
 
 
+
+
+def test_dataset_version_change_is_persisted_when_no_prior_analysis_depends_on_it(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-owner",
+        "Enterprise",
+        "DS-ABCDEF654321",
+        2,
+        "c" * 64,
+        "d" * 64,
+    )
+    assert result["status"] == "NO_STALE_DEPENDENTS"
+    assert result["stale_record_count"] == 0
+    assert result["lineage_event_id"]
+    assert result["current_dataset_thread_node_id"]
+    current_node = next(
+        node for node in session["global_thread_nodes"]
+        if node["node_id"] == result["current_dataset_thread_node_id"]
+    )
+    assert current_node["node_type"] == "Dataset"
+    assert current_node["status"] == "Current"
+    assert current_node["metadata"]["version"] == 2
+    assert current_node["metadata"]["data_hash"] == "c" * 64
+    event = next(
+        row for row in session[ii.STATE_PREFIX + "records"]
+        if row["record_id"] == result["lineage_event_id"]
+    )
+    assert event["record_type"] == "dataset_lineage_invalidation"
+    assert event["payload"]["stale_record_ids"] == []
+    assert event["workspace_id"] == ii._session_authorize(
+        "synthetic-owner", "Enterprise", "write"
+    )["workspace_id"]
+
+
 def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
