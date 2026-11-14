@@ -1135,6 +1135,7 @@ def send_analysis_to_workbook(
     result: Mapping[str, Any],
     provenance: str,
     source_ref: str = "",
+    source_timestamp: str = "",
 ) -> dict[str, Any]:
     """Save a result as a new sheet in the existing Industrial Workbook session.
 
@@ -1157,6 +1158,7 @@ def send_analysis_to_workbook(
             "input_hash": _hash_payload(inputs),
             "result_hash": _hash_payload(result),
             "thread_node_type": THREAD_NODE_TYPES[tool_id],
+            "source_timestamp": str(source_timestamp or ""),
         },
         provenance=provenance,
         source_ref=source_ref,
@@ -1515,7 +1517,9 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     if target not in allowed:
         raise IndustrialIntelligenceError(f"Unsupported action status: {target}.")
     current = str(action.get("status") or "").upper()
-    if target == "APPROVED":
+    if target == "APPROVED" and not (
+        current == "BLOCKED" and str(action.get("blocked_from_status") or "").upper() == "APPROVED"
+    ):
         raise PermissionError("Use approve_action so the authenticated approver, role and audit record are enforced.")
     transitions = {
         "PROPOSED": {"BLOCKED"},
@@ -1984,17 +1988,86 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         except Exception as exc:
             ui.error(f"Saved record could not be reused: {exc}")
     defaults = json.dumps(_sample_input(selected_id), ensure_ascii=False, indent=2)
+    uploaded_file = ui.file_uploader(
+        "Import a JSON payload or CSV event/measurement table",
+        type=["json", "csv"],
+        key=f"shoir_ii_upload_{selected_id}",
+    )
+    if uploaded_file is not None and ui.button("Load imported file into the input editor", key=f"shoir_ii_upload_load_{selected_id}"):
+        try:
+            if str(uploaded_file.name).casefold().endswith(".json"):
+                imported = json.loads(uploaded_file.getvalue().decode("utf-8-sig"))
+                if not isinstance(imported, dict):
+                    raise IndustrialIntelligenceError("An imported JSON payload must have an object at its root.")
+            else:
+                imported_frame = pd.read_csv(uploaded_file)
+                imported_rows = imported_frame.where(pd.notna(imported_frame), None).to_dict(orient="records")
+                imported_columns = list(imported_frame.columns)
+                def choose_column(candidates):
+                    return next((candidate for candidate in candidates if candidate in imported_columns), None)
+                imported = {"rows": imported_rows}
+                if selected_id == "process-mining":
+                    case_col = choose_column(["case_id", "case", "process_instance", "order_id"])
+                    activity_col = choose_column(["activity", "event", "operation", "step"])
+                    timestamp_col = choose_column(["timestamp", "event_time", "occurred_at", "time"])
+                    if case_col and activity_col and timestamp_col:
+                        imported = {"events": [
+                            {"case_id": row.get(case_col), "activity": row.get(activity_col), "timestamp": row.get(timestamp_col)}
+                            for row in imported_rows
+                        ]}
+                elif selected_id == "data-trust":
+                    meter_col = choose_column(["meter_id", "meter", "tag"])
+                    value_col = choose_column(["value", "reading", "measurement"])
+                    unit_col = choose_column(["unit", "engineering_unit", "uom"])
+                    time_col = choose_column(["timestamp", "measured_at", "time"])
+                    source_col = choose_column(["source", "source_id"])
+                    if meter_col and value_col and unit_col:
+                        imported = {"measurements": [
+                            {"meter_id": row.get(meter_col), "value": row.get(value_col), "unit": row.get(unit_col),
+                             "source": row.get(source_col) if source_col else uploaded_file.name,
+                             "timestamp": row.get(time_col) if time_col else None, "provenance": "IMPORTED"}
+                            for row in imported_rows
+                        ]}
+                elif selected_id == "benchmarking":
+                    name_col = choose_column(["name", "line", "facility", "asset"])
+                    metric_col = choose_column(["metric", "kpi", "indicator"])
+                    unit_col = choose_column(["unit", "uom"])
+                    period_col = choose_column(["period", "period_id", "month"])
+                    value_col = choose_column(["value", "actual", "result"])
+                    if all([name_col, metric_col, unit_col, period_col, value_col]):
+                        imported = {"observations": [
+                            {"name": row.get(name_col), "metric": row.get(metric_col), "unit": row.get(unit_col),
+                             "period": row.get(period_col), "value": row.get(value_col)}
+                            for row in imported_rows
+                        ]}
+                elif selected_id == "commissioning":
+                    check_col = choose_column(["check_id", "test_id", "inspection_id"])
+                    status_col = choose_column(["status", "result", "state"])
+                    evidence_col = choose_column(["evidence_id", "document_id", "source_ref"])
+                    if check_col and status_col:
+                        imported = {"required_checks": [
+                            {"check_id": row.get(check_col), "status": row.get(status_col),
+                             "evidence_id": row.get(evidence_col) if evidence_col else None}
+                            for row in imported_rows
+                        ]}
+            ui.session_state[f"shoir_ii_input_{selected_id}"] = json.dumps(imported, ensure_ascii=False, indent=2)
+            ui.session_state[f"shoir_ii_provenance_{selected_id}"] = "IMPORTED"
+            ui.session_state[f"shoir_ii_source_{selected_id}"] = uploaded_file.name
+            ui.success(f"Loaded {uploaded_file.name} as imported data. Review field mapping and validate before running.")
+        except Exception as exc:
+            ui.error(f"Import was not loaded: {exc}")
     input_text = ui.text_area("Tool input JSON", value=defaults, height=280, key=f"shoir_ii_input_{selected_id}")
     provenance_options = list(PROVENANCE)
     provenance = ui.selectbox("Input provenance", provenance_options, index=3, key=f"shoir_ii_provenance_{selected_id}")
-    source_ref = ui.text_input("Source / evidence reference (optional)", key=f"shoir_ii_source_{selected_id}")
+    source_ref = ui.text_input("Source / evidence reference", key=f"shoir_ii_source_{selected_id}")
+    source_timestamp = ui.text_input("Source timestamp (timezone-aware ISO-8601; required for LIVE/STALE)", key=f"shoir_ii_source_timestamp_{selected_id}")
     if ui.button("Run deterministic analysis", type="primary", key=f"shoir_ii_run_{selected_id}"):
         try:
             parsed = json.loads(input_text)
             if not isinstance(parsed, dict):
                 raise IndustrialIntelligenceError("Tool input JSON root must be an object.")
             result = analyze_tool(selected_id, parsed)
-            ui.session_state[STATE_PREFIX + "last_analysis"] = {"tool_id": selected_id, "input": parsed, "result": result, "provenance": provenance, "source_ref": source_ref}
+            ui.session_state[STATE_PREFIX + "last_analysis"] = {"tool_id": selected_id, "input": parsed, "result": result, "provenance": provenance, "source_ref": source_ref, "source_timestamp": source_timestamp}
             ui.success("Analysis completed. Results are calculated from the submitted inputs only.")
         except Exception as exc:
             ui.error(f"Analysis could not be completed: {exc}")
@@ -2010,6 +2083,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
             "result": last.get("result", {}),
             "provenance": last.get("provenance"),
             "source_ref": last.get("source_ref"),
+            "source_timestamp": last.get("source_timestamp"),
             "exported_at": _utc_now(),
             "export_status": "MODEL_OUTPUT_NOT_INDEPENDENTLY_VERIFIED",
         }
@@ -2041,7 +2115,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         save_col, workbook_col = ui.columns(2)
         if save_col.button("Save analysis and add it to the Digital Thread", key=f"shoir_ii_save_{selected_id}"):
             try:
-                saved = create_record(username, tier, "tool_analysis", definition["name"], {"tool_id": selected_id, "input": last["input"], "result": last["result"], "thread_node_type": THREAD_NODE_TYPES[selected_id]}, provenance=last["provenance"], source_ref=last.get("source_ref") or "")
+                saved = create_record(username, tier, "tool_analysis", definition["name"], {"tool_id": selected_id, "input": last["input"], "result": last["result"], "thread_node_type": THREAD_NODE_TYPES[selected_id], "source_timestamp": last.get("source_timestamp") or ""}, provenance=last["provenance"], source_ref=last.get("source_ref") or "")
                 ui.success(f"Saved record {saved['record_id']} and created its Digital Thread node.")
             except Exception as exc:
                 ui.error(f"Record was not confirmed saved: {exc}")
@@ -2050,6 +2124,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 handoff = send_analysis_to_workbook(
                     username, tier, selected_id, last["input"], last["result"],
                     last["provenance"], last.get("source_ref") or "",
+                    last.get("source_timestamp") or "",
                 )
                 ui.success(f"Added {handoff['workbook_sheet']} to the Industrial Workbook and saved record {handoff['record_id']}. Existing sheets were preserved.")
             except Exception as exc:
