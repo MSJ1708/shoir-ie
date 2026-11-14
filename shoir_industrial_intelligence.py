@@ -689,37 +689,199 @@ def _commissioning(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _experimentation(payload: Mapping[str, Any]) -> dict[str, Any]:
+    import numpy as np
+
     factors = payload.get("factors")
     if not isinstance(factors, list) or not 1 <= len(factors) <= 8:
         raise IndustrialIntelligenceError("Experimentation requires between 1 and 8 factor names.")
     names = [_required_text(item, "factor name", 80) for item in factors]
     if len(set(names)) != len(names):
         raise IndustrialIntelligenceError("Factor names must be unique.")
+    design_type = str(payload.get("design_type") or "FULL_2_LEVEL_FACTORIAL").upper()
+    if design_type in {"RESPONSE_SURFACE", "CENTRAL_COMPOSITE"}:
+        design_type = "CENTRAL_COMPOSITE"
+    if design_type not in {"FULL_2_LEVEL_FACTORIAL", "FRACTIONAL_2_LEVEL", "CENTRAL_COMPOSITE"}:
+        raise IndustrialIntelligenceError("design_type must be FULL_2_LEVEL_FACTORIAL, FRACTIONAL_2_LEVEL or CENTRAL_COMPOSITE.")
+
+    generators = payload.get("generators") or {}
+    generator_terms: dict[str, list[str]] = {}
+    resolution = None
+    if design_type == "FRACTIONAL_2_LEVEL":
+        if not isinstance(generators, Mapping) or not generators:
+            raise IndustrialIntelligenceError("A fractional factorial design requires generators mapping derived factors to factor products.")
+        for derived, expression in generators.items():
+            derived_name = _required_text(derived, "derived factor", 80)
+            if derived_name not in names or derived_name in generator_terms:
+                raise IndustrialIntelligenceError(f"Fractional generator target {derived_name} must be a unique member of factors.")
+            terms = (
+                [item.strip() for item in expression.split("*") if item.strip()]
+                if isinstance(expression, str)
+                else list(expression) if isinstance(expression, Sequence) and not isinstance(expression, (str, bytes))
+                else []
+            )
+            normalized = [_required_text(item, f"generator {derived_name} factor", 80) for item in terms]
+            if not normalized or len(set(normalized)) != len(normalized) or derived_name in normalized:
+                raise IndustrialIntelligenceError(f"Generator for {derived_name} must be a non-empty product of distinct other factors.")
+            if any(item not in names for item in normalized):
+                raise IndustrialIntelligenceError(f"Generator for {derived_name} references an unknown factor.")
+            generator_terms[derived_name] = normalized
+        independent = [name for name in names if name not in generator_terms]
+        if not independent:
+            raise IndustrialIntelligenceError("Fractional factorial generators must leave at least one independent factor.")
+        defining_words = [frozenset([derived, *terms]) for derived, terms in generator_terms.items()]
+        combined_words = {frozenset()}
+        for word in defining_words:
+            combined_words |= {existing.symmetric_difference(word) for existing in list(combined_words)}
+        non_identity_lengths = [len(word) for word in combined_words if word]
+        resolution = min(non_identity_lengths) if non_identity_lengths else None
+        base_rows = [
+            {name: (1 if mask & (1 << index) else -1) for index, name in enumerate(independent)}
+            for mask in range(2 ** len(independent))
+        ]
+        design = []
+        for base_row in base_rows:
+            row = dict(base_row)
+            pending = dict(generator_terms)
+            while pending:
+                progressed = False
+                for derived, terms in list(pending.items()):
+                    if all(term in row for term in terms):
+                        value = 1
+                        for term in terms:
+                            value *= row[term]
+                        row[derived] = value
+                        del pending[derived]
+                        progressed = True
+                if not progressed:
+                    raise IndustrialIntelligenceError("Fractional generator definitions contain a dependency cycle or unresolved derived-factor reference.")
+            design.append({name: int(row[name]) for name in names})
+    elif design_type == "FULL_2_LEVEL_FACTORIAL":
+        design = [
+            {name: (1 if mask & (1 << index) else -1) for index, name in enumerate(names)}
+            for mask in range(2 ** len(names))
+        ]
+    else:
+        if len(names) > 6:
+            raise IndustrialIntelligenceError("Central composite response-surface designs are limited to six factors in this foundation.")
+        alpha = _finite(payload.get("alpha", (2 ** len(names)) ** 0.25), "central composite alpha", minimum=1)
+        center_points = payload.get("center_points", 4)
+        if isinstance(center_points, bool) or not isinstance(center_points, int) or not 1 <= center_points <= 100:
+            raise IndustrialIntelligenceError("center_points must be an integer between 1 and 100.")
+        design = [
+            {name: (1 if mask & (1 << index) else -1) for index, name in enumerate(names)}
+            for mask in range(2 ** len(names))
+        ]
+        for name in names:
+            for sign in (-1, 1):
+                design.append({factor: (sign * alpha if factor == name else 0.0) for factor in names})
+        for _ in range(center_points):
+            design.append({factor: 0.0 for factor in names})
+
+    statistical_test = payload.get("statistical_test")
+    statistical_result = None
+    if statistical_test is not None:
+        if not isinstance(statistical_test, Mapping):
+            raise IndustrialIntelligenceError("statistical_test must be an object.")
+        from scipy import stats
+        test_name = str(statistical_test.get("test") or "").upper()
+        alpha_level = _finite(statistical_test.get("alpha", 0.05), "statistical_test alpha", minimum=0.000001, maximum=0.5)
+        if test_name == "ONE_SAMPLE_T_TEST":
+            sample = statistical_test.get("sample")
+            if not isinstance(sample, list) or len(sample) < 2:
+                raise IndustrialIntelligenceError("ONE_SAMPLE_T_TEST requires at least two sample values.")
+            values = [_finite(item, f"t-test sample {index}",) for index, item in enumerate(sample, start=1)]
+            reference = _finite(statistical_test.get("reference_value"), "t-test reference_value")
+            statistic, p_value = stats.ttest_1samp(values, reference)
+            degrees = len(values) - 1
+            test_label = "ONE_SAMPLE_T_TEST"
+        elif test_name == "TWO_SAMPLE_T_TEST":
+            group_a, group_b = statistical_test.get("group_a"), statistical_test.get("group_b")
+            if not isinstance(group_a, list) or not isinstance(group_b, list) or len(group_a) < 2 or len(group_b) < 2:
+                raise IndustrialIntelligenceError("TWO_SAMPLE_T_TEST requires two groups with at least two values each.")
+            values_a = [_finite(item, f"group_a sample {index}") for index, item in enumerate(group_a, start=1)]
+            values_b = [_finite(item, f"group_b sample {index}") for index, item in enumerate(group_b, start=1)]
+            statistic, p_value = stats.ttest_ind(values_a, values_b, equal_var=bool(statistical_test.get("equal_var", True)))
+            degrees = None
+            test_label = "TWO_SAMPLE_T_TEST"
+        elif test_name == "ONE_WAY_ANOVA":
+            groups = statistical_test.get("groups")
+            if not isinstance(groups, list) or len(groups) < 2 or any(not isinstance(group, list) or len(group) < 2 for group in groups):
+                raise IndustrialIntelligenceError("ONE_WAY_ANOVA requires at least two groups with at least two values per group.")
+            parsed_groups = [
+                [_finite(item, f"group {group_index} sample {sample_index}") for sample_index, item in enumerate(group, start=1)]
+                for group_index, group in enumerate(groups, start=1)
+            ]
+            statistic, p_value = stats.f_oneway(*parsed_groups)
+            degrees = {"between": len(parsed_groups) - 1, "within": sum(len(group) for group in parsed_groups) - len(parsed_groups)}
+            test_label = "ONE_WAY_ANOVA"
+        else:
+            raise IndustrialIntelligenceError("Supported statistical tests: ONE_SAMPLE_T_TEST, TWO_SAMPLE_T_TEST and ONE_WAY_ANOVA.")
+        p_num = float(p_value)
+        stat_num = float(statistic)
+        statistical_result = {
+            "test": test_label,
+            "statistic": stat_num if math.isfinite(stat_num) else None,
+            "p_value": p_num if math.isfinite(p_num) else None,
+            "alpha": alpha_level,
+            "degrees_of_freedom": degrees,
+            "reject_null_at_alpha": bool(math.isfinite(p_num) and p_num < alpha_level),
+            "status": "STATISTICAL_TEST_CALCULATED_NOT_CAUSAL_PROOF",
+            "limitations": ["Test assumptions, sampling design, independence, distribution and measurement quality require review.", "A p-value does not prove causation or practical importance."],
+        }
+
     runs = payload.get("runs")
     if runs is None:
-        design = []
-        for mask in range(2 ** len(names)):
-            design.append({name: (1 if mask & (1 << index) else -1) for index, name in enumerate(names)})
-        return {"status": "FACTORIAL_DESIGN_GENERATED", "design_type": "FULL_2_LEVEL_FACTORIAL", "factors": names, "run_count": len(design), "design": design, "limitations": ["Run order is not randomized.", "The design itself is not evidence of a process effect."]}
+        result = {
+            "status": "EXPERIMENT_DESIGN_GENERATED",
+            "design_type": design_type,
+            "factors": names,
+            "run_count": len(design),
+            "design": design,
+            "randomized_run_order": False,
+            "resolution": resolution,
+            "alpha": alpha if design_type == "CENTRAL_COMPOSITE" else None,
+            "center_points": center_points if design_type == "CENTRAL_COMPOSITE" else 0,
+            "limitations": [
+                "Run order is not randomized.",
+                "The design itself is not evidence of a process effect.",
+                "Fractional designs have aliasing determined by their generators and resolution.",
+                "Central composite design supports response-surface fitting only when measured runs are supplied.",
+            ],
+        }
+        if statistical_result is not None:
+            result["statistical_test"] = statistical_result
+        return result
     if not isinstance(runs, list) or not runs:
         raise IndustrialIntelligenceError("runs must be omitted for design generation or supplied as a non-empty list.")
     response_col = str(payload.get("response_column") or "response")
     matrix = []
     responses = []
+    model_columns = ["intercept"] + [f"linear:{name}" for name in names]
+    if design_type == "CENTRAL_COMPOSITE":
+        model_columns += [f"quadratic:{name}" for name in names]
+        model_columns += [f"interaction:{names[left]}*{names[right]}" for left in range(len(names)) for right in range(left + 1, len(names))]
+    include_interactions = bool(payload.get("include_interactions", False)) and design_type != "CENTRAL_COMPOSITE"
+    if include_interactions:
+        model_columns += [f"interaction:{names[left]}*{names[right]}" for left in range(len(names)) for right in range(left + 1, len(names))]
+    max_level = alpha if design_type == "CENTRAL_COMPOSITE" else 1.0
     for index, run in enumerate(runs, start=1):
         if not isinstance(run, Mapping):
             raise IndustrialIntelligenceError(f"Run {index} must be an object.")
         values = []
         for name in names:
-            value = _finite(run.get(name), f"run {index} factor {name}", minimum=-1, maximum=1)
-            if value not in {-1.0, 1.0}:
+            value = _finite(run.get(name), f"run {index} factor {name}", minimum=-max_level, maximum=max_level)
+            if design_type != "CENTRAL_COMPOSITE" and value not in {-1.0, 1.0}:
                 raise IndustrialIntelligenceError(f"Run {index} factor {name} must be coded exactly -1 or +1.")
             values.append(value)
-        matrix.append([1.0, *values])
+        row = [1.0, *values]
+        if design_type == "CENTRAL_COMPOSITE":
+            row += [value ** 2 for value in values]
+        if include_interactions or design_type == "CENTRAL_COMPOSITE":
+            row += [values[left] * values[right] for left in range(len(values)) for right in range(left + 1, len(values))]
+        matrix.append(row)
         responses.append(_finite(run.get(response_col), f"run {index} response"))
-    if len(runs) < len(names) + 2:
-        raise IndustrialIntelligenceError("At least factors + 2 runs are required for an estimable first-order fit.")
-    import numpy as np
+    if len(runs) < len(model_columns):
+        raise IndustrialIntelligenceError(f"At least {len(model_columns)} runs are required for this {design_type} model contract.")
     x = np.asarray(matrix, dtype=float)
     y = np.asarray(responses, dtype=float)
     coef, _, rank, _ = np.linalg.lstsq(x, y, rcond=None)
@@ -728,18 +890,36 @@ def _experimentation(payload: Mapping[str, Any]) -> dict[str, Any]:
     ss_total = float(((y - y.mean()) ** 2).sum())
     ss_error = float((residual ** 2).sum())
     r2 = 1.0 - ss_error / ss_total if ss_total > 0 else None
-    return {
-        "status": "FACTORIAL_FIRST_ORDER_MODEL_FITTED" if rank == x.shape[1] else "DESIGN_RANK_DEFICIENT",
+    coefficients = {name: float(coef[index]) for index, name in enumerate(model_columns)}
+    linear_sensitivity = sorted(
+        [{"factor": name, "coefficient": coefficients[f"linear:{name}"], "absolute_effect": abs(coefficients[f"linear:{name}"])} for name in names],
+        key=lambda row: (-row["absolute_effect"], row["factor"]),
+    )
+    result = {
+        "status": "RESPONSE_SURFACE_MODEL_FITTED" if design_type == "CENTRAL_COMPOSITE" and rank == x.shape[1] else ("FACTORIAL_MODEL_FITTED" if rank == x.shape[1] else "DESIGN_RANK_DEFICIENT"),
+        "design_type": design_type,
         "factors": names,
         "response_column": response_col,
         "run_count": len(runs),
-        "coefficients": {"intercept": float(coef[0]), **{name: float(coef[i + 1]) for i, name in enumerate(names)}},
+        "coefficients": coefficients,
+        "sensitivity_ranking": linear_sensitivity,
         "r_squared": r2,
         "residual_sum_squares": ss_error,
         "design_rank": int(rank),
-        "input_hash": _hash_payload({"factors": names, "runs": runs, "response_column": response_col}),
-        "limitations": ["This first-order fit omits interaction and curvature terms.", "No p-values or causal claims are produced.", "Randomization, blocking, replication and measurement-system adequacy require study design review."],
+        "model_parameter_count": int(x.shape[1]),
+        "input_hash": _hash_payload({"design_type": design_type, "factors": names, "runs": runs, "response_column": response_col}),
+        "limitations": [
+            "Fitted coefficients describe the supplied design and data; they do not prove causality.",
+            "Randomization, blocking, replication and measurement-system adequacy require study design review.",
+            "Fractional factorial results are subject to generator aliasing and the reported resolution.",
+            "Response-surface estimates are limited to the fitted quadratic model and sampled experimental region.",
+        ],
     }
+    if resolution is not None:
+        result["resolution"] = resolution
+    if statistical_result is not None:
+        result["statistical_test"] = statistical_result
+    return result
 
 
 def _procurement(payload: Mapping[str, Any]) -> dict[str, Any]:
