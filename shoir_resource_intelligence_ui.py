@@ -49,6 +49,7 @@ from shoir_resource_intelligence import (
     ENGINEERING_MODEL_REGISTRY,
     build_engineering_assurance_record,
     verify_engineering_assurance_record,
+    build_industrial_cluster_twin,
 )
 
 
@@ -231,7 +232,7 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
         "Safety Gate", "Proof of Value", "Quality & Reliability",
         "Resource Memory", "Infrastructure & Bottlenecks", "Exchange Assurance",
         "Environmental Impact", "Investment Prioritization",
-        "Model Assurance", "Reports",
+        "Model Assurance", "Reports", "Cluster Twin",
     ])
 
     with tabs[0]:
@@ -1625,3 +1626,120 @@ def render_resource_intelligence_workbench(st, *, user: str, tier: str) -> None:
             key="sri_export_json",
         )
         st.caption("Exports contain the current workspace snapshot and its recorded provenance. Review access controls before sharing.")
+
+
+    with tabs[16]:
+        st.markdown("#### Industrial Cluster Twin · confidential network screening")
+        st.caption(
+            "Build a time-aware graph from explicitly supplied facility, supply, demand, route, infrastructure and commitment records. "
+            "Only records explicitly marked SHARED_WITH_CLUSTER are eligible for the shared discovery view."
+        )
+        st.warning(
+            "A sharing reference is not independently verified. This screen does not prove participant availability, "
+            "physical routes, permits, process compatibility or operational approval."
+        )
+        cluster_as_of = st.text_input(
+            "Evaluation timestamp (timezone required)",
+            value="",
+            placeholder="2026-11-14T09:00:00+03:00",
+            key="sri_cluster_as_of",
+        )
+        cluster_facilities = st.text_area(
+            "Facilities JSON",
+            value="[]",
+            height=120,
+            key="sri_cluster_facilities",
+            help="Each facility needs facility_id, organization_id, name, valid_from, disclosure_scope and a sharing_approval_reference when shared.",
+        )
+        cluster_supplies = st.text_area(
+            "Resource supplies JSON",
+            value="[]",
+            height=120,
+            key="sri_cluster_supplies",
+            help="Each supply needs supply_id, facility_id, resource_type, available_quantity, unit, provenance, valid_from and disclosure_scope.",
+        )
+        cluster_demands = st.text_area(
+            "Resource demands JSON",
+            value="[]",
+            height=120,
+            key="sri_cluster_demands",
+            help="Each demand needs demand_id, facility_id, resource_type, required_quantity, unit, provenance, valid_from and disclosure_scope.",
+        )
+        cluster_routes = st.text_area(
+            "Physical route candidates JSON",
+            value="[]",
+            height=120,
+            key="sri_cluster_routes",
+            help="Each route needs route_id, supply_id, demand_id, capacity, connection_confirmed, valid_from, provenance and disclosure_scope. A confirmed route still requires independent verification.",
+        )
+        cluster_infrastructure = st.text_area(
+            "Infrastructure records JSON",
+            value="[]",
+            height=90,
+            key="sri_cluster_infrastructure",
+            help="Optional time-bounded capacity records. Only shared records appear in the cluster-facing summary.",
+        )
+        cluster_commitments = st.text_area(
+            "Active exchange commitments JSON",
+            value="[]",
+            height=90,
+            key="sri_cluster_commitments",
+            help="Only status=ACTIVE commitments are counted. Each requires an approval_reference, time window and quantity.",
+        )
+        cluster_edges = st.text_area(
+            "Explicit dependency edges JSON",
+            value="[]",
+            height=90,
+            key="sri_cluster_edges",
+            help="Optional source_node_id / target_node_id / relationship records. They are not causal claims.",
+        )
+        if st.button("Build cluster twin screening graph", key="sri_build_cluster_twin", type="primary"):
+            try:
+                cluster_result = build_industrial_cluster_twin({
+                    "as_of": cluster_as_of,
+                    "facilities": _json_array(cluster_facilities, "Facilities"),
+                    "supplies": _json_array(cluster_supplies, "Resource supplies"),
+                    "demands": _json_array(cluster_demands, "Resource demands"),
+                    "routes": _json_array(cluster_routes, "Routes"),
+                    "infrastructure": _json_array(cluster_infrastructure, "Infrastructure"),
+                    "active_commitments": _json_array(cluster_commitments, "Active commitments"),
+                    "dependency_edges": _json_array(cluster_edges, "Dependency edges"),
+                })
+                results["cluster_twin"] = cluster_result
+                st.session_state[STATE_PREFIX + "results"] = results
+                st.success("Cluster Twin screening graph calculated. Save workspace data to persist this result.")
+            except Exception as exc:
+                st.error(f"Cluster Twin calculation was blocked safely: {exc}")
+        cluster_result = results.get("cluster_twin")
+        if isinstance(cluster_result, dict):
+            summary = cluster_result.get("summary", {})
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Facilities", int(summary.get("facility_count", 0)))
+            k2.metric("Shared candidates", int(summary.get("cross_company_candidate_count", 0)))
+            k3.metric("Active commitments", int(summary.get("active_commitment_count", 0)))
+            k4.metric("Overcommitments", int(summary.get("overcommitment_count", 0)))
+            st.markdown("**Shared resource offers**")
+            offers = cluster_result.get("cross_company_shared_offers", [])
+            st.dataframe(pd.DataFrame(offers), use_container_width=True, hide_index=True)
+            st.markdown("**Shared resource needs**")
+            needs = cluster_result.get("cross_company_shared_needs", [])
+            st.dataframe(pd.DataFrame(needs), use_container_width=True, hide_index=True)
+            st.markdown("**Cross-company match candidates**")
+            matches = cluster_result.get("cross_company_match_candidates", [])
+            st.dataframe(pd.DataFrame(matches), use_container_width=True, hide_index=True)
+            if cluster_result.get("overcommitments"):
+                st.error("One or more current commitments exceed the declared supply or demand. Do not allocate additional quantity.")
+                st.dataframe(pd.DataFrame(cluster_result["overcommitments"]), use_container_width=True, hide_index=True)
+            if cluster_result.get("rejected_or_hidden_routes"):
+                with st.expander("Rejected or undisclosed routes", expanded=False):
+                    st.dataframe(pd.DataFrame(cluster_result["rejected_or_hidden_routes"]), use_container_width=True, hide_index=True)
+            _render_result(st, "Cluster Twin limitations and verification boundary", {
+                "operational_authorization": cluster_result.get("operational_authorization"),
+                "resource_availability_verification": cluster_result.get("resource_availability_verification"),
+                "physical_route_verification": cluster_result.get("physical_route_verification"),
+                "laboratory_and_process_qualification": cluster_result.get("laboratory_and_process_qualification"),
+                "sharing_approval_verification": cluster_result.get("sharing_approval_verification"),
+                "independent_verification": cluster_result.get("independent_verification"),
+                "limitations": cluster_result.get("limitations"),
+            })
+
