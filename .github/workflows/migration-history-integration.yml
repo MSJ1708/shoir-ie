@@ -1,0 +1,78 @@
+name: Shoir-IE clean migration-history replay
+
+on:
+  pull_request:
+    branches: ["main", "staging-e2e-20261019", "feat/shoir-ie-release-hardening-20261105"]
+    paths:
+      - "supabase/migrations/**"
+      - "tests/test_full_migration_history_postgres.py"
+      - ".github/workflows/migration-history-integration.yml"
+  push:
+    branches: ["feat/**", "fix/**", "staging-e2e-20261019"]
+    paths:
+      - "supabase/migrations/**"
+      - "tests/test_full_migration_history_postgres.py"
+      - ".github/workflows/migration-history-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-postgres-migration-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shoir_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shoir_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SHOIR_TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/shoir_test
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install isolated PostgreSQL test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest psycopg2-binary
+      - name: Verify disposable PostgreSQL service
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+          from urllib.parse import urlparse
+          url = urlparse(os.environ["SHOIR_TEST_POSTGRES_URL"])
+          assert url.hostname == "127.0.0.1"
+          assert url.path == "/shoir_test"
+          with psycopg2.connect(os.environ["SHOIR_TEST_POSTGRES_URL"]) as conn:
+              with conn.cursor() as cur:
+                  cur.execute("SELECT current_database(), current_user, version()")
+                  name, user, version = cur.fetchone()
+          assert name == "shoir_test" and user == "postgres"
+          print(f"Disposable database verified: {name}; {version}")
+          PY
+      - name: Replay every tracked migration from an empty database
+        run: |
+          mkdir -p artifacts/migration-history
+          python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q -ra --junitxml=artifacts/migration-history/junit.xml tests/test_full_migration_history_postgres.py
+      - name: Upload migration replay evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-clean-migration-history
+          path: artifacts/migration-history/junit.xml
+          if-no-files-found: warn
+          retention-days: 14

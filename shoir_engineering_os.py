@@ -440,7 +440,7 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
         if prompt.strip():
             plan = classify_industrial_problem(prompt, module)
             st.write(f"**Intent:** {plan['intent']}")
-            st.dataframe(pd.DataFrame({"Candidate method": plan["methods"]}), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame({"Candidate method": plan["methods"]}), width="stretch", hide_index=True)
             st.info("Recommended workflow: " + " → ".join(plan["workflow"]))
             st.caption("Candidate routing only; calculation and execution remain with the selected governed engines.")
             if st.button("Record problem-solving plan", key="ieos_record_plan"):
@@ -454,7 +454,7 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
     with tabs[1]:
         st.markdown("#### People + machines + materials + time + space + energy + cost + carbon")
         resource_df, gaps = resource_efficiency_analysis(frame)
-        st.dataframe(resource_df, use_container_width=True, hide_index=True)
+        st.dataframe(resource_df, width="stretch", hide_index=True)
         if gaps:
             st.caption("Evidence gaps: " + ", ".join(gaps))
         coverage = resource_df[["Resource Family", "Observations"]].copy()
@@ -465,7 +465,7 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
             max_figures=1,
         )
         for title, fig in suite:
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "responsive": True})
         st.caption("Resource statistics remain field-specific; the chart shows evidence coverage rather than comparing incompatible units.")
 
     with tabs[2]:
@@ -482,10 +482,10 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
             if chosen:
                 try:
                     comparison = scenario_tradeoff_matrix(frame, scenario_col, chosen)
-                    st.dataframe(comparison, use_container_width=True, hide_index=True)
+                    st.dataframe(comparison, width="stretch", hide_index=True)
                     suite = ensure_visualization_suite(comparison, context=f"{module} · Scenario trade-offs", max_figures=2)
                     for title, fig in suite:
-                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
                 except Exception as exc:
                     st.warning(f"Scenario comparison unavailable: {type(exc).__name__}: {exc}")
         st.markdown("#### Expected vs actual verification")
@@ -504,10 +504,10 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
                 return out
             table = verification_table(parse_lines(expected_text), parse_lines(actual_text))
             st.session_state["unified_verification_df"] = table
-            st.dataframe(table, use_container_width=True, hide_index=True)
+            st.dataframe(table, width="stretch", hide_index=True)
             suite = ensure_visualization_suite(table, context=f"{module} · Verification", max_figures=1)
             for title, fig in suite:
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with tabs[3]:
         search = st.text_input("Find an IE method", key="ieos_method_search")
@@ -516,17 +516,17 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
             terms = [x for x in str(search).lower().split() if x]
             mask = methods.apply(lambda row: all(any(t in str(v).lower() for v in row) for t in terms), axis=1)
             methods = methods.loc[mask]
-        st.dataframe(methods, use_container_width=True, hide_index=True)
+        st.dataframe(methods, width="stretch", hide_index=True)
         st.caption("Coverage distinguishes native engines from workflow adapters; no unimplemented method is presented as a completed solver.")
 
     with tabs[4]:
         thread = digital_thread_contract(frame)
-        st.dataframe(thread, use_container_width=True, hide_index=True)
+        st.dataframe(thread, width="stretch", hide_index=True)
         st.caption("Canonical objects reuse the existing Digital Thread authority; this layer only maps evidence into the shared contract.")
 
     with tabs[5]:
         contract = operating_system_contract(module, frame, session_state=st.session_state)
-        st.dataframe(contract, use_container_width=True, hide_index=True)
+        st.dataframe(contract, width="stretch", hide_index=True)
         st.caption("Profile: " + profile + " · Persona: " + persona + " · Actor: " + str(username))
 
 __all__ = [

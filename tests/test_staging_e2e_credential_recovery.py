@@ -29,10 +29,10 @@ class StagingE2ECredentialRecoveryTests(unittest.TestCase):
         self.assertTrue(recovery.verify_password_hash(stored, password))
         self.assertFalse(recovery.verify_password_hash(stored, password + "-wrong"))
 
-    def test_recovery_targets_only_six_fixed_test_accounts(self) -> None:
+    def test_recovery_targets_only_seven_fixed_test_accounts(self) -> None:
         usernames = [row["username"] for row in recovery.ACCOUNT_SPECS]
-        self.assertEqual(len(usernames), 6)
-        self.assertEqual(len(set(usernames)), 6)
+        self.assertEqual(len(usernames), 7)
+        self.assertEqual(len(set(usernames)), 7)
         self.assertTrue(all(name.startswith("shoir-e2e-") for name in usernames))
         self.assertNotIn("sho", usernames)
         self.assertEqual(recovery.STAGING_PROJECT_REF, "hfhrosthswcybccepmak")
@@ -57,7 +57,7 @@ class StagingE2ECredentialRecoveryTests(unittest.TestCase):
         self.assertFalse(recovery.is_publishable_key("key with whitespace"))
         self.assertFalse(recovery.is_publishable_key("bad\u200bkey"))
 
-    def make_row(self, spec: dict, *, role: str = "User", active: bool = True,
+    def make_row(self, spec: dict, *, role: str = "User", active: bool | None = None,
                  tier: str | None = None, expired: bool | None = None) -> dict:
         now = datetime.now(timezone.utc)
         is_expired = spec["expired"] if expired is None else expired
@@ -66,7 +66,7 @@ class StagingE2ECredentialRecoveryTests(unittest.TestCase):
             "username_lc": spec["username"],
             "role": role,
             "tier": tier or spec["tier"],
-            "active": active,
+            "active": spec.get("active", True) if active is None else active,
             "subscription_expires_at": expiry.isoformat(),
             "password_hash": recovery.hash_password("prior-test-password"),
         }
@@ -81,17 +81,20 @@ class StagingE2ECredentialRecoveryTests(unittest.TestCase):
         now = datetime.now(timezone.utc)
         active = next(spec for spec in recovery.ACCOUNT_SPECS if spec["prefix"] == "active")
         expired = next(spec for spec in recovery.ACCOUNT_SPECS if spec["prefix"] == "expired")
+        inactive = next(spec for spec in recovery.ACCOUNT_SPECS if spec["prefix"] == "inactive")
 
-        for row in (
-            self.make_row(active, role="Enterprise Admin"),
-            self.make_row(active, active=False),
-            self.make_row(active, tier="Starter Tier ($29)"),
-            self.make_row(active, expired=True),
-            self.make_row(expired, expired=False),
-        ):
-            with self.subTest(row=row):
+        invalid_cases = (
+            (self.make_row(active, role="Enterprise Admin"), active),
+            (self.make_row(active, active=False), active),
+            (self.make_row(active, tier="Starter Tier ($29)"), active),
+            (self.make_row(active, expired=True), active),
+            (self.make_row(expired, expired=False), expired),
+            (self.make_row(inactive, active=True), inactive),
+        )
+        for row, spec in invalid_cases:
+            with self.subTest(username=row["username_lc"], active=row["active"]):
                 with self.assertRaises(ValueError):
-                    recovery.validate_existing_account(row, active if row["username_lc"] == active["username"] else expired, now)
+                    recovery.validate_existing_account(row, spec, now)
 
     def test_preflight_requires_existing_password_hash(self) -> None:
         now = datetime.now(timezone.utc)

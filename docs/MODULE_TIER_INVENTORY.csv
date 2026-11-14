@@ -56,6 +56,7 @@ module_name,minimum_tier,declared_in,catalog_sources,authenticated_browser_statu
 "Industrial Control Center","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Industrial Data Platform","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Industrial Operating System","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
+"Industrial Resource Intelligence","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Industrial Simulation Lab","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Manufacturing Execution System","Enterprise","app.py:tier3_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"

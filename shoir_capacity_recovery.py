@@ -374,7 +374,7 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
     edited = st.data_editor(
         st.session_state["capacity_recovery_events"],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         key="capacity_recovery_events_editor",
     )
@@ -389,7 +389,7 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
         help="A what-if assumption only. It does not assert that this reduction is achievable.",
         key="capacity_recovery_reduction_pct",
     )
-    if st.button("Validate and analyze capacity", type="primary", use_container_width=True,
+    if st.button("Validate and analyze capacity", type="primary", width="stretch",
                  key="capacity_recovery_analyze"):
         result = analyze_capacity_recovery(
             edited,
@@ -464,11 +464,11 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
         "Constraint signal is a screening hint based on lowest OEE only. Confirm a true flow bottleneck "
         "using comparable products, routing, throughput, queues/WIP, and process constraints."
     )
-    st.dataframe(metrics, use_container_width=True, hide_index=True)
+    st.dataframe(metrics, width="stretch", hide_index=True)
     st.plotly_chart(
         px.bar(metrics, x="Line", y="OEEPct", title="Calculated OEE by line",
                labels={"OEEPct": "OEE (%)", "Line": "Production line"}),
-        use_container_width=True,
+        width="stretch",
     )
     if (metrics["OEEPct"] > 100).any():
         st.warning("At least one OEE result exceeds 100%. Check ideal-cycle units and source data; the engine has not silently capped the result.")
@@ -477,12 +477,12 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
 
     st.subheader(f"What-if: recover {reduction_pct}% of observed downtime")
     st.caption("Simulated estimates assume observed row-level performance and quality remain unchanged during recovered time.")
-    st.dataframe(scenario, use_container_width=True, hide_index=True)
+    st.dataframe(scenario, width="stretch", hide_index=True)
     st.plotly_chart(
         px.bar(scenario, x="Line", y="EstimatedAdditionalGoodUnits",
                title="Estimated additional good units under the scenario",
                labels={"EstimatedAdditionalGoodUnits": "Estimated units", "Line": "Production line"}),
-        use_container_width=True,
+        width="stretch",
     )
 
     evidence = result["evidence"]
@@ -503,7 +503,7 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
             data=export_bytes,
             file_name="shoir_ie_capacity_recovery_study.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
             key="capacity_recovery_download",
         )
     except Exception as exc:

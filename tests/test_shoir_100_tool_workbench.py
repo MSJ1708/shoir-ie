@@ -798,3 +798,266 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "OVERDUE"
+
+
+def _open_tool_for_app_test(at, tool_label: str) -> None:
+    at.selectbox(key="shoir_100_tool_inspector").select(tool_label)
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+
+def test_workbench_runs_rcm_network_calibration_disruption_and_kpi_tools():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "foundation-tools-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # T044: RCM decision candidates, including specialist escalation.
+    _open_tool_for_app_test(at, "T044 · Reliability-Centered Maintenance Assistant")
+    at.button(key="tool044_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    rcm = at.session_state["shoir_tool_result_T044"]
+    assert rcm["status"] == "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL"
+    assert rcm["task_candidate_count"] == 2
+    assert rcm["specialist_review_count"] == 3
+    assert "SPECIALIST_SAFETY_REVIEW" in rcm["decision_tree"]["Recommended task candidate"].tolist()
+
+    # T060: deterministic transport optimization with explicit shortage reporting.
+    _open_tool_for_app_test(at, "T060 · Supply Chain Network Planner")
+    at.button(key="tool060_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    network = at.session_state["shoir_tool_result_T060"]
+    assert network["status"] == "OPTIMAL"
+    assert network["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert network["total_unmet_demand"] == pytest.approx(0)
+    assert network["total_units_shipped"] == pytest.approx(150)
+
+    # T074: the sample is deliberately linear so the calibration fit is known.
+    _open_tool_for_app_test(at, "T074 · Digital Twin Calibration Studio")
+    at.text_input(key="tool074_simulated").set_value("1, 2, 3, 4, 5, 6")
+    at.text_input(key="tool074_measured").set_value("2.5, 4.5, 6.5, 8.5, 10.5, 12.5")
+    at.slider(key="tool074_fraction").set_value(0.67)
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool074_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    calibration = at.session_state["shoir_tool_result_T074"]
+    assert calibration["status"] == "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT"
+    assert calibration["calibration_slope"] == pytest.approx(2.0)
+    assert calibration["holdout_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-8)
+
+    # T080: reproducible synthetic shock study; never label this as live.
+    _open_tool_for_app_test(at, "T080 · Industrial Disruption Simulator")
+    at.number_input(key="tool080_iterations").set_value(10)
+    at.number_input(key="tool080_seed").set_value(17)
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool080_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    disruption = at.session_state["shoir_tool_result_T080"]
+    assert disruption["status"] == "SYNTHETIC_DISRUPTION_STRESS_TEST"
+    assert disruption["iterations"] == 10
+    assert disruption["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+
+    # T094: KPI breach must be visible and source freshness must be evaluated.
+    _open_tool_for_app_test(at, "T094 · KPI Dashboard and Alert Center")
+    at.text_area(key="tool094_records").set_value(
+        '[{"kpi":"OEE","value":80,"unit":"%","observed_at":"2026-11-06T17:50:00Z","source":"synthetic-ci"}]'
+    )
+    at.text_area(key="tool094_rules").set_value(
+        '[{"rule_id":"oee-floor","kpi":"OEE","operator":"<","threshold":85,"severity":"WARNING"}]'
+    )
+    at.text_input(key="tool094_as_of").set_value("2026-11-06T18:00:00Z")
+    # These controls are inside a Streamlit form. Submit the form before
+    # triggering a separate rerun; an intermediate AppTest rerun resets
+    # unsubmitted form values to their defaults.
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    # The focused-tool handler deliberately catches calculation errors and
+    # displays them in the UI. Check that channel before reading the result;
+    # otherwise a genuine T094 failure is obscured by a secondary KeyError.
+    displayed_errors = [str(element.value) for element in at.error]
+    assert not displayed_errors, (
+        "T094 execution displayed an application error despite no uncaught "
+        "Streamlit exception:\\n" + "\\n".join(displayed_errors)
+    )
+    assert "shoir_tool_result_T094" in at.session_state, (
+        "T094 completed without raising but did not persist its result."
+    )
+    alerts = at.session_state["shoir_tool_result_T094"]
+    assert alerts["open_alert_count"] == 1
+    assert alerts["new_alert_count"] == 1
+    assert alerts["alerts"].iloc[0]["Event"] == "NEW"
+
+
+def test_workbench_plugin_contract_and_personal_backup_tools_are_not_fake_routes():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "plugin-governance-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    _open_tool_for_app_test(at, "T097 · API, SDK, and Plugin Toolkit")
+    at.selectbox(key="tool097_plugin").select("REST connector adapter")
+    at.text_area(key="tool097_payload").set_value("{}")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool097_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    plugin = at.session_state["shoir_tool_result_T097"]
+    assert plugin["status"] == "PLUGIN_CONTRACT_VALIDATED"
+    assert plugin["payload_valid"] is True
+    assert plugin["execution_status"] == "METADATA_ONLY"
+    assert "No external endpoint was called" in plugin["warning"]
+
+    _open_tool_for_app_test(at, "T099 · Data Governance and Recovery Center")
+    at.radio(key="tool099_action").set_value("Export personal workspace backup")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool099_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    governance = at.session_state["shoir_tool_result_T099"]
+    backup = at.session_state["shoir_tool_bundle_bytes_T099"]
+    assert governance["status"] == "PERSONAL_WORKSPACE_BACKUP_CREATED"
+    assert backup.startswith(b"{")
+    assert governance["backup_manifest"]["owner_username_lc"] == "plugin-governance-checker"
+
+def test_workbench_recovery_tool_applies_a_verified_revision_snapshot():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "recovery-tool-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    _open_tool_for_app_test(at, "T006 · Undo, Redo, and Recovery")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "RECOVERY_ACTION_APPLIED"
+    assert result["action"] == "snapshot"
+    assert result["current_state"]["dataset"] == "SYNTHETIC-example"
+    assert result["can_undo"] is False
+    assert len(result["history"]) == 1
+
+
+
+def test_workbench_exposes_and_runs_t096_and_t098_configuration_checks():
+    """T096/T098 must have real focused UI routes without fake live integrations."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.session_state["user_role"] = "Enterprise Admin"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T096 · Integration Management Center")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.selectbox(key="tool096_action").value == "Inspect configured connector settings"
+    at.button(key="tool096_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    integration = at.session_state.get("shoir_tool_result_T096")
+    assert integration is not None
+    assert integration["status"] == "CONFIGURATION_INSPECTED"
+    assert integration["connected_count"] == 0
+    assert all(
+        item["status"] in {
+            "NOT_CONNECTED_CONFIGURATION_INCOMPLETE",
+            "READY_FOR_AUTHORIZED_STAGING_TEST",
+        }
+        for item in integration["profile_records"]
+    )
+    assert all(item["last_test_at"] is None for item in integration["profile_records"])
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T098 · Enterprise Identity and Audit Center")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool098_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    identity = at.session_state.get("shoir_tool_result_T098")
+    assert identity is not None
+    assert identity["tool_id"] == "T098"
+    assert identity["provider"].startswith("OIDC-compatible identity provider")
+    assert identity["sso_active"] is False
+    assert identity["mfa_active"] is False
+    assert identity["provider_authentication_tested"] is False
+    assert identity["provider_mfa_evidence_verified"] is False
+    assert all(row["value_exposed"] is False for row in identity["environment_variables"].to_dict("records"))
+
+
+def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
+    """Exercise T094's real Workbench form, result key, and open-alert deduplication."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T094 · KPI Dashboard and Alert Center")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.text_area(key="tool094_records").set_value(
+        '[{"kpi":"Scrap Rate","value":4,"unit":"%","observed_at":"2026-11-12T09:00:00Z","source":"Synthetic acceptance fixture"}]'
+    )
+    at.text_area(key="tool094_rules").set_value(
+        '[{"rule_id":"scrap-high","kpi":"Scrap Rate","operator":"gt","threshold":3,"severity":"HIGH"}]'
+    )
+    at.text_input(key="tool094_as_of").set_value("2026-11-12T10:00:00Z")
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "T094 first run raised: " + "\n".join(str(error.value) for error in at.exception)
+
+    first = at.session_state.get("shoir_tool_result_T094")
+    assert first is not None, "T094 did not populate shoir_tool_result_T094."
+    assert first["kpi_count"] == 1
+    assert first["breached_kpi_count"] == 1
+    assert first["new_alert_count"] == 1
+    assert first["alert_records"][0]["rule_id"] == "scrap-high"
+    assert first["alert_records"][0]["severity"] == "HIGH"
+    assert first["alert_records"][0]["source"] == "Synthetic acceptance fixture"
+    assert at.session_state["shoir_kpi_open_alert_records"][0]["state"] == "OPEN"
+
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "T094 repeat run raised: " + "\n".join(str(error.value) for error in at.exception)
+
+    repeated = at.session_state.get("shoir_tool_result_T094")
+    assert repeated is not None
+    assert repeated["new_alert_count"] == 0
+    assert repeated["alert_records"][0]["new_alert"] is False

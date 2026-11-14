@@ -417,7 +417,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
             "Low":[50,0,0],
             "High":[100,3,20],
         }))
-        factors_df = st.data_editor(defaults, num_rows="dynamic", use_container_width=True, key="experiment_factor_editor")
+        factors_df = st.data_editor(defaults, num_rows="dynamic", width="stretch", key="experiment_factor_editor")
         c1,c2,c3 = st.columns(3)
         with c1:
             response_col = st.selectbox("Response column (after measurements)", ["(none)"] + [str(c) for c in st.session_state.get("experiment_engine_data", _experiment_source_df(module)).columns], key="experiment_doe_response")
@@ -426,7 +426,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
         with c3:
             seed = st.number_input("DOE seed", 0, 2147483647, int((protocol or {}).get("random_seed",42)), 1, key="experiment_doe_seed")
 
-        if st.button("🧬 Generate Full Factorial Design", type="primary", use_container_width=True, key="experiment_generate_factorial"):
+        if st.button("🧬 Generate Full Factorial Design", type="primary", width="stretch", key="experiment_generate_factorial"):
             try:
                 factors = {}
                 for row in factors_df.to_dict("records"):
@@ -443,11 +443,11 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
 
         if "experiment_doe_design" in st.session_state:
             st.markdown("#### Editable run sheet")
-            design = st.data_editor(st.session_state["experiment_doe_design"], num_rows="dynamic", use_container_width=True, key="experiment_doe_results_editor")
+            design = st.data_editor(st.session_state["experiment_doe_design"], num_rows="dynamic", width="stretch", key="experiment_doe_results_editor")
             st.session_state["experiment_doe_design"] = design.copy(deep=True)
             if response_col != "(none)" and response_col in st.session_state.get("experiment_engine_data", _experiment_source_df(module)).columns:
                 st.caption("The selected response column is reference data only; the generated DOE run sheet remains editable so you can paste measured results.")
-            if st.button("📐 Analyze Factor Effects", use_container_width=True, key="experiment_factorial_analyze"):
+            if st.button("📐 Analyze Factor Effects", width="stretch", key="experiment_factorial_analyze"):
                 try:
                     effects, summary = factorial_effects(design, "Response" if "Response" in design.columns else response_col, [c for c in factors_df["Factor"].astype(str).tolist() if c in design.columns], bootstrap=int(boot), seed=int(seed), confidence=float((protocol or {}).get("confidence_level",0.95)))
                     st.session_state["experiment_factorial_effects"] = effects
@@ -456,9 +456,9 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                     st.error(f"Factorial analysis failed safely: {exc}")
             if "experiment_factorial_effects" in st.session_state:
                 eff = st.session_state["experiment_factorial_effects"]
-                st.dataframe(eff, use_container_width=True, hide_index=True)
+                st.dataframe(eff, width="stretch", hide_index=True)
                 fig = px.bar(eff.sort_values("Effect"), x="Effect", y="Term", orientation="h", error_x=None, title="Factorial Effects")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
                 st.json(st.session_state.get("experiment_factorial_summary", {}))
 
     with tabs[1]:
@@ -474,12 +474,12 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                 mean = float(s.mean()) if not s.empty else 0.0
                 std = float(s.std(ddof=1)) if len(s) > 1 else 0.0
                 specs_rows.append({"Input":c,"Mean":mean,"Std":std,"Weight":1.0,"Distribution":"Normal"})
-            specs_df=st.data_editor(pd.DataFrame(specs_rows),num_rows="dynamic",use_container_width=True,key="experiment_mc_specs")
+            specs_df=st.data_editor(pd.DataFrame(specs_rows),num_rows="dynamic",width="stretch",key="experiment_mc_specs")
             mc1,mc2,mc3=st.columns(3)
             with mc1: runs_n=st.number_input("Simulation runs",500,200000,10000,500,key="experiment_mc_runs")
             with mc2: mc_seed=st.number_input("MC seed",0,2147483647,int((protocol or {}).get("random_seed",42)),1,key="experiment_mc_seed")
             with mc3: confidence=st.number_input("Confidence",0.80,0.999,float((protocol or {}).get("confidence_level",0.95)),0.01,key="experiment_mc_conf")
-            if st.button("🎲 Propagate Uncertainty",type="primary",use_container_width=True,key="experiment_mc_run"):
+            if st.button("🎲 Propagate Uncertainty",type="primary",width="stretch",key="experiment_mc_run"):
                 try:
                     specs={str(r["Input"]):{"mean":float(r["Mean"]),"std":float(r["Std"]),"weight":float(r["Weight"]),"distribution":str(r["Distribution"]),"min":float(r["Mean"])-float(r["Std"]),"max":float(r["Mean"])+float(r["Std"]),"mode":float(r["Mean"])} for r in specs_df.to_dict("records") if str(r["Input"]).strip()}
                     summary, draws=monte_carlo_uncertainty(specs,runs=int(runs_n),seed=int(mc_seed),confidence=float(confidence))
@@ -489,8 +489,8 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                 except Exception as exc: st.error(f"Monte Carlo failed safely: {exc}")
             if "experiment_mc_result_summary" in st.session_state:
                 st.metric("Mean propagated KPI",f'{st.session_state["experiment_mc_result_summary"]["Mean"]:,.4g}')
-                st.dataframe(pd.DataFrame([st.session_state["experiment_mc_result_summary"]]),use_container_width=True,hide_index=True)
-                st.plotly_chart(px.histogram(st.session_state["experiment_mc_results"],x="Propagated KPI",nbins=50,title="Monte Carlo Propagated KPI Distribution"),use_container_width=True)
+                st.dataframe(pd.DataFrame([st.session_state["experiment_mc_result_summary"]]),width="stretch",hide_index=True)
+                st.plotly_chart(px.histogram(st.session_state["experiment_mc_results"],x="Propagated KPI",nbins=50,title="Monte Carlo Propagated KPI Distribution"),width="stretch")
 
     with tabs[2]:
         source = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
@@ -509,19 +509,19 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                 if len(values)>=2:
                     a,b=values[0],values[1]
                     st.caption(f"Comparing first two observed groups: {a} vs {b}")
-                    if st.button("🔁 Bootstrap Group Effect",type="primary",use_container_width=True,key="experiment_boot_group_run"):
+                    if st.button("🔁 Bootstrap Group Effect",type="primary",width="stretch",key="experiment_boot_group_run"):
                         try:
                             summ,dist=bootstrap_group_effect(source,group_col,metric,a,b,replicates=int(reps),seed=int(boot_seed),confidence=float(conf))
                             st.session_state["experiment_bootstrap_summary"]=summ; st.session_state["experiment_bootstrap_results"]=dist
                         except Exception as exc: st.error(f"Bootstrap group effect failed safely: {exc}")
-            if st.button("🔁 Bootstrap Single-Metric CI",use_container_width=True,key="experiment_boot_single_run"):
+            if st.button("🔁 Bootstrap Single-Metric CI",width="stretch",key="experiment_boot_single_run"):
                 try:
                     summ,dist=bootstrap_statistic(source[metric],statistic="mean",replicates=int(reps),seed=int(boot_seed),confidence=float(conf))
                     st.session_state["experiment_bootstrap_summary"]=summ; st.session_state["experiment_bootstrap_results"]=dist
                 except Exception as exc: st.error(f"Bootstrap failed safely: {exc}")
             if "experiment_bootstrap_summary" in st.session_state:
-                st.dataframe(pd.DataFrame([st.session_state["experiment_bootstrap_summary"]]),use_container_width=True,hide_index=True)
-                st.plotly_chart(px.histogram(st.session_state["experiment_bootstrap_results"],x=st.session_state["experiment_bootstrap_results"].columns[0],nbins=50,title="Bootstrap Distribution"),use_container_width=True)
+                st.dataframe(pd.DataFrame([st.session_state["experiment_bootstrap_summary"]]),width="stretch",hide_index=True)
+                st.plotly_chart(px.histogram(st.session_state["experiment_bootstrap_results"],x=st.session_state["experiment_bootstrap_results"].columns[0],nbins=50,title="Bootstrap Distribution"),width="stretch")
 
     with tabs[3]:
         source = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
@@ -533,17 +533,17 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
             resp=st.selectbox("Response",nums,key="experiment_rep_response")
             scen=st.selectbox("Scenario / group",["(none)"]+cats,key="experiment_rep_scenario")
             repl=st.selectbox("Replication ID (optional)",["(none)"]+cats,key="experiment_replication_id")
-            if st.button("📊 Summarize Replications",use_container_width=True,key="experiment_rep_summary"):
+            if st.button("📊 Summarize Replications",width="stretch",key="experiment_rep_summary"):
                 try:
                     st.session_state["experiment_replication_summary"]=replication_summary(source,resp,scenario_col=None if scen=="(none)" else scen,replication_col=None if repl=="(none)" else repl,confidence=float((protocol or {}).get("confidence_level",0.95)))
                 except Exception as exc: st.error(f"Replication summary failed safely: {exc}")
             if "experiment_replication_summary" in st.session_state:
-                st.dataframe(st.session_state["experiment_replication_summary"],use_container_width=True,hide_index=True)
+                st.dataframe(st.session_state["experiment_replication_summary"],width="stretch",hide_index=True)
             inputs=[c for c in nums if c!=resp]
             selected_inputs=st.multiselect("Sensitivity drivers",inputs,default=inputs[:min(5,len(inputs))],key="experiment_sensitivity_inputs")
-            if st.button("🌪️ Compute Sensitivity",use_container_width=True,key="experiment_sensitivity_run"):
+            if st.button("🌪️ Compute Sensitivity",width="stretch",key="experiment_sensitivity_run"):
                 try: st.session_state["experiment_sensitivity_results"]=sensitivity_table(source,resp,selected_inputs)
                 except Exception as exc: st.error(f"Sensitivity analysis failed safely: {exc}")
             if "experiment_sensitivity_results" in st.session_state:
-                sens=st.session_state["experiment_sensitivity_results"]; st.dataframe(sens,use_container_width=True,hide_index=True)
-                if not sens.empty: st.plotly_chart(px.bar(sens.sort_values("Sensitivity"),x="Sensitivity",y="Driver",orientation="h",hover_data=["Direction"],title="Sensitivity Strength"),use_container_width=True)
+                sens=st.session_state["experiment_sensitivity_results"]; st.dataframe(sens,width="stretch",hide_index=True)
+                if not sens.empty: st.plotly_chart(px.bar(sens.sort_values("Sensitivity"),x="Sensitivity",y="Driver",orientation="h",hover_data=["Direction"],title="Sensitivity Strength"),width="stretch")

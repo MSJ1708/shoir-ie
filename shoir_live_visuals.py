@@ -52,6 +52,7 @@ _MODULE_KEYS = {
     "Advanced Engineering Copilot": ["copilot_orchestrator_run", "copilot_orchestrator_figure_json", "copilot_staged_decision_id", "copilot_orchestrator_export", "copilot_clean_audit"],
     "MILP Solvers": ["milp_result_df", "milp_summary_df", "milp_allocation_flow_df"],
     "Industrial Data Model & Digital Thread": ["thread_df", "thread_rel"],
+    "Industrial Resource Intelligence": ["shoir_resource_intelligence_passports", "shoir_resource_intelligence_demands", "shoir_resource_intelligence_routes", "shoir_resource_intelligence_results", "shoir_resource_intelligence_agreements", "shoir_resource_intelligence_deliveries"],
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
     "Manufacturing Execution System": ["mes_wo_df", "mes_events_df", "mes_oee_df", "mes_oee_result"],
     "Quality Engineering & Reliability": ["quality_df", "quality_spc_result", "quality_limits_result", "msa_df", "anova_df", "fmea_df", "fmea_result"],
@@ -624,7 +625,7 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
     fig = _make_figure(df, auto_chart, x, y, z, f"{module} · Auto view")
     if fig is not None:
         st.caption(f"Auto-selected visualization: **{auto_chart}**")
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False, "responsive": True})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": True, "displaylogo": False, "responsive": True})
         try:
             token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
             st.session_state[f"liveviz_last_figure_json_{token}"] = fig.to_json()
@@ -675,7 +676,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             )
             st.plotly_chart(
                 workflow_fig,
-                use_container_width=True,
+                width="stretch",
                 config={"displayModeBar": True, "displaylogo": False, "responsive": True},
             )
             return
@@ -793,7 +794,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         q3.metric("Numeric measures", f"{len(nums):,}")
         q4.metric("View", actual_chart)
 
-        st.plotly_chart(fig, use_container_width=True, config={
+        st.plotly_chart(fig, width="stretch", config={
             "displayModeBar": True,
             "displaylogo": False,
             "scrollZoom": True,
@@ -825,7 +826,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         csv_key = f"liveviz_csv_bytes_{chart_token}"
         with left:
             if len(prepared) >= 50_000:
-                if st.button("📦 Prepare interactive chart (HTML)", use_container_width=True, key=f"liveviz_prepare_html_{chart_token}"):
+                if st.button("📦 Prepare interactive chart (HTML)", width="stretch", key=f"liveviz_prepare_html_{chart_token}"):
                     try:
                         st.session_state[html_key] = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
                     except Exception as exc:
@@ -836,7 +837,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                         data=st.session_state[html_key],
                         file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
                         mime="text/html",
-                        use_container_width=True,
+                        width="stretch",
                         key=f"liveviz_html_{chart_token}",
                     )
             else:
@@ -845,25 +846,25 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                     st.download_button(
                         "📥 Download interactive chart (HTML)", data=html_bytes,
                         file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
-                        mime="text/html", use_container_width=True, key=f"liveviz_html_{chart_token}",
+                        mime="text/html", width="stretch", key=f"liveviz_html_{chart_token}",
                     )
                 except Exception as exc:
                     st.caption(f"Interactive export unavailable: {exc}")
         with right:
             if len(prepared) >= 50_000:
-                if st.button("📄 Prepare chart data (CSV)", use_container_width=True, key=f"liveviz_prepare_csv_{chart_token}"):
+                if st.button("📄 Prepare chart data (CSV)", width="stretch", key=f"liveviz_prepare_csv_{chart_token}"):
                     st.session_state[csv_key] = prepared.to_csv(index=False).encode("utf-8")
                 if isinstance(st.session_state.get(csv_key), (bytes, bytearray)):
                     st.download_button(
                         "📄 Download chart data (CSV)", data=st.session_state[csv_key],
                         file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
-                        mime="text/csv", use_container_width=True, key=f"liveviz_csv_{chart_token}",
+                        mime="text/csv", width="stretch", key=f"liveviz_csv_{chart_token}",
                     )
             else:
                 st.download_button(
                     "📄 Download chart data (CSV)", data=prepared.to_csv(index=False).encode("utf-8"),
                     file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
-                    mime="text/csv", use_container_width=True, key=f"liveviz_csv_{chart_token}",
+                    mime="text/csv", width="stretch", key=f"liveviz_csv_{chart_token}",
                 )
 
 
@@ -1378,7 +1379,7 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
     for idx, (title, fig) in enumerate(suite):
         st.plotly_chart(
             fig,
-            use_container_width=True,
+            width="stretch",
             config={
                 "displayModeBar": True,
                 "displaylogo": False,

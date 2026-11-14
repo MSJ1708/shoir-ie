@@ -40,12 +40,12 @@ def test_client_and_server_keys_are_not_interchangeable():
     assert not is_service_role_key(_jwt("anon"))
 
 
-def test_expected_fixture_has_six_distinct_disposable_accounts_and_tiers():
+def test_expected_fixture_has_seven_distinct_disposable_accounts_and_tiers():
     accounts = _expected_accounts()
-    assert len(accounts) == 6
-    assert len({a["username"].casefold() for a in accounts}) == 6
+    assert len(accounts) == 7
+    assert len({a["username"].casefold() for a in accounts}) == 7
     assert all(a["username"].startswith("shoir-e2e-") for a in accounts)
-    assert len({a["password"] for a in accounts}) == 6
+    assert len({a["password"] for a in accounts}) == 7
     assert all(len(a["password"]) >= 24 for a in accounts)
     tiers = {a["secret_prefix"]: a["tier"] for a in accounts}
     assert tiers["active"] == ACTIVE_TIER
@@ -54,6 +54,9 @@ def test_expected_fixture_has_six_distinct_disposable_accounts_and_tiers():
     assert tiers["starter"] == STARTER_TIER
     assert tiers["expired"] == STARTER_TIER
     assert tiers["research_module"] == RESEARCH_TIER
+    assert tiers["inactive"] == STARTER_TIER
+    inactive = next(a for a in accounts if a["secret_prefix"] == "inactive")
+    assert inactive["username"] == "shoir-e2e-inactive"
     assert EXPIRED_AT.startswith("2000-")
 
 

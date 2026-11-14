@@ -12,7 +12,12 @@ def test_managed_backend_never_falls_back_to_local_sqlite(monkeypatch):
 
     restored = {}
     assert wp.load_user_workspace("Alice", restored) is False
-    assert restored == {}
+    # The loader may retain private ownership/scope markers, but must not
+    # hydrate user workspace values or invoke the local SQLite fallback.
+    assert restored.get("_workspace_loaded_keys") == []
+    assert restored.get("_workspace_loaded_owner") == "alice"
+    assert restored.get("_workspace_loaded_scope") is None
+    assert not any(not key.startswith("_workspace_") for key in restored)
 
 
 def test_managed_save_never_writes_local_sqlite(monkeypatch):

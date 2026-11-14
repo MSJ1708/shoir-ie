@@ -530,7 +530,7 @@ def _render_validation_card(validation: dict[str, Any]) -> None:
     checks = pd.DataFrame(validation.get("checks", []))
     if not checks.empty:
         with st.expander("🔎 Validation checks", expanded=False):
-            st.dataframe(checks, use_container_width=True, hide_index=True)
+            st.dataframe(checks, width="stretch", hide_index=True)
 
 
 def _render_prepare(module: str, keys: dict[str, str]) -> None:
@@ -582,7 +582,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
             f"Large dataset detected ({len(df):,} rows). Shoir-IE keeps the full dataset for analysis, "
             "but uses a bounded preview instead of loading every row into the browser editor."
         )
-        st.dataframe(sample_preview(df, DEFAULT_PREVIEW_ROWS), use_container_width=True, hide_index=True)
+        st.dataframe(sample_preview(df, DEFAULT_PREVIEW_ROWS), width="stretch", hide_index=True)
         current_validation = st.session_state.get(keys["validation"])
         if not isinstance(current_validation, dict):
             current_validation = validate_module_dataframe(df)
@@ -593,7 +593,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
         edited = st.data_editor(
             df,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key=f"module_parity_editor_{token}",
         )
         _apply_module_edit(module, edited)
@@ -615,7 +615,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("✅ Validate & Record", type="primary", use_container_width=True, key=f"module_parity_validate_{token}"):
+        if st.button("✅ Validate & Record", type="primary", width="stretch", key=f"module_parity_validate_{token}"):
             st.session_state[keys["validation"]] = validate_module_dataframe(df)
             st.session_state[keys["results"]] = summarize_module_dataframe(df)
             meta = st.session_state.get(keys["meta"], {})
@@ -625,7 +625,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
             st.session_state[keys["meta"]] = meta
             st.success("Validation snapshot recorded in the workspace.")
     with c2:
-        if st.button("✨ Auto Clean & Revalidate", use_container_width=True, key=f"module_parity_clean_{token}"):
+        if st.button("✨ Auto Clean & Revalidate", width="stretch", key=f"module_parity_clean_{token}"):
             try:
                 from shoir_upgrade import clean_dataframe
                 cleaned, audit = clean_dataframe(df)
@@ -637,7 +637,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
             except Exception as exc:
                 st.error(f"Cleaning failed safely: {exc}")
     with c3:
-        if st.button("↩️ Reset to Imported Snapshot", use_container_width=True, key=f"module_parity_reset_{token}"):
+        if st.button("↩️ Reset to Imported Snapshot", width="stretch", key=f"module_parity_reset_{token}"):
             original = st.session_state.get(keys["original"], pd.DataFrame())
             restored = original.copy(deep=True) if isinstance(original, pd.DataFrame) else pd.DataFrame()
             st.session_state[keys["data"]] = restored
@@ -670,7 +670,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     if native_targets and not df.empty:
         st.markdown("### 🔄 Native Module Input Bridge")
         st.caption("Apply the validated parity dataset to compatible native module inputs. This is schema-aware and never overwrites unrelated tables.")
-        if st.button("🔗 Apply parity data to compatible native inputs", use_container_width=True, key=f"module_parity_apply_native_{token}"):
+        if st.button("🔗 Apply parity data to compatible native inputs", width="stretch", key=f"module_parity_apply_native_{token}"):
             try:
                 from shoir_upgrade import align_imported_table
                 applied = 0
@@ -777,7 +777,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
             if st.button(
                 "▶ Run module-specific review on this result dataset",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key=f"module_playbook_run_{token}",
                 disabled=result_df.empty,
             ):
@@ -837,7 +837,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                             metric_display = str(metric_value)
                         metric_columns[metric_index % len(metric_columns)].metric(str(metric_name), metric_display)
                 if isinstance(analysis_df, pd.DataFrame) and not analysis_df.empty:
-                    st.dataframe(apply_display_labels(analysis_df, profile), use_container_width=True, hide_index=True)
+                    st.dataframe(apply_display_labels(analysis_df, profile), width="stretch", hide_index=True)
                     import plotly.express as px
                     chart_x = analysis.get("chart_x")
                     chart_y = analysis.get("chart_y")
@@ -858,7 +858,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                             st.info(chart_notice)
                         if fig is not None:
                             st.caption(f"Visualization: {actual_chart} · configured for this module profile.")
-                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                            st.plotly_chart(fig, width="stretch", config={"displayModeBar": True, "responsive": True})
                         if cached_playbook.get("run_id"):
                             st.caption(f"Saved run: {cached_playbook['run_id']} · Input SHA-256: {cached_playbook.get('input_hash', 'unavailable')}")
                 st.warning(analysis.get("guardrail", blueprint["guardrail"]))
@@ -872,14 +872,14 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     c5.metric("Readiness", summary["Readiness"])
 
     if not result_df.empty:
-        st.dataframe(result_df.head(500), use_container_width=True, hide_index=True)
+        st.dataframe(result_df.head(500), width="stretch", hide_index=True)
     else:
         st.info("No tabular result has been produced yet. Import data above or run the module's own calculation to populate this surface.")
 
     numeric_summary = summary.get("numeric_summary", pd.DataFrame())
     if isinstance(numeric_summary, pd.DataFrame) and not numeric_summary.empty:
         with st.expander("📐 Numeric result statistics", expanded=False):
-            st.dataframe(numeric_summary, use_container_width=True, hide_index=True)
+            st.dataframe(numeric_summary, width="stretch", hide_index=True)
 
     try:
         from shoir_live_visuals import render_live_visualization_studio
@@ -906,7 +906,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     if len(result_df) >= LARGE_TABLE_ROWS:
         st.caption("Large-result optimization: export files are generated only when requested, so analysis results do not wait on workbook/ZIP serialization.")
         with ea:
-            if st.button("📦 Prepare Excel evidence", use_container_width=True, key=f"module_parity_prepare_xlsx_{token}"):
+            if st.button("📦 Prepare Excel evidence", width="stretch", key=f"module_parity_prepare_xlsx_{token}"):
                 try:
                     st.session_state[xlsx_key] = _build_export_xlsx(module, result_df, validation, summary, figure)
                     st.session_state.pop(zip_key, None)
@@ -919,11 +919,11 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                     data=st.session_state[xlsx_key],
                     file_name=f"shoir_ie_{_slug(module)}_parity.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"module_parity_xlsx_{token}",
                 )
         with eb:
-            if st.button("📄 Prepare CSV", use_container_width=True, key=f"module_parity_prepare_csv_{token}"):
+            if st.button("📄 Prepare CSV", width="stretch", key=f"module_parity_prepare_csv_{token}"):
                 st.session_state[csv_key] = result_df.to_csv(index=False).encode("utf-8")
             if isinstance(st.session_state.get(csv_key), (bytes, bytearray)):
                 st.download_button(
@@ -931,11 +931,11 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                     data=st.session_state[csv_key],
                     file_name=f"shoir_ie_{_slug(module)}_results.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"module_parity_csv_{token}",
                 )
         with ec:
-            if st.button("🗂️ Prepare evidence bundle", use_container_width=True, key=f"module_parity_prepare_zip_{token}"):
+            if st.button("🗂️ Prepare evidence bundle", width="stretch", key=f"module_parity_prepare_zip_{token}"):
                 try:
                     xlsx_for_zip = st.session_state.get(xlsx_key)
                     if not isinstance(xlsx_for_zip, (bytes, bytearray)):
@@ -953,7 +953,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                     data=st.session_state[zip_key],
                     file_name=f"shoir_ie_{_slug(module)}_evidence.zip",
                     mime="application/zip",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"module_parity_zip_{token}",
                 )
     else:
@@ -965,12 +965,12 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
             st.warning(f"Workbook export could not be generated for this result set: {exc}")
         with ea:
             if xlsx_bytes is not None:
-                st.download_button("📥 Download Excel evidence", data=xlsx_bytes, file_name=f"shoir_ie_{_slug(module)}_parity.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"module_parity_xlsx_{token}")
+                st.download_button("📥 Download Excel evidence", data=xlsx_bytes, file_name=f"shoir_ie_{_slug(module)}_parity.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", key=f"module_parity_xlsx_{token}")
         with eb:
-            st.download_button("📄 Download CSV results", data=result_df.to_csv(index=False).encode("utf-8"), file_name=f"shoir_ie_{_slug(module)}_results.csv", mime="text/csv", use_container_width=True, key=f"module_parity_csv_{token}")
+            st.download_button("📄 Download CSV results", data=result_df.to_csv(index=False).encode("utf-8"), file_name=f"shoir_ie_{_slug(module)}_results.csv", mime="text/csv", width="stretch", key=f"module_parity_csv_{token}")
         with ec:
             zip_bytes = _build_export_zip(module, result_df, validation, summary, xlsx_bytes or b"", figure_json if isinstance(figure_json, str) else None)
-            st.download_button("🗂️ Download evidence bundle", data=zip_bytes, file_name=f"shoir_ie_{_slug(module)}_evidence.zip", mime="application/zip", use_container_width=True, key=f"module_parity_zip_{token}")
+            st.download_button("🗂️ Download evidence bundle", data=zip_bytes, file_name=f"shoir_ie_{_slug(module)}_evidence.zip", mime="application/zip", width="stretch", key=f"module_parity_zip_{token}")
 
     st.caption("Persistence: the parity dataset, validation snapshot and results summary live in workspace state and are captured by Shoir-IE autosave; the configured durable backend remains authoritative in managed deployments.")
 
@@ -985,7 +985,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
         save_snapshot = st.button(
             "📌 Save result snapshot",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=result_df.empty,
             key=f"module_parity_save_run_{token}",
         )

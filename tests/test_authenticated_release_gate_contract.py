@@ -96,9 +96,9 @@ def test_active_module_identity_renders_before_optional_header_diagnostics_and_h
 
 def test_manual_release_gate_runbook_targets_the_unmerged_candidate_branch():
     docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
-    assert "select the branch containing the release-candidate commit" in docs
-    assert "select `staging-e2e-20261019` (PR #165)" in docs
-    assert "choosing `main` would test the older base revision" in docs
+    assert "Ensure the dedicated staging Streamlit app is configured to deploy the same release-candidate branch" in docs
+    assert "select `feat/shoir-ie-release-hardening-20261105`" in docs
+    assert "Do not select `staging-e2e-20261019` (the PR base) or `main`" in docs
 
 
 def test_server_login_throttle_is_reviewed_and_migration_first():
@@ -219,3 +219,59 @@ def test_inactive_test_account_is_required_and_restricted_to_disposable_prefix()
     assert "SHOIR_E2E_INACTIVE_PASSWORD" in required_line
     assert "SHOIR_E2E_INACTIVE_USERNAME" in account_prefix_line
     assert "shoir-e2e-*" in workflow
+
+
+
+def test_authenticated_gate_covers_two_tenant_organization_and_role_lifecycle():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    required = (
+        '("organization_create", "active")',
+        '("organization_create_second", "active")',
+        '("organization_workspace_create", "active")',
+        '("organization_invitation_create", "active")',
+        '("organization_invitation_accept", "second")',
+        '("organization_viewer_write_denied", "second")',
+        '("organization_suspend_member", "active")',
+        '("organization_suspended_access_denied", "second")',
+        '("organization_restore_member", "active")',
+        '("organization_restored_access_allowed", "second")',
+        '("organization_invitation_replay_denied", "second")',
+        '("organization_cross_tenant_denied", "second")',
+        '("organization_admin_workspace_write", "second")',
+        '("organization_admin_self_promotion_denied", "second")',
+        '("organization_engineer_write_denied", "second")',
+        '("organization_approver_write_denied", "second")',
+        '("organization_removed_access_denied", "second")',
+        '("organization_revoked_invitation_denied", "second")',
+        '("organization_cleanup_org_1", "active")',
+        '("organization_cleanup_org_2", "active")',
+    )
+    for case in required:
+        assert case in script
+
+    assert "def verify_organization_lifecycle(" in script
+    assert '"org_create_session"' in script
+    assert '"org_invitation_create_session"' in script
+    assert '"org_invitation_accept_session"' in script
+    assert '"org_member_role_set_session"' in script
+    assert '"org_member_remove_session"' in script
+    assert '"org_member_suspend_session"' in script
+    assert '"org_member_restore_session"' in script
+    assert '"org_workspace_list_session"' in script
+    assert '"org_close_session"' in script
+
+
+def test_authenticated_organization_gate_closes_only_created_orgs_before_session_revocation():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    finally_start = script.index("    finally:")
+    cleanup_start = script.index("for org_index in (1, 2):", finally_start)
+    session_revoke_start = script.index("for label, username, token in (", cleanup_start)
+    cleanup = script[cleanup_start:session_revoke_start]
+
+    assert "created_organization_ids" in cleanup
+    assert "org_close_session" in cleanup
+    assert "cleanup_result.get(\"status\") == \"closed\"" in cleanup
+    assert "manual staging cleanup is required" in cleanup
+    assert "for label, username, token in (" in script[session_revoke_start:]
+    assert "PREFIX = \"shoir-e2e-\"" in script
+    assert "validate_test_username" in script

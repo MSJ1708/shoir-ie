@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import sqlite3
 import pandas as pd
 import pytest
@@ -23,7 +24,7 @@ def test_catalog_and_tiers():
 def test_db_migration(tmp_path):
     db=tmp_path/"platform.db"
     assert init_platform_db(str(db))
-    with sqlite3.connect(db) as c:
+    with sqlite_connection(db) as c:
         tables={r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     assert {"industrial_entities","platform_datasets","platform_models","platform_experiments","platform_decisions"} <= tables
 
@@ -154,7 +155,7 @@ def test_save_experiment_persists_all_seven_columns(tmp_path):
     )
 
     assert experiment_id.startswith("EXP-")
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         row = conn.execute(
             """SELECT experiment_id, name, module, scenarios_json, results_json, created_by, created_at
                FROM platform_experiments WHERE experiment_id=?""",
@@ -172,3 +173,382 @@ def test_unique_modules_preserves_order_and_removes_duplicates():
     assert unique_modules(["MILP Solvers", "AI Copilot", "MILP Solvers", "", None, "AI Copilot"]) == [
         "MILP Solvers", "AI Copilot"
     ]
+
+
+
+def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    calls = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 3,
+                "data_hash": kwargs["data_hash"],
+                "version_fingerprint": kwargs["version_fingerprint"],
+                "created_new_version": True,
+            },
+        },
+    )
+    state = {}
+    monkeypatch.setattr(
+        platform, "_industrial_platform_session_state", lambda: state
+    )
+    frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "throughput_tph": [12.5, 14.0]})
+    first = platform.register_dataset(
+        "Production", "production.csv", frame,
+        username="synthetic-user", workspace="plant-a", token="session-token",
+    )
+    second = platform.register_dataset(
+        "Production", "production.csv", frame.copy(deep=True),
+        username="synthetic-user", workspace="plant-a", token="session-token",
+    )
+    assert first == second
+    assert len(calls) == 2
+    assert calls[0]["dataset_id"] == first
+    assert calls[0]["file_bytes"] == calls[1]["file_bytes"]
+    assert calls[0]["data_hash"] == calls[1]["data_hash"]
+    assert calls[0]["version_fingerprint"] == calls[1]["version_fingerprint"]
+    assert calls[0]["row_count"] == 2
+    assert calls[0]["column_count"] == 2
+    assert state["data_platform_latest_version"] == 3
+
+
+def test_staging_dataset_registration_fails_closed_without_session(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: pytest.fail("must not call the API without an authenticated session"),
+    )
+    with pytest.raises(PermissionError, match="authenticated staging session"):
+        platform.register_dataset(
+            "Production", "production.csv",
+            pd.DataFrame({"units": [1, 2]}),
+            username="synthetic-user", workspace="plant-a", token="",
+        )
+
+
+def test_staging_dataset_registration_rejects_too_many_transformations(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    with pytest.raises(ValueError, match="50 entries"):
+        platform.register_dataset(
+            "Production", "production.csv",
+            pd.DataFrame({"units": [1]}),
+            transformations=[{"operation": "clean"}] * 51,
+        )
+
+
+
+def test_load_registered_dataset_activates_verified_shared_frame(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    raw = b"asset_id,throughput_tph\nA-1,12.5\nA-2,14.0\n"
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_download_dataset_version",
+        lambda **kwargs: (raw, {
+            "data_hash": "f" * 64, "version": 2, "row_count": 2, "column_count": 2
+        }),
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    monkeypatch.setattr(
+        platform,
+        "_activate_dataset_for_shared_workspace",
+        lambda df, filename, sheet, signature: state.update({
+            "universal_active_dataset": df.copy(deep=True),
+            "data_platform_latest_df": df.copy(deep=True),
+            "shoir_data_status": "IMPORTED",
+            "shoir_data_source": f"{filename} · {sheet}",
+            "shoir_data_version": signature[:12],
+            "shoir_data_hash": signature,
+        }),
+    )
+    frame = platform.load_registered_dataset(
+        "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
+    )
+    assert list(frame.columns) == ["asset_id", "throughput_tph"]
+    assert len(frame) == 2
+    assert state["universal_active_dataset"].equals(frame)
+    assert state["data_platform_latest_version"] == 2
+
+
+def test_load_registered_dataset_rejects_metadata_row_count_mismatch(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_download_dataset_version",
+        lambda **kwargs: (
+            b"asset_id\nA-1\n",
+            {"data_hash": "f" * 64, "version": 1, "row_count": 2, "column_count": 1},
+        ),
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    with pytest.raises(RuntimeError, match="row count"):
+        platform.load_registered_dataset(
+            "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
+        )
+
+
+
+def test_dataset_profile_figures_render_real_missingness_and_numeric_distributions():
+    from industrial_platform import _dataset_profile_figures
+
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2", "A-3", "A-4"],
+        "throughput_tph": [10.0, 12.0, None, 18.0],
+        "temperature_c": [40.0, 42.0, 43.0, 47.0],
+    })
+    figures = _dataset_profile_figures(frame, "Synthetic production")
+    assert len(figures) == 3
+    assert figures[0][0] == "Missingness"
+    assert len(figures[0][1].data) >= 1
+    assert any("throughput_tph" in label for label, _ in figures[1:])
+    for label, figure in figures:
+        assert figure.data, label
+        assert figure.layout.title.text
+        assert figure.layout.xaxis.title.text
+        assert figure.layout.yaxis.title.text
+
+
+def test_dataset_profile_figures_handle_empty_and_non_numeric_data():
+    from industrial_platform import _dataset_profile_figures
+
+    assert _dataset_profile_figures(pd.DataFrame(), "Empty") == []
+    frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "status": ["Run", "Stop"]})
+    figures = _dataset_profile_figures(frame, "Categorical only")
+    assert len(figures) == 1
+    assert figures[0][0] == "Missingness"
+    assert figures[0][1].data
+
+
+def test_data_platform_route_has_stable_t020_entitlement_guard_and_visual_panel():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "industrial_platform.py").read_text(encoding="utf-8")
+    assert 'require_tool_access(tier, "T020")' in source
+    assert "def _render_dataset_profile(" in source
+    assert "st.plotly_chart(" in source
+    assert "data_platform_processed_upload_fingerprint" in source
+
+
+
+def test_dataset_profile_renderer_calls_plotly_for_each_generated_figure(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from industrial_platform import _dataset_profile_figures, _render_dataset_profile
+
+    rendered = []
+    metrics = []
+    def metric(label, value):
+        metrics.append((label, value))
+    fake_streamlit = SimpleNamespace(
+        columns=lambda count: [SimpleNamespace(metric=metric) for _ in range(count)],
+        warning=lambda message: None,
+        success=lambda message: None,
+        caption=lambda message: None,
+        plotly_chart=lambda figure, **kwargs: rendered.append((figure, kwargs)),
+    )
+    monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2", "A-3"],
+        "throughput_tph": [8.0, 11.0, None],
+    })
+    _render_dataset_profile(frame, "Production", "render-test")
+    assert len(metrics) == 4
+    assert len(rendered) == len(_dataset_profile_figures(frame, "Production"))
+    assert len(rendered) == 2
+    assert all(call[1]["use_container_width"] is True for call in rendered)
+    assert all(call[1]["key"].startswith("render-test_") for call in rendered)
+
+
+def test_industrial_data_platform_is_reachable_from_original_app_and_workbench():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+    workbench_source = (
+        root / "pages" / "Industrial_Engineering_Workbench.py"
+    ).read_text(encoding="utf-8")
+    platform_source = (root / "industrial_platform.py").read_text(encoding="utf-8")
+
+    assert "PLATFORM_CATALOG" in app_source
+    assert "render_industrial_module(mod" in app_source
+    assert '"Industrial Data Platform"' in platform_source
+    assert "from industrial_platform import render_module" in workbench_source
+    assert "render_module(selected, RAW_TIER, USER)" in workbench_source
+    assert 'elif module=="Industrial Data Platform":' in platform_source
+
+
+
+def test_shared_dataset_activation_delegates_to_existing_application_shell(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import industrial_platform as platform
+
+    calls = []
+    fake_shell = SimpleNamespace(
+        _activate_shared_dataset=lambda df, **kwargs: calls.append(
+            (df.copy(deep=True), dict(kwargs))
+        )
+    )
+    monkeypatch.setitem(sys.modules, "shoir_application_shell", fake_shell)
+    frame = pd.DataFrame({"asset_id": ["A-1"], "rate_tph": [9.5]})
+    platform._activate_dataset_for_shared_workspace(
+        frame,
+        filename="production.xlsx",
+        sheet="Line 1",
+        signature="a" * 64,
+    )
+    assert len(calls) == 1
+    assert calls[0][0].equals(frame)
+    assert calls[0][1] == {
+        "filename": "production.xlsx",
+        "sheet": "Line 1",
+        "signature": "a" * 64,
+    }
+
+
+def test_industrial_data_platform_entitlement_matches_existing_catalog_and_tool():
+    from industrial_platform import PLATFORM_CATALOG, tier_allows
+    from shoir_tool_registry import get_tool, require_tool_access
+
+    entry = next(
+        item for item in PLATFORM_CATALOG
+        if item["name"] == "Industrial Data Platform"
+    )
+    tool = get_tool("T020")
+    assert entry["tier"] == "Enterprise"
+    assert tool is not None
+    assert tool["target_minimum_tier"] == "Enterprise"
+    assert tier_allows("Enterprise", entry["tier"])
+    with pytest.raises(PermissionError):
+        require_tool_access("Professional", "T020")
+    require_tool_access("Enterprise", "T020")
+
+
+
+def test_staging_dataset_registration_can_append_version_to_existing_logical_id(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    calls = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 4,
+                "created_new_version": True,
+            },
+        },
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    frame = pd.DataFrame({"asset_id": ["A-1"], "throughput_tph": [15.0]})
+    saved_id = platform.register_dataset(
+        "Renamed production view",
+        "production-export-2026-11.csv",
+        frame,
+        username="synthetic-user",
+        workspace="plant-a",
+        token="session-token",
+        dataset_id="DS-AABBCCDDEEFF",
+        transformations=[{"operation": "normalize_sheet_to_csv", "status": "completed"}],
+    )
+    assert saved_id == "DS-AABBCCDDEEFF"
+    assert calls[0]["dataset_id"] == "DS-AABBCCDDEEFF"
+    assert state["data_platform_latest_version"] == 4
+
+
+def test_dataset_registration_rejects_malformed_existing_dataset_id_before_network(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: pytest.fail("invalid logical ID must be rejected before network"),
+    )
+    with pytest.raises(ValueError, match="canonical DS- identifier"):
+        platform.register_dataset(
+            "Production",
+            "production.csv",
+            pd.DataFrame({"asset_id": ["A-1"]}),
+            username="synthetic-user",
+            workspace="plant-a",
+            token="session-token",
+            dataset_id="../OTHER-WORKSPACE",
+        )
+
+
+
+def test_local_dataset_registration_returns_stable_generated_id(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    frame = pd.DataFrame({"asset_id": ["A-1"], "throughput_tph": [10.0]})
+    first = platform.register_dataset(
+        "Production", "source.csv", frame,
+        db_path=str(tmp_path / "local-datasets.db"),
+    )
+    second = platform.register_dataset(
+        "Production renamed", "source-renamed.csv", frame,
+        db_path=str(tmp_path / "local-datasets.db"),
+        dataset_id=first,
+    )
+    assert first.startswith("DS-")
+    assert second == first
+
+
+
+def test_local_dataset_registration_initializes_missing_sqlite_schema(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    db_path = str(tmp_path / "dataset.db")
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2"],
+        "throughput_tph": [12.5, 14.0],
+    })
+
+    dataset_id = platform.register_dataset(
+        "Production",
+        "production.csv",
+        frame,
+        db_path=db_path,
+    )
+
+    with sqlite_connection(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT dataset_id, name, source_name, row_count, column_count, sha256
+            FROM platform_datasets
+            WHERE dataset_id = ?
+            """,
+            (dataset_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == dataset_id
+    assert row[1:5] == ("Production", "production.csv", 2, 2)
+    assert len(row[5]) == 64

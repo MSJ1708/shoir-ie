@@ -8,9 +8,13 @@ import pytest
 import pandas as pd
 
 from shoir_target_engines import (
+    calculate_niosh_revised_lifting_equation,
     monitor_forecast_drift,
     plan_two_sample_t_sample_size,
     solve_cutting_stock,
+    build_rcm_decision_support,
+    calibrate_simulation_outputs,
+    evaluate_kpi_alerts,
 )
 
 
@@ -1767,6 +1771,7 @@ def test_solver_diagnostics_distinguishes_infeasible_unbounded_and_milp_models()
     assert infeasible["solver_status"] == "Infeasible"
     assert infeasible["status"] == "INFEASIBLE"
     assert infeasible["objective_value"] is None
+    assert "continuous-LP fallback" in infeasible["solver_backend"]
 
     unbounded = run_solver_diagnostics(
         {"x": {"low": 0, "up": None, "category": "Continuous"}},
@@ -2134,3 +2139,407 @@ def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dat
         assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
     with pytest.raises(ValueError, match="between 1 and 5,000"):
         assess_capa_8d_records([])
+
+def test_niosh_rnle_metric_ideal_case_matches_load_constant():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=25,
+        vertical_hand_start=75,
+        vertical_travel_distance=25,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=1,
+        coupling_multiplier=1,
+        units="metric",
+        frequency_duration_category="Short (≤ 1 hour)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["recommended_weight_limit"] == pytest.approx(23.0)
+    assert result["lifting_index"] == pytest.approx(10 / 23)
+    assert result["status"] == "LI_AT_OR_BELOW_1"
+    assert result["horizontal_value_used"] == 25
+    assert result["asymmetry_value_used_degrees"] == 0
+
+
+def test_niosh_rnle_uses_worst_origin_destination_measurements():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=50,
+        vertical_hand_start=75,
+        vertical_travel_distance=50,
+        asymmetry_origin=10,
+        asymmetry_destination=45,
+        frequency_lifts_per_minute=2,
+        frequency_multiplier=0.8,
+        coupling_multiplier=0.9,
+        units="metric",
+        frequency_duration_category="Moderate (> 1 to 2 hours)",
+        coupling_quality="Fair",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["horizontal_value_used"] == 50
+    assert result["multipliers"]["Horizontal multiplier (HM)"] == pytest.approx(0.5)
+    assert result["asymmetry_value_used_degrees"] == 45
+    assert result["multipliers"]["Asymmetry multiplier (AM)"] == pytest.approx(1 - 0.0032 * 45)
+    expected = 23 * 0.5 * 1 * (0.82 + 4.5 / 50) * (1 - 0.0032 * 45) * 0.8 * 0.9
+    assert result["recommended_weight_limit"] == pytest.approx(expected)
+    assert result["status"] == "LI_ABOVE_1_REVIEW_REQUIRED"
+
+
+def test_niosh_rnle_imperial_ideal_case_and_required_table_sources():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=20,
+        horizontal_origin=10,
+        horizontal_destination=10,
+        vertical_hand_start=30,
+        vertical_travel_distance=10,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=1,
+        coupling_multiplier=1,
+        units="imperial",
+        frequency_duration_category="Long (> 2 to 8 hours)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["recommended_weight_limit"] == pytest.approx(51.0)
+    assert result["lifting_index"] == pytest.approx(20 / 51)
+    with pytest.raises(ValueError, match="official RNLE table/source"):
+        calculate_niosh_revised_lifting_equation(
+            load_weight=20,
+            horizontal_origin=10,
+            horizontal_destination=10,
+            vertical_hand_start=30,
+            vertical_travel_distance=10,
+            asymmetry_origin=0,
+            asymmetry_destination=0,
+            frequency_lifts_per_minute=1,
+            frequency_multiplier=1,
+            coupling_multiplier=1,
+            units="imperial",
+            frequency_duration_category="Long (> 2 to 8 hours)",
+            coupling_quality="Good",
+            frequency_multiplier_source="",
+            coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+        )
+
+
+def test_niosh_rnle_rejects_out_of_range_measurements_and_multipliers():
+    base = dict(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=25,
+        vertical_hand_start=75,
+        vertical_travel_distance=25,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=0.8,
+        coupling_multiplier=0.9,
+        units="metric",
+        frequency_duration_category="Short (≤ 1 hour)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH manual Table 5",
+        coupling_multiplier_source="NIOSH manual Table 7",
+    )
+    with pytest.raises(ValueError, match="Horizontal hand location exceeds"):
+        calculate_niosh_revised_lifting_equation(**{**base, "horizontal_origin": 70})
+    with pytest.raises(ValueError, match="asymmetry angles"):
+        calculate_niosh_revised_lifting_equation(**{**base, "asymmetry_destination": 140})
+    with pytest.raises(ValueError, match="Frequency multiplier"):
+        calculate_niosh_revised_lifting_equation(**{**base, "frequency_multiplier": 0})
+
+
+def test_rcm_decision_support_separates_task_candidates_from_specialist_review():
+    result = build_rcm_decision_support([
+        {
+            "asset": "P-101", "failure_mode": "Bearing wear",
+            "consequence": "operational", "severity": 5,
+            "detectable": True, "on_condition_applicable": True,
+            "evidence_reference": "inspection-2026-11",
+        },
+        {
+            "asset": "P-102", "failure_mode": "Guard failure",
+            "consequence": "safety", "severity": 10,
+            "detectable": True, "on_condition_applicable": True,
+        },
+        {
+            "asset": "PSV-1", "failure_mode": "Pressure trip fails",
+            "consequence": "hidden", "severity": 8,
+            "hidden_protective_function": True,
+            "failure_finding_applicable": True,
+        },
+    ])
+    assert result["status"] == "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL"
+    frame = result["decision_tree"].set_index("Failure mode")
+    assert frame.loc["Bearing wear", "Recommended task candidate"] == "ON_CONDITION_TASK_CANDIDATE"
+    assert frame.loc["Guard failure", "Recommended task candidate"] == "SPECIALIST_SAFETY_REVIEW"
+    assert frame.loc["Pressure trip fails", "Recommended task candidate"] == "FAILURE_FINDING_TASK_CANDIDATE"
+    assert result["specialist_review_count"] == 3
+    assert "not a certified RCM analysis" in result["warning"]
+
+
+def test_rcm_run_to_failure_requires_explicit_acceptance_and_cost_comparison():
+    accepted = build_rcm_decision_support([{
+        "asset": "A-1", "failure_mode": "Indicator lamp",
+        "consequence": "non_operational", "severity": 2,
+        "preventive_task_cost": 50, "consequence_cost": 10,
+        "run_to_failure_accepted": True,
+    }])
+    assert accepted["decision_tree"].iloc[0]["Recommended task candidate"] == "RUN_TO_FAILURE_CANDIDATE"
+    not_accepted = build_rcm_decision_support([{
+        "asset": "A-2", "failure_mode": "Cooling fan",
+        "consequence": "operational", "severity": 4,
+        "preventive_task_cost": 5, "consequence_cost": 50,
+        "run_to_failure_accepted": True,
+    }])
+    assert not_accepted["decision_tree"].iloc[0]["Recommended task candidate"] == "HUMAN_REVIEW_REQUIRED"
+    with pytest.raises(ValueError, match="whole number from 1 to 10"):
+        build_rcm_decision_support([{
+            "asset": "A-3", "failure_mode": "Invalid severity",
+            "consequence": "operational", "severity": 11,
+        }])
+
+
+def test_simulation_calibration_uses_chronological_holdout_without_leakage():
+    result = calibrate_simulation_outputs(
+        [1, 2, 3, 4, 5, 6],
+        [2.5, 4.5, 6.5, 8.5, 10.5, 12.5],
+        training_fraction=2 / 3,
+    )
+    assert result["status"] == "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT"
+    assert result["training_observations"] == 4
+    assert result["holdout_observations"] == 2
+    assert result["calibration_intercept"] == pytest.approx(0.5)
+    assert result["calibration_slope"] == pytest.approx(2.0)
+    assert result["training_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["holdout_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["residuals"].iloc[-1]["Segment"] == "HOLDOUT"
+    assert "not a physics-based digital-twin calibration" in result["warning"]
+
+
+def test_simulation_calibration_rejects_bad_series_and_slope_bounds():
+    with pytest.raises(ValueError, match="same number"):
+        calibrate_simulation_outputs([1, 2, 3, 4, 5], [1, 2, 3, 4])
+    with pytest.raises(ValueError, match="at least 5 observations"):
+        calibrate_simulation_outputs([1, 2, 3, 4], [2, 4, 6, 8])
+    with pytest.raises(ValueError, match="contain variation"):
+        calibrate_simulation_outputs([1, 1, 1, 1, 1], [2, 3, 4, 5, 6])
+    with pytest.raises(ValueError, match="outside the configured bounds"):
+        calibrate_simulation_outputs(
+            [1, 2, 3, 4, 5], [10, 20, 30, 40, 50],
+            min_slope=0, max_slope=2,
+        )
+
+
+def test_kpi_alerts_are_freshness_aware_and_deduplicate_open_alerts():
+    records = [
+        {
+            "kpi": "OEE", "value": 88.0, "unit": "%",
+            "observed_at": "2026-11-06T17:50:00Z", "source": "synthetic-test",
+        },
+        {
+            "kpi": "Throughput", "value": 20.0, "unit": "units/hour",
+            "observed_at": "2026-11-04T17:00:00Z", "source": "synthetic-test",
+        },
+    ]
+    rules = [
+        {"rule_id": "oee-min", "kpi": "OEE", "operator": "<", "threshold": 90, "severity": "CRITICAL"},
+        {"rule_id": "throughput-min", "kpi": "Throughput", "operator": "<", "threshold": 25},
+        {"rule_id": "scrap-max", "kpi": "Scrap", "operator": ">", "threshold": 3},
+    ]
+    first = evaluate_kpi_alerts(
+        records, rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+    )
+    rows = first["alerts"].set_index("Rule ID")
+    assert first["open_alert_count"] == 1
+    assert first["new_alert_count"] == 1
+    assert rows.loc["oee-min", "Event"] == "NEW"
+    assert rows.loc["throughput-min", "State"] == "STALE_DATA"
+    assert rows.loc["scrap-max", "State"] == "MISSING_DATA"
+
+    second = evaluate_kpi_alerts(
+        records, rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+        previous_open_alert_ids=first["next_open_alert_ids"],
+    )
+    assert second["new_alert_count"] == 0
+    assert second["continuing_alert_count"] == 1
+
+
+def test_kpi_alerts_resolve_breaches_and_reject_duplicate_rules():
+    rules = [{"rule_id": "temperature-high", "kpi": "Temperature", "operator": ">", "threshold": 80}]
+    active = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:01:00Z",
+    )
+    resolved = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-06T17:02:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:03:00Z",
+        previous_open_alert_ids=active["next_open_alert_ids"],
+    )
+    assert resolved["resolved_alert_count"] == 1
+    assert resolved["alerts"].iloc[0]["Event"] == "RESOLVED"
+    with pytest.raises(ValueError, match="unique"):
+        evaluate_kpi_alerts(
+            [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+            [rules[0], rules[0]], as_of="2026-11-06T17:01:00Z",
+        )
+
+
+def test_kpi_alerts_reject_empty_contracts_and_classify_unusable_readings():
+    with pytest.raises(ValueError, match="at least one KPI alert rule"):
+        evaluate_kpi_alerts([], [], as_of="2026-11-06T18:00:00Z")
+    with pytest.raises(ValueError, match="must be a list"):
+        evaluate_kpi_alerts("not-a-record-list", [
+            {"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85}
+        ])
+
+    rules = [
+        {"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85},
+        {"rule_id": "uptime-floor", "kpi": "Uptime", "operator": "<", "threshold": 95},
+        {"rule_id": "quality-floor", "kpi": "Quality", "operator": "<", "threshold": 99},
+        {"rule_id": "future-reading", "kpi": "Future", "operator": ">", "threshold": 1},
+    ]
+    result = evaluate_kpi_alerts(
+        [
+            {"kpi": "OEE", "value": 70, "unit": "%", "observed_at": "2026-11-06T17:50:00Z", "source": "test-sensor"},
+            {"kpi": "Uptime", "value": 90, "unit": "%", "observed_at": "2026-11-04T17:00:00Z", "source": "test-sensor"},
+            {"kpi": "Quality", "value": 98, "unit": "%", "observed_at": "invalid-date", "source": "test-sensor"},
+            {"kpi": "Future", "value": 2, "unit": "%", "observed_at": "2026-11-06T18:01:00Z", "source": "test-sensor"},
+        ],
+        rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+    )
+    states = result["alerts"].set_index("Rule ID")["State"].to_dict()
+    assert states == {
+        "oee-floor": "OPEN",
+        "uptime-floor": "STALE_DATA",
+        "quality-floor": "INVALID_TIMESTAMP",
+        "future-reading": "FUTURE_TIMESTAMP",
+    }
+    assert result["open_alert_count"] == 1
+    assert result["new_alert_count"] == 1
+    assert result["stale_or_missing_count"] == 3
+
+
+def test_kpi_alerts_reject_duplicate_casefolded_readings_and_nonfinite_thresholds():
+    with pytest.raises(ValueError, match="Duplicate KPI record"):
+        evaluate_kpi_alerts(
+            [
+                {"kpi": "OEE", "value": 80, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"},
+                {"kpi": "oee", "value": 81, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"},
+            ],
+            [{"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85}],
+            as_of="2026-11-06T18:00:00Z",
+        )
+    with pytest.raises(ValueError, match="finite number"):
+        evaluate_kpi_alerts(
+            [],
+            [{"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": float("nan")}],
+            as_of="2026-11-06T18:00:00Z",
+        )
+
+def test_recovery_snapshot_history_checkpoints_undoes_redoes_and_restores_revision():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    first = manage_recovery_snapshot_history(
+        None,
+        action="checkpoint",
+        new_snapshot={"asset_id": "P-101", "inspection_state": "PENDING"},
+    )
+    assert first["status"] == "SNAPSHOT_CREATED"
+    assert first["current_revision"] == 1
+    assert first["can_undo"] is False
+
+    second = manage_recovery_snapshot_history(
+        first["history_state"],
+        action="checkpoint",
+        new_snapshot={"asset_id": "P-101", "inspection_state": "COMPLETE"},
+    )
+    assert second["status"] == "SNAPSHOT_CHECKPOINTED"
+    assert second["current_revision"] == 2
+    assert second["can_undo"] is True
+
+    undone = manage_recovery_snapshot_history(second["history_state"], action="undo")
+    assert undone["status"] == "SNAPSHOT_UNDONE"
+    assert undone["current_snapshot"]["inspection_state"] == "PENDING"
+    assert undone["can_redo"] is True
+
+    redone = manage_recovery_snapshot_history(undone["history_state"], action="redo")
+    assert redone["status"] == "SNAPSHOT_REDONE"
+    assert redone["current_snapshot"]["inspection_state"] == "COMPLETE"
+
+    restored = manage_recovery_snapshot_history(
+        redone["history_state"],
+        action="restore",
+        target_revision=1,
+    )
+    assert restored["status"] == "REVISION_RESTORED"
+    assert restored["current_revision"] == 1
+    assert restored["current_snapshot"]["inspection_state"] == "PENDING"
+    assert restored["can_redo"] is True
+    assert "arbitrary edits in other" in " ".join(restored["limitations"])
+
+
+def test_recovery_snapshot_history_clears_redo_and_bounds_history():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    history = None
+    for revision in range(1, 5):
+        result = manage_recovery_snapshot_history(
+            history,
+            action="checkpoint",
+            new_snapshot={"revision": revision},
+            max_history=3,
+        )
+        history = result["history_state"]
+    assert result["revision_count"] == 3
+    assert result["current_snapshot"]["revision"] == 4
+    assert result["timeline"][0]["snapshot"]["revision"] == 2
+
+    undone = manage_recovery_snapshot_history(history, action="undo")
+    assert undone["can_redo"] is True
+    forked = manage_recovery_snapshot_history(
+        undone["history_state"],
+        action="checkpoint",
+        new_snapshot={"revision": 5},
+    )
+    assert forked["can_redo"] is False
+    assert forked["current_snapshot"]["revision"] == 5
+
+
+def test_recovery_snapshot_history_rejects_invalid_actions_data_and_revisions():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    with pytest.raises(ValueError, match="Recovery action"):
+        manage_recovery_snapshot_history(None, action="delete")
+    with pytest.raises(ValueError, match="JSON-compatible"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"bad": float("nan")})
+    with pytest.raises(ValueError, match="snapshot limit"):
+        manage_recovery_snapshot_history(
+            None, action="checkpoint", new_snapshot={"value": "x" * 500},
+            max_snapshot_bytes=256,
+        )
+    with pytest.raises(ValueError, match="No earlier snapshot"):
+        manage_recovery_snapshot_history(
+            None, action="undo"
+        )
+    current = manage_recovery_snapshot_history(
+        None, action="checkpoint", new_snapshot={"revision": 1}
+    )
+    with pytest.raises(ValueError, match="Target revision"):
+        manage_recovery_snapshot_history(current["history_state"], action="restore", target_revision=2)
+

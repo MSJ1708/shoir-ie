@@ -11,6 +11,8 @@ import io
 import json
 import re
 import sqlite3
+from shoir_sqlite import sqlite_connect as sqlite_connection
+from shoir_sqlite import ClosingSQLiteConnection
 from datetime import datetime
 from uuid import uuid4
 
@@ -23,6 +25,7 @@ import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
+from shoir_remaining_tool_engines import get_tool_example_json, run_additional_tool
 from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
@@ -88,7 +91,7 @@ h1,h2,h3,h4,h5 = st.columns(5)
 h1.metric("User", USER)
 h2.metric("Tier", TIER)
 h3.metric("Modules", len(MODULE_MATRIX))
-with sqlite3.connect("enterprise_full_workspace.db") as c:
+with sqlite_connection("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as c:
     ds_count = c.execute("SELECT COUNT(*) FROM platform_datasets").fetchone()[0]
     model_count = c.execute("SELECT COUNT(*) FROM platform_models").fetchone()[0]
 h4.metric("Datasets", ds_count)
@@ -262,6 +265,28 @@ if category != "All":
 if search.strip():
     q=search.strip().lower()
     filtered=filtered[filtered["Module"].str.lower().str.contains(q, regex=False)]
+    _resource_aliases = (
+        "industrial resource intelligence", "industrial resource intelligence & resilience",
+        "industrial resource intelligence & resilience system",
+        "industrial resource exchange", "resource exchange intelligence",
+        "industrial exchange intelligence twin", "ieit", "industrial resource passport",
+        "resource passport", "industrial resource loss", "resource efficiency",
+        "resource recovery", "resource cascade optimization", "waste heat recovery",
+        "water reuse", "industrial resource optimization", "industrial resource resilience",
+        "industrial symbiosis",
+        "resource quality forecasting", "supplier reliability", "resource matching",
+        "industrial network optimization", "industrial cluster intelligence",
+        "ذكاء الموارد الصناعية", "تبادل الموارد الصناعية", "استعادة الموارد", "كفاءة الموارد",
+    )
+    _resource_alias_match = any(q in alias or alias in q for alias in _resource_aliases)
+    # Explain the entitlement boundary whenever a user searches a resource alias,
+    # even when a different category filter hides the module row.
+    if _resource_alias_match and not tier_allows(RAW_TIER, "Enterprise"):
+        st.warning("🔒 Industrial Resource Intelligence requires the Enterprise capability level.")
+    if _resource_alias_match and category in {"All", "Resource Intelligence"}:
+        _resource_row = available.loc[available["Module"] == "Industrial Resource Intelligence"]
+        if not _resource_row.empty and "Industrial Resource Intelligence" not in set(filtered["Module"]):
+            filtered = pd.concat([filtered, _resource_row], ignore_index=True).drop_duplicates(subset=["Module"])
 
 labels = filtered["Module"].tolist()
 if not labels:
@@ -413,7 +438,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -533,8 +558,23 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
                             spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
                             run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
+                        elif selected_tool["tool_id"] == "T006":
+                            st.caption(
+                                "Create, undo, redo or recover a verified revision in a supplied JSON history. The returned history must be saved to the authenticated workspace for durable cross-session recovery."
+                            )
+                            tool006_payload_json = st.text_area(
+                                "Revision history action (JSON object)",
+                                value=get_tool_example_json("T006"),
+                                key="tool006_payload",
+                            )
+                            run_method = st.form_submit_button(
+                                "Apply revision-history action",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool006_run",
+                            )
                         elif selected_tool["tool_id"] == "T039":
-                            st.caption("Structured 8D/CAPA record-completeness and due-date review. It tracks missing fields and closure evidence but does not certify the cause, action effectiveness or regulatory compliance.")
+                            st.caption("Structured 8D/CAPA record-completeness, due-date and controlled transition review. Closure requires approval and effectiveness evidence; this does not certify regulatory compliance.")
                             capa_records_json = st.text_area(
                                 "CAPA / 8D records (JSON list; edit or add records)",
                                 value=_TOOL039_EXAMPLE_RECORDS,
@@ -544,6 +584,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "Review date (YYYY-MM-DD; blank uses current date)",
                                 value="",
                                 key="tool039_as_of_date",
+                            )
+                            capa_transitions_json = st.text_area(
+                                "Optional controlled status transitions (JSON list)",
+                                value="[]",
+                                key="tool039_transitions",
                             )
                             run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
                         elif selected_tool["tool_id"] == "T040":
@@ -1015,6 +1060,326 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
                             spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
                             run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
+                        elif selected_tool["tool_id"] == "T044":
+                            st.caption(
+                                "RCM first-pass task screening. Safety/environmental/high-severity and hidden protective-function cases are escalated; all outputs require a competent reliability review."
+                            )
+                            rcm_records_json = st.text_area(
+                                "Failure-mode records (JSON list)",
+                                value='[{"asset":"P-101","failure_mode":"Bearing wear","consequence":"operational","severity":5,"detectable":true,"on_condition_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"PSV-1","failure_mode":"Pressure trip fails","consequence":"hidden","severity":8,"hidden_protective_function":true,"failure_finding_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"ESD-1","failure_mode":"Emergency shutdown fails on demand","consequence":"safety","severity":9,"evidence_reference":"synthetic-example"}]',
+                                key="tool044_records",
+                            )
+                            run_method = st.form_submit_button("Build RCM task candidates", type="primary", use_container_width=True, key="tool044_run")
+                        elif selected_tool["tool_id"] == "T046":
+                            st.caption(
+                                "Single-task, two-handed NIOSH Revised Lifting Equation screen. "
+                                "Measure H and A at both the origin and destination. Enter FM and "
+                                "CM from the applicable official NIOSH tables; the app does not guess them."
+                            )
+                            st.markdown(
+                                "[NIOSH RNLE Applications Manual (DHHS/NIOSH 94-110, revised 2021)]"
+                                "(https://www.cdc.gov/niosh/publications/numbered/94-110.html)"
+                            )
+                            rnle_units = st.selectbox(
+                                "Measurement units",
+                                ["metric", "imperial"],
+                                key="tool046_units",
+                            )
+                            distance_unit = "cm" if rnle_units == "metric" else "in"
+                            load_unit = "kg" if rnle_units == "metric" else "lb"
+                            default_h = 25.0 if rnle_units == "metric" else 10.0
+                            default_v = 75.0 if rnle_units == "metric" else 30.0
+                            default_d = 25.0 if rnle_units == "metric" else 10.0
+                            h_limit = 63.0 if rnle_units == "metric" else 25.0
+                            v_limit = 175.0 if rnle_units == "metric" else 70.0
+                            rnle_task = st.text_input("Task description", key="tool046_task")
+                            rnle_load = st.number_input(
+                                f"Object weight ({load_unit})",
+                                min_value=0.01,
+                                value=10.0 if rnle_units == "metric" else 22.0,
+                                step=0.5,
+                                key="tool046_load",
+                            )
+                            rnle_h_origin = st.number_input(
+                                f"Horizontal hand location at origin ({distance_unit})",
+                                min_value=0.01,
+                                max_value=h_limit,
+                                value=default_h,
+                                step=1.0,
+                                key="tool046_h_origin",
+                            )
+                            rnle_h_destination = st.number_input(
+                                f"Horizontal hand location at destination ({distance_unit})",
+                                min_value=0.01,
+                                max_value=h_limit,
+                                value=default_h,
+                                step=1.0,
+                                key="tool046_h_destination",
+                            )
+                            rnle_v_start = st.number_input(
+                                f"Vertical hand location at origin ({distance_unit})",
+                                min_value=0.0,
+                                max_value=v_limit,
+                                value=default_v,
+                                step=1.0,
+                                key="tool046_v_start",
+                            )
+                            rnle_distance = st.number_input(
+                                f"Vertical travel distance ({distance_unit})",
+                                min_value=0.01,
+                                max_value=v_limit,
+                                value=default_d,
+                                step=1.0,
+                                key="tool046_distance",
+                            )
+                            rnle_a_origin = st.number_input(
+                                "Asymmetry angle at origin (degrees)",
+                                min_value=0.0,
+                                max_value=135.0,
+                                value=0.0,
+                                step=5.0,
+                                key="tool046_a_origin",
+                            )
+                            rnle_a_destination = st.number_input(
+                                "Asymmetry angle at destination (degrees)",
+                                min_value=0.0,
+                                max_value=135.0,
+                                value=0.0,
+                                step=5.0,
+                                key="tool046_a_destination",
+                            )
+                            rnle_frequency = st.number_input(
+                                "Average lifting frequency (lifts/minute)",
+                                min_value=0.01,
+                                max_value=15.0,
+                                value=1.0,
+                                step=0.25,
+                                key="tool046_frequency",
+                            )
+                            rnle_duration = st.selectbox(
+                                "Task duration (with required recovery)",
+                                [
+                                    "Select duration",
+                                    "Short (≤ 1 hour)",
+                                    "Moderate (> 1 to 2 hours)",
+                                    "Long (> 2 to 8 hours)",
+                                ],
+                                key="tool046_duration",
+                            )
+                            rnle_fm = st.number_input(
+                                "Frequency multiplier (FM) from NIOSH table",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=0.0,
+                                step=0.01,
+                                key="tool046_fm",
+                            )
+                            rnle_fm_source = st.text_input(
+                                "Frequency multiplier table reference (required)",
+                                key="tool046_fm_source",
+                            )
+                            rnle_coupling = st.selectbox(
+                                "Observed hand-to-load coupling",
+                                ["Select coupling", "Good", "Fair", "Poor"],
+                                key="tool046_coupling",
+                            )
+                            rnle_cm = st.number_input(
+                                "Coupling multiplier (CM) from NIOSH table",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=0.0,
+                                step=0.01,
+                                key="tool046_cm",
+                            )
+                            rnle_cm_source = st.text_input(
+                                "Coupling multiplier table reference (required)",
+                                key="tool046_cm_source",
+                            )
+                            run_method = st.form_submit_button(
+                                "Calculate RNLE screening estimate",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool046_run",
+                            )
+                        elif selected_tool["tool_id"] == "T060":
+                            st.caption(
+                                "Single-period capacitated transportation optimization. Unmet demand remains visible; this is not a multi-period network design model."
+                            )
+                            supply_network_suppliers_json = st.text_area(
+                                "Suppliers (JSON list)",
+                                value='[{"supplier":"Supplier A","supply_capacity":100},{"supplier":"Supplier B","supply_capacity":60}]',
+                                key="tool060_suppliers",
+                            )
+                            supply_network_sites_json = st.text_area(
+                                "Demand sites (JSON list)",
+                                value='[{"site":"Plant 1","demand":80},{"site":"Plant 2","demand":70}]',
+                                key="tool060_sites",
+                            )
+                            supply_network_routes_json = st.text_area(
+                                "Available and disrupted routes (JSON list)",
+                                value='[{"supplier":"Supplier A","site":"Plant 1","unit_cost":2,"capacity":80,"available":true},{"supplier":"Supplier A","site":"Plant 2","unit_cost":3,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 1","unit_cost":4,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 2","unit_cost":1,"capacity":60,"available":true}]',
+                                key="tool060_routes",
+                            )
+                            supply_network_penalty = st.number_input(
+                                "Unmet-demand penalty per unit", min_value=0.01, value=1000.0, step=50.0, key="tool060_penalty"
+                            )
+                            supply_network_time_limit = st.number_input(
+                                "Solver time limit (seconds)", min_value=0.1, max_value=120.0, value=10.0, step=1.0, key="tool060_time_limit"
+                            )
+                            run_method = st.form_submit_button("Optimize supply chain network", type="primary", use_container_width=True, key="tool060_run")
+                        elif selected_tool["tool_id"] == "T074":
+                            st.caption(
+                                "Affine simulation-output calibration with a chronological holdout. It does not tune simulator physics or connect to live equipment."
+                            )
+                            calibration_simulated_text = st.text_input(
+                                "Simulated outputs (chronological, comma-separated)",
+                                "10, 20, 30, 40, 50, 60",
+                                key="tool074_simulated",
+                            )
+                            calibration_measured_text = st.text_input(
+                                "Measured outputs (same order and unit)",
+                                "21, 41, 61, 81, 101, 121",
+                                key="tool074_measured",
+                            )
+                            calibration_training_fraction = st.slider(
+                                "Training fraction", min_value=0.5, max_value=0.9, value=0.67, step=0.01, key="tool074_fraction"
+                            )
+                            run_method = st.form_submit_button("Fit and validate calibration", type="primary", use_container_width=True, key="tool074_run")
+                        elif selected_tool["tool_id"] == "T080":
+                            st.caption(
+                                "Synthetic Monte Carlo stress test with supplier outages, demand variation and capacity shocks. Outputs are scenario estimates, not live supply availability or a forecast."
+                            )
+                            disruption_suppliers_json = st.text_area(
+                                "Supplier baseline (JSON list)",
+                                value='[{"Supplier":"Supplier A","Capacity":100,"Unit Cost":2,"Lead Days":2,"Risk %":5,"Carbon kg/unit":0.5,"Local Share %":70},{"Supplier":"Supplier B","Capacity":70,"Unit Cost":3,"Lead Days":4,"Risk %":10,"Carbon kg/unit":0.7,"Local Share %":30}]',
+                                key="tool080_suppliers",
+                            )
+                            disruption_demands_json = st.text_area(
+                                "Demand baseline (JSON list)",
+                                value='[{"Destination":"Plant 1","Demand":80,"Priority":5,"Due Days":2},{"Destination":"Plant 2","Demand":70,"Priority":3,"Due Days":5}]',
+                                key="tool080_demands",
+                            )
+                            disruption_iterations = st.number_input(
+                                "Monte Carlo iterations", min_value=10, max_value=250, value=10, step=10, key="tool080_iterations"
+                            )
+                            disruption_seed = st.number_input(
+                                "Random seed", min_value=0, max_value=2147483647, value=17, step=1, key="tool080_seed"
+                            )
+                            disruption_outage_probability = st.slider(
+                                "Supplier outage probability", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_outage"
+                            )
+                            disruption_demand_cv = st.slider(
+                                "Demand coefficient of variation", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_demand_cv"
+                            )
+                            run_method = st.form_submit_button("Run disruption stress test", type="primary", use_container_width=True, key="tool080_run")
+                        elif selected_tool["tool_id"] == "T096":
+                            st.caption(
+                                "Inspect server-side connector configuration without making network requests. "
+                                "Live verification is a separate, explicitly confirmed, staging-only HTTPS read; "
+                                "provider credentials must remain in server-side secrets."
+                            )
+                            integration_action = st.selectbox(
+                                "Integration action",
+                                [
+                                    "Inspect configured connector settings",
+                                    "Verify approved REST connector (staging only)",
+                                ],
+                                key="tool096_action",
+                            )
+                            integration_profiles_json = st.text_area(
+                                "Connector profiles (JSON object with a profiles list)",
+                                value=get_tool_example_json("T096"),
+                                key="tool096_profiles",
+                            )
+                            integration_live_profile_json = st.text_area(
+                                "Single approved REST profile for a live staging read (JSON object)",
+                                value='{"name":"Plant REST API","protocol":"REST","endpoint_env":"SHOIR_CONNECTOR_PLANT_ENDPOINT","credential_env":"SHOIR_CONNECTOR_PLANT_TOKEN"}',
+                                key="tool096_live_profile",
+                                disabled=integration_action != "Verify approved REST connector (staging only)",
+                            )
+                            integration_confirm_live = st.checkbox(
+                                "I confirm this sends a read-only HTTPS request to the server-configured staging connector.",
+                                value=False,
+                                key="tool096_confirm_live",
+                                disabled=integration_action != "Verify approved REST connector (staging only)",
+                            )
+                            run_method = st.form_submit_button(
+                                "Run Integration Management check",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool096_run",
+                            )
+                        elif selected_tool["tool_id"] == "T098":
+                            st.caption(
+                                "Configuration inspection only. This does not start an OIDC login, activate MFA, "
+                                "or prove that an identity provider is connected."
+                            )
+                            st.info(
+                                "Provider-backed SSO/MFA remains unavailable until the staging identity provider, "
+                                "verified claims, secure session handling and audit acceptance are configured."
+                            )
+                            run_method = st.form_submit_button(
+                                "Check identity and audit configuration",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool098_run",
+                            )
+                        elif selected_tool["tool_id"] == "T097":
+                            from plugin_registry import plugin_manifest
+                            plugin_options = [item["name"] for item in plugin_manifest()]
+                            st.caption(
+                                "Inspect the local v1 plugin contract. Execution is available only for explicitly registered server-side handlers; external API hosting and credentials are separate configuration."
+                            )
+                            plugin_name = st.selectbox(
+                                "Registered plugin",
+                                plugin_options,
+                                key="tool097_plugin",
+                            )
+                            plugin_payload_json = st.text_area(
+                                "Optional JSON payload to validate against the plugin input schema",
+                                "{}",
+                                key="tool097_payload",
+                            )
+                            run_method = st.form_submit_button("Inspect plugin contract", type="primary", use_container_width=True, key="tool097_run")
+                        elif selected_tool["tool_id"] == "T099":
+                            st.caption(
+                                "Export or restore a same-account personal workspace backup. Checksum and size are verified before restore. This does not replace Supabase point-in-time recovery or an organisation-level restore rehearsal."
+                            )
+                            governance_action = st.radio(
+                                "Workspace recovery action",
+                                ["Export personal workspace backup", "Restore uploaded personal backup"],
+                                key="tool099_action",
+                            )
+                            governance_backup_upload = st.file_uploader(
+                                "Select a Shoir-IE workspace backup JSON file",
+                                type=["json"],
+                                accept_multiple_files=False,
+                                key="tool099_backup_upload",
+                            )
+                            run_method = st.form_submit_button("Run workspace recovery action", type="primary", use_container_width=True, key="tool099_run")
+                        elif selected_tool["tool_id"] == "T094":
+                            st.caption(
+                                "Freshness-aware KPI threshold evaluation. Use gt/gte/lt/lte or >, >=, <, <= operators; each KPI reading must have one unique name, and each rule must reference that name. No email, SMS or external notification is sent."
+                            )
+                            kpi_records_json = st.text_area(
+                                "KPI readings (JSON list: kpi, value, unit, observed_at, source)",
+                                value="[]",
+                                key="tool094_records",
+                            )
+                            kpi_rules_json = st.text_area(
+                                "Alert rules (JSON list: rule_id, kpi, operator, threshold, severity)",
+                                value="[]",
+                                key="tool094_rules",
+                            )
+                            kpi_as_of = st.text_input(
+                                "Evaluation timestamp (ISO 8601 UTC; blank uses current time)",
+                                "",
+                                key="tool094_as_of",
+                            )
+                            kpi_stale_hours = st.number_input(
+                                "Stale-data threshold (hours)", min_value=0.1, max_value=8760.0, value=24.0, step=1.0, key="tool094_stale"
+                            )
+                            run_method = st.form_submit_button("Evaluate KPI alerts", type="primary", use_container_width=True, key="tool094_run")
                         elif selected_tool["tool_id"] == "T047":
                             st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
                             hazard_json = st.text_area(
@@ -1292,8 +1657,50 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
                     elif selected_tool["tool_id"] == "T045":
                         current_tool_inputs = {"parts_json": spare_parts_json}
+                    elif selected_tool["tool_id"] == "T044":
+                        current_tool_inputs = {"failure_modes_json": rcm_records_json}
+                    elif selected_tool["tool_id"] == "T046":
+                        current_tool_inputs = {
+                            "units": rnle_units,
+                            "task_description": rnle_task,
+                            "load_weight": rnle_load,
+                            "horizontal_origin": rnle_h_origin,
+                            "horizontal_destination": rnle_h_destination,
+                            "vertical_hand_start": rnle_v_start,
+                            "vertical_travel_distance": rnle_distance,
+                            "asymmetry_origin": rnle_a_origin,
+                            "asymmetry_destination": rnle_a_destination,
+                            "frequency_lifts_per_minute": rnle_frequency,
+                            "frequency_duration_category": rnle_duration,
+                            "frequency_multiplier": rnle_fm,
+                            "frequency_multiplier_source": rnle_fm_source,
+                            "coupling_quality": rnle_coupling,
+                            "coupling_multiplier": rnle_cm,
+                            "coupling_multiplier_source": rnle_cm_source,
+                        }
                     elif selected_tool["tool_id"] == "T047":
                         current_tool_inputs = {"hazards_json": hazard_json}
+                    elif selected_tool["tool_id"] == "T060":
+                        current_tool_inputs = {"suppliers_json": supply_network_suppliers_json, "sites_json": supply_network_sites_json, "routes_json": supply_network_routes_json, "unmet_demand_penalty": supply_network_penalty, "time_limit_seconds": supply_network_time_limit}
+                    elif selected_tool["tool_id"] == "T074":
+                        current_tool_inputs = {"simulated_values": calibration_simulated_text, "measured_values": calibration_measured_text, "training_fraction": calibration_training_fraction}
+                    elif selected_tool["tool_id"] == "T080":
+                        current_tool_inputs = {"suppliers_json": disruption_suppliers_json, "demands_json": disruption_demands_json, "iterations": int(disruption_iterations), "seed": int(disruption_seed), "outage_probability": disruption_outage_probability, "demand_cv": disruption_demand_cv}
+                    elif selected_tool["tool_id"] == "T094":
+                        current_tool_inputs = {"kpi_records_json": kpi_records_json, "alert_rules_json": kpi_rules_json, "as_of": kpi_as_of, "stale_after_hours": kpi_stale_hours}
+                    elif selected_tool["tool_id"] == "T096":
+                        current_tool_inputs = {
+                            "action": integration_action,
+                            "profiles_json": integration_profiles_json,
+                            "live_profile_json": integration_live_profile_json,
+                            "confirm_live": integration_confirm_live,
+                        }
+                    elif selected_tool["tool_id"] == "T097":
+                        current_tool_inputs = {"plugin_name": plugin_name, "payload_json": plugin_payload_json}
+                    elif selected_tool["tool_id"] == "T098":
+                        current_tool_inputs = {"configuration_check": True}
+                    elif selected_tool["tool_id"] == "T099":
+                        current_tool_inputs = {"action": governance_action, "backup_filename": governance_backup_upload.name if governance_backup_upload is not None else ""}
                     elif selected_tool["tool_id"] == "T050":
                         current_tool_inputs = {"periods_json": safety_periods_json, "rate_base_hours": safety_rate_base}
                     elif selected_tool["tool_id"] == "T054":
@@ -1314,8 +1721,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
                     elif selected_tool["tool_id"] == "T031":
                         current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
+                    elif selected_tool["tool_id"] == "T006":
+                        current_tool_inputs = {"payload_json": tool006_payload_json}
                     elif selected_tool["tool_id"] == "T039":
-                        current_tool_inputs = {"records_json": capa_records_json, "as_of_date": capa_as_of_date}
+                        current_tool_inputs = {"records_json": capa_records_json, "transitions_json": capa_transitions_json, "as_of_date": capa_as_of_date}
 
                     elif selected_tool["tool_id"] == "T040":
                         current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
@@ -1368,595 +1777,882 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         try:
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
-                            from shoir_target_engines import (
-                                analyze_work_sampling, analyze_pareto_root_cause,
-                                assess_5s_audit, build_kaizen_a3_record,
-                                calculate_time_study, calculate_takt_capacity,
-                                solve_cutting_stock, monitor_forecast_drift,
-                                plan_two_sample_t_sample_size, calculate_oee,
-                                analyze_process_capability, plan_inventory_policy,
-                                calculate_carbon_emissions, analyze_engineering_economics,
-                                convert_units_or_currency, analyze_spc_individuals,
-                                analyze_quality_cost_defects, analyze_mtbf_mttr,
-                                analyze_abc_xyz_inventory,
-                                balance_production_line, analyze_bottleneck_capacity,
-                                build_value_stream_map, analyze_fmea, analyze_mm1_queue,
-                                analyze_industrial_cost_variance, calculate_roi_evidence,
-                                plan_preventive_maintenance, assess_job_hazards,
-                                plan_material_requirements, score_project_portfolio,
-                                merge_data_tables, process_time_series,
-                                generate_synthetic_industrial_data, plan_acceptance_sampling,
-                                analyze_process_mining, analyze_water_waste_efficiency,
-                                analyze_weibull_reliability, analyze_spare_parts_criticality,
-                                analyze_safety_incident_trends, optimize_warehouse_slotting,
-                                optimize_task_resource_assignment, compare_energy_performance_scenarios,
-                                fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
-                                forecast_demand_baselines, simulate_monte_carlo_net_value,
-                                map_industrial_fields, prioritize_maintenance_backlog,
-                                reconcile_sop_plan, score_supplier_performance,
-                                analyze_crossed_gage_rr, analyze_full_factorial_2level,
-                                simulate_discrete_event_process,
-                                run_solver_diagnostics,
-                                build_reproducibility_pack,
-                                optimize_facility_location_flow,
-                                get_student_practice_problem,
-                                evaluate_student_practice_answer,
-                                build_guided_study_plan,
-                                monitor_equipment_anomalies,
-                                assess_capa_8d_records,
-                            )
-                            if selected_tool["tool_id"] == "T007":
-                                result = classify_diagnostic(diagnostic_inspector_text)
-                                result["reported_subsystem"] = diagnostic_category
-                                result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
-                            elif selected_tool["tool_id"] == "T009":
-                                result = summarize_capability_registry(
-                                    TOOL_TARGETS,
-                                    status_filter=capability_status_filter,
-                                    limit=int(capability_status_limit),
-                                )
-                            elif selected_tool["tool_id"] == "T010":
-                                result = search_tool_help(
-                                    TOOL_TARGETS,
-                                    help_query,
-                                    workbench_filter=help_workbench,
-                                    limit=20,
-                                )
-                            elif selected_tool["tool_id"] == "T100":
-                                result = build_redacted_support_bundle(
-                                    TOOL_TARGETS,
-                                    diagnostic_text=support_diagnostic_text,
-                                    component=support_component,
-                                    severity=support_severity,
-                                )
-                            elif selected_tool["tool_id"] == "T015":
-                                headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
-                                manual_mapping = json.loads(field_manual_mapping_json)
-                                if not isinstance(manual_mapping, dict):
-                                    raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
-                                result = map_industrial_fields(headers, manual_mapping=manual_mapping, minimum_confidence=field_min_confidence)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if field_headers_text.strip() == "Timestamp,Qty,Defects,Machine ID" and field_manual_mapping_json.strip() == "{}" else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T049":
-                                parsed_backlog = json.loads(backlog_orders_json)
-                                if not isinstance(parsed_backlog, list):
-                                    raise ValueError("Maintenance work orders must be a JSON list.")
-                                skill_list = [item.strip() for item in backlog_skills_text.split(",") if item.strip()]
-                                result = prioritize_maintenance_backlog(parsed_backlog, backlog_hours, available_skills=skill_list)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"WO-101"' in backlog_orders_json and '"WO-102"' in backlog_orders_json and '"WO-103"' in backlog_orders_json else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T052":
-                                parsed_periods = json.loads(sop_periods_json)
-                                if not isinstance(parsed_periods, list):
-                                    raise ValueError("S&OP periods must be a JSON list of period objects.")
-                                result = reconcile_sop_plan(parsed_periods, starting_inventory=sop_starting_inventory)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if sop_periods_json.strip().startswith('[{"period":"Jan"') else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T058":
-                                parsed_suppliers = json.loads(supplier_scores_json)
-                                parsed_weights = json.loads(supplier_weights_json)
-                                if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
-                                    raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
-                                result = score_supplier_performance(parsed_suppliers, parsed_weights)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"supplier":"Acme"' in supplier_scores_json and '"supplier":"Gamma"' in supplier_scores_json else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T021":
+                            if selected_tool["tool_id"] == "T006":
                                 try:
-                                    observation_times = [float(item.strip()) for item in observation_text.split(",") if item.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Observed times must be comma-separated numbers.") from exc
-                                result = calculate_time_study(
-                                    observation_times, rating, allowance, time_unit=unit,
-                                )
-                            elif selected_tool["tool_id"] == "T022":
-                                parsed_counts = json.loads(work_sampling_counts_json)
-                                if not isinstance(parsed_counts, dict):
-                                    raise ValueError("Activity counts must be a JSON object mapping category names to counts.")
-                                result = analyze_work_sampling(
-                                    parsed_counts,
-                                    confidence_level=float(confidence_option.rstrip("%")) / 100.0,
-                                    target_margin_pct=margin_pct,
-                                )
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if work_sampling_counts_json.strip() == _TOOL022_EXAMPLE_COUNTS
-                                    else "USER_ENTERED_UNVERIFIED"
-                                )
-                                result["provenance_warning"] = (
-                                    "The example counts are synthetic teaching data; replace them and verify the sampling frame before using the output operationally."
-                                    if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-                                    else
-                                    "Entered counts were not independently validated against a sampling log or plant system."
-                                )
-                            elif selected_tool["tool_id"] == "T023":
-                                result = calculate_takt_capacity(
-                                    available_time, demand_units, cycle_time, time_unit=unit,
-                                )
-                            elif selected_tool["tool_id"] == "T028":
-                                parsed_counts = json.loads(pareto_counts_json)
-                                if not isinstance(parsed_counts, dict):
-                                    raise ValueError("Pareto counts must be a JSON object mapping category names to counts.")
-                                whys = [line.strip() for line in why_chain_text.splitlines() if line.strip()]
-                                result = analyze_pareto_root_cause(
-                                    parsed_counts,
-                                    problem_statement=problem_statement,
-                                    why_chain=whys,
-                                    countermeasure=countermeasure_text,
-                                    owner=action_owner,
-                                    due_date=action_due_date,
-                                )
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if pareto_counts_json.strip() == _TOOL028_EXAMPLE_COUNTS
-                                    else "USER_ENTERED_UNVERIFIED"
-                                )
-                                result["provenance_warning"] = (
-                                    "The example counts are synthetic teaching data; replace them and verify the source before operational use."
-                                    if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-                                    else
-                                    "Entered counts were not independently validated against a source log."
-                                )
-                            elif selected_tool["tool_id"] == "T029":
-                                parsed_items = json.loads(audit_items_json)
-                                if not isinstance(parsed_items, list):
-                                    raise ValueError("5S checklist must be a JSON list of item objects.")
-                                result = assess_5s_audit(parsed_items)
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if audit_items_json.strip() == _TOOL029_EXAMPLE_ITEMS
-                                    else "USER_ENTERED_UNVERIFIED"
-                                )
-                                result["provenance_warning"] = (
-                                    "The displayed checklist is illustrative self-assessment data, not a completed plant audit."
-                                    if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-                                    else "Checklist evidence was not independently validated against a signed audit."
-                                )
-                            elif selected_tool["tool_id"] == "T030":
-                                result = build_kaizen_a3_record(
-                                    title=a3_title,
-                                    problem_statement=a3_problem,
-                                    metric_name=a3_metric,
-                                    unit=a3_unit,
-                                    baseline_value=a3_baseline,
-                                    target_value=a3_target,
-                                    actual_after_value=a3_actual,
-                                    root_cause_hypothesis=a3_root_cause,
-                                    countermeasure=a3_countermeasure,
-                                    owner=a3_owner,
-                                    due_date=a3_due_date,
-                                    baseline_evidence=a3_baseline_evidence,
-                                    post_change_evidence=a3_post_evidence,
-                                    implementation_status=a3_status,
-                                    review_date=a3_review_date,
-                                )
-                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                records = st.session_state.get("shoir_kaizen_a3_records", [])
-                                if not isinstance(records, list):
-                                    raise ValueError("The saved A3 register is invalid; existing workspace data was preserved.")
-                                record_id = str(record_id_input or "").strip()
-                                now = datetime.now().astimezone().isoformat(timespec="seconds")
-                                known_index = next((i for i, item in enumerate(records) if str(item.get("record_id", "")) == record_id), None) if record_id else None
-                                if record_id and known_index is None:
-                                    raise ValueError("A3 record ID was not found in this user's workspace. Leave it blank to create a new record.")
-                                if known_index is None:
-                                    if len(records) >= 500:
-                                        raise ValueError("The A3 register reached 500 records; archive records before adding more.")
-                                    record_id = "A3-" + uuid4().hex[:10].upper()
-                                    result["record_id"] = record_id
-                                    result["created_at"] = now
-                                    result["updated_at"] = now
-                                    result["revision_number"] = 1
-                                    result["revision_history"] = []
-                                    records.append(dict(result))
-                                else:
-                                    previous = dict(records[known_index])
-                                    history = list(previous.get("revision_history", []))
-                                    snapshot_keys = (
-                                        "title", "problem_statement", "metric_name", "unit",
-                                        "baseline_value", "target_value", "actual_after_value",
-                                        "root_cause_hypothesis", "countermeasure", "owner", "due_date",
-                                        "baseline_evidence", "post_change_evidence", "review_date",
-                                        "status", "outcome_status",
-                                    )
-                                    history.append({
-                                        "revision_number": int(previous.get("revision_number", 1)),
-                                        "updated_at": previous.get("updated_at", previous.get("created_at", "")),
-                                        "snapshot": {key: previous.get(key) for key in snapshot_keys},
-                                    })
-                                    result["record_id"] = record_id
-                                    result["created_at"] = previous.get("created_at", now)
-                                    result["updated_at"] = now
-                                    result["revision_number"] = int(previous.get("revision_number", 1)) + 1
-                                    result["revision_history"] = history
-                                    records[known_index] = dict(result)
-                                st.session_state["shoir_kaizen_a3_records"] = records
-                            elif selected_tool["tool_id"] == "T059":
-                                parsed_slot_items = json.loads(slotting_items_json)
-                                parsed_slots = json.loads(slotting_slots_json)
-                                if not isinstance(parsed_slot_items, list) or not isinstance(parsed_slots, list):
-                                    raise ValueError("Slotting items and slots must each be JSON lists.")
-                                result = optimize_warehouse_slotting(parsed_slot_items, parsed_slots)
-                            elif selected_tool["tool_id"] == "T063":
-                                parsed_assignment_tasks = json.loads(assignment_tasks_json)
-                                parsed_assignment_resources = json.loads(assignment_resources_json)
-                                parsed_assignment_costs = json.loads(assignment_costs_json)
-                                if not isinstance(parsed_assignment_tasks, list) or not isinstance(parsed_assignment_resources, list) or not isinstance(parsed_assignment_costs, list):
-                                    raise ValueError("Task names, resource names and cost matrix must each be JSON lists.")
-                                result = optimize_task_resource_assignment(parsed_assignment_tasks, parsed_assignment_resources, parsed_assignment_costs)
-                            elif selected_tool["tool_id"] == "T066":
-                                parsed_parts = json.loads(parts_json)
-                                if not isinstance(parsed_parts, list):
-                                    raise ValueError("Parts input must be a JSON list of part definitions.")
-                                result = solve_cutting_stock(stock_len, parsed_parts, kerf)
-                            elif selected_tool["tool_id"] == "T075":
-                                try:
-                                    predictions = [float(x.strip()) for x in predictions_text.split(",") if x.strip()]
-                                    actuals = [float(x.strip()) for x in actuals_text.split(",") if x.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Predictions and actuals must be comma-separated numbers.") from exc
-                                result = monitor_forecast_drift(
-                                    predictions, actuals, max_mae,
-                                    window=int(window) if int(window) > 0 else None,
-                                )
-                            elif selected_tool["tool_id"] == "T026":
-                                result = calculate_oee(oee_planned, oee_downtime, oee_cycle, oee_total, oee_good, time_unit=oee_unit)
-                            elif selected_tool["tool_id"] == "T032":
-                                try:
-                                    measured_values = [float(x.strip()) for x in capability_measurements.split(",") if x.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Measurements must be comma-separated numbers.") from exc
-                                result = analyze_process_capability(measured_values, capability_lsl, capability_usl, subgroup_size=int(capability_subgroup), unit=capability_unit)
-                            elif selected_tool["tool_id"] == "T055":
-                                result = plan_inventory_policy(inv_demand, inv_sd, inv_lead, inv_order_cost, inv_holding_cost, operating_days_per_year=int(inv_days), service_factor_z=service_options[inv_service])
-                            elif selected_tool["tool_id"] == "T078":
-                                result = calculate_carbon_emissions(carbon_amount, carbon_factor, activity_unit=carbon_unit, factor_unit=carbon_factor_unit, factor_source=carbon_source, factor_date=carbon_date, boundary=carbon_boundary)
-                            elif selected_tool["tool_id"] == "T081":
-                                try:
-                                    cash_flows = [float(x.strip()) for x in economics_cash_flows.split(",") if x.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Cash flows must be comma-separated numbers.") from exc
-                                result = analyze_engineering_economics(cash_flows, economics_rate, currency=economics_currency, period_unit=economics_period)
-                            elif selected_tool["tool_id"] == "T016":
-                                result = convert_units_or_currency(amount_to_convert, source_unit, target_unit, exchange_rate=exchange_rate_value, exchange_rate_date=exchange_rate_date_value, exchange_rate_source=exchange_rate_source_value)
-                            elif selected_tool["tool_id"] == "T031":
-                                try:
-                                    values = [float(item.strip()) for item in spc_measurements_text.split(",") if item.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("SPC measurements must be comma-separated numbers.") from exc
-                                result = analyze_spc_individuals(values, unit=spc_unit)
+                                    additional_payload = json.loads(tool006_payload_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Revision-history input must be valid JSON.") from exc
+                                if not isinstance(additional_payload, dict):
+                                    raise ValueError("Revision-history input must be a JSON object.")
+                                result = run_additional_tool("T006", additional_payload)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if "SYNTHETIC" in tool006_payload_json else "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T039":
                                 try:
                                     parsed_capa_records = json.loads(capa_records_json)
+                                    parsed_capa_transitions = json.loads(capa_transitions_json or "[]")
                                 except json.JSONDecodeError as exc:
-                                    raise ValueError("CAPA/8D records must be valid JSON.") from exc
-                                if not isinstance(parsed_capa_records, list):
-                                    raise ValueError("CAPA/8D records must be a JSON list of objects.")
-                                result = assess_capa_8d_records(
-                                    parsed_capa_records,
-                                    as_of_date=capa_as_of_date.strip() or None,
-                                )
+                                    raise ValueError("CAPA/8D records and transitions must be valid JSON.") from exc
+                                if not isinstance(parsed_capa_records, list) or not isinstance(parsed_capa_transitions, list):
+                                    raise ValueError("CAPA/8D records and transitions must each be JSON lists.")
+                                result = run_additional_tool("T039", {
+                                    "records": parsed_capa_records,
+                                    "transitions": parsed_capa_transitions,
+                                    "as_of_date": capa_as_of_date.strip() or None,
+                                })
                                 result["data_provenance"] = (
                                     "SYNTHETIC_EXAMPLE"
                                     if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
                                     else "USER_ENTERED_UNVERIFIED"
                                 )
-                            elif selected_tool["tool_id"] == "T040":
-                                result = analyze_quality_cost_defects(quality_total_units, quality_defects, quality_scrap_units, quality_rework_units, quality_scrap_cost, quality_rework_cost, quality_inspection_cost, currency=quality_currency, period=quality_period)
-                            elif selected_tool["tool_id"] == "T042":
-                                try:
-                                    durations = [float(item.strip()) for item in repair_durations_text.split(",") if item.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Repair durations must be comma-separated numbers.") from exc
-                                result = analyze_mtbf_mttr(mtbf_operating_hours, durations)
-                            elif selected_tool["tool_id"] == "T056":
-                                inventory_items = json.loads(inventory_items_json)
-                                if not isinstance(inventory_items, list):
-                                    raise ValueError("SKU data must be a JSON list of objects.")
-                                result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
-                            elif selected_tool["tool_id"] == "T024":
-                                parsed_tasks = json.loads(line_tasks_json)
-                                if not isinstance(parsed_tasks, list):
-                                    raise ValueError("Tasks input must be a JSON list of task objects.")
-                                result = balance_production_line(parsed_tasks, line_cycle_time, time_unit=line_time_unit)
-                            elif selected_tool["tool_id"] == "T025":
-                                parsed_processes = json.loads(bottleneck_processes_json)
-                                if not isinstance(parsed_processes, list):
-                                    raise ValueError("Process capacities must be a JSON list of process objects.")
-                                result = analyze_bottleneck_capacity(parsed_processes, bottleneck_demand, period_label=bottleneck_period)
-                            elif selected_tool["tool_id"] == "T027":
-                                parsed_steps = json.loads(vsm_steps_json)
-                                if not isinstance(parsed_steps, list):
-                                    raise ValueError("Value-stream steps must be a JSON list of step objects.")
-                                result = build_value_stream_map(parsed_steps, vsm_demand, vsm_available_time, time_unit=vsm_time_unit)
-                            elif selected_tool["tool_id"] == "T038":
-                                parsed_fmea = json.loads(fmea_json)
-                                if not isinstance(parsed_fmea, list):
-                                    raise ValueError("FMEA input must be a JSON list of failure-mode objects.")
-                                result = analyze_fmea(parsed_fmea)
-                            elif selected_tool["tool_id"] == "T070":
-                                result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, time_unit=queue_time_unit)
-                            elif selected_tool["tool_id"] == "T082":
-                                result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
-                            elif selected_tool["tool_id"] == "T083":
-                                result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
-                            elif selected_tool["tool_id"] == "T017":
-                                parsed_left = json.loads(join_left_json)
-                                parsed_right = json.loads(join_right_json)
-                                if not isinstance(parsed_left, list) or not isinstance(parsed_right, list):
-                                    raise ValueError("Both join inputs must be JSON lists of records.")
-                                result = merge_data_tables(parsed_left, parsed_right, join_left_key, join_right_key, join_type=join_type, duplicate_policy=duplicate_policy)
-                            elif selected_tool["tool_id"] == "T018":
-                                parsed_series = json.loads(time_series_json)
-                                if not isinstance(parsed_series, list):
-                                    raise ValueError("Time-series input must be a JSON list of records.")
-                                result = process_time_series(parsed_series, ts_column, timezone_name=ts_timezone, expected_interval=ts_expected_interval, resample_frequency=ts_resample_frequency, aggregation=ts_aggregation)
-                            elif selected_tool["tool_id"] == "T019":
-                                result = generate_synthetic_industrial_data(int(synthetic_rows), seed=int(synthetic_seed), start_timestamp=synthetic_start, interval_minutes=int(synthetic_interval), defect_rate_pct=synthetic_defect_rate, mean_downtime_minutes=synthetic_downtime, energy_kwh_per_unit=synthetic_energy)
-                            elif selected_tool["tool_id"] == "T034":
-                                result = plan_acceptance_sampling(sampling_aql / 100.0, sampling_ltpd / 100.0, producer_risk=sampling_alpha / 100.0, consumer_risk=sampling_beta / 100.0, max_sample_size=int(sampling_max_n))
-                            elif selected_tool["tool_id"] == "T041":
-                                parsed_failure_times = json.loads(weibull_times_json)
-                                if not isinstance(parsed_failure_times, list):
-                                    raise ValueError("Failure-time observations must be a JSON list.")
-                                result = analyze_weibull_reliability(parsed_failure_times)
-                            elif selected_tool["tool_id"] == "T043":
-                                parsed_pm_tasks = json.loads(pm_tasks_json)
-                                if not isinstance(parsed_pm_tasks, list):
-                                    raise ValueError("Maintenance tasks must be a JSON list of task objects.")
-                                result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
-                            elif selected_tool["tool_id"] == "T045":
-                                parsed_parts = json.loads(spare_parts_json)
-                                if not isinstance(parsed_parts, list):
-                                    raise ValueError("Spare parts must be a JSON list of part objects.")
-                                result = analyze_spare_parts_criticality(parsed_parts)
-                            elif selected_tool["tool_id"] == "T047":
-                                parsed_hazards = json.loads(hazard_json)
-                                if not isinstance(parsed_hazards, list):
-                                    raise ValueError("Hazards must be a JSON list of hazard objects.")
-                                result = assess_job_hazards(parsed_hazards)
-                            elif selected_tool["tool_id"] == "T050":
-                                parsed_safety_periods = json.loads(safety_periods_json)
-                                if not isinstance(parsed_safety_periods, list):
-                                    raise ValueError("Safety periods must be a JSON list of period objects.")
-                                result = analyze_safety_incident_trends(parsed_safety_periods, rate_base_hours=safety_rate_base)
-                            elif selected_tool["tool_id"] == "T054":
-                                parsed_bom = json.loads(mrp_bom_json)
-                                parsed_inventory = json.loads(mrp_inventory_json)
-                                if not isinstance(parsed_bom, list):
-                                    raise ValueError("BOM must be a JSON list of component objects.")
-                                if not isinstance(parsed_inventory, dict):
-                                    raise ValueError("Inventory must be a JSON object keyed by component.")
-                                result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
-                            elif selected_tool["tool_id"] == "T076":
-                                parsed_events = json.loads(process_event_log_json)
-                                if not isinstance(parsed_events, list):
-                                    raise ValueError("Event log must be a JSON list of event records.")
-                                result = analyze_process_mining(parsed_events)
-                            elif selected_tool["tool_id"] == "T077":
-                                parsed_energy_baseline = json.loads(energy_baseline_json)
-                                parsed_energy_alternatives = json.loads(energy_alternatives_json)
-                                if not isinstance(parsed_energy_baseline, dict) or not isinstance(parsed_energy_alternatives, list):
-                                    raise ValueError("Energy baseline must be a JSON object and alternatives must be a JSON list.")
-                                result = compare_energy_performance_scenarios(parsed_energy_baseline, parsed_energy_alternatives)
-                            elif selected_tool["tool_id"] == "T079":
-                                parsed_flows = json.loads(water_flows_json)
-                                if not isinstance(parsed_flows, list):
-                                    raise ValueError("Process flows must be a JSON list of flow records.")
-                                result = analyze_water_waste_efficiency(parsed_flows)
-                            elif selected_tool["tool_id"] == "T084":
-                                parsed_criteria = json.loads(portfolio_criteria_json)
-                                parsed_alternatives = json.loads(portfolio_alternatives_json)
-                                if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
-                                    raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
-                                result = score_project_portfolio(parsed_criteria, parsed_alternatives)
-                            elif selected_tool["tool_id"] == "T033":
-                                parsed_msa = json.loads(msa_observations_json)
-                                if not isinstance(parsed_msa, list):
-                                    raise ValueError("Gage R&R observations must be a JSON list.")
-                                result = analyze_crossed_gage_rr(parsed_msa, tolerance=msa_tolerance if msa_tolerance > 0 else None)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if msa_observations_json.strip().startswith('[{"part":"P1"') else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T035":
-                                parsed_doe = json.loads(doe_observations_json)
-                                factors = [item.strip() for item in doe_factor_fields_text.split(",") if item.strip()]
-                                if not isinstance(parsed_doe, list):
-                                    raise ValueError("Factorial DOE observations must be a JSON list of run objects.")
-                                result = analyze_full_factorial_2level(parsed_doe, response_field=doe_response_field.strip(), factor_fields=factors, alpha=doe_alpha)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if doe_observations_json.strip().startswith('[{"A":-1,"B":-1,"response":6.4') else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T036":
-                                if regression_mode == "Linear regression":
-                                    parsed_observations = json.loads(regression_observations_json)
-                                    if not isinstance(parsed_observations, list):
-                                        raise ValueError("Regression observations must be a JSON list.")
-                                    result = fit_simple_linear_regression(parsed_observations, alpha=regression_alpha)
+                            elif selected_tool["tool_id"] == "T096":
+                                if integration_action == "Inspect configured connector settings":
+                                    try:
+                                        integration_payload = json.loads(integration_profiles_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Connector profiles must be valid JSON.") from exc
+                                    if not isinstance(integration_payload, dict):
+                                        raise ValueError("Connector profiles input must be a JSON object.")
+                                    if not isinstance(integration_payload.get("profiles"), list):
+                                        raise ValueError("Connector profiles input must contain a profiles JSON list.")
+                                    result = run_additional_tool("T096", integration_payload)
+                                    result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
                                 else:
-                                    parsed_groups = json.loads(anova_groups_json)
-                                    if not isinstance(parsed_groups, dict):
-                                        raise ValueError("ANOVA groups must be a JSON object mapping group names to numeric lists.")
-                                    result = run_one_way_anova(parsed_groups, alpha=regression_alpha)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if (
-                                    (regression_mode == "Linear regression" and regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]')
-                                    or (regression_mode == "One-way ANOVA" and anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}')
-                                ) else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T037":
+                                    if not integration_confirm_live:
+                                        raise PermissionError("Confirm the staging-only read-only connector request before running it.")
+                                    try:
+                                        live_profile = json.loads(integration_live_profile_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("The approved REST connector profile must be valid JSON.") from exc
+                                    if not isinstance(live_profile, dict):
+                                        raise ValueError("The approved REST connector profile must be a JSON object.")
+                                    result = run_additional_tool("T096", {
+                                        "action": "verify_rest_read",
+                                        "profile": live_profile,
+                                        "include_sample_data": False,
+                                    })
+                                    result["data_provenance"] = "EXPLICIT_STAGING_READ_ONLY_CONNECTOR_TEST"
+                                    result["warning"] = (
+                                        str(result.get("warning") or "")
+                                        + " Sample payload preview is disabled in the Workbench; "
+                                        "only redacted connection/data-retrieval metadata is retained."
+                                    )
+                            elif selected_tool["tool_id"] == "T098":
+                                result = run_additional_tool("T098", {})
+                                result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
+                            elif selected_tool["tool_id"] == "T097":
+                                import json as _plugin_json
+                                from plugin_registry import plugin_manifest, get_plugin, validate_plugin_payload
+                                selected_plugin = get_plugin(plugin_name)
+                                if selected_plugin is None:
+                                    raise ValueError("Selected plugin is no longer registered.")
                                 try:
-                                    sample_a_values = [float(item.strip()) for item in hypothesis_sample_a.split(",") if item.strip()]
-                                    sample_b_values = [float(item.strip()) for item in hypothesis_sample_b.split(",") if item.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Both samples must be comma-separated numeric observations.") from exc
-                                result = run_welch_t_test(sample_a_values, sample_b_values, alpha=hypothesis_alpha)
-                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T051":
-                                try:
-                                    demand_values = [float(item.strip()) for item in demand_history_text.split(",") if item.strip()]
-                                except ValueError as exc:
-                                    raise ValueError("Demand history must be comma-separated numeric observations in chronological order.") from exc
-                                result = forecast_demand_baselines(
-                                    demand_values, holdout_periods=int(demand_holdout),
-                                    horizon=int(demand_horizon), moving_average_window=int(demand_ma_window),
+                                    parsed_plugin_payload = _plugin_json.loads(plugin_payload_json or "{}")
+                                except _plugin_json.JSONDecodeError as exc:
+                                    raise ValueError("Plugin payload must be valid JSON.") from exc
+                                if not isinstance(parsed_plugin_payload, dict):
+                                    raise ValueError("Plugin payload must be a JSON object.")
+                                validated_payload = validate_plugin_payload(selected_plugin, parsed_plugin_payload)
+                                plugin_row = next(item for item in plugin_manifest() if item["name"] == plugin_name)
+                                result = {
+                                    "status": "PLUGIN_CONTRACT_VALIDATED",
+                                    "plugin": plugin_row,
+                                    "payload_valid": True,
+                                    "payload_keys": sorted(validated_payload.keys()),
+                                    "execution_status": plugin_row["execution_status"],
+                                    "warning": "No external endpoint was called. Metadata-only adapters remain non-executable until a reviewed server-side handler and external credentials are configured.",
+                                }
+                                result["data_provenance"] = "LOCAL_PLUGIN_REGISTRY"
+                            elif selected_tool["tool_id"] == "T099":
+                                from workspace_persistence import (
+                                    export_user_workspace_backup,
+                                    restore_user_workspace_backup,
+                                    save_user_workspace,
                                 )
-                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T072":
-                                parsed_components = json.loads(monte_carlo_components_json)
-                                if not isinstance(parsed_components, list):
-                                    raise ValueError("Monte Carlo components must be a JSON list.")
-                                result = simulate_monte_carlo_net_value(
-                                    parsed_components, iterations=int(monte_carlo_iterations),
-                                    seed=int(monte_carlo_seed), output_unit=monte_carlo_unit,
+                                if governance_action == "Export personal workspace backup":
+                                    backup = export_user_workspace_backup(USER, st.session_state)
+                                    st.session_state["shoir_tool_bundle_bytes_T099"] = backup.pop("backup_bytes")
+                                    result = {
+                                        "status": "PERSONAL_WORKSPACE_BACKUP_CREATED",
+                                        "backup_manifest": backup,
+                                        "warning": "Portable user data backup only. Store the file securely; the SHA-256 digest is not an authenticity signature or encryption.",
+                                    }
+                                else:
+                                    if governance_backup_upload is None:
+                                        raise ValueError("Select a workspace backup JSON file before restoring.")
+                                    before = export_user_workspace_backup(USER, st.session_state)["backup_bytes"]
+                                    try:
+                                        result = restore_user_workspace_backup(
+                                            governance_backup_upload.getvalue(),
+                                            USER,
+                                            st.session_state,
+                                        )
+                                        if not save_user_workspace(USER, st.session_state):
+                                            raise RuntimeError("Restored state could not be saved to the configured persistence backend.")
+                                    except Exception:
+                                        restore_user_workspace_backup(before, USER, st.session_state)
+                                        raise
+                                    result["status"] = "PERSONAL_WORKSPACE_BACKUP_RESTORED_AND_SAVED"
+                                    result["warning"] = "The backup was restored only into the currently signed-in account. Infrastructure/PITR recovery remains a separate procedure."
+                                    st.session_state.pop("shoir_tool_bundle_bytes_T099", None)
+                                result["data_provenance"] = "USER_OWNED_BACKUP"
+                            else:
+                                from shoir_target_engines import (
+                                    analyze_work_sampling, analyze_pareto_root_cause,
+                                    assess_5s_audit, build_kaizen_a3_record,
+                                    calculate_time_study, calculate_takt_capacity,
+                                    solve_cutting_stock, monitor_forecast_drift,
+                                    plan_two_sample_t_sample_size, calculate_oee,
+                                    analyze_process_capability, plan_inventory_policy,
+                                    calculate_carbon_emissions, analyze_engineering_economics,
+                                    convert_units_or_currency, analyze_spc_individuals,
+                                    analyze_quality_cost_defects, analyze_mtbf_mttr,
+                                    analyze_abc_xyz_inventory,
+                                    balance_production_line, analyze_bottleneck_capacity,
+                                    build_value_stream_map, analyze_fmea, analyze_mm1_queue,
+                                    analyze_industrial_cost_variance, calculate_roi_evidence,
+                                    plan_preventive_maintenance, assess_job_hazards,
+                                    plan_material_requirements, score_project_portfolio,
+                                    merge_data_tables, process_time_series,
+                                    generate_synthetic_industrial_data, plan_acceptance_sampling,
+                                    analyze_process_mining, analyze_water_waste_efficiency,
+                                    analyze_weibull_reliability, analyze_spare_parts_criticality,
+                                    analyze_safety_incident_trends, optimize_warehouse_slotting,
+                                    optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                    fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
+                                    forecast_demand_baselines, simulate_monte_carlo_net_value,
+                                    map_industrial_fields, prioritize_maintenance_backlog,
+                                    reconcile_sop_plan, score_supplier_performance,
+                                    analyze_crossed_gage_rr, analyze_full_factorial_2level,
+                                    simulate_discrete_event_process,
+                                    run_solver_diagnostics,
+                                    build_reproducibility_pack,
+                                    optimize_facility_location_flow,
+                                    get_student_practice_problem,
+                                    evaluate_student_practice_answer,
+                                    build_guided_study_plan,
+                                    monitor_equipment_anomalies,
+                                    assess_capa_8d_records,
+                                    calculate_niosh_revised_lifting_equation,
+                                    build_rcm_decision_support,
+                                    optimize_supply_chain_network,
+                                    calibrate_simulation_outputs,
+                                    evaluate_kpi_alerts,
                                 )
-                                result["data_provenance"] = "SIMULATION — USER-DECLARED DISTRIBUTIONS"
-                            elif selected_tool["tool_id"] == "T085":
-                                result = plan_two_sample_t_sample_size(
-                                    effect_size, alpha, target_power,
-                                    max_n_per_group=int(search_limit),
-                                )
-                            elif selected_tool["tool_id"] == "T002":
-                                completed_ids = [
-                                    key.replace("shoir_tool_result_", "")
-                                    for key in st.session_state.keys()
-                                    if key.startswith("shoir_tool_result_T")
-                                    and isinstance(st.session_state.get(key), dict)
-                                    and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
-                                ]
-                                result = build_guided_study_plan(
-                                    guided_goal,
-                                    available_data_fields=guided_fields_text,
-                                    completed_tool_ids=completed_ids,
-                                    tier=RAW_TIER,
-                                )
+                                from shoir_resilience_suite import simulate_disruption_scenarios
+                                from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
+                                if selected_tool["tool_id"] == "T007":
+                                    result = classify_diagnostic(diagnostic_inspector_text)
+                                    result["reported_subsystem"] = diagnostic_category
+                                    result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
+                                elif selected_tool["tool_id"] == "T009":
+                                    result = summarize_capability_registry(
+                                        TOOL_TARGETS,
+                                        status_filter=capability_status_filter,
+                                        limit=int(capability_status_limit),
+                                    )
+                                elif selected_tool["tool_id"] == "T010":
+                                    result = search_tool_help(
+                                        TOOL_TARGETS,
+                                        help_query,
+                                        workbench_filter=help_workbench,
+                                        limit=20,
+                                    )
+                                elif selected_tool["tool_id"] == "T100":
+                                    result = build_redacted_support_bundle(
+                                        TOOL_TARGETS,
+                                        diagnostic_text=support_diagnostic_text,
+                                        component=support_component,
+                                        severity=support_severity,
+                                    )
+                                elif selected_tool["tool_id"] == "T015":
+                                    headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
+                                    manual_mapping = json.loads(field_manual_mapping_json)
+                                    if not isinstance(manual_mapping, dict):
+                                        raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
+                                    result = map_industrial_fields(headers, manual_mapping=manual_mapping, minimum_confidence=field_min_confidence)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if field_headers_text.strip() == "Timestamp,Qty,Defects,Machine ID" and field_manual_mapping_json.strip() == "{}" else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T049":
+                                    parsed_backlog = json.loads(backlog_orders_json)
+                                    if not isinstance(parsed_backlog, list):
+                                        raise ValueError("Maintenance work orders must be a JSON list.")
+                                    skill_list = [item.strip() for item in backlog_skills_text.split(",") if item.strip()]
+                                    result = prioritize_maintenance_backlog(parsed_backlog, backlog_hours, available_skills=skill_list)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"WO-101"' in backlog_orders_json and '"WO-102"' in backlog_orders_json and '"WO-103"' in backlog_orders_json else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T052":
+                                    parsed_periods = json.loads(sop_periods_json)
+                                    if not isinstance(parsed_periods, list):
+                                        raise ValueError("S&OP periods must be a JSON list of period objects.")
+                                    result = reconcile_sop_plan(parsed_periods, starting_inventory=sop_starting_inventory)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if sop_periods_json.strip().startswith('[{"period":"Jan"') else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T058":
+                                    parsed_suppliers = json.loads(supplier_scores_json)
+                                    parsed_weights = json.loads(supplier_weights_json)
+                                    if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
+                                        raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
+                                    result = score_supplier_performance(parsed_suppliers, parsed_weights)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"supplier":"Acme"' in supplier_scores_json and '"supplier":"Gamma"' in supplier_scores_json else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T021":
+                                    try:
+                                        observation_times = [float(item.strip()) for item in observation_text.split(",") if item.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Observed times must be comma-separated numbers.") from exc
+                                    result = calculate_time_study(
+                                        observation_times, rating, allowance, time_unit=unit,
+                                    )
+                                elif selected_tool["tool_id"] == "T022":
+                                    parsed_counts = json.loads(work_sampling_counts_json)
+                                    if not isinstance(parsed_counts, dict):
+                                        raise ValueError("Activity counts must be a JSON object mapping category names to counts.")
+                                    result = analyze_work_sampling(
+                                        parsed_counts,
+                                        confidence_level=float(confidence_option.rstrip("%")) / 100.0,
+                                        target_margin_pct=margin_pct,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if work_sampling_counts_json.strip() == _TOOL022_EXAMPLE_COUNTS
+                                        else "USER_ENTERED_UNVERIFIED"
+                                    )
+                                    result["provenance_warning"] = (
+                                        "The example counts are synthetic teaching data; replace them and verify the sampling frame before using the output operationally."
+                                        if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                        else
+                                        "Entered counts were not independently validated against a sampling log or plant system."
+                                    )
+                                elif selected_tool["tool_id"] == "T023":
+                                    result = calculate_takt_capacity(
+                                        available_time, demand_units, cycle_time, time_unit=unit,
+                                    )
+                                elif selected_tool["tool_id"] == "T028":
+                                    parsed_counts = json.loads(pareto_counts_json)
+                                    if not isinstance(parsed_counts, dict):
+                                        raise ValueError("Pareto counts must be a JSON object mapping category names to counts.")
+                                    whys = [line.strip() for line in why_chain_text.splitlines() if line.strip()]
+                                    result = analyze_pareto_root_cause(
+                                        parsed_counts,
+                                        problem_statement=problem_statement,
+                                        why_chain=whys,
+                                        countermeasure=countermeasure_text,
+                                        owner=action_owner,
+                                        due_date=action_due_date,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if pareto_counts_json.strip() == _TOOL028_EXAMPLE_COUNTS
+                                        else "USER_ENTERED_UNVERIFIED"
+                                    )
+                                    result["provenance_warning"] = (
+                                        "The example counts are synthetic teaching data; replace them and verify the source before operational use."
+                                        if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                        else
+                                        "Entered counts were not independently validated against a source log."
+                                    )
+                                elif selected_tool["tool_id"] == "T029":
+                                    parsed_items = json.loads(audit_items_json)
+                                    if not isinstance(parsed_items, list):
+                                        raise ValueError("5S checklist must be a JSON list of item objects.")
+                                    result = assess_5s_audit(parsed_items)
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if audit_items_json.strip() == _TOOL029_EXAMPLE_ITEMS
+                                        else "USER_ENTERED_UNVERIFIED"
+                                    )
+                                    result["provenance_warning"] = (
+                                        "The displayed checklist is illustrative self-assessment data, not a completed plant audit."
+                                        if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                        else "Checklist evidence was not independently validated against a signed audit."
+                                    )
+                                elif selected_tool["tool_id"] == "T030":
+                                    result = build_kaizen_a3_record(
+                                        title=a3_title,
+                                        problem_statement=a3_problem,
+                                        metric_name=a3_metric,
+                                        unit=a3_unit,
+                                        baseline_value=a3_baseline,
+                                        target_value=a3_target,
+                                        actual_after_value=a3_actual,
+                                        root_cause_hypothesis=a3_root_cause,
+                                        countermeasure=a3_countermeasure,
+                                        owner=a3_owner,
+                                        due_date=a3_due_date,
+                                        baseline_evidence=a3_baseline_evidence,
+                                        post_change_evidence=a3_post_evidence,
+                                        implementation_status=a3_status,
+                                        review_date=a3_review_date,
+                                    )
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    records = st.session_state.get("shoir_kaizen_a3_records", [])
+                                    if not isinstance(records, list):
+                                        raise ValueError("The saved A3 register is invalid; existing workspace data was preserved.")
+                                    record_id = str(record_id_input or "").strip()
+                                    now = datetime.now().astimezone().isoformat(timespec="seconds")
+                                    known_index = next((i for i, item in enumerate(records) if str(item.get("record_id", "")) == record_id), None) if record_id else None
+                                    if record_id and known_index is None:
+                                        raise ValueError("A3 record ID was not found in this user's workspace. Leave it blank to create a new record.")
+                                    if known_index is None:
+                                        if len(records) >= 500:
+                                            raise ValueError("The A3 register reached 500 records; archive records before adding more.")
+                                        record_id = "A3-" + uuid4().hex[:10].upper()
+                                        result["record_id"] = record_id
+                                        result["created_at"] = now
+                                        result["updated_at"] = now
+                                        result["revision_number"] = 1
+                                        result["revision_history"] = []
+                                        records.append(dict(result))
+                                    else:
+                                        previous = dict(records[known_index])
+                                        history = list(previous.get("revision_history", []))
+                                        snapshot_keys = (
+                                            "title", "problem_statement", "metric_name", "unit",
+                                            "baseline_value", "target_value", "actual_after_value",
+                                            "root_cause_hypothesis", "countermeasure", "owner", "due_date",
+                                            "baseline_evidence", "post_change_evidence", "review_date",
+                                            "status", "outcome_status",
+                                        )
+                                        history.append({
+                                            "revision_number": int(previous.get("revision_number", 1)),
+                                            "updated_at": previous.get("updated_at", previous.get("created_at", "")),
+                                            "snapshot": {key: previous.get(key) for key in snapshot_keys},
+                                        })
+                                        result["record_id"] = record_id
+                                        result["created_at"] = previous.get("created_at", now)
+                                        result["updated_at"] = now
+                                        result["revision_number"] = int(previous.get("revision_number", 1)) + 1
+                                        result["revision_history"] = history
+                                        records[known_index] = dict(result)
+                                    st.session_state["shoir_kaizen_a3_records"] = records
+                                elif selected_tool["tool_id"] == "T059":
+                                    parsed_slot_items = json.loads(slotting_items_json)
+                                    parsed_slots = json.loads(slotting_slots_json)
+                                    if not isinstance(parsed_slot_items, list) or not isinstance(parsed_slots, list):
+                                        raise ValueError("Slotting items and slots must each be JSON lists.")
+                                    result = optimize_warehouse_slotting(parsed_slot_items, parsed_slots)
+                                elif selected_tool["tool_id"] == "T063":
+                                    parsed_assignment_tasks = json.loads(assignment_tasks_json)
+                                    parsed_assignment_resources = json.loads(assignment_resources_json)
+                                    parsed_assignment_costs = json.loads(assignment_costs_json)
+                                    if not isinstance(parsed_assignment_tasks, list) or not isinstance(parsed_assignment_resources, list) or not isinstance(parsed_assignment_costs, list):
+                                        raise ValueError("Task names, resource names and cost matrix must each be JSON lists.")
+                                    result = optimize_task_resource_assignment(parsed_assignment_tasks, parsed_assignment_resources, parsed_assignment_costs)
+                                elif selected_tool["tool_id"] == "T066":
+                                    parsed_parts = json.loads(parts_json)
+                                    if not isinstance(parsed_parts, list):
+                                        raise ValueError("Parts input must be a JSON list of part definitions.")
+                                    result = solve_cutting_stock(stock_len, parsed_parts, kerf)
+                                elif selected_tool["tool_id"] == "T075":
+                                    try:
+                                        predictions = [float(x.strip()) for x in predictions_text.split(",") if x.strip()]
+                                        actuals = [float(x.strip()) for x in actuals_text.split(",") if x.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Predictions and actuals must be comma-separated numbers.") from exc
+                                    result = monitor_forecast_drift(
+                                        predictions, actuals, max_mae,
+                                        window=int(window) if int(window) > 0 else None,
+                                    )
+                                elif selected_tool["tool_id"] == "T026":
+                                    result = calculate_oee(oee_planned, oee_downtime, oee_cycle, oee_total, oee_good, time_unit=oee_unit)
+                                elif selected_tool["tool_id"] == "T032":
+                                    try:
+                                        measured_values = [float(x.strip()) for x in capability_measurements.split(",") if x.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Measurements must be comma-separated numbers.") from exc
+                                    result = analyze_process_capability(measured_values, capability_lsl, capability_usl, subgroup_size=int(capability_subgroup), unit=capability_unit)
+                                elif selected_tool["tool_id"] == "T055":
+                                    result = plan_inventory_policy(inv_demand, inv_sd, inv_lead, inv_order_cost, inv_holding_cost, operating_days_per_year=int(inv_days), service_factor_z=service_options[inv_service])
+                                elif selected_tool["tool_id"] == "T078":
+                                    result = calculate_carbon_emissions(carbon_amount, carbon_factor, activity_unit=carbon_unit, factor_unit=carbon_factor_unit, factor_source=carbon_source, factor_date=carbon_date, boundary=carbon_boundary)
+                                elif selected_tool["tool_id"] == "T081":
+                                    try:
+                                        cash_flows = [float(x.strip()) for x in economics_cash_flows.split(",") if x.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Cash flows must be comma-separated numbers.") from exc
+                                    result = analyze_engineering_economics(cash_flows, economics_rate, currency=economics_currency, period_unit=economics_period)
+                                elif selected_tool["tool_id"] == "T016":
+                                    result = convert_units_or_currency(amount_to_convert, source_unit, target_unit, exchange_rate=exchange_rate_value, exchange_rate_date=exchange_rate_date_value, exchange_rate_source=exchange_rate_source_value)
+                                elif selected_tool["tool_id"] == "T031":
+                                    try:
+                                        values = [float(item.strip()) for item in spc_measurements_text.split(",") if item.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("SPC measurements must be comma-separated numbers.") from exc
+                                    result = analyze_spc_individuals(values, unit=spc_unit)
+                                elif selected_tool["tool_id"] == "T039":
+                                    try:
+                                        parsed_capa_records = json.loads(capa_records_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("CAPA/8D records must be valid JSON.") from exc
+                                    if not isinstance(parsed_capa_records, list):
+                                        raise ValueError("CAPA/8D records must be a JSON list of objects.")
+                                    result = assess_capa_8d_records(
+                                        parsed_capa_records,
+                                        as_of_date=capa_as_of_date.strip() or None,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
+                                        else "USER_ENTERED_UNVERIFIED"
+                                    )
+                                elif selected_tool["tool_id"] == "T040":
+                                    result = analyze_quality_cost_defects(quality_total_units, quality_defects, quality_scrap_units, quality_rework_units, quality_scrap_cost, quality_rework_cost, quality_inspection_cost, currency=quality_currency, period=quality_period)
+                                elif selected_tool["tool_id"] == "T042":
+                                    try:
+                                        durations = [float(item.strip()) for item in repair_durations_text.split(",") if item.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Repair durations must be comma-separated numbers.") from exc
+                                    result = analyze_mtbf_mttr(mtbf_operating_hours, durations)
+                                elif selected_tool["tool_id"] == "T056":
+                                    inventory_items = json.loads(inventory_items_json)
+                                    if not isinstance(inventory_items, list):
+                                        raise ValueError("SKU data must be a JSON list of objects.")
+                                    result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
+                                elif selected_tool["tool_id"] == "T024":
+                                    parsed_tasks = json.loads(line_tasks_json)
+                                    if not isinstance(parsed_tasks, list):
+                                        raise ValueError("Tasks input must be a JSON list of task objects.")
+                                    result = balance_production_line(parsed_tasks, line_cycle_time, time_unit=line_time_unit)
+                                elif selected_tool["tool_id"] == "T025":
+                                    parsed_processes = json.loads(bottleneck_processes_json)
+                                    if not isinstance(parsed_processes, list):
+                                        raise ValueError("Process capacities must be a JSON list of process objects.")
+                                    result = analyze_bottleneck_capacity(parsed_processes, bottleneck_demand, period_label=bottleneck_period)
+                                elif selected_tool["tool_id"] == "T027":
+                                    parsed_steps = json.loads(vsm_steps_json)
+                                    if not isinstance(parsed_steps, list):
+                                        raise ValueError("Value-stream steps must be a JSON list of step objects.")
+                                    result = build_value_stream_map(parsed_steps, vsm_demand, vsm_available_time, time_unit=vsm_time_unit)
+                                elif selected_tool["tool_id"] == "T038":
+                                    parsed_fmea = json.loads(fmea_json)
+                                    if not isinstance(parsed_fmea, list):
+                                        raise ValueError("FMEA input must be a JSON list of failure-mode objects.")
+                                    result = analyze_fmea(parsed_fmea)
+                                elif selected_tool["tool_id"] == "T070":
+                                    result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, time_unit=queue_time_unit)
+                                elif selected_tool["tool_id"] == "T082":
+                                    result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
+                                elif selected_tool["tool_id"] == "T083":
+                                    result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
+                                elif selected_tool["tool_id"] == "T017":
+                                    parsed_left = json.loads(join_left_json)
+                                    parsed_right = json.loads(join_right_json)
+                                    if not isinstance(parsed_left, list) or not isinstance(parsed_right, list):
+                                        raise ValueError("Both join inputs must be JSON lists of records.")
+                                    result = merge_data_tables(parsed_left, parsed_right, join_left_key, join_right_key, join_type=join_type, duplicate_policy=duplicate_policy)
+                                elif selected_tool["tool_id"] == "T018":
+                                    parsed_series = json.loads(time_series_json)
+                                    if not isinstance(parsed_series, list):
+                                        raise ValueError("Time-series input must be a JSON list of records.")
+                                    result = process_time_series(parsed_series, ts_column, timezone_name=ts_timezone, expected_interval=ts_expected_interval, resample_frequency=ts_resample_frequency, aggregation=ts_aggregation)
+                                elif selected_tool["tool_id"] == "T019":
+                                    result = generate_synthetic_industrial_data(int(synthetic_rows), seed=int(synthetic_seed), start_timestamp=synthetic_start, interval_minutes=int(synthetic_interval), defect_rate_pct=synthetic_defect_rate, mean_downtime_minutes=synthetic_downtime, energy_kwh_per_unit=synthetic_energy)
+                                elif selected_tool["tool_id"] == "T034":
+                                    result = plan_acceptance_sampling(sampling_aql / 100.0, sampling_ltpd / 100.0, producer_risk=sampling_alpha / 100.0, consumer_risk=sampling_beta / 100.0, max_sample_size=int(sampling_max_n))
+                                elif selected_tool["tool_id"] == "T041":
+                                    parsed_failure_times = json.loads(weibull_times_json)
+                                    if not isinstance(parsed_failure_times, list):
+                                        raise ValueError("Failure-time observations must be a JSON list.")
+                                    result = analyze_weibull_reliability(parsed_failure_times)
+                                elif selected_tool["tool_id"] == "T043":
+                                    parsed_pm_tasks = json.loads(pm_tasks_json)
+                                    if not isinstance(parsed_pm_tasks, list):
+                                        raise ValueError("Maintenance tasks must be a JSON list of task objects.")
+                                    result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
+                                elif selected_tool["tool_id"] == "T045":
+                                    parsed_parts = json.loads(spare_parts_json)
+                                    if not isinstance(parsed_parts, list):
+                                        raise ValueError("Spare parts must be a JSON list of part objects.")
+                                    result = analyze_spare_parts_criticality(parsed_parts)
+                                elif selected_tool["tool_id"] == "T044":
+                                    parsed_rcm = json.loads(rcm_records_json)
+                                    if not isinstance(parsed_rcm, list):
+                                        raise ValueError("RCM failure modes must be a JSON list.")
+                                    result = build_rcm_decision_support(parsed_rcm)
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T046":
+                                    if rnle_duration == "Select duration":
+                                        raise ValueError("Select the lifting-task duration from the NIOSH definitions.")
+                                    if rnle_coupling == "Select coupling":
+                                        raise ValueError("Select the observed hand-to-load coupling quality.")
+                                    result = calculate_niosh_revised_lifting_equation(
+                                        load_weight=rnle_load,
+                                        horizontal_origin=rnle_h_origin,
+                                        horizontal_destination=rnle_h_destination,
+                                        vertical_hand_start=rnle_v_start,
+                                        vertical_travel_distance=rnle_distance,
+                                        asymmetry_origin=rnle_a_origin,
+                                        asymmetry_destination=rnle_a_destination,
+                                        frequency_lifts_per_minute=rnle_frequency,
+                                        frequency_multiplier=rnle_fm,
+                                        coupling_multiplier=rnle_cm,
+                                        units=rnle_units,
+                                        frequency_duration_category=rnle_duration,
+                                        coupling_quality=rnle_coupling,
+                                        frequency_multiplier_source=rnle_fm_source,
+                                        coupling_multiplier_source=rnle_cm_source,
+                                        task_description=rnle_task,
+                                    )
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T060":
+                                    parsed_suppliers = json.loads(supply_network_suppliers_json)
+                                    parsed_sites = json.loads(supply_network_sites_json)
+                                    parsed_routes = json.loads(supply_network_routes_json)
+                                    if not isinstance(parsed_suppliers, list) or not isinstance(parsed_sites, list) or not isinstance(parsed_routes, list):
+                                        raise ValueError("Suppliers, sites and routes must each be JSON lists.")
+                                    result = optimize_supply_chain_network(
+                                        parsed_suppliers,
+                                        parsed_sites,
+                                        parsed_routes,
+                                        unmet_demand_penalty_per_unit=supply_network_penalty,
+                                        time_limit_seconds=supply_network_time_limit,
+                                    )
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T074":
+                                    try:
+                                        simulated_values = [float(x.strip()) for x in calibration_simulated_text.split(",") if x.strip()]
+                                        measured_values = [float(x.strip()) for x in calibration_measured_text.split(",") if x.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Simulated and measured outputs must be comma-separated numbers.") from exc
+                                    result = calibrate_simulation_outputs(
+                                        simulated_values,
+                                        measured_values,
+                                        training_fraction=calibration_training_fraction,
+                                    )
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T080":
+                                    parsed_disruption_suppliers = json.loads(disruption_suppliers_json)
+                                    parsed_disruption_demands = json.loads(disruption_demands_json)
+                                    if not isinstance(parsed_disruption_suppliers, list) or not isinstance(parsed_disruption_demands, list):
+                                        raise ValueError("Disruption suppliers and demands must each be JSON lists.")
+                                    supplier_frame = pd.DataFrame(parsed_disruption_suppliers)
+                                    demand_frame = pd.DataFrame(parsed_disruption_demands)
+                                    if supplier_frame.empty or demand_frame.empty:
+                                        raise ValueError("At least one supplier and one demand destination are required.")
+                                    simulation_rows = simulate_disruption_scenarios(
+                                        supplier_frame,
+                                        demand_frame,
+                                        iterations=int(disruption_iterations),
+                                        seed=int(disruption_seed),
+                                        outage_probability=disruption_outage_probability,
+                                        demand_cv=disruption_demand_cv,
+                                    )
+                                    result = {
+                                        "status": "SYNTHETIC_DISRUPTION_STRESS_TEST",
+                                        "data_provenance": "USER_ENTERED_UNVERIFIED",
+                                        "iterations": len(simulation_rows),
+                                        "service_level_mean_pct": float(simulation_rows["Service %"].mean()),
+                                        "service_level_p05_pct": float(simulation_rows["Service %"].quantile(0.05)),
+                                        "service_level_p95_pct": float(simulation_rows["Service %"].quantile(0.95)),
+                                        "shortage_mean_units": float(simulation_rows["Shortage units"].mean()),
+                                        "simulation_results": simulation_rows,
+                                        "warning": "This is a stochastic supply-shock sensitivity run, not a calibrated forecast or live supplier availability signal.",
+                                    }
+                                elif selected_tool["tool_id"] == "T094":
+                                    parsed_kpis = json.loads(kpi_records_json)
+                                    parsed_rules = json.loads(kpi_rules_json)
+                                    if not isinstance(parsed_kpis, list) or not isinstance(parsed_rules, list):
+                                        raise ValueError("KPI readings and alert rules must each be JSON lists.")
+                                    if not parsed_kpis:
+                                        raise ValueError("Add at least one KPI reading.")
+                                    if not parsed_rules:
+                                        raise ValueError("Add at least one KPI alert rule.")
 
-                            elif selected_tool["tool_id"] == "T089":
-                                get_student_practice_problem(practice_topic)
-                                result = evaluate_student_practice_answer(practice_topic, practice_answer)
+                                    readings_by_name = {}
+                                    for reading in parsed_kpis:
+                                        if not isinstance(reading, dict):
+                                            raise ValueError("Each KPI reading must be a JSON object.")
+                                        reading_name = str(reading.get("kpi") or "").strip()
+                                        if not reading_name:
+                                            raise ValueError("Every KPI reading must include a non-empty kpi name.")
+                                        reading_key = reading_name.casefold()
+                                        if reading_key in readings_by_name:
+                                            raise ValueError(f"More than one KPI reading matches '{reading_name}'. Use one reading per KPI name.")
+                                        readings_by_name[reading_key] = reading
 
-                            elif selected_tool["tool_id"] == "T048":
-                                try:
-                                    parsed_anomaly_observations = json.loads(anomaly_observations_json)
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError("Time-series observations must be valid JSON.") from exc
-                                if not isinstance(parsed_anomaly_observations, list):
-                                    raise ValueError("Time-series observations must be a JSON list of objects.")
-                                result = monitor_equipment_anomalies(
-                                    parsed_anomaly_observations,
-                                    value_field=anomaly_value_field.strip(),
-                                    timestamp_field=anomaly_timestamp_field.strip(),
-                                    modified_z_threshold=anomaly_threshold,
-                                    max_age_hours=anomaly_max_age,
-                                    evaluation_time_utc=anomaly_eval_time.strip() or None,
-                                )
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if anomaly_observations_json.strip() == _TOOL048_EXAMPLE_OBSERVATIONS
-                                    else "USER_ENTERED_UNVERIFIED"
-                                )
-                            elif selected_tool["tool_id"] == "T069":
-                                try:
-                                    parsed_facilities = json.loads(facility_location_facilities_json)
-                                    parsed_customers = json.loads(facility_location_customers_json)
-                                    parsed_routes = json.loads(facility_location_routes_json)
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError("Facilities, customers and routes must each be valid JSON.") from exc
-                                if not isinstance(parsed_facilities, list) or not isinstance(parsed_customers, list) or not isinstance(parsed_routes, list):
-                                    raise ValueError("Facilities, customers and routes must each be JSON lists.")
-                                result = optimize_facility_location_flow(
-                                    parsed_facilities, parsed_customers, parsed_routes,
-                                    time_limit_seconds=facility_location_time_limit,
-                                )
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if facility_location_facilities_json.strip() == _TOOL069_EXAMPLE_FACILITIES
-                                    and facility_location_customers_json.strip() == _TOOL069_EXAMPLE_CUSTOMERS
-                                    and facility_location_routes_json.strip() == _TOOL069_EXAMPLE_ROUTES
-                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
-                                )
-                            elif selected_tool["tool_id"] == "T071":
-                                parsed_des_steps = json.loads(des_steps_json)
-                                if not isinstance(parsed_des_steps, list):
-                                    raise ValueError("DES station setup must be a JSON list of station records.")
-                                result = simulate_discrete_event_process(
-                                    parsed_des_steps,
-                                    job_count=int(des_job_count),
-                                    mean_interarrival_time=des_interarrival,
-                                    arrival_distribution=des_arrival_distribution,
-                                    warmup_jobs=int(des_warmup_jobs),
-                                    replications=int(des_replications),
-                                    random_seed=int(des_seed),
-                                    time_unit=des_time_unit,
-                                )
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if des_steps_json.strip() == _TOOL071_EXAMPLE_STATIONS
-                                    and int(des_job_count) == 50
-                                    and float(des_interarrival) == 1.0
-                                    and des_arrival_distribution == "deterministic"
-                                    and int(des_warmup_jobs) == 5
-                                    and int(des_replications) == 10
-                                    and int(des_seed) == 42
-                                    and des_time_unit == "minutes"
-                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
-                                )
-                            elif selected_tool["tool_id"] == "T062":
-                                parsed_solver_variables = json.loads(solver_variables_json)
-                                parsed_solver_objective = json.loads(solver_objective_json)
-                                parsed_solver_constraints = json.loads(solver_constraints_json)
-                                if not isinstance(parsed_solver_variables, dict) or not isinstance(parsed_solver_objective, dict) or not isinstance(parsed_solver_constraints, list):
-                                    raise ValueError("Variables and objective must be JSON objects, and constraints must be a JSON list.")
-                                result = run_solver_diagnostics(
-                                    parsed_solver_variables,
-                                    parsed_solver_objective,
-                                    parsed_solver_constraints,
-                                    direction=solver_direction,
-                                    time_limit_seconds=solver_time_limit,
-                                    feasibility_tolerance=solver_tolerance,
-                                )
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if solver_variables_json.strip() == _TOOL062_EXAMPLE_VARIABLES
-                                    and solver_objective_json.strip() == _TOOL062_EXAMPLE_OBJECTIVE
-                                    and solver_constraints_json.strip() == _TOOL062_EXAMPLE_CONSTRAINTS
-                                    and solver_direction == "minimize"
-                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
-                                )
-                            elif selected_tool["tool_id"] == "T087":
-                                if source_result_tool_id == "NONE":
-                                    raise ValueError("Run an entitled source tool first; no completed result is available to package.")
-                                source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
-                                source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
-                                if not isinstance(source_result, dict):
-                                    raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
-                                try:
-                                    parsed_repro_metadata = json.loads(reproducibility_metadata_json or "{}")
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError("Run metadata must be valid JSON.") from exc
-                                if not isinstance(parsed_repro_metadata, dict):
-                                    raise ValueError("Run metadata must be a JSON object.")
-                                source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
-                                pack_result = build_reproducibility_pack(
-                                    source_result_tool_id,
-                                    source_tool["canonical_name"],
-                                    source_result,
-                                    inputs=source_inputs if isinstance(source_inputs, dict) else {},
-                                    metadata=parsed_repro_metadata,
-                                    include_input_snapshot=include_input_snapshot,
-                                    include_result_tables=include_result_tables,
-                                )
-                                st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
-                                result = pack_result
+                                    evaluator_records = []
+                                    seen_rule_ids = set()
+                                    for index, rule in enumerate(parsed_rules, start=1):
+                                        if not isinstance(rule, dict):
+                                            raise ValueError("Each KPI alert rule must be a JSON object.")
+                                        rule_id = str(rule.get("rule_id") or "").strip()
+                                        rule_kpi = str(rule.get("kpi") or "").strip()
+                                        severity = str(rule.get("severity") or "").strip()
+                                        if not rule_id or not rule_kpi or not severity:
+                                            raise ValueError("Every alert rule must include rule_id, kpi and severity.")
+                                        if rule_id.casefold() in seen_rule_ids:
+                                            raise ValueError(f"Duplicate KPI rule_id: {rule_id}.")
+                                        seen_rule_ids.add(rule_id.casefold())
+                                        reading = readings_by_name.get(rule_kpi.casefold())
+                                        if reading is None:
+                                            raise ValueError(f"No KPI reading was supplied for alert rule '{rule_id}' ({rule_kpi}).")
+                                        evaluator_records.append({
+                                            "name": rule_kpi,
+                                            "value": reading.get("value"),
+                                            "unit": reading.get("unit") or "",
+                                            "measured_at": reading.get("observed_at"),
+                                            "source": reading.get("source") or "",
+                                            "threshold": rule.get("threshold"),
+                                            "operator": rule.get("operator"),
+                                            "rule_id": rule_id,
+                                            "severity": severity,
+                                            "max_age_minutes": float(kpi_stale_hours) * 60.0,
+                                        })
+
+                                    existing_open_alerts = st.session_state.get("shoir_kpi_open_alert_records", [])
+                                    if not isinstance(existing_open_alerts, list) or any(
+                                        not isinstance(item, dict) for item in existing_open_alerts
+                                    ):
+                                        raise ValueError("Saved KPI alert state is invalid; clear the existing alert state and rerun.")
+                                    result = evaluate_kpi_alerts_with_dedup({
+                                        "kpis": evaluator_records,
+                                        "as_of": kpi_as_of.strip() or None,
+                                        "existing_alerts": existing_open_alerts,
+                                    })
+                                    next_open_alerts = []
+                                    for alert in result["alert_records"]:
+                                        alert["state"] = "OPEN"
+                                        next_open_alerts.append({
+                                            "fingerprint": alert["fingerprint"],
+                                            "alert_id": alert["alert_id"],
+                                            "rule_id": alert.get("rule_id"),
+                                            "state": "OPEN",
+                                        })
+                                    st.session_state["shoir_kpi_open_alert_records"] = next_open_alerts
+                                    # Keep the older ID-only view available for any pre-existing
+                                    # UI/session consumers; the evaluator itself uses fingerprints.
+                                    st.session_state["shoir_kpi_open_alert_ids"] = [
+                                        item["alert_id"] for item in next_open_alerts
+                                    ]
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T047":
+                                    parsed_hazards = json.loads(hazard_json)
+                                    if not isinstance(parsed_hazards, list):
+                                        raise ValueError("Hazards must be a JSON list of hazard objects.")
+                                    result = assess_job_hazards(parsed_hazards)
+                                elif selected_tool["tool_id"] == "T050":
+                                    parsed_safety_periods = json.loads(safety_periods_json)
+                                    if not isinstance(parsed_safety_periods, list):
+                                        raise ValueError("Safety periods must be a JSON list of period objects.")
+                                    result = analyze_safety_incident_trends(parsed_safety_periods, rate_base_hours=safety_rate_base)
+                                elif selected_tool["tool_id"] == "T054":
+                                    parsed_bom = json.loads(mrp_bom_json)
+                                    parsed_inventory = json.loads(mrp_inventory_json)
+                                    if not isinstance(parsed_bom, list):
+                                        raise ValueError("BOM must be a JSON list of component objects.")
+                                    if not isinstance(parsed_inventory, dict):
+                                        raise ValueError("Inventory must be a JSON object keyed by component.")
+                                    result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
+                                elif selected_tool["tool_id"] == "T076":
+                                    parsed_events = json.loads(process_event_log_json)
+                                    if not isinstance(parsed_events, list):
+                                        raise ValueError("Event log must be a JSON list of event records.")
+                                    result = analyze_process_mining(parsed_events)
+                                elif selected_tool["tool_id"] == "T077":
+                                    parsed_energy_baseline = json.loads(energy_baseline_json)
+                                    parsed_energy_alternatives = json.loads(energy_alternatives_json)
+                                    if not isinstance(parsed_energy_baseline, dict) or not isinstance(parsed_energy_alternatives, list):
+                                        raise ValueError("Energy baseline must be a JSON object and alternatives must be a JSON list.")
+                                    result = compare_energy_performance_scenarios(parsed_energy_baseline, parsed_energy_alternatives)
+                                elif selected_tool["tool_id"] == "T079":
+                                    parsed_flows = json.loads(water_flows_json)
+                                    if not isinstance(parsed_flows, list):
+                                        raise ValueError("Process flows must be a JSON list of flow records.")
+                                    result = analyze_water_waste_efficiency(parsed_flows)
+                                elif selected_tool["tool_id"] == "T084":
+                                    parsed_criteria = json.loads(portfolio_criteria_json)
+                                    parsed_alternatives = json.loads(portfolio_alternatives_json)
+                                    if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
+                                        raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
+                                    result = score_project_portfolio(parsed_criteria, parsed_alternatives)
+                                elif selected_tool["tool_id"] == "T033":
+                                    parsed_msa = json.loads(msa_observations_json)
+                                    if not isinstance(parsed_msa, list):
+                                        raise ValueError("Gage R&R observations must be a JSON list.")
+                                    result = analyze_crossed_gage_rr(parsed_msa, tolerance=msa_tolerance if msa_tolerance > 0 else None)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if msa_observations_json.strip().startswith('[{"part":"P1"') else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T035":
+                                    parsed_doe = json.loads(doe_observations_json)
+                                    factors = [item.strip() for item in doe_factor_fields_text.split(",") if item.strip()]
+                                    if not isinstance(parsed_doe, list):
+                                        raise ValueError("Factorial DOE observations must be a JSON list of run objects.")
+                                    result = analyze_full_factorial_2level(parsed_doe, response_field=doe_response_field.strip(), factor_fields=factors, alpha=doe_alpha)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if doe_observations_json.strip().startswith('[{"A":-1,"B":-1,"response":6.4') else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T036":
+                                    if regression_mode == "Linear regression":
+                                        parsed_observations = json.loads(regression_observations_json)
+                                        if not isinstance(parsed_observations, list):
+                                            raise ValueError("Regression observations must be a JSON list.")
+                                        result = fit_simple_linear_regression(parsed_observations, alpha=regression_alpha)
+                                    else:
+                                        parsed_groups = json.loads(anova_groups_json)
+                                        if not isinstance(parsed_groups, dict):
+                                            raise ValueError("ANOVA groups must be a JSON object mapping group names to numeric lists.")
+                                        result = run_one_way_anova(parsed_groups, alpha=regression_alpha)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if (
+                                        (regression_mode == "Linear regression" and regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]')
+                                        or (regression_mode == "One-way ANOVA" and anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}')
+                                    ) else "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T037":
+                                    try:
+                                        sample_a_values = [float(item.strip()) for item in hypothesis_sample_a.split(",") if item.strip()]
+                                        sample_b_values = [float(item.strip()) for item in hypothesis_sample_b.split(",") if item.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Both samples must be comma-separated numeric observations.") from exc
+                                    result = run_welch_t_test(sample_a_values, sample_b_values, alpha=hypothesis_alpha)
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T051":
+                                    try:
+                                        demand_values = [float(item.strip()) for item in demand_history_text.split(",") if item.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError("Demand history must be comma-separated numeric observations in chronological order.") from exc
+                                    result = forecast_demand_baselines(
+                                        demand_values, holdout_periods=int(demand_holdout),
+                                        horizon=int(demand_horizon), moving_average_window=int(demand_ma_window),
+                                    )
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                elif selected_tool["tool_id"] == "T072":
+                                    parsed_components = json.loads(monte_carlo_components_json)
+                                    if not isinstance(parsed_components, list):
+                                        raise ValueError("Monte Carlo components must be a JSON list.")
+                                    result = simulate_monte_carlo_net_value(
+                                        parsed_components, iterations=int(monte_carlo_iterations),
+                                        seed=int(monte_carlo_seed), output_unit=monte_carlo_unit,
+                                    )
+                                    result["data_provenance"] = "SIMULATION — USER-DECLARED DISTRIBUTIONS"
+                                elif selected_tool["tool_id"] == "T085":
+                                    result = plan_two_sample_t_sample_size(
+                                        effect_size, alpha, target_power,
+                                        max_n_per_group=int(search_limit),
+                                    )
+                                elif selected_tool["tool_id"] == "T002":
+                                    completed_ids = [
+                                        key.replace("shoir_tool_result_", "")
+                                        for key in st.session_state.keys()
+                                        if key.startswith("shoir_tool_result_T")
+                                        and isinstance(st.session_state.get(key), dict)
+                                        and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                                    ]
+                                    result = build_guided_study_plan(
+                                        guided_goal,
+                                        available_data_fields=guided_fields_text,
+                                        completed_tool_ids=completed_ids,
+                                        tier=RAW_TIER,
+                                    )
+
+                                elif selected_tool["tool_id"] == "T089":
+                                    get_student_practice_problem(practice_topic)
+                                    result = evaluate_student_practice_answer(practice_topic, practice_answer)
+
+                                elif selected_tool["tool_id"] == "T048":
+                                    try:
+                                        parsed_anomaly_observations = json.loads(anomaly_observations_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Time-series observations must be valid JSON.") from exc
+                                    if not isinstance(parsed_anomaly_observations, list):
+                                        raise ValueError("Time-series observations must be a JSON list of objects.")
+                                    result = monitor_equipment_anomalies(
+                                        parsed_anomaly_observations,
+                                        value_field=anomaly_value_field.strip(),
+                                        timestamp_field=anomaly_timestamp_field.strip(),
+                                        modified_z_threshold=anomaly_threshold,
+                                        max_age_hours=anomaly_max_age,
+                                        evaluation_time_utc=anomaly_eval_time.strip() or None,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if anomaly_observations_json.strip() == _TOOL048_EXAMPLE_OBSERVATIONS
+                                        else "USER_ENTERED_UNVERIFIED"
+                                    )
+                                elif selected_tool["tool_id"] == "T069":
+                                    try:
+                                        parsed_facilities = json.loads(facility_location_facilities_json)
+                                        parsed_customers = json.loads(facility_location_customers_json)
+                                        parsed_routes = json.loads(facility_location_routes_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Facilities, customers and routes must each be valid JSON.") from exc
+                                    if not isinstance(parsed_facilities, list) or not isinstance(parsed_customers, list) or not isinstance(parsed_routes, list):
+                                        raise ValueError("Facilities, customers and routes must each be JSON lists.")
+                                    result = optimize_facility_location_flow(
+                                        parsed_facilities, parsed_customers, parsed_routes,
+                                        time_limit_seconds=facility_location_time_limit,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if facility_location_facilities_json.strip() == _TOOL069_EXAMPLE_FACILITIES
+                                        and facility_location_customers_json.strip() == _TOOL069_EXAMPLE_CUSTOMERS
+                                        and facility_location_routes_json.strip() == _TOOL069_EXAMPLE_ROUTES
+                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                    )
+                                elif selected_tool["tool_id"] == "T071":
+                                    parsed_des_steps = json.loads(des_steps_json)
+                                    if not isinstance(parsed_des_steps, list):
+                                        raise ValueError("DES station setup must be a JSON list of station records.")
+                                    result = simulate_discrete_event_process(
+                                        parsed_des_steps,
+                                        job_count=int(des_job_count),
+                                        mean_interarrival_time=des_interarrival,
+                                        arrival_distribution=des_arrival_distribution,
+                                        warmup_jobs=int(des_warmup_jobs),
+                                        replications=int(des_replications),
+                                        random_seed=int(des_seed),
+                                        time_unit=des_time_unit,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if des_steps_json.strip() == _TOOL071_EXAMPLE_STATIONS
+                                        and int(des_job_count) == 50
+                                        and float(des_interarrival) == 1.0
+                                        and des_arrival_distribution == "deterministic"
+                                        and int(des_warmup_jobs) == 5
+                                        and int(des_replications) == 10
+                                        and int(des_seed) == 42
+                                        and des_time_unit == "minutes"
+                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                    )
+                                elif selected_tool["tool_id"] == "T062":
+                                    parsed_solver_variables = json.loads(solver_variables_json)
+                                    parsed_solver_objective = json.loads(solver_objective_json)
+                                    parsed_solver_constraints = json.loads(solver_constraints_json)
+                                    if not isinstance(parsed_solver_variables, dict) or not isinstance(parsed_solver_objective, dict) or not isinstance(parsed_solver_constraints, list):
+                                        raise ValueError("Variables and objective must be JSON objects, and constraints must be a JSON list.")
+                                    result = run_solver_diagnostics(
+                                        parsed_solver_variables,
+                                        parsed_solver_objective,
+                                        parsed_solver_constraints,
+                                        direction=solver_direction,
+                                        time_limit_seconds=solver_time_limit,
+                                        feasibility_tolerance=solver_tolerance,
+                                    )
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if solver_variables_json.strip() == _TOOL062_EXAMPLE_VARIABLES
+                                        and solver_objective_json.strip() == _TOOL062_EXAMPLE_OBJECTIVE
+                                        and solver_constraints_json.strip() == _TOOL062_EXAMPLE_CONSTRAINTS
+                                        and solver_direction == "minimize"
+                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                    )
+                                elif selected_tool["tool_id"] == "T087":
+                                    if source_result_tool_id == "NONE":
+                                        raise ValueError("Run an entitled source tool first; no completed result is available to package.")
+                                    source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
+                                    source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
+                                    if not isinstance(source_result, dict):
+                                        raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
+                                    try:
+                                        parsed_repro_metadata = json.loads(reproducibility_metadata_json or "{}")
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Run metadata must be valid JSON.") from exc
+                                    if not isinstance(parsed_repro_metadata, dict):
+                                        raise ValueError("Run metadata must be a JSON object.")
+                                    source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                    pack_result = build_reproducibility_pack(
+                                        source_result_tool_id,
+                                        source_tool["canonical_name"],
+                                        source_result,
+                                        inputs=source_inputs if isinstance(source_inputs, dict) else {},
+                                        metadata=parsed_repro_metadata,
+                                        include_input_snapshot=include_input_snapshot,
+                                        include_result_tables=include_result_tables,
+                                    )
+                                    st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
+                                    result = pack_result
 
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
@@ -1964,7 +2660,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T096", "T097", "T098", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1973,6 +2669,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                            if selected_tool["tool_id"] == "T099":
+                                backup_bytes = st.session_state.get("shoir_tool_bundle_bytes_T099")
+                                if backup_bytes:
+                                    st.download_button(
+                                        "Download verified personal workspace backup",
+                                        data=backup_bytes,
+                                        file_name=f"shoir_ie_workspace_backup_{USER}.json",
+                                        mime="application/json",
+                                        key="tool099_download_backup",
+                                        use_container_width=True,
+                                    )
                             if selected_tool["tool_id"] == "T100":
                                 st.download_button(
                                     "Download redacted support bundle (JSON)",
@@ -2540,6 +3247,11 @@ if selected == "Excel Intelligence":
     # This dedicated Data route reuses the governed Excel runtime and its
     # server-side premium entitlement check in industrial_platform.render_module.
     render_module(selected, RAW_TIER, USER)
+elif selected == "Industrial Resource Intelligence":
+    # Keep the flagship resource system inside the existing Workbench and
+    # enforce the same Enterprise tier boundary used by the module selector.
+    from shoir_resource_intelligence_ui import render_resource_intelligence_workbench
+    render_resource_intelligence_workbench(st, user=USER, tier=RAW_TIER)
 elif selected == "Engineering Validation Center":
     st.subheader("🔎 Engineering Validation Center")
     st.caption("Validate schema, missingness, duplicates, types, units, ranges and cross-table references before running engineering logic.")

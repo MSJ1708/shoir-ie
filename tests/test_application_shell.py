@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import json
 import os
 import sqlite3
@@ -7,6 +8,7 @@ import pandas as pd
 from shoir_application_shell import (
     PASTED_SPEC_UPDATES,
     PROVENANCE_STATES,
+    WORKFLOW_STEPS,
     _flatten_variance,
     data_readiness,
     ensure_shell_schema,
@@ -58,7 +60,7 @@ def test_variance_calculation_is_numeric_and_traceable():
 def test_shell_schema_can_be_created(tmp_path):
     db = tmp_path / "shell.db"
     ensure_shell_schema(str(db))
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         tables = {
             row[0]
             for row in conn.execute(
@@ -66,3 +68,15 @@ def test_shell_schema_can_be_created(tmp_path):
             ).fetchall()
         }
     assert "shoir_shell_decision_outcomes" in tables
+
+
+
+def test_shared_workflow_order_contains_explicit_import_and_mapping_stages():
+    assert WORKFLOW_STEPS == (
+        "IMPORT", "VALIDATE", "MAP", "MODEL", "RUN",
+        "VISUALIZE", "COMPARE", "EXPLAIN", "DECIDE", "EXPORT", "VERIFY",
+    )
+    assert PASTED_SPEC_UPDATES["universal_workflow"] == (
+        "IMPORT → VALIDATE → MAP → MODEL → RUN → VISUALIZE → COMPARE "
+        "→ EXPLAIN → DECIDE → EXPORT → VERIFY"
+    )

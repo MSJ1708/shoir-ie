@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import hmac
 import json
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from io import StringIO
 from typing import Any, MutableMapping
 
@@ -32,6 +34,15 @@ CREATE TABLE IF NOT EXISTS workspace_states (
 _EXACT_EXCLUDE = {
     "authenticated",
     "current_user",
+    "remote_session_token",
+    "renewal_session_token",
+    "access_token",
+    "refresh_token",
+    "session_token",
+    "api_secret",
+    "password",
+    "password_hash",
+    "_shoir_persist_change_signature",
     "user_role",
     "user_tier",
     "user_email",
@@ -51,6 +62,9 @@ _EXACT_EXCLUDE = {
 
 _PREFIX_EXCLUDE = (
     "signin_",
+    "token_",
+    "secret_",
+    "password_",
     "reg_",
     "payment_",
     "uploaded_",
@@ -62,12 +76,23 @@ _PREFIX_EXCLUDE = (
     # The unified shell uses a consistent shoir_shell_* namespace for UI
     # controls and transient surface state; none of it belongs in persistence.
     "shoir_shell_",
+    # The active organization/workspace selector is request context, not
+    # personal workspace data to restore for a later sign-in.
+    "shoir_active_organization_",
+    "team_org_",
+    "team_workspace_",
+    "team_member_",
+    "team_invitation_",
+    "team_owner_",
+    "team_accept_",
+    "team_invite_",
     "shoir_global_module_",
     "upgrade_clean_",
     "upgrade_reset_",
     "upgrade_uploader_",
     # Never hydrate Streamlit button state; the global command Open button is transient.
     "global_command_open_",
+    "global_thread_rename_",
     "sx_save_",
     "sx_open_",
     "sx_job_",
@@ -110,6 +135,7 @@ _ACTION_KEYS = {
     "run_monte_carlo_btn",
     "payment_screenshot_upload",
     "shoir_create_study",
+    "global_thread_rename_save",
     "shoir_presentation_return",
     # Unified application-shell actions are ephemeral Streamlit button state.
     # Persisting any of these keys would hydrate a button before its widget is
@@ -212,7 +238,7 @@ def _unpack(value: Any) -> Any:
     return payload
 
 def ensure_workspace_state_db(db_path: str = "enterprise_full_workspace.db") -> None:
-    with sqlite3.connect(db_path, timeout=15) as conn:
+    with sqlite3.connect(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
         conn.execute(_STATE_TABLE_SQL)
         conn.commit()
 
@@ -379,6 +405,32 @@ def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
                 parts.append(f"V|{key}|{type(value).__name__}")
     return hashlib.sha1("\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
 
+def clear_loaded_workspace_state(
+    session_state: MutableMapping[str, Any],
+) -> None:
+    """Remove only persisted workspace values currently hydrated into this session."""
+    prior_keys = session_state.get("_workspace_loaded_keys", [])
+    keys_to_clear = {
+        key for key in prior_keys
+        if isinstance(key, str) and not _excluded(key)
+    } if isinstance(prior_keys, list) else set()
+    if isinstance(session_state.get("shoir_active_organization_workspace"), dict):
+        # Include values created since the last confirmed autosave. A disconnect
+        # or revoked-membership path must not leave new team-only keys behind.
+        keys_to_clear.update(_snapshot(session_state).keys())
+    for key in keys_to_clear:
+        if not _excluded(key):
+            session_state.pop(key, None)
+    session_state["_workspace_loaded_keys"] = []
+    session_state.pop("_shoir_persist_change_signature", None)
+    session_state.pop("_workspace_org_revision", None)
+    session_state.pop("_workspace_org_updated_at", None)
+    session_state.pop("_workspace_save_conflict", None)
+    session_state["_workspace_loaded_owner"] = None
+    session_state["_workspace_loaded_scope"] = None
+    session_state["_workspace_loaded_for_user"] = None
+
+
 def save_user_workspace(
     username: str,
     session_state: MutableMapping[str, Any],
@@ -387,6 +439,24 @@ def save_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
+        raw_context = session_state.get("shoir_active_organization_workspace")
+        if raw_context is not None and not isinstance(raw_context, dict):
+            raise ValueError("Active organization workspace context is invalid.")
+        if raw_context is not None and (
+            not str(raw_context.get("organization_id") or "").strip()
+            or not str(raw_context.get("organization_workspace_id") or "").strip()
+        ):
+            raise ValueError("Both organization and workspace IDs are required for shared persistence.")
+        # A shared organization workspace must never fall back to a per-user
+        # SQLite/PostgreSQL record, even when the change signature is unchanged.
+        remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        if raw_context is not None and not remote_mode:
+            raise RuntimeError("Shared organization workspaces require the authenticated managed workspace service.")
+        if raw_context is not None and session_state.get("_workspace_save_conflict"):
+            session_state["_workspace_save_error"] = (
+                "A newer shared-workspace revision exists. Reload the workspace before saving."
+            )
+            return False
         # Most Streamlit interactions rerun the script without changing the
         # durable workspace. Avoid serializing large Excel-backed DataFrames on
         # those no-op reruns (chart filters, tab switches, UI interactions).
@@ -396,23 +466,25 @@ def save_user_workspace(
             return True
         payload = json.dumps(_snapshot(session_state), ensure_ascii=False, separators=(",", ":"))
         # A custom db_path is used by local/regression tests and intentionally
-        # bypasses the remote backend. The deployed application uses the default
-        # enterprise_full_workspace.db path and therefore uses Supabase.
-        remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        # bypasses the remote backend. It is never a valid target for shared state.
         if remote_mode:
             # In durable mode, never silently persist to shared/ephemeral SQLite.
             # A failed cloud write must stay a failed cloud write.
             ok = bool(save_remote_workspace(username, payload))
             if ok:
                 session_state["_shoir_persist_change_signature"] = change_signature
-                _persist_domain_manifest(username, session_state, db_path)
+                session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
+                if raw_context is None:
+                    _persist_domain_manifest(username, session_state, db_path)
+                session_state.pop("_workspace_save_error", None)
+                session_state.pop("_workspace_save_conflict", None)
             return ok
 
         # Local development fallback only. A deployed Streamlit instance should
         # configure a managed database because local files are ephemeral.
         ensure_workspace_state_db(db_path)
         now = _dt.datetime.now(_dt.timezone.utc).isoformat()
-        with sqlite3.connect(db_path, timeout=15) as conn:
+        with sqlite3.connect(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
             conn.execute(
                 """
                 INSERT INTO workspace_states (username, state_json, updated_at)
@@ -425,11 +497,180 @@ def save_user_workspace(
             )
             conn.commit()
         session_state["_shoir_persist_change_signature"] = change_signature
-        _persist_domain_manifest(username, session_state, db_path)
+        session_state["_workspace_loaded_keys"] = list(_snapshot(session_state).keys())
+        if raw_context is None:
+            _persist_domain_manifest(username, session_state, db_path)
+        session_state.pop("_workspace_save_error", None)
+        session_state.pop("_workspace_save_conflict", None)
         return True
-    except Exception:
-        # Workspace persistence should never crash the engineering application.
+    except Exception as exc:
+        # Do not fall back to SQLite or the personal workspace when a shared
+        # organization save fails. Keep the in-session edits and surface a
+        # non-secret diagnostic in the application shell.
+        conflict = (
+            "changed since it was loaded" in str(exc).casefold()
+            or "shared_workspace_revision_conflict" in str(exc).casefold()
+        )
+        if conflict and isinstance(session_state.get("shoir_active_organization_workspace"), dict):
+            session_state["_workspace_save_conflict"] = True
+        if conflict:
+            session_state["_workspace_save_error"] = (
+                "A newer shared-workspace revision exists. Reload the workspace before saving."
+            )
+        elif isinstance(exc, ValueError) and str(exc) == "Both organization and workspace IDs are required for shared persistence.":
+            session_state["_workspace_save_error"] = (
+                "Both organization and workspace IDs are required for shared persistence."
+            )
+        elif isinstance(exc, ValueError) and str(exc) == "Active organization workspace context is invalid.":
+            session_state["_workspace_save_error"] = (
+                "Active organization workspace context is invalid."
+            )
+        elif "shared organization workspaces require" in str(exc).casefold():
+            session_state["_workspace_save_error"] = (
+                "Shared organization workspaces require the authenticated managed workspace service to be configured."
+            )
+        else:
+            session_state["_workspace_save_error"] = (
+                "Workspace persistence failed. Your current in-session changes have not been confirmed as saved."
+            )
         return False
+
+
+_BACKUP_FORMAT = "shoir-ie-user-workspace-backup"
+_BACKUP_VERSION = 1
+_MAX_BACKUP_BYTES = 32 * 1024 * 1024
+
+
+def export_user_workspace_backup(
+    username: str,
+    session_state: MutableMapping[str, Any],
+) -> dict[str, Any]:
+    """Create a portable, integrity-checked backup of the current user's workspace.
+
+    Authentication/session secrets and transient controls are excluded by the
+    same allow-by-exclusion policy used for normal workspace persistence.
+    The SHA-256 digest detects accidental corruption; it is not a signature
+    and does not prove who created or modified a backup.
+    """
+    owner = str(username or "").strip().lower()
+    if not owner or owner == "guest visitor":
+        raise PermissionError("Sign in with a named account before exporting a workspace backup.")
+    payload = _snapshot(session_state)
+    envelope = {
+        "format": _BACKUP_FORMAT,
+        "version": _BACKUP_VERSION,
+        "owner_username_lc": owner,
+        "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "payload": payload,
+    }
+    canonical = json.dumps(
+        envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    envelope["sha256"] = digest
+    data = json.dumps(
+        envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    if len(data) > _MAX_BACKUP_BYTES:
+        raise ValueError(
+            f"Workspace backup exceeds the {_MAX_BACKUP_BYTES // (1024 * 1024)} MiB safety limit."
+        )
+    return {
+        "backup_bytes": data,
+        "sha256": digest,
+        "owner_username_lc": owner,
+        "created_at": envelope["created_at"],
+        "payload_key_count": len(payload),
+        "backup_size_bytes": len(data),
+        "warning": (
+            "This portable file may contain private engineering workspace data. Store it securely. "
+            "Its checksum detects accidental corruption but is not a cryptographic signature or encrypted backup."
+        ),
+    }
+
+
+def verify_user_workspace_backup(
+    backup_bytes: bytes | bytearray,
+    username: str,
+) -> dict[str, Any]:
+    """Verify format, digest, size and current-account target before restoring."""
+    owner = str(username or "").strip().lower()
+    if not owner or owner == "guest visitor":
+        raise PermissionError("Sign in with a named account before restoring a workspace backup.")
+    if not isinstance(backup_bytes, (bytes, bytearray)):
+        raise TypeError("Workspace backup must be uploaded as bytes.")
+    if not backup_bytes or len(backup_bytes) > _MAX_BACKUP_BYTES:
+        raise ValueError("Workspace backup is empty or exceeds the 32 MiB safety limit.")
+    try:
+        envelope = json.loads(bytes(backup_bytes).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Workspace backup is not valid UTF-8 JSON.") from exc
+    if not isinstance(envelope, dict):
+        raise ValueError("Workspace backup root must be a JSON object.")
+    if envelope.get("format") != _BACKUP_FORMAT or envelope.get("version") != _BACKUP_VERSION:
+        raise ValueError("Workspace backup format or version is not supported.")
+    if str(envelope.get("owner_username_lc", "")).strip().lower() != owner:
+        raise PermissionError("This backup belongs to a different account; restore was blocked.")
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Workspace backup payload must be a JSON object.")
+    supplied_digest = str(envelope.get("sha256", "")).strip().lower()
+    canonical_envelope = {
+        key: envelope[key]
+        for key in ("format", "version", "owner_username_lc", "created_at", "payload")
+        if key in envelope
+    }
+    canonical = json.dumps(
+        canonical_envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(canonical).hexdigest()
+    if len(supplied_digest) != 64 or not hmac.compare_digest(supplied_digest, expected_digest):
+        raise ValueError("Workspace backup checksum is invalid; no state was restored.")
+    forbidden = [str(key) for key in payload if _excluded(str(key))]
+    if forbidden:
+        raise ValueError("Workspace backup contains excluded authentication or transient state.")
+    for key, value in payload.items():
+        if not isinstance(key, str):
+            raise ValueError("Workspace backup contains a non-string state key.")
+        json.dumps(value, ensure_ascii=False, allow_nan=False)
+    return {
+        "owner_username_lc": owner,
+        "created_at": str(envelope.get("created_at", "")),
+        "sha256": expected_digest,
+        "payload": payload,
+        "payload_key_count": len(payload),
+    }
+
+
+def restore_user_workspace_backup(
+    backup_bytes: bytes | bytearray,
+    username: str,
+    session_state: MutableMapping[str, Any],
+) -> dict[str, Any]:
+    """Restore only an already-verified same-account backup into current session state.
+
+    Persistence is a separate explicit step so callers can first save a copy of
+    the current session and roll back if the managed write fails.
+    """
+    verified = verify_user_workspace_backup(backup_bytes, username)
+    restored = 0
+    for key, value in verified["payload"].items():
+        if _excluded(str(key)):
+            continue
+        session_state[str(key)] = _unpack(value)
+        restored += 1
+    return {
+        "status": "WORKSPACE_BACKUP_RESTORED_IN_SESSION",
+        "owner_username_lc": verified["owner_username_lc"],
+        "source_created_at": verified["created_at"],
+        "source_sha256": verified["sha256"],
+        "restored_key_count": restored,
+        "warning": (
+            "The backup was restored in this session. The caller must save the restored state "
+            "to the configured managed persistence backend before treating it as durable."
+        ),
+    }
+
 
 def load_user_workspace(
     username: str,
@@ -439,31 +680,86 @@ def load_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
+        owner = str(username).strip().lower()
+        context = session_state.get("shoir_active_organization_workspace")
+        if isinstance(context, dict):
+            scope = (
+                str(context.get("organization_id") or ""),
+                str(context.get("organization_workspace_id") or ""),
+            )
+        else:
+            scope = None
+
+        # A session can switch from personal state to a team workspace, between
+        # two team workspaces, or between accounts. Remove only values loaded
+        # from the previous durable workspace; credentials and active UI state
+        # are excluded from the snapshot and are never cleared here.
+        prior_owner = session_state.get("_workspace_loaded_owner")
+        prior_scope = session_state.get("_workspace_loaded_scope")
+        if prior_owner != owner or prior_scope != scope:
+            prior_keys = session_state.get("_workspace_loaded_keys", [])
+            if isinstance(prior_keys, list):
+                for key in prior_keys:
+                    if isinstance(key, str) and not _excluded(key):
+                        session_state.pop(key, None)
+            session_state.pop("_shoir_persist_change_signature", None)
+            session_state["_workspace_loaded_keys"] = []
+            session_state["_workspace_loaded_owner"] = owner
+            session_state["_workspace_loaded_scope"] = scope
+            session_state.pop("_workspace_org_revision", None)
+            session_state.pop("_workspace_org_updated_at", None)
+
         remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        if scope is not None and not remote_mode:
+            raise RuntimeError("Shared organization workspaces require the authenticated managed workspace service.")
         if remote_mode:
             # A configured managed backend is authoritative. Do not fall back
             # to SQLite when the remote record is missing or temporarily empty;
             # doing so can resurrect stale cross-user/local state after a restart.
             remote_payload = load_remote_workspace(username)
             if not remote_payload:
+                session_state["_workspace_loaded_keys"] = []
                 return False
             payload = json.loads(remote_payload)
         else:
             ensure_workspace_state_db(db_path)
-            with sqlite3.connect(db_path, timeout=15) as conn:
+            with sqlite3.connect(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
                 row = conn.execute(
                     "SELECT state_json FROM workspace_states WHERE username = ?",
-                    (username.strip().lower(),),
+                    (owner,),
                 ).fetchone()
             if not row or not row[0]:
+                session_state["_workspace_loaded_keys"] = []
                 return False
             payload = json.loads(row[0])
+
+        if not isinstance(payload, dict):
+            raise ValueError("Persisted workspace state must be a JSON object.")
+        loaded_keys: list[str] = []
         for key, value in payload.items():
             if _excluded(str(key)):
                 continue
             # Load persisted workspace values before module widgets are rendered.
-            # This intentionally replaces initial defaults on first login.
+            # This intentionally replaces defaults for the selected workspace.
             session_state[key] = _unpack(value)
+            loaded_keys.append(str(key))
+        session_state["_workspace_loaded_keys"] = loaded_keys
+        session_state["_workspace_loaded_owner"] = owner
+        session_state["_workspace_loaded_scope"] = scope
+        session_state.pop("_workspace_load_error", None)
         return True
-    except Exception:
+    except Exception as exc:
+        # Access denial and corrupted payloads fail closed; never load the
+        # previous user's or previous organization's values as a fallback.
+        error_message = str(exc).casefold()
+        if "shared organization workspaces require" in error_message:
+            session_state["_workspace_load_error"] = (
+                "Shared organization workspaces require the authenticated managed workspace service to be configured."
+            )
+        else:
+            session_state["_workspace_load_error"] = (
+                "Shared workspace access could not be verified. Select another workspace or return to your personal workspace."
+                if "workspace" in error_message or "organization" in error_message
+                else "The saved workspace could not be loaded safely."
+            )
         return False

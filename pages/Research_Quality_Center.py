@@ -58,7 +58,7 @@ with tabs[0]:
         "Group":["A","A","A","B","B","B","C","C","C"],
         "Value":[10.2,10.0,10.4,11.1,11.3,10.9,12.0,11.8,12.2],
     })
-    df = st.data_editor(default, num_rows="dynamic", use_container_width=True, hide_index=True, key="rq_stats_df")
+    df = st.data_editor(default, num_rows="dynamic", width="stretch", hide_index=True, key="rq_stats_df")
     test = st.selectbox("Test", ["One-sample t-test","Independent two-sample t-test","Mann-Whitney U","One-way ANOVA"])
     alpha = st.number_input("α", 0.001, 0.20, 0.05, 0.001)
     if test == "One-sample t-test":
@@ -90,13 +90,13 @@ with tabs[0]:
         r2.metric("p-value", f"{result['p_value']:.5g}")
         r3.metric("α", f"{result['alpha']:.3f}")
         r4.metric("Evidence", "SIGNAL" if result["significant_at_alpha"] else "NO SIGNAL")
-        st.dataframe(pd.DataFrame([result]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([result]), width="stretch", hide_index=True)
 
 with tabs[1]:
     st.subheader("Regression diagnostics + surrogate validation")
     rng = np.random.default_rng(2026)
     demo = pd.DataFrame({"X1":np.arange(1,31), "X2":np.linspace(5,35,30), "Response":20 + 2.2*np.arange(1,31) - .4*np.linspace(5,35,30) + rng.normal(0,2,30)})
-    reg = st.data_editor(demo, num_rows="dynamic", use_container_width=True, hide_index=True, key="rq_reg_df")
+    reg = st.data_editor(demo, num_rows="dynamic", width="stretch", hide_index=True, key="rq_reg_df")
     features = st.multiselect("Features", [c for c in reg.columns if c != "Response"], default=[c for c in reg.columns if c != "Response"])
     degree = st.slider("Polynomial degree", 1, 3, 1)
     if st.button("📈 Fit regression", type="primary", key="rq_reg"):
@@ -110,8 +110,8 @@ with tabs[1]:
         x1,x2,x3 = st.columns(3)
         x1.metric("R²", f"{metrics['R2']:.3f}"); x2.metric("MAE", f"{metrics['MAE']:.3f}"); x3.metric("RMSE", f"{metrics['RMSE']:.3f}")
         c1,c2=st.columns(2)
-        with c1: st.dataframe(coef, use_container_width=True, hide_index=True)
-        with c2: st.plotly_chart(px.scatter(residuals, x="Predicted", y="Residual", trendline="ols", title="Residual diagnostics"), use_container_width=True)
+        with c1: st.dataframe(coef, width="stretch", hide_index=True)
+        with c2: st.plotly_chart(px.scatter(residuals, x="Predicted", y="Residual", trendline="ols", title="Residual diagnostics"), width="stretch")
     st.markdown("#### Surrogate hold-out validation")
     if len(features) >= 1 and st.button("🧠 Fit Random Forest surrogate", key="rq_surrogate"):
         try:
@@ -120,8 +120,8 @@ with tabs[1]:
         except Exception as exc: st.error(f"Surrogate fit failed safely: {exc}")
     if st.session_state.get("rq_surrogate"):
         pred,metrics=st.session_state.rq_surrogate
-        st.dataframe(pd.DataFrame([metrics]), use_container_width=True, hide_index=True)
-        st.plotly_chart(px.scatter(pred,x="Observed",y="Predicted",trendline="ols",title="Observed vs predicted hold-out"),use_container_width=True)
+        st.dataframe(pd.DataFrame([metrics]), width="stretch", hide_index=True)
+        st.plotly_chart(px.scatter(pred,x="Observed",y="Predicted",trendline="ols",title="Observed vs predicted hold-out"),width="stretch")
 
 with tabs[2]:
     st.subheader("Adversarial shock matrix")
@@ -137,9 +137,9 @@ with tabs[2]:
         st.session_state.rq_shocks=out
     if st.session_state.get("rq_shocks") is not None:
         out=st.session_state.rq_shocks
-        st.dataframe(out.head(100),use_container_width=True,hide_index=True)
+        st.dataframe(out.head(100),width="stretch",hide_index=True)
         summary=out.groupby("Scenario",as_index=False).agg({"Demand":"mean","Capacity":"mean","Cost":"mean"})
-        st.plotly_chart(px.scatter(summary,x="Demand",y="Capacity",size="Cost",color="Scenario",title="Shock response surface"),use_container_width=True)
+        st.plotly_chart(px.scatter(summary,x="Demand",y="Capacity",size="Cost",color="Scenario",title="Shock response surface"),width="stretch")
 
 with tabs[3]:
     st.subheader("Cryptographic reproducibility")
@@ -159,13 +159,13 @@ with tabs[4]:
     if st.session_state.get("rq_audit"):
         audit=st.session_state.rq_audit
         st.metric("Static safety", "PASS" if audit["safe_for_static_review"] else "REVIEW")
-        st.dataframe(pd.DataFrame(audit["findings"]),use_container_width=True,hide_index=True)
+        st.dataframe(pd.DataFrame(audit["findings"]),width="stretch",hide_index=True)
         st.caption("The submitted code is parsed only; it is never executed by this page.")
     manuscript = st.text_area("Paste abstract/methods text for reviewer diagnostics", height=160)
     n = st.number_input("Sample size (optional)", min_value=0, value=0)
     if st.button("🔎 Run reviewer diagnostics", key="rq_review"):
         diag=peer_review_diagnostics(manuscript, n if n else None)
-        st.dataframe(diag,use_container_width=True,hide_index=True)
+        st.dataframe(diag,width="stretch",hide_index=True)
 
 with tabs[5]:
     st.subheader("Platform Excellence — all 60 capabilities")
@@ -174,9 +174,9 @@ with tabs[5]:
     if search.strip():
         q=search.lower()
         cat=cat[cat["Capability"].str.lower().str.contains(q,regex=False)|cat["Description"].str.lower().str.contains(q,regex=False)]
-    st.dataframe(cat,use_container_width=True,hide_index=True)
+    st.dataframe(cat,width="stretch",hide_index=True)
     status_counts=pd.DataFrame(FEATURES_60,columns=["ID","Capability","Description","Status"]).groupby("Status").size().reset_index(name="Count")
-    st.plotly_chart(px.pie(status_counts,names="Status",values="Count",hole=.55,title="Capability delivery status"),use_container_width=True)
+    st.plotly_chart(px.pie(status_counts,names="Status",values="Count",hole=.55,title="Capability delivery status"),width="stretch")
     if st.button("🤖 Record Copilot awareness update",key="rq_copilot"):
         rid=log_copilot_action("Research Quality Center","Refresh research capability context",USER,True,"Approved",{"capabilities":len(FEATURES_60)})
         st.success(f"Copilot context ledger updated · {rid}")

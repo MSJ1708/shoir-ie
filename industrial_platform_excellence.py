@@ -26,10 +26,11 @@ import json
 import math
 import re
 import sqlite3
+from shoir_sqlite import sqlite_connect
 
 from shoir_excel_entitlements import excel_intelligence_minimum_tier
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from itertools import product
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -112,6 +113,7 @@ MODULE_MATRIX = [
     ("Economics","Capital Investment & Engineering Economics","Professional"),
     ("Workforce","Workforce Engineering","Professional"),
     ("Sustainability","Industrial Sustainability & LCA","Professional"),
+    ("Resource Intelligence","Industrial Resource Intelligence","Enterprise"),
     ("Benchmarking","Benchmarking & Engineering Standards","Professional"),
     ("Governance","Engineering Model Registry","Enterprise"),
     ("Governance","Scenario Versioning & Comparison","Professional"),
@@ -152,7 +154,7 @@ class ApprovalState:
     note: str = ""
 
 def _now() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
@@ -212,7 +214,7 @@ def module_availability(current: str) -> pd.DataFrame:
     return d
 
 def ensure_excellence_db(db_path: str = "enterprise_full_workspace.db") -> bool:
-    with sqlite3.connect(db_path) as c:
+    with sqlite_connect(db_path) as c:
         c.execute("""CREATE TABLE IF NOT EXISTS industrial_relationships(
             relationship_id TEXT PRIMARY KEY,
             from_entity TEXT NOT NULL,
@@ -251,7 +253,7 @@ def ensure_excellence_db(db_path: str = "enterprise_full_workspace.db") -> bool:
 def audit_event(actor: str, event_type: str, payload: Mapping[str, Any] | None = None,
                 db_path: str = "enterprise_full_workspace.db") -> None:
     ensure_excellence_db(db_path)
-    with sqlite3.connect(db_path) as c:
+    with sqlite_connect(db_path) as c:
         c.execute(
             "INSERT INTO platform_events(actor,event_type,payload_json,created_at) VALUES(?,?,?,?)",
             (actor, event_type, json.dumps(payload or {}, default=str), _now()),
@@ -368,7 +370,7 @@ def upsert_relationships(rows: pd.DataFrame, username: str,
         raise ValueError(f"Relationship table requires {sorted(req)}")
     ensure_excellence_db(db_path)
     count = 0
-    with sqlite3.connect(db_path) as c:
+    with sqlite_connect(db_path) as c:
         for r in rows.to_dict("records"):
             raw = f"{r['From']}|{r['Relationship']}|{r['To']}"
             rid = "REL-" + hashlib.sha256(raw.encode()).hexdigest()[:12].upper()
@@ -385,7 +387,7 @@ def impact_analysis(entity_id: str, max_hops: int = 3,
                     db_path: str = "enterprise_full_workspace.db") -> pd.DataFrame:
     ensure_excellence_db(db_path)
     edges = pd.DataFrame()
-    with sqlite3.connect(db_path) as c:
+    with sqlite_connect(db_path) as c:
         edges = pd.read_sql("SELECT from_entity AS From, relationship AS Relationship, to_entity AS To FROM industrial_relationships", c)
     if edges.empty:
         return pd.DataFrame(columns=["Entity","Hops","Path"])
@@ -743,7 +745,7 @@ def save_decision(card: dict, username: str, db_path: str="enterprise_full_works
     ensure_excellence_db(db_path)
     raw=json.dumps(card,sort_keys=True,default=str)
     did="DEC-"+hashlib.sha256(raw.encode()).hexdigest()[:12].upper()
-    with sqlite3.connect(db_path) as c:
+    with sqlite_connect(db_path) as c:
         c.execute("""CREATE TABLE IF NOT EXISTS platform_decisions(
             decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,metrics_json TEXT,
             assumptions_json TEXT,uncertainty_json TEXT,created_by TEXT,created_at TEXT,status TEXT)""")
@@ -762,7 +764,7 @@ def record_approval(decision_id: str, actor: str, action: str, note: str="",
     if action not in allowed:
         raise ValueError(f"Action must be one of {sorted(allowed)}")
     ensure_excellence_db(db_path)
-    with sqlite3.connect(db_path) as c:
+    with sqlite_connect(db_path) as c:
         aid="APR-"+hashlib.sha256(f"{decision_id}|{actor}|{_now()}".encode()).hexdigest()[:12].upper()
         c.execute("INSERT INTO decision_approvals VALUES(?,?,?,?,?,?)",
                   (aid,decision_id,actor,action,note,_now()))

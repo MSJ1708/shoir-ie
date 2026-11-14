@@ -12,6 +12,7 @@ import io
 import json
 import math
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -152,7 +153,7 @@ def _hash(value: str) -> str:
 
 def _db() -> sqlite3.Connection:
     ensure_experience_db()
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite3.connect(DB_PATH, timeout=30, factory=ClosingSQLiteConnection)
     for statement in SCHEMA.split(";\n"):
         if statement.strip():
             conn.execute(statement)
