@@ -1432,6 +1432,10 @@ def test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_r
     )
     assert stale_again == []
     assert again[0]["record_status"] == "STALE"
+    assert len(updated[0]["stale_dataset_dependencies"]) == 1
+    assert len(again[0]["stale_dataset_dependencies"]) == 1
+    assert updated[0]["stale_dataset_dependencies"][0]["current_version_fingerprint"] == "d" * 64
+    assert again[0]["stale_dataset_dependencies"] == updated[0]["stale_dataset_dependencies"]
 
 
 def test_dataset_dependency_cannot_cross_organization_or_workspace_boundaries(monkeypatch):
