@@ -1722,6 +1722,8 @@ Deno.serve(async (req) => {
         download_url: data.signedUrl,
         data_hash: String(payload.data_hash || ""),
         version_fingerprint: String(payload.version_fingerprint || ""),
+        name: String(payload.name || ""),
+        source_name: String(payload.source_name || ""),
         version: Number(payload.version || requestedVersion || 1),
         current_version: currentVersion,
         is_current_version: Number(payload.version || requestedVersion || 1) === currentVersion,
