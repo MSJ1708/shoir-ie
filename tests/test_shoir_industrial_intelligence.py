@@ -1052,6 +1052,14 @@ def test_data_trust_reconciliation_rejects_negative_proposed_values():
 
 def test_shift_handover_persists_unresolved_issues_and_requires_incoming_acknowledgement(monkeypatch):
     session = _configure_org_session(monkeypatch, "synthetic-outgoing-supervisor", "owner")
+    with pytest.raises(ii.IndustrialIntelligenceError, match="not registered in this workspace"):
+        ii.record_shift_handover(
+            "synthetic-outgoing-supervisor", "Enterprise",
+            "Night Shift", "Day Shift",
+            [{"issue_id": "ISSUE-INVALID", "status": "OPEN", "source_record_id": "IIR-NOT-REGISTERED"}],
+            incoming_shift_owner="synthetic-incoming-supervisor",
+            provenance="SYNTHETIC",
+        )
     handover = ii.record_shift_handover(
         "synthetic-outgoing-supervisor", "Enterprise",
         "Night Shift", "Day Shift",
