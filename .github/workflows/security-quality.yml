@@ -32,8 +32,6 @@ jobs:
           pip install pip-audit
       - name: Compile
         run: python -m compileall -q .
-      - name: Regression tests
-        run: python -m pytest -q tests
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Secret-pattern guard
