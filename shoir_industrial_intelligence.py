@@ -497,11 +497,12 @@ def _data_trust(payload: Mapping[str, Any]) -> dict[str, Any]:
                 })
             if len(observed_values) >= 4:
                 ordered_values = sorted(observed_values)
-                midpoint = len(ordered_values) // 2
-                lower = ordered_values[:midpoint]
-                upper = ordered_values[midpoint:] if len(ordered_values) % 2 == 0 else ordered_values[midpoint + 1:]
-                q1 = float(pd.Series(lower).median())
-                q3 = float(pd.Series(upper).median())
+                # Use the standard linearly interpolated sample quartiles; a
+                # split-half median can hide an extreme point in a five-point
+                # sample by placing that value in the upper-half median.
+                quartiles = pd.Series(ordered_values).quantile([0.25, 0.75], interpolation="linear")
+                q1 = float(quartiles.loc[0.25])
+                q3 = float(quartiles.loc[0.75])
                 iqr = q3 - q1
                 if iqr > 0:
                     low_fence, high_fence = q1 - 1.5 * iqr, q3 + 1.5 * iqr
