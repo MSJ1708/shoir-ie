@@ -293,7 +293,7 @@ if search.strip():
     _ii_matches = []
     try:
         from shoir_industrial_intelligence import search_tools as _search_industrial_tools
-        _ii_matches = _search_industrial_tools(q)
+        _ii_matches = _search_industrial_tools(q) if q else []
     except Exception:
         _ii_matches = []
     if _ii_matches:
