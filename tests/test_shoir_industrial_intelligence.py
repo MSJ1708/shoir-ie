@@ -236,6 +236,9 @@ def test_energy_flexibility_respects_capacity_and_selects_low_cost_period():
     result = ii.analyze_tool("energy-flexibility", _payloads()["energy-flexibility"])
     assert result["status"] == "FEASIBLE"
     assert result["allocations"][0]["period_id"] == "P2"
+    assert result["allocation_method"] == "DETERMINISTIC_TARIFF_GREEDY"
+    assert result["optimality_guarantee"] is False
+    assert any("global minimum-cost" in item for item in result["limitations"])
     payload = _payloads()["energy-flexibility"]
     payload["periods"][1]["capacity_kwh"] = 80
     failed = ii.analyze_tool("energy-flexibility", payload)
