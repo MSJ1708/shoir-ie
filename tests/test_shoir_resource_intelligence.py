@@ -2116,3 +2116,159 @@ def test_resource_ui_json_parsers_enforce_size_and_array_record_limits():
         )
     assert _json_object('{"ok":true}', "Small object") == {"ok": True}
     assert _json_array('[{"ok":true}]', "Small array") == [{"ok": True}]
+
+
+def _cluster_twin_fixture():
+    return {
+        "as_of": "2026-11-14T09:00:00+03:00",
+        "facilities": [
+            {
+                "facility_id": "FAC-A", "organization_id": "ORG-A", "name": "Private source name",
+                "status": "ACTIVE", "valid_from": "2026-01-01T00:00:00Z",
+                "disclosure_scope": "SHARED_WITH_CLUSTER", "sharing_approval_reference": "SHARE-A-1",
+            },
+            {
+                "facility_id": "FAC-B", "organization_id": "ORG-B", "name": "Private buyer name",
+                "status": "ACTIVE", "valid_from": "2026-01-01T00:00:00Z",
+                "disclosure_scope": "SHARED_WITH_CLUSTER", "sharing_approval_reference": "SHARE-B-1",
+            },
+        ],
+        "supplies": [
+            {
+                "supply_id": "SUP-A1", "facility_id": "FAC-A", "resource_type": "Water",
+                "available_quantity": 100, "unit": "m3/day", "quality": {"pH": 7.2},
+                "provenance": "IMPORTED", "valid_from": "2026-01-01T00:00:00Z",
+                "disclosure_scope": "SHARED_WITH_CLUSTER", "sharing_approval_reference": "SUPPLY-SHARE-1",
+            },
+        ],
+        "demands": [
+            {
+                "demand_id": "DEM-B1", "facility_id": "FAC-B", "resource_type": "Water",
+                "required_quantity": 50, "unit": "m3/day",
+                "quality_limits": {"pH": {"min": 6.5, "max": 8.5}},
+                "provenance": "MANUAL", "valid_from": "2026-01-01T00:00:00Z",
+                "disclosure_scope": "SHARED_WITH_CLUSTER", "sharing_approval_reference": "DEMAND-SHARE-1",
+            },
+        ],
+        "routes": [
+            {
+                "route_id": "ROUTE-1", "supply_id": "SUP-A1", "demand_id": "DEM-B1",
+                "capacity": 80, "connection_confirmed": True,
+                "connection_evidence_reference": "ROUTE-EVIDENCE-1",
+                "provenance": "IMPORTED", "valid_from": "2026-01-01T00:00:00Z",
+                "disclosure_scope": "SHARED_WITH_CLUSTER", "sharing_approval_reference": "ROUTE-SHARE-1",
+            },
+        ],
+        "infrastructure": [],
+        "active_commitments": [],
+        "dependency_edges": [
+            {
+                "source_node_id": "facility:FAC-A",
+                "target_node_id": "facility:FAC-B",
+                "relationship": "POTENTIAL_RESOURCE_DEPENDENCY",
+            },
+        ],
+    }
+
+
+def test_cluster_twin_builds_time_aware_shared_cross_company_match_without_leaking_company_names():
+    import json
+    from shoir_resource_intelligence import build_industrial_cluster_twin
+
+    result = build_industrial_cluster_twin(_cluster_twin_fixture())
+    assert result["status"] == "CLUSTER_TWIN_SCREEN_CREATED"
+    assert result["summary"]["facility_count"] == 2
+    assert result["summary"]["cross_company_candidate_count"] == 1
+    match = result["cross_company_match_candidates"][0]
+    assert match["screening_capacity"] == pytest.approx(50)
+    assert match["compatibility_status"] == "TECHNICALLY_COMPATIBLE"
+    assert match["allocation_status"] == "ELIGIBLE_FOR_SEPARATE_ALLOCATION_REVIEW"
+    shared_view = json.dumps({
+        "offers": result["cross_company_shared_offers"],
+        "needs": result["cross_company_shared_needs"],
+        "matches": result["cross_company_match_candidates"],
+    })
+    assert "ORG-A" not in shared_view and "ORG-B" not in shared_view
+    assert "Private source name" not in shared_view
+    assert "Private buyer name" not in shared_view
+    assert "FAC-A" not in shared_view and "FAC-B" not in shared_view
+    assert result["dependency_edges"][0]["causality"] == "NOT_ESTABLISHED"
+    assert result["operational_authorization"] == "NOT_GRANTED"
+    assert result["live_participation_asserted"] is False
+
+
+def test_cluster_twin_hides_routes_when_any_party_has_not_shared():
+    from shoir_resource_intelligence import build_industrial_cluster_twin
+
+    payload = _cluster_twin_fixture()
+    payload["supplies"][0]["disclosure_scope"] = "PRIVATE"
+    payload["supplies"][0].pop("sharing_approval_reference")
+    result = build_industrial_cluster_twin(payload)
+    assert result["cross_company_match_candidates"] == []
+    assert result["cross_company_shared_offers"] == []
+    assert result["rejected_or_hidden_routes"][0]["status"] == "NOT_SHARED_BY_ALL_PARTICIPANTS"
+
+
+def test_cluster_twin_blocks_stale_or_expired_supply_and_does_not_guess_availability():
+    from shoir_resource_intelligence import build_industrial_cluster_twin
+
+    payload = _cluster_twin_fixture()
+    payload["supplies"][0]["valid_to"] = "2026-11-14T05:00:00Z"
+    result = build_industrial_cluster_twin(payload)
+    assert result["cross_company_match_candidates"] == []
+    assert result["rejected_or_hidden_routes"][0]["status"] == "OUTSIDE_VALIDITY_WINDOW"
+
+
+def test_cluster_twin_surfaces_active_overcommitment_without_silently_rewriting_commitments():
+    from shoir_resource_intelligence import build_industrial_cluster_twin
+
+    payload = _cluster_twin_fixture()
+    payload["active_commitments"] = [{
+        "commitment_id": "EX-1", "supply_id": "SUP-A1", "demand_id": "DEM-B1",
+        "quantity": 70, "unit": "m3/day", "status": "ACTIVE",
+        "approval_reference": "APPROVAL-REF-1", "valid_from": "2026-01-01T00:00:00Z",
+    }]
+    result = build_industrial_cluster_twin(payload)
+    assert result["summary"]["overcommitment_count"] == 1
+    assert result["overcommitments"][0]["record_type"] == "DEMAND"
+    assert result["active_commitment_screen"][0]["approval_reference_verification"] == "NOT_PERFORMED"
+    assert result["cross_company_match_candidates"] == []
+
+
+def test_cluster_twin_rejects_unknown_endpoints_mixed_units_live_claims_and_invalid_time_windows():
+    from shoir_resource_intelligence import ResourceValidationError, build_industrial_cluster_twin
+
+    payload = _cluster_twin_fixture()
+    payload["routes"][0]["demand_id"] = "MISSING"
+    with pytest.raises(ResourceValidationError, match="unknown supply or demand"):
+        build_industrial_cluster_twin(payload)
+
+    payload = _cluster_twin_fixture()
+    payload["demands"][0]["unit"] = "L/s"
+    with pytest.raises(ResourceValidationError, match="unlike units"):
+        build_industrial_cluster_twin(payload)
+
+    payload = _cluster_twin_fixture()
+    payload["supplies"][0]["provenance"] = "LIVE"
+    with pytest.raises(ResourceValidationError, match="LIVE is not accepted"):
+        build_industrial_cluster_twin(payload)
+
+    payload = _cluster_twin_fixture()
+    payload["routes"][0]["valid_to"] = "2025-01-01T00:00:00Z"
+    with pytest.raises(ResourceValidationError, match="later than valid_from"):
+        build_industrial_cluster_twin(payload)
+
+
+def test_cluster_twin_requires_explicit_sharing_reference_and_explicit_as_of_timestamp():
+    from shoir_resource_intelligence import ResourceValidationError, build_industrial_cluster_twin
+
+    payload = _cluster_twin_fixture()
+    payload["facilities"][0].pop("sharing_approval_reference")
+    with pytest.raises(ResourceValidationError, match="cannot be shared"):
+        build_industrial_cluster_twin(payload)
+
+    payload = _cluster_twin_fixture()
+    payload.pop("as_of")
+    with pytest.raises(ResourceValidationError, match="explicit timezone-aware"):
+        build_industrial_cluster_twin(payload)
+
