@@ -1153,12 +1153,17 @@ def test_data_trust_detects_missing_stuck_outlier_and_timestamp_sync_candidates(
             {"meter_id": "MISSING-01", "value": None, "unit": "bar", "source": "S3", "timestamp": "2026-10-01T08:00:00Z", "provenance": "SYNTHETIC"},
             {"meter_id": "SYNC-A", "value": 50, "unit": "m3/h", "source": "S4", "timestamp": "2026-10-01T08:00:00Z", "synchronization_group": "CUT-01", "provenance": "SYNTHETIC"},
             {"meter_id": "SYNC-B", "value": 49, "unit": "m3/h", "source": "S5", "timestamp": "2026-10-01T08:10:00Z", "synchronization_group": "CUT-01", "provenance": "SYNTHETIC"},
+            {"meter_id": "MISSING-TS-01", "value": 3, "unit": "bar", "source": "S6", "timestamp": None, "provenance": "SYNTHETIC"},
+            {"meter_id": "SYNC-C", "value": 2, "unit": "m3/h", "source": "S7", "timestamp": "2026-10-01T08:00:00Z", "synchronization_group": "CUT-02", "provenance": "SYNTHETIC"},
+            {"meter_id": "SYNC-D", "value": 2, "unit": "m3/h", "source": "S8", "timestamp": None, "synchronization_group": "CUT-02", "provenance": "SYNTHETIC"},
         ],
     }
     originals = [dict(row) for row in payload["measurements"]]
     result = ii.analyze_tool("data-trust", payload)
     assert result["status"] == "REVIEW_REQUIRED"
     assert result["missing_measurements"][0]["meter_id"] == "MISSING-01"
+    assert any(item["meter_id"] == "MISSING-TS-01" for item in result["missing_timestamps"])
+    assert any(item["synchronization_group"] == "CUT-02" and item["missing_timestamp_count"] == 1 for item in result["timestamp_sync_conflicts"])
     assert result["stuck_sensor_candidates"][0]["meter_id"] == "STUCK-01"
     assert result["outlier_candidates"][0]["meter_id"] == "OUTLIER-01"
     assert result["outlier_candidates"][0]["value"] == pytest.approx(100)
