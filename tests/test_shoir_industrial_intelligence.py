@@ -100,6 +100,12 @@ def _payloads():
     }
 
 
+def test_industrial_entity_vocabulary_matches_shared_digital_thread():
+    import shoir_digital_thread as thread
+    assert set(ii.THREAD_ENTITY_TYPES) == set(thread.THREAD_TYPES)
+    assert len(ii.THREAD_ENTITY_TYPES) == len(thread.THREAD_TYPES)
+
+
 def test_catalog_contains_16_unique_tools_and_non_overlapping_stable_ids():
     from shoir_tool_registry import TOOL_TARGETS
 
