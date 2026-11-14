@@ -1447,13 +1447,30 @@ def _require_evidence_refs(evidence_refs: Sequence[str], label: str) -> list[str
         raise IndustrialIntelligenceError(f"{label} requires at least one evidence reference.")
     records = _state_list("records")
     available = set()
+    stale_references = set()
     for record in records:
         record_id = str(record.get("record_id") or "").strip()
         source_ref = str(record.get("source_ref") or "").strip()
+        is_stale = (
+            str(record.get("record_status") or "").upper() == "STALE"
+            or str(record.get("dataset_dependency_status") or "").upper() == "STALE"
+        )
+        if is_stale:
+            if record_id:
+                stale_references.add(record_id)
+            if source_ref:
+                stale_references.add(source_ref)
+            continue
         if record_id:
             available.add(record_id)
         if source_ref:
             available.add(source_ref)
+    stale = sorted(set(refs) & stale_references)
+    if stale:
+        raise IndustrialIntelligenceError(
+            f"{label} references stale dataset-derived evidence: {stale}. "
+            "Re-run the analysis against the current dataset version and register a new evidence record."
+        )
     missing = sorted(set(refs) - available)
     if missing:
         raise IndustrialIntelligenceError(
@@ -1499,6 +1516,226 @@ def _snapshot_thread_graph(username: str) -> dict[str, Any]:
 def _restore_thread_graph(snapshot: Mapping[str, Any]) -> None:
     st.session_state[snapshot["nodes_key"]] = copy.deepcopy(snapshot["nodes"])
     st.session_state[snapshot["edges_key"]] = copy.deepcopy(snapshot["edges"])
+
+
+
+
+def _normalize_dataset_dependencies(body: Mapping[str, Any], access: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Validate exact immutable dataset-version references attached to a saved record."""
+    import re
+
+    raw = body.get("dataset_dependencies")
+    mode = "EXPLICIT_RECORD_DEPENDENCY"
+    if raw is None and st.session_state.get("shoir_dataset_dependency_tracking_enabled") is True:
+        active = st.session_state.get("shoir_active_dataset_dependency")
+        if not isinstance(active, Mapping):
+            raise IndustrialIntelligenceError(
+                "Dataset dependency tracking is enabled but no active immutable dataset-version reference is available."
+            )
+        raw = [active]
+        mode = "USER_ENABLED_ACTIVE_DATASET_LINK"
+    if raw is None:
+        return []
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence) or not raw:
+        raise IndustrialIntelligenceError("dataset_dependencies must be a non-empty list of version references.")
+    if len(raw) > 25:
+        raise IndustrialIntelligenceError("A record may reference at most 25 dataset versions.")
+
+    normalized = []
+    seen = set()
+    for index, item in enumerate(raw, start=1):
+        if not isinstance(item, Mapping):
+            raise IndustrialIntelligenceError(f"dataset_dependencies[{index}] must be an object.")
+        dataset_id = _required_text(item.get("dataset_id"), f"dataset_dependencies[{index}].dataset_id", 80).upper()
+        if not re.fullmatch(r"DS-[A-F0-9]{12,32}", dataset_id):
+            raise IndustrialIntelligenceError(f"dataset_dependencies[{index}].dataset_id is invalid.")
+        version = item.get("version")
+        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+            raise IndustrialIntelligenceError(f"dataset_dependencies[{index}].version must be a positive integer.")
+        data_hash = str(item.get("data_hash") or "").strip().lower()
+        fingerprint = str(item.get("version_fingerprint") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", data_hash) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise IndustrialIntelligenceError(f"dataset_dependencies[{index}] requires valid SHA-256 hashes.")
+        key = (dataset_id, version)
+        if key in seen:
+            raise IndustrialIntelligenceError("Duplicate dataset-version dependencies are not accepted.")
+        seen.add(key)
+
+        dependency_organization = str(item.get("organization_id") or "").strip() or None
+        dependency_workspace = str(item.get("workspace_id") or "").strip()
+        active_organization = str(access.get("organization_id") or "").strip() or None
+        active_workspace = str(access.get("workspace_id") or "").strip()
+        if dependency_organization != active_organization:
+            raise PermissionError("Dataset dependency belongs to a different organization scope.")
+        if dependency_workspace and dependency_workspace != active_workspace:
+            raise PermissionError("Dataset dependency belongs to a different workspace.")
+        if item.get("current_version_verified") is False:
+            raise IndustrialIntelligenceError(
+                "A historical dataset version cannot be attached as a current operational dependency."
+            )
+        normalized.append({
+            "dataset_id": dataset_id,
+            "version": version,
+            "data_hash": data_hash,
+            "version_fingerprint": fingerprint,
+            "organization_id": dependency_organization,
+            "workspace_id": dependency_workspace or active_workspace,
+            "source_name": str(item.get("source_name") or "")[:240],
+            "registered_at": str(item.get("registered_at") or "")[:80] or None,
+            "link_mode": mode,
+        })
+    return normalized
+
+
+def mark_dataset_dependents_stale(
+    records: Sequence[Mapping[str, Any]],
+    dataset_id: str,
+    current_version: int,
+    current_data_hash: str,
+    current_version_fingerprint: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Preserve historical outputs while flagging records linked to older dataset content."""
+    import re
+
+    normalized_id = _required_text(dataset_id, "dataset_id", 80).upper()
+    if not re.fullmatch(r"DS-[A-F0-9]{12,32}", normalized_id):
+        raise IndustrialIntelligenceError("Dataset identifier is invalid.")
+    if isinstance(current_version, bool) or not isinstance(current_version, int) or current_version < 1:
+        raise IndustrialIntelligenceError("Current dataset version must be a positive integer.")
+    data_hash = str(current_data_hash or "").strip().lower()
+    fingerprint = str(current_version_fingerprint or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", data_hash) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise IndustrialIntelligenceError("Current dataset hashes must be valid SHA-256 digests.")
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
+        raise IndustrialIntelligenceError("Workspace records must be a list.")
+
+    updated, stale_ids = [], []
+    for index, raw in enumerate(records, start=1):
+        if not isinstance(raw, Mapping):
+            raise IndustrialIntelligenceError(f"Workspace record {index} is malformed.")
+        record = copy.deepcopy(dict(raw))
+        payload = record.get("payload")
+        dependencies = record.get("dataset_dependencies")
+        if dependencies is None and isinstance(payload, Mapping):
+            dependencies = payload.get("dataset_dependencies")
+        if dependencies is None:
+            updated.append(record)
+            continue
+        if isinstance(dependencies, (str, bytes)) or not isinstance(dependencies, Sequence):
+            raise IndustrialIntelligenceError(
+                f"Workspace record {record.get('record_id') or index} has a malformed dataset dependency list."
+            )
+        stale = []
+        for dependency in dependencies:
+            if not isinstance(dependency, Mapping):
+                raise IndustrialIntelligenceError("A saved dataset dependency is malformed.")
+            if str(dependency.get("dataset_id") or "").strip().upper() != normalized_id:
+                continue
+            if (
+                dependency.get("version") != current_version
+                or str(dependency.get("data_hash") or "").strip().lower() != data_hash
+                or str(dependency.get("version_fingerprint") or "").strip().lower() != fingerprint
+            ):
+                stale.append({
+                    "dataset_id": normalized_id,
+                    "previous_version": dependency.get("version"),
+                    "current_version": current_version,
+                    "previous_data_hash": str(dependency.get("data_hash") or "") or None,
+                    "current_data_hash": data_hash,
+                    "reason": "The dataset head no longer matches the immutable version used by this record.",
+                })
+        if stale:
+            record["record_status"] = "STALE"
+            record["dataset_dependency_status"] = "STALE"
+            existing = record.get("stale_dataset_dependencies", [])
+            record["stale_dataset_dependencies"] = (existing if isinstance(existing, list) else []) + stale
+            record["stale_detected_at"] = _utc_now()
+            record_id = str(record.get("record_id") or "").strip()
+            if record_id:
+                stale_ids.append(record_id)
+        updated.append(record)
+    return updated, stale_ids
+
+
+def invalidate_dataset_dependents(
+    username: str,
+    tier: str,
+    dataset_id: str,
+    current_version: int,
+    current_data_hash: str,
+    current_version_fingerprint: str,
+) -> dict[str, Any]:
+    """Mark older dataset-derived workspace records and their Digital Thread nodes stale."""
+    access = _session_authorize(username, tier, "write")
+    previous_records = copy.deepcopy(_state_list("records"))
+    updated_records, stale_ids = mark_dataset_dependents_stale(
+        previous_records, dataset_id, current_version, current_data_hash, current_version_fingerprint
+    )
+    if not stale_ids:
+        return {
+            "status": "NO_STALE_DEPENDENTS",
+            "dataset_id": str(dataset_id).upper(),
+            "current_version": current_version,
+            "stale_record_count": 0,
+            "historical_outputs_preserved": True,
+        }
+
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        stale_set = set(stale_ids)
+        nodes = st.session_state.get(graph_snapshot["nodes_key"], [])
+        for node in nodes:
+            if not isinstance(node, Mapping):
+                continue
+            metadata = node.get("metadata")
+            if not isinstance(metadata, Mapping) or str(metadata.get("industrial_record_id") or "") not in stale_set:
+                continue
+            updated_metadata = dict(metadata)
+            updated_metadata["dataset_dependency_status"] = "STALE"
+            updated_metadata["stale_dataset_id"] = str(dataset_id).upper()
+            updated_metadata["stale_dataset_current_version"] = current_version
+            node["metadata"] = updated_metadata
+            node["status"] = "Stale"
+            node["updated_at"] = _utc_now()
+
+        event_id = "LIN-" + uuid.uuid4().hex[:14].upper()
+        event_payload = {
+            "dataset_id": str(dataset_id).upper(),
+            "current_version": current_version,
+            "stale_record_ids": list(stale_ids),
+            "historical_outputs_preserved": True,
+        }
+        updated_records.append({
+            "record_id": event_id,
+            "record_type": "dataset_lineage_invalidation",
+            "name": f"Dataset {str(dataset_id).upper()} dependency invalidation",
+            "payload": event_payload,
+            "payload_hash": _hash_payload(event_payload),
+            "provenance": "MANUAL",
+            "provenance_limit": PROVENANCE_RELIABILITY["MANUAL"],
+            "source_ref": f"dataset:{str(dataset_id).upper()}@v{current_version}",
+            "source_timestamp": _utc_now(),
+            "organization_id": access["organization_id"],
+            "workspace_id": access["workspace_id"],
+            "workspace_scope": access["scope"],
+            "created_by": access["actor"],
+            "created_at": _utc_now(),
+            "record_status": "SYSTEM_EVENT",
+        })
+        _save_state_list(username, tier, "records", updated_records)
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
+    return {
+        "status": "DEPENDENTS_MARKED_STALE",
+        "dataset_id": str(dataset_id).upper(),
+        "current_version": current_version,
+        "stale_record_count": len(stale_ids),
+        "stale_record_ids": stale_ids,
+        "historical_outputs_preserved": True,
+        "digital_thread_nodes_marked_stale": len(stale_ids),
+        "scope": access["scope"],
+    }
 
 
 def _sync_thread_node(username: str, tier: str, node_type: str, name: str, record_id: str, status: str, metadata: Mapping[str, Any]) -> str:
@@ -1547,6 +1784,14 @@ def create_record(
         raise IndustrialIntelligenceError(f"{provenance_value} records require an explicit source timestamp.")
     if source_timestamp:
         _iso_timestamp(source_timestamp, "source_timestamp")
+    if st.session_state.get("shoir_dataset_lineage_blocked") is True and st.session_state.get("shoir_dataset_dependency_tracking_enabled") is True:
+        raise IndustrialIntelligenceError(
+            "Dataset lineage invalidation is unresolved. Saving new dataset-dependent results is blocked until the lineage check succeeds."
+        )
+    dataset_dependencies = _normalize_dataset_dependencies(body, access)
+    if dataset_dependencies:
+        body["dataset_dependencies"] = dataset_dependencies
+        body["dataset_dependency_status"] = "CURRENT"
     encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(encoded) > MAX_RECORD_BYTES:
         raise IndustrialIntelligenceError(f"Record payload exceeds {MAX_RECORD_BYTES} bytes.")
@@ -1563,6 +1808,8 @@ def create_record(
         "source_ref": safe_source_ref or None,
         "source_timestamp": source_timestamp or None,
         "entity_id": str(entity_id or "").strip()[:160] or None,
+        "dataset_dependencies": copy.deepcopy(dataset_dependencies),
+        "dataset_dependency_status": "CURRENT" if dataset_dependencies else "NOT_LINKED",
         "organization_id": access["organization_id"],
         "workspace_id": access["workspace_id"],
         "workspace_scope": access["scope"],
@@ -1575,7 +1822,13 @@ def create_record(
         node_type = str(body.get("thread_node_type") or "Dataset")
         record["thread_node_id"] = _sync_thread_node(
             username, tier, node_type, record["name"], record_id, "Observed",
-            {"record_type": record["record_type"], "provenance": provenance_value, "payload_hash": record["payload_hash"]},
+            {
+                "record_type": record["record_type"],
+                "provenance": provenance_value,
+                "payload_hash": record["payload_hash"],
+                "dataset_dependencies": dataset_dependencies,
+                "dataset_dependency_status": "CURRENT" if dataset_dependencies else "NOT_LINKED",
+            },
         )
         rows = list(_state_list("records"))
         rows.append(record)
