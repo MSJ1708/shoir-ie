@@ -29,6 +29,14 @@ MAX_RECORDS = 5000
 MAX_RECORD_BYTES = 64000
 MAX_GRAPH_NODES = 10000
 MAX_GRAPH_EDGES = 20000
+VISUAL_STATE_KEYS = {
+    "records": "shoir_industrial_intelligence_records",
+    "nodes": "shoir_industrial_intelligence_nodes",
+    "edges": "shoir_industrial_intelligence_edges",
+    "actions": "shoir_industrial_intelligence_actions",
+    "events": "shoir_industrial_intelligence_events",
+    "models": "shoir_industrial_intelligence_models",
+}
 
 PROVENANCE = (
     "LIVE", "IMPORTED", "MANUAL", "SYNTHETIC", "SIMULATED", "MOCK", "STALE",
@@ -944,6 +952,10 @@ def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, An
         saved = save_user_workspace(username, st.session_state)
         if not saved:
             raise RuntimeError(str(st.session_state.get("_workspace_save_error") or "Workspace persistence did not confirm the save."))
+        visual_key = VISUAL_STATE_KEYS.get(key)
+        if visual_key:
+            scoped_rows = _state_list(key)
+            st.session_state[visual_key] = pd.DataFrame(copy.deepcopy(scoped_rows))
     except Exception:
         st.session_state[STATE_PREFIX + key] = snapshot
         raise
