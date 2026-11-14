@@ -282,8 +282,10 @@ def _activate_registered_dataset_dependency(
     organization_id = str(scope.get("organization_id") or "").strip() or None
     workspace_id = str(
         scope.get("organization_workspace_id")
+        or state.get("shoir_workspace_name")
+        or state.get("workspace")
         or workspace
-        or "default"
+        or "personal"
     ).strip()
     dependency = {
         "dataset_id": dataset_id,
