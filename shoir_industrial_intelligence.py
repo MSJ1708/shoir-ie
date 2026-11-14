@@ -905,7 +905,32 @@ def _state_list(key: str) -> list[dict[str, Any]]:
     value = st.session_state.get(STATE_PREFIX + key, [])
     if not isinstance(value, list):
         return []
-    return value
+    context = st.session_state.get("shoir_active_organization_workspace")
+    if isinstance(context, Mapping):
+        organization_id = str(context.get("organization_id") or "").strip()
+        workspace_id = str(context.get("organization_workspace_id") or "").strip()
+        if not organization_id or not workspace_id:
+            return []
+        return [
+            row for row in value
+            if isinstance(row, Mapping)
+            and str(row.get("organization_id") or "") == organization_id
+            and str(row.get("workspace_id") or "") == workspace_id
+        ]
+    actor = str(st.session_state.get("current_user") or "").strip()
+    workspace_id = str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or "personal")
+    return [
+        row for row in value
+        if isinstance(row, Mapping)
+        and row.get("organization_id") is None
+        and str(row.get("workspace_id") or "") == workspace_id
+        and actor.casefold() in {
+            str(row.get("created_by") or "").casefold(),
+            str(row.get("owner") or "").casefold(),
+            str(row.get("actor") or "").casefold(),
+            str(row.get("reviewer") or "").casefold(),
+        }
+    ]
 
 
 def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, Any]], action: str = "write") -> None:
@@ -1090,7 +1115,7 @@ def add_entity(username: str, tier: str, entity_type: str, entity_id: str, name:
 
 
 def add_relationship(username: str, tier: str, source_id: str, target_id: str, relation: str, status: str = "CONFIRMED", evidence_refs: Sequence[str] = ()) -> dict[str, Any]:
-    _session_authorize(username, tier, "write")
+    access = _session_authorize(username, tier, "write")
     source = _required_text(source_id, "source_id", 160)
     target = _required_text(target_id, "target_id", 160)
     relation_name = _required_text(relation, "relation", 160)
@@ -1110,7 +1135,7 @@ def add_relationship(username: str, tier: str, source_id: str, target_id: str, r
     existing = next((item for item in edges if item.get("edge_id") == edge_id), None)
     if existing:
         raise IndustrialIntelligenceError("This relationship already exists; use a new evidence revision rather than replacing it.")
-    edge = {"edge_id": edge_id, "source_id": source, "target_id": target, "relation": relation_name, "status": state, "evidence_refs": refs, "created_by": str(st.session_state.get("current_user")), "created_at": _utc_now()}
+    edge = {"edge_id": edge_id, "source_id": source, "target_id": target, "relation": relation_name, "status": state, "evidence_refs": refs, "created_by": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "created_at": _utc_now()}
     edges.append(edge)
     _save_state_list(username, tier, "edges", edges)
     import shoir_digital_thread as thread
@@ -1303,6 +1328,8 @@ def review_barrier_effectiveness(
         raise IndustrialIntelligenceError("This reviewer has already reviewed the selected barrier.")
     review = {
         "review_id": "IIB-" + uuid.uuid4().hex[:12].upper(),
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
         "risk_record_id": str(risk_record_id),
         "barrier_id": key,
         "decision": status,
@@ -1355,7 +1382,7 @@ def verify_benefit_record(username: str, tier: str, record_id: str, verification
     verifications = list(_state_list("benefit_verifications"))
     if any(item.get("record_id") == str(record_id) for item in verifications):
         raise IndustrialIntelligenceError("A verification decision already exists for this benefit record.")
-    review = {"verification_id": "IIV-" + uuid.uuid4().hex[:12].upper(), "record_id": str(record_id), "reviewer": access["actor"], "role": access["role"], "evidence_refs": refs, "comment": str(reviewer_comment or "")[:2000], "status": "VERIFIED_BY_INDEPENDENT_REVIEWER", "reviewed_at": _utc_now()}
+    review = {"verification_id": "IIV-" + uuid.uuid4().hex[:12].upper(), "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "record_id": str(record_id), "reviewer": access["actor"], "role": access["role"], "evidence_refs": refs, "comment": str(reviewer_comment or "")[:2000], "status": "VERIFIED_BY_INDEPENDENT_REVIEWER", "reviewed_at": _utc_now()}
     verifications.append(review)
     _save_state_list(username, tier, "benefit_verifications", verifications, action="approve")
     _append_audit(username, tier, "benefit.independently_verified", str(record_id), review)
@@ -1384,7 +1411,7 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
         else:
             passed = expected == actual
         tests.append({"test_id": _required_text(case.get("test_id"), f"model test {index} test_id"), "expected": expected, "actual": actual, "passed": bool(passed), "evidence_id": str(case.get("evidence_id") or "").strip() or None})
-    record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": _hash_payload(definition), "assumptions": [_required_text(item, "model assumption", 500) for item in assumptions], "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
+    record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": _hash_payload(definition), "assumptions": [_required_text(item, "model assumption", 500) for item in assumptions], "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
     models.append(record)
     _save_state_list(username, tier, "models", models)
     _append_audit(username, tier, "model.version_registered", record["model_id"], {"version": version_id, "definition_hash": record["definition_hash"]})
