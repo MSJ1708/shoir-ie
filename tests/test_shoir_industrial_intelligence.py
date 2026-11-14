@@ -909,7 +909,8 @@ def test_copilot_context_redacts_secrets_and_includes_scoped_thread_links(monkey
             "api_token": "do-not-send-this",
             "nested": {"password": "never-export"},
         },
-        provenance="SYNTHETIC",
+        provenance="IMPORTED",
+        source_ref="https://user:sourcepass@example.test/import.csv?api_key=do-not-send-this",
     )
     ii.add_relationship(
         "synthetic-copilot-user", "Enterprise",
@@ -924,6 +925,9 @@ def test_copilot_context_redacts_secrets_and_includes_scoped_thread_links(monkey
     payload = context["citations"][0]["payload"]
     assert payload["api_token"] == "[REDACTED]"
     assert payload["nested"]["password"] == "[REDACTED]"
+    assert context["citations"][0]["source_reference_present"] is True
+    assert "sourcepass" not in json.dumps(context)
+    assert "do-not-send-this" not in json.dumps(context)
     assert any(item["node_id"] == asset["thread_node_id"] for item in context["digital_thread"]["nodes"])
     assert any(item["node_id"] == process["thread_node_id"] for item in context["digital_thread"]["nodes"])
     assert context["digital_thread"]["relationships"]
