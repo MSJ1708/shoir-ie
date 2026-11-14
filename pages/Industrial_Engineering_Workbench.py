@@ -1939,7 +1939,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     evaluate_kpi_alerts,
                                 )
                                 from shoir_resilience_suite import simulate_disruption_scenarios
-from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
+                                from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
                                 if selected_tool["tool_id"] == "T007":
                                     result = classify_diagnostic(diagnostic_inspector_text)
                                     result["reported_subsystem"] = diagnostic_category
