@@ -1797,6 +1797,21 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 {"Record ID": item.get("record_id"), "Hazard": item.get("name"), "Status": item.get("record_status"), "Created": item.get("created_at")}
                 for item in risk_records
             ]), use_container_width=True, hide_index=True)
+            ui.markdown("#### Independent barrier-effectiveness review")
+            selected_risk = ui.selectbox("Risk/barrier record", [item["record_id"] for item in risk_records], key="shoir_ii_barrier_risk_record")
+            risk_record = next(item for item in risk_records if item["record_id"] == selected_risk)
+            barrier_rows = risk_record.get("payload", {}).get("barriers", [])
+            if barrier_rows:
+                selected_barrier = ui.selectbox("Barrier to review", [item["barrier_id"] for item in barrier_rows], key="shoir_ii_barrier_review_id")
+                barrier_decision = ui.selectbox("Review decision", ["VERIFIED_EFFECTIVE", "NOT_EFFECTIVE"], key="shoir_ii_barrier_review_decision")
+                barrier_evidence = ui.text_input("Registered evidence record ID", key="shoir_ii_barrier_review_evidence")
+                barrier_comment = ui.text_input("Independent reviewer comment", key="shoir_ii_barrier_review_comment")
+                if ui.button("Submit independent barrier review", key="shoir_ii_barrier_review_submit"):
+                    try:
+                        review = review_barrier_effectiveness(username, tier, selected_risk, selected_barrier, barrier_decision, barrier_evidence, barrier_comment)
+                        ui.success(f"Independent barrier review saved: {review['review_record']['record_id']}. Screening score: {review['residual_screening_score']:.2f}. This is not formal safety approval.")
+                    except Exception as exc:
+                        ui.error(f"Barrier review was not saved: {exc}")
 
     with workspace_tabs[2]:
         ui.markdown("#### Register immutable engineering model versions")
@@ -1890,6 +1905,31 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 ui.success(f"Investigation saved: {investigation['record_id']}. Causation remains unconfirmed.")
             except Exception as exc:
                 ui.error(f"Cause-and-effect investigation was not saved: {exc}")
+        investigations = [item for item in _state_list("records") if item.get("record_type") == "cause_effect_investigation"]
+        if investigations:
+            ui.markdown("#### Independent cause-effect review")
+            selected_investigation = ui.selectbox("Investigation to review", [item["record_id"] for item in investigations], key="shoir_ii_cause_review_record")
+            investigation = next(item for item in investigations if item["record_id"] == selected_investigation)
+            candidate_links = investigation.get("payload", {}).get("candidate_relationships", [])
+            if candidate_links:
+                candidate_index = ui.selectbox(
+                    "Candidate relationship",
+                    list(range(len(candidate_links))),
+                    format_func=lambda index: f"{candidate_links[index].get('from')} → {candidate_links[index].get('to')} · {candidate_links[index].get('validation_status')}",
+                    key="shoir_ii_cause_review_link",
+                )
+                cause_decision = ui.selectbox("Independent review decision", ["CONFIRMED", "REJECTED"], key="shoir_ii_cause_review_decision")
+                cause_evidence = ui.text_input("Registered supporting evidence record ID(s)", key="shoir_ii_cause_review_evidence")
+                cause_comment = ui.text_input("Independent reviewer comment", key="shoir_ii_cause_review_comment")
+                if ui.button("Submit independent cause-effect review", key="shoir_ii_cause_review_submit"):
+                    try:
+                        review = review_cause_effect_investigation(
+                            username, tier, selected_investigation, int(candidate_index), cause_decision,
+                            [item.strip() for item in cause_evidence.split(",") if item.strip()], cause_comment,
+                        )
+                        ui.success(f"Independent cause-effect review saved: {review['review_record']['record_id']}. Decision: {review['decision']}.")
+                    except Exception as exc:
+                        ui.error(f"Cause-effect review was not saved: {exc}")
         ui.markdown("#### Evidence-backed Knowledge Copilot context")
         copilot_query = ui.text_input("Question / evidence search", key="shoir_ii_copilot_query")
         if ui.button("Retrieve authorized evidence", key="shoir_ii_copilot_search"):
