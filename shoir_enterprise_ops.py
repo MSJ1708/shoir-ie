@@ -483,6 +483,66 @@ def render_control_tower_extension() -> None:
     elif actions is not None:
         st.info("No control-tower actions have been created yet. Use the form above to turn an observed issue into tracked work.")
 
+    # Read-only operational context from the shared Industrial Intelligence
+    # workspace. Access is revalidated; inaccessible/other-tenant records are never
+    # queried or rendered by this surface.
+    try:
+        from shoir_industrial_intelligence import _session_authorize as _ii_authorize, _state_list as _ii_state_list
+        _ii_authorize(username, str(st.session_state.get("user_tier") or ""), "read")
+        _ii_events = _ii_state_list("events")
+        _ii_actions = _ii_state_list("actions")
+        _ii_risk = [item for item in _ii_state_list("records") if item.get("record_type") == "risk_barrier_assurance"]
+        _ii_open_actions = [
+            item for item in _ii_actions
+            if str(item.get("status") or "").upper() not in {"VERIFIED", "CLOSED"}
+        ]
+        with st.expander("Industrial Intelligence · Events, decisions and action assurance", expanded=bool(_ii_events or _ii_open_actions or _ii_risk)):
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Recorded events", len(_ii_events))
+            c2.metric("Open actions", len(_ii_open_actions))
+            c3.metric("Risk screens", len(_ii_risk))
+            if _ii_events:
+                st.markdown("#### Recent operational events")
+                st.dataframe(pd.DataFrame([
+                    {
+                        "Event ID": row.get("record_id"),
+                        "Event": row.get("name"),
+                        "Occurred": row.get("event_timestamp"),
+                        "Entity": row.get("entity_id"),
+                        "Provenance": row.get("provenance"),
+                    }
+                    for row in sorted(_ii_events, key=lambda item: str(item.get("event_timestamp") or ""), reverse=True)[:20]
+                ]), use_container_width=True, hide_index=True)
+            if _ii_open_actions:
+                st.markdown("#### Actions awaiting resolution or verification")
+                st.dataframe(pd.DataFrame([
+                    {
+                        "Action ID": row.get("action_id"),
+                        "Action": row.get("title"),
+                        "Owner": row.get("owner"),
+                        "Due": row.get("due_date"),
+                        "Priority": row.get("priority"),
+                        "Status": row.get("status"),
+                    }
+                    for row in _ii_open_actions[:50]
+                ]), use_container_width=True, hide_index=True)
+            if _ii_risk:
+                st.markdown("#### Risk/barrier screens requiring formal review")
+                st.dataframe(pd.DataFrame([
+                    {
+                        "Record ID": row.get("record_id"),
+                        "Hazard": row.get("name"),
+                        "Status": row.get("payload", {}).get("status", "SCREENING_ONLY"),
+                        "Provenance": row.get("provenance"),
+                    }
+                    for row in _ii_risk[:30]
+                ]), use_container_width=True, hide_index=True)
+            st.caption("This view is sourced from the active workspace. Display does not approve actions or safety controls; complete review in the Industrial Intelligence Suite.")
+    except Exception:
+        # Non-Enterprise users and workspaces without the feature must not see
+        # data or receive a privilege-escalation fallback.
+        pass
+
     st.markdown("### 🔗 Decision Operating Loop")
     st.caption("Observe → prioritize → assign → mitigate → verify. Control actions are stored with the workspace record.")
 # ---------------------------------------------------------------------------
