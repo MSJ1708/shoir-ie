@@ -1,180 +1,250 @@
 # Shoir-IE Industrial Intelligence Foundation
 
-## Status and operating boundary
+## Delivery status
 
-This document describes the shared Industrial Intelligence foundation implemented in shoir_industrial_intelligence.py and integrated under the existing Enterprise Industrial Operating System Workbench entry. It does not introduce a second application, navigation tree, subscription plan, or live OT/ERP connector.
+**Code status: IMPLEMENTED AS A SHARED FOUNDATION — VALIDATION PENDING.**
 
-The foundation is additive. Existing Shoir-IE pages, tool IDs, workbook tabs, subscriptions, Resource Intelligence, Industrial Control Center, Command Center, Inspector drawer and navigation remain authoritative.
+The branch contains the shared service layer, all 16 deterministic analysis engines, six Workbench suites, eight cross-tool capability services, workspace-scoped Digital Thread integration, governed decision/action workflows, evidence-aware Copilot context, workbook handoff, exports, industry templates and acceptance-test definitions.
 
-This is a software foundation for deterministic, evidence-bounded workflows. Passing synthetic acceptance tests does not establish plant-specific engineering validity, customer readiness, Saudi legal/privacy compliance, an active external connector, or production readiness.
+This is not yet a declaration that every route, calculation, tenant policy or browser flow has passed CI or staging. GitHub Actions for the current head must finish, and the live staging organization/role/persistence matrix must be independently exercised before the new capabilities can be labelled VERIFIED.
 
-Production remains NO-GO; application status remains BETA. Work is staged through draft PR #232 only. No production schema, data or infrastructure is modified by this feature.
+Application status remains **BETA**. Production remains **NO-GO**. Do not merge, deploy, migrate production data or change production infrastructure as part of this work.
+
+## Repository and integration
+
+- Repository: MSJ1708/shoir-ie
+- Working branch: feat/shoir-ie-release-hardening-20261105
+- Pull request: #232 (kept draft while implementation and verification continue)
+- Main implementation: shoir_industrial_intelligence.py
+- Existing suite integration: Industrial Operating System Workbench route and existing Workbench dispatcher
+- Main AI integration: app.py get_copilot_response
+- Existing Digital Thread: shoir_digital_thread.py
+- Existing persistence: workspace_persistence.py and the authenticated organization-workspace Edge Function path
+- Acceptance tests: tests/test_shoir_industrial_intelligence.py
+- Shared foundation documentation: docs/SHOIR_IE_INDUSTRIAL_INTELLIGENCE_FOUNDATION.md
+
+No new production migration or production data change is part of this implementation.
+
+## Preserved platform contracts
+
+The suite is additive and does not replace the existing application, its pages or its navigation. The existing top-level navigation, Workbench, Industrial Control Center, Command Center, Inspector, workbook tabs, login, subscription catalog, resource-intelligence capability, and specialist T001–T100 registry remain the authoritative platform surfaces.
+
+The sixteen new specialist capabilities use their own non-overlapping codes:
+
+\`II-001\` through \`II-016\`.
+
+The existing T001–T100 inventory is not renumbered or expanded by this suite. Search includes exact names, codes, IDs and aliases. The Workbench only deep-links after a non-empty query matches a real registered tool; an empty search does not auto-open a tool.
+
+The suite uses the existing \`Industrial Operating System\` module entitlement (Enterprise minimum) through the existing tier policy. It does not create a new subscription plan or modify plan pricing. The server-side service independently checks the existing Enterprise capability, authenticated actor, active organization membership, workspace role and operation. Organization read is restricted to Owner/Admin/Engineer/Approver/Viewer; writes to Owner/Admin/Engineer/Approver; approvals to Owner/Admin/Approver. A Viewer cannot write or approve.
 
 ## Architecture
 
-Existing Shoir-IE Workbench / Industrial Operating System
-- Six connected tool suites
-- Sixteen deterministic tool engines
-- Shared records, evidence and provenance
-- Industrial Digital Thread entity and edge links
-- Operational event and investigation records
-- Decisions, approvals, actions and verification
-- Model versions and independent review
-- Benefits records and independent review
-- Risk/barrier screening
-- Evidence retrieval context for the existing Copilot
-- Existing workspace persistence and organization membership controls
+Existing Shoir-IE app and Workbench
+- Industrial Operating System
+  - Six Industrial Intelligence suites
+  - II-001 ... II-016 deterministic engines
+  - Shared records, evidence and provenance
+  - Existing Industrial Workbook handoff
+  - Existing Digital Thread node/edge graph
+  - Operational event timeline
+  - Cause/effect investigation records
+  - Risk and barrier screening / independent review
+  - Decision proposals / independent review
+  - Action approval / implementation / verification
+  - Model versions / validation
+  - Actual benefits / independent review
+  - Evidence retrieval context for existing AI Copilot
+  - workspace_persistence
+    - Personal workspace persistence
+    - Organization workspace Edge Function
+      - Existing membership and revision checks
 
-## Persistence and authorization
+All new records are stored through the existing workspace persistence path. Shared organization writes require an authenticated organization workspace and the managed persistence service. If the managed shared persistence service is unavailable, a team write fails rather than falling back to an unrelated personal SQLite workspace.
 
-The service uses the existing workspace_persistence path. For a selected organization workspace, it reuses shoir_active_organization_workspace, organization/workspace IDs, the authenticated session token, Edge Function membership validation and optimistic revision handling. Shared state must not fall back to per-user SQLite if the managed organization service is unavailable.
+Every record and graph edge carries organization/workspace scope. Lists are filtered against the current active workspace. A workspace save serializes only that active workspace's records; it does not copy another tenant's rows into the active tenant payload. The existing workspace loader is responsible for restoring the corresponding workspace snapshot when users switch context.
 
-The service checks signed-in identity, the existing Enterprise tier gate and the active workspace role. Read, write and approval are separate operations. Organization roles are resolved by the existing server-backed organization service: Owner, Admin, Engineer, Approver and Viewer. Viewers are read-only. Approvals and independent verification are restricted to authorized roles, and a creator cannot approve or verify their own record.
+## Provenance and evidence contract
 
-These checks are implemented as service-level guards and covered by deterministic tests. Hosted end-to-end organization membership/RLS verification remains a separate release gate.
+Supported provenance values are:
 
-## Provenance
+- \`LIVE\`
+- \`IMPORTED\`
+- \`MANUAL\`
+- \`SYNTHETIC\`
+- \`SIMULATED\`
+- \`MOCK\`
+- \`STALE\`
 
-Supported provenance labels:
-- LIVE
-- IMPORTED
-- MANUAL
-- SYNTHETIC
-- SIMULATED
-- MOCK
-- STALE
+\`LIVE\`, \`IMPORTED\` and \`STALE\` require a source reference. \`LIVE\` and \`STALE\` also require a timezone-aware source timestamp. These labels record the supplied origin; they do not independently prove source health, accuracy or connector activity.
 
-LIVE, IMPORTED and STALE records require a source reference. LIVE and STALE records also require a timezone-aware source timestamp. A label is not proof that a connection is live or data is accurate. Each record preserves a payload hash, creation identity/time, source reference and provenance limitations.
+Records preserve their payload hash, creator, created timestamp, workspace scope, provenance, source reference, source timestamp and validation limitations. Original measurements are not overwritten by reconciliation. Any reconciliation or model output must remain distinguishable from the original observation.
 
-Original measurement inputs are not silently changed by Data Trust. Process event elapsed time is not automatically relabelled as waiting time. Suspected genealogy or cause-effect relationships are not treated as confirmed. Modeled values are not reported as realized benefits.
+Registered evidence means an evidence record ID or source reference already exists in the same active workspace. Confirmed Digital Thread links, action verification, decision reviews, model validation, cause/effect reviews, barrier reviews and benefit verification require registered workspace evidence. An arbitrary typed string is not sufficient.
 
-## Six suites and 16 tool engines
+## Six suites and sixteen engines
 
-The catalogue and search aliases are maintained in TOOL_CATALOG. Each specialist capability has a stable II-001 through II-016 identifier, separate from the existing T001 through T100 registry; both namespaces are tested for uniqueness and non-overlap. Tool analysis is available through analyze_tool(tool_id_or_code, payload). Results include status, calculation timestamp, core version, input hash and limitations.
+| Code | Suite | Tool | Implemented deterministic foundation |
+|---|---|---|---|
+| II-001 | Operations Intelligence | Industrial Operations Mission Control | Evidence-bounded event triage; transparent priority heuristic; no automatic root-cause claim |
+| II-002 | Operations Intelligence | Industrial Process Mining and Hidden Inefficiency Intelligence | Event-log chronology, variants, directly-follows transitions, explicit wait minutes, repeated-activity candidates and conformance |
+| II-003 | Engineering Intelligence | Engineering Change Impact Twin | Directed dependency traversal and change-impact review register |
+| II-004 | Maintenance and Project Intelligence | Shutdown and Turnaround Intelligence Optimizer | Deterministic precedence/skill/resource schedule, one resource availability clock across skills, permit/inspection/SIMOPS/safety gates |
+| II-005 | Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | Measurement conflicts, unit-group checks and explicit balance residuals; original values retained |
+| II-006 | Maintenance and Project Intelligence | Asset Reliability Mission Board | Transparent criticality/history heuristic and supplied production dependencies |
+| II-007 | Production and Quality Intelligence | Production Yield and Process Variability Intelligence | First-pass yield, recovered rework, final yield, scrap and count reconciliation |
+| II-008 | Maintenance and Project Intelligence | New Factory Commissioning and Production Ramp-up Intelligence | Fail-closed required-check/evidence readiness gate |
+| II-009 | Engineering Intelligence | Industrial Experimentation and Process Improvement Laboratory | Reproducible two-level factorial design and first-order least-squares fit |
+| II-010 | Supply Chain and Procurement Intelligence | Technical Procurement and Supplier Engineering Assurance | Requirement-to-offer compliance, deviation and evidence coverage |
+| II-011 | Energy and Enterprise Assurance | Industrial Energy Flexibility and Peak-Demand Optimizer | Deterministic least-cost flexible-load placement within declared windows and capacities |
+| II-012 | Supply Chain and Procurement Intelligence | Critical Spare Parts and Multi-Site Inventory Intelligence | Compatibility, source minimum stock and destination inventory constraints |
+| II-013 | Energy and Enterprise Assurance | Industrial OT Asset and Configuration Assurance | Passive approved-baseline versus observed-configuration comparison |
+| II-014 | Production and Quality Intelligence | Product and Batch Genealogy Intelligence | Forward/backward confirmed-lot traversal; suspected links remain separate |
+| II-015 | Operations Intelligence | Intelligent Shift Handover and Operational Learning | Open issue/action carry-forward and incoming-shift acknowledgement |
+| II-016 | Energy and Enterprise Assurance | Industrial Benchmarking and Improvement Radar | Comparability checks across metric, units, period and denominator |
 
-| Suite | Tool | Deterministic foundation |
+### Calculation and operational boundaries
+
+1. Mission Control provides a triage heuristic, not a formal safety risk score or confirmed root cause.
+2. Process Mining treats elapsed event time as elapsed time; it counts waiting only when an explicit source field provides it.
+3. Engineering Change reports only supplied dependency edges. Missing dependencies are not guessed.
+4. Turnaround scheduling uses supplied task, resource, skill and constraint data. It does not infer site calendars, labor agreements, weather, lifting constraints, permit authority or all SIMOPS rules; it does not authorize work.
+5. Data Trust flags supplied conflicts and balance residuals. It does not invent calibration uncertainty or silently reconcile source values.
+6. Asset Reliability does not produce a guaranteed failure date or remaining useful life.
+7. Yield calculations require consistent product/batch boundaries and units.
+8. Commissioning status is readiness for authorized review, not statutory or formal system acceptance.
+9. DOE results are bounded by the supplied design and fitted model; first-order fit does not establish causality or omitted interactions.
+10. Procurement Assurance only evaluates claims and evidence IDs supplied by the user; missing substantiation remains unverified.
+11. Energy Flexibility uses supplied tariffs/windows/capacities and does not dispatch plant equipment.
+12. Spare Parts reports eligibility or rejection; it does not execute a stock transfer.
+13. OT Assurance is a passive records comparison. No active discovery, scan, PLC/DCS/SCADA connection or configuration write is performed.
+14. Genealogy traverses only relationships explicitly marked CONFIRMED and does not turn suspected links into genealogy facts.
+15. Shift Handover carries records and acknowledgement; similar issue text does not establish common cause.
+16. Benchmarking suppresses misleading comparisons when required definitions, units, periods or denominators are incompatible.
+
+## Eight shared intelligence capabilities
+
+| Capability | Foundation implementation | Important boundary |
 |---|---|---|
-| Operations Intelligence | Industrial Operations Mission Control | Transparent severity/urgency/impact triage; root cause remains unconfirmed |
-| Operations Intelligence | Industrial Process Mining and Hidden Inefficiency Intelligence | Event-log variants, directly-follows transitions, elapsed time, explicit wait field, repeated-activity candidates and sequence deviations |
-| Operations Intelligence | Intelligent Shift Handover and Operational Learning | Carry open issues, owner and acknowledgement state forward |
-| Engineering Intelligence | Engineering Change Impact Twin | Directed dependency traversal and review register |
-| Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | Same-meter conflict and unit checks, explicit balance residuals, original-value retention |
-| Engineering Intelligence | Industrial Experimentation and Process Improvement Laboratory | Full two-level factorial design and first-order least-squares fit |
-| Maintenance and Project Intelligence | Asset Reliability Mission Board | Transparent history/criticality heuristic and supplied production dependencies |
-| Maintenance and Project Intelligence | Shutdown and Turnaround Intelligence Optimizer | Deterministic precedence/skill/resource schedule with permit, inspection, SIMOPS and safety-hold gates |
-| Maintenance and Project Intelligence | New Factory Commissioning and Production Ramp-up Intelligence | Required-check and evidence readiness gate |
-| Production and Quality Intelligence | Production Yield and Process Variability Intelligence | First-pass, final yield, rework, scrap and unaccounted-unit calculation |
-| Production and Quality Intelligence | Product and Batch Genealogy Intelligence | Confirmed forward/backward lot graph traversal; suspected links excluded |
-| Supply Chain and Procurement Intelligence | Technical Procurement and Supplier Engineering Assurance | Requirement-to-offer compliance, deviation and evidence coverage |
-| Supply Chain and Procurement Intelligence | Critical Spare Parts and Multi-Site Inventory Intelligence | Compatibility, source minimum and destination stock constraints |
-| Energy and Enterprise Assurance | Industrial Energy Flexibility and Peak-Demand Optimizer | Period-window/capacity-constrained least-cost flexible-load placement |
-| Energy and Enterprise Assurance | Industrial OT Asset and Configuration Assurance | Passive baseline-versus-observed configuration record diff |
-| Energy and Enterprise Assurance | Industrial Benchmarking and Improvement Radar | KPI comparability by metric, units, period and denominator |
+| A. Industrial Cause-and-Effect Intelligence | Investigation records, observations, candidate relationships, supporting and contradicting evidence, independent review record | A candidate can be SUSPECTED or SUPPORTED; only an independent evidence-backed review can confirm/reject that candidate |
+| B. Industrial Risk and Barrier Assurance | Risk screen, barrier owners, evidence references, independent barrier-effectiveness review and audit trail | Not formal safety/process-safety approval; a user-entered EFFECTIVE status cannot reduce the reviewed screen |
+| C. Engineering Knowledge Graph | Existing Digital Thread node/edge graph, full entity vocabulary, scoped relationships and evidence requirements | No separate graph database; relationships only connect registered active-workspace entities |
+| D. Industrial Decision and Action Management | Decision proposal with options/recommendation/rationale/evidence, independent APPROVED/REJECTED review, assigned actions, approval, implementation and verification | Decision author/action creator cannot independently approve or verify their own record; action closure follows independent verification |
+| E. Industrial Investment and Benefits Realization | Baseline/actual/delta record with source evidence, separate independent review and audit trail | Actual record is unverified until separately reviewed; no automatic realized-savings/ROI claim |
+| F. Engineering Model Validation and Registry | Immutable model/version identity, contract hash over definition/assumptions/tests, actual-versus-expected checks and independent review | All test cases must pass and a different authorized reviewer must provide registered evidence |
+| G. Operational Event Intelligence | Provenance-bearing event record, source timestamp, entity reference, workspace scope and timeline list | No claim of live telemetry unless a configured source has supplied the record |
+| H. Industrial Knowledge Copilot | Workspace-scoped evidence retrieval, record citations, linked Digital Thread context and connection to existing AI Copilot | Evidence is bounded/redacted before provider prompt use; retrieved records are not an automatic causal answer and Copilot cannot approve/execute actions |
 
-### Calculation boundaries
+## Industrial Digital Thread
 
-1. Mission Control returns a triage heuristic, not a formal safety risk score.
-2. Process Mining measures event timestamps and only counts waiting minutes when the source explicitly supplies explicit_wait_minutes; elapsed time is not assumed to be queue time.
-3. Engineering Change traverses only supplied dependency edges; absent edges are not inferred.
-4. Turnaround checks supplied dependencies, skills, resources, permits, inspections, SIMOPS state and safety holds. Site calendars, rest rules, weather, crane envelopes and permit authority are not inferred. It cannot authorize work.
-5. Data Trust flags supplied measurement conflicts and balance residuals. It does not estimate calibration uncertainty or automatically reconcile/overwrite values.
-6. Asset Reliability is a transparent heuristic. It does not return an exact failure date or remaining useful life.
-7. Yield assumes supplied quantities use the same product/batch boundary and unit.
-8. Commissioning only reports readiness for authorized review; it does not grant formal acceptance.
-9. Experimentation first-order fitting omits curvature/interactions in the fitted model. A generated design does not establish causality.
-10. Procurement classifies claims against supplied requirement IDs and evidence IDs. An unsupported compliant claim remains unverified.
-11. Energy Flexibility uses supplied tariffs, time windows and capacities; it does not dispatch equipment.
-12. Spare Parts returns eligibility/rejection only; it does not move stock.
-13. OT Assurance is passive evidence comparison; it performs no active scan, connection or controller modification.
-14. Genealogy traverses only CONFIRMED edges. Suspected relationships remain separate.
-15. Shift Handover carries unresolved records; repeated wording is not root-cause proof.
-16. Benchmarking suppresses comparison when metric, units, period or denominator are incompatible.
-
-## Shared services
-
-The shared service module currently provides:
-- Cause-and-effect investigation records with observations, candidate relationships, supporting references and counter-evidence.
-- Risk/barrier screening records with owner and evidence fields; no formal safety approval is issued.
-- Entity and relationship persistence integrated with shoir_digital_thread.py.
-- Decision/action records, approval records and independent outcome verification.
-- Actual benefit records that start unverified; only a different authorized reviewer can add an independent review with evidence.
-- Immutable model-version registration with definition hash, assumptions and expected-versus-actual test comparisons; a different authorized reviewer is required to validate.
-- Operational event records and event timeline state.
-- Evidence retrieval context for the existing Copilot; record IDs are citations, not a generated AI conclusion.
-- Analysis handoff to the existing Industrial Workbook. The service preserves existing workbook sheets, initializes the nine standard engineering tabs only for a new workbook, adds a provenance/hash-labelled result sheet, and persists through the active managed workspace.
-
-The Copilot context service retrieves only records available in the current authorized workspace. It does not invent records, assert a root cause, approve an engineering change, or execute a plant action.
-
-## Digital Thread
-
-The shared Digital Thread vocabulary now includes:
+The new shared services use the existing canonical Digital Thread type vocabulary:
 
 Organization → Facility → ProductionLine → Process → Asset / Equipment → Instrument
 
-It also covers Product, Batch, Material, Supplier, Order, WorkOrder, WorkPackage, Workforce, Document, Dataset, Event, Quality, Maintenance, Energy, Cost, KPI, Model, Experiment, Scenario, Decision, Action, Approval, Evidence, Risk, Control, Project and Outcome.
+The same vocabulary covers Product, Batch, Material, Supplier, Order, WorkOrder, WorkPackage, Workforce, Document, Dataset, Event, Quality, Maintenance, Energy, Cost, KPI, Model, Experiment, Scenario, Decision, Action, Approval, Evidence, Risk, Control, Project and Outcome.
 
-The new service creates stable node identities for saved industrial records and directed edges only between existing entities. CONFIRMED edges require at least one evidence reference; SUSPECTED and PROPOSED remain distinct statuses. Graph links are scoped to the active personal or organization workspace.
+New entities receive stable scoped thread identities. The thread namespace includes organization/personal identity and workspace, avoiding a global collision of the same user-supplied asset ID across tenants. Edges connect only entities registered in the active workspace. CONFIRMED edges require at least one registered evidence record/source reference; SUSPECTED and PROPOSED remain separate. Snapshot retrieval filters graph nodes to the active workspace's registered records/entities/actions/models and includes only edges whose endpoints are both visible.
 
-Existing canonical graph tables and the general Digital Thread remain in place. This feature does not migrate existing customers' rows into a new graph database.
+The suite can connect:
+- industrial entities and evidence records;
+- records to events and actions;
+- actions through approval, implementation and independent verification;
+- model versions to registration and reviewer-validation state;
+- risk/barrier screens and their independent reviews;
+- decision proposals and their independent review records;
+- outcome records and independent benefit review;
+- relevant record nodes and linked Digital Thread edges in Copilot evidence context.
+
+The existing Digital Thread graph remains the canonical UI/data structure. This feature does not introduce an unrelated graph database.
+
+## Existing application integrations
+
+- The existing Industrial Operating System Workbench route composes the established Operating System page and the Industrial Intelligence Suite.
+- The Workbench dispatcher routes the existing module entry to that screen instead of the generic data exchange fallback.
+- The Workbench search recognizes specialist names/aliases/IDs and deep-links to the selected tool; empty search is inert.
+- Tool result export includes a provenance-bearing JSON package and calls the existing shared Excel/PDF/PowerPoint exporter when available.
+- A user can send a tool result into the existing Industrial Workbook. Existing sheets are preserved; a new workbook initializes the established nine tabs; the result becomes a new named sheet with input, result, provenance, source, hashes and a NOT_VERIFIED status.
+- The existing Industrial Control Tower has a permission-checked read-only panel for current-workspace events, open actions and risk screens.
+- The existing AI Copilot retrieves current-workspace evidence for Enterprise-authorized users. Payloads are bounded and credential-like keys are redacted; the prompt instructs the model to cite record IDs, distinguish evidence provenance and not treat a relationship as proof of causation.
+- Existing T001–T100 registry entries and their IDs remain unchanged. The suite uses II-001–II-016 identifiers separately.
 
 ## Industry templates
 
-Five configurable starting templates are provided:
+Five configurable workspace starting templates exist:
+
 - Oil, Gas and Petrochemicals
 - Mining and Minerals
 - Steel, Aluminium and Metals
 - Food and Manufacturing
 - Water and Utilities
 
-Templates provide suggested tools, starter KPIs and configuration warnings. They do not remove tools or change subscription entitlements.
+Each provides focus tools, starter KPIs and an explicit industry warning. Templates do not remove tools or modify subscription entitlements.
 
-## Acceptance tests
+## Acceptance test inventory
 
-tests/test_shoir_industrial_intelligence.py contains deterministic coverage for:
-- Catalogue cardinality, six suites, eight shared service definitions and five industry templates.
-- All 16 independent analysis engines.
-- Mission Control triage and root-cause boundary.
-- Process event timeline, explicit waits, repeated activities and conformance.
-- Engineering-change direct/downstream dependencies.
-- Turnaround feasible/infeasible scheduling.
-- Data conflict detection and original preservation.
-- Asset priority ranking.
-- Yield reconciliation.
+\`tests/test_shoir_industrial_intelligence.py\` currently defines **49 tests**. It includes coverage for:
+
+- 16-tool catalogue cardinality, stable II-001–II-016 IDs and exact/alias search.
+- All 16 deterministic analysis engines and their expected synthetic acceptance cases.
+- Entity vocabulary parity with the existing Digital Thread.
+- Event triage and evidence boundaries.
+- Process mining elapsed time, explicit waits, rework/repeated activities and conformance.
+- Engineering Change dependency traversal.
+- Turnaround feasible/infeasible schedules and global resource non-overlap across multiple skills.
+- Measurement conflicts and original-value retention.
+- Asset priority and dependency outputs.
+- Yield arithmetic and reconciliation.
 - Commissioning fail-closed readiness.
 - Reproducible experiment design.
-- Supplier compliance/deviation classification.
-- Energy scheduling constraints.
-- Spare-part minimum-stock guard.
-- Passive OT configuration difference detection.
+- Supplier claim compliance and missing evidence.
+- Energy capacity/window constraints.
+- Spare-part compatibility and source minimum stock.
+- Passive OT configuration differences.
 - Confirmed genealogy traversal.
 - Shift handover acknowledgement.
 - Benchmark comparability.
-- Input/provenance validation.
-- Workspace persistence failure behavior.
-- Personal workspace separation and organization viewer restriction.
-- Evidence-backed Digital Thread relationships.
-- Action independent approval and verification.
-- Actual model test comparison and independent model review.
-- Benefit independent review.
-- Cause-effect uncertainty and Copilot evidence citation context.
+- Provenance/source metadata validation.
+- Persistence failure behaviour.
+- Personal/organization scope and Viewer restrictions.
+- Organization-switch isolation and no cross-tenant payload copying.
+- Evidence-backed Digital Thread relationship creation.
+- Event → entity → action → approval → implementation → independent verification.
+- Action state transition enforcement and closure after verification.
+- Decision proposal/option validation and independent review.
+- Risk/barrier independent review.
+- Actual benefit independent review.
+- Model expected-versus-actual tests and evidence-backed independent validation.
+- Cause/effect candidate and independent review.
+- Copilot evidence citations, redaction, Digital Thread links and cross-organization denial.
+- Workbook sheet handoff and preservation of standard/existing tabs.
+- Workbench routing and empty-search behavior.
+- Existing Copilot evidence-context integration.
 
-Recommended commands:
-- pytest -q tests/test_shoir_industrial_intelligence.py
-- pytest -q tests/test_shoir_digital_thread.py
-- python -m compileall -q .
+The existing Digital Thread test file contains its separate regression tests. These acceptance definitions are committed, but **they are not a passing test report until the exact-head CI runner finishes successfully**.
 
-The tests use synthetic fixtures and mocked managed persistence. Passing them is evidence of deterministic engine and service behavior only. It does not replace staging browser journeys, live Supabase RLS/Edge Function verification, real customer data reconciliation, OT security approval, independent engineering review, Arabic/RTL testing or the full production release checklist.
+## Verification still required
 
-## Known further verification work
+Before marking these features VERIFIED:
 
-Before any new-tool status can be changed to VERIFIED:
-1. Run the full exact-head CI suite and fix every failure.
-2. Exercise all 16 routes through authenticated browser sessions.
-3. Exercise organization-scoped persistence through the real staging Edge Function with disposable Owner/Admin/Engineer/Approver/Viewer accounts.
-4. Prove cross-organization read/write/approval denial with distinct organizations.
-5. Test page refresh, logout/login, reload and revision-conflict flows.
-6. Test exports and workbook linkage for each relevant tool.
-7. Test Arabic/RTL and 1440/768/390-pixel responsive layouts.
-8. Complete independent engineering review of calculations and plant-specific constraints.
-9. Keep external integration states blocked until approved endpoints, credentials, certificates, tests and customer authorization exist.
-10. Preserve BETA and production NO-GO until existing release gates are independently satisfied.
+1. Run and pass all PR checks on the exact branch head; fix all new failures and classify historical failures.
+2. Exercise all 16 real Workbench tool launches using authenticated browser sessions.
+3. Test Owner, Admin, Engineer, Approver and Viewer using disposable staging users.
+4. Prove read/write/approval denial across two distinct staging organizations using the actual Edge Function/RLS path.
+5. Verify reload, logout/login, workspace switch, optimistic revision conflict and managed persistence on staging.
+6. Exercise workbook handoff and JSON/Excel/PDF/PowerPoint export in the deployed UI.
+7. Verify the real Copilot provider path with a disposable test workspace and confirm only authorized, redacted evidence is sent.
+8. Perform responsive browser tests at 1440, 768 and 390 pixels, and Arabic/RTL tests.
+9. Independently review all engineering calculations and plant-specific operating/safety constraints.
+10. Keep SAP/Oracle/REST/OT integrations BLOCKED until actual endpoints, credentials, certificates, allowlists, customer authorization and security tests exist.
+11. Complete all existing Shoir-IE release gates independently. Production remains NO-GO and BETA remains in force until those are satisfied.
+
+## Current delivery labels
+
+Use these labels precisely:
+
+- IMPLEMENTED — VALIDATION PENDING: code and tests are committed on the candidate branch, but CI/browser/staging evidence is incomplete.
+- VALIDATED IN CI: exact-head required checks have finished successfully.
+- VALIDATED IN STAGING: authenticated staging journeys, real managed persistence and tenant/RBAC matrix have passed with disposable accounts.
+- INDEPENDENTLY VERIFIED: an independent reviewer has inspected the required engineering/security evidence.
+- PRODUCTION READY: all existing production release gates are independently satisfied and cutover is explicitly authorized.
+
+No tool or shared capability should be labelled VERIFIED merely because its name exists in the Workbench or its test has been authored.
