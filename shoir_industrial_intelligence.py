@@ -972,6 +972,14 @@ def create_record(
     access = _session_authorize(username, tier, "write")
     provenance_value = _provenance(provenance)
     body = _json_safe(payload)
+    safe_source_ref = str(source_ref or "").strip()[:500]
+    source_timestamp = str(body.get("source_timestamp") or "").strip()
+    if provenance_value in {"LIVE", "IMPORTED", "STALE"} and not safe_source_ref:
+        raise IndustrialIntelligenceError(f"{provenance_value} records require a source reference.")
+    if provenance_value in {"LIVE", "STALE"} and not source_timestamp:
+        raise IndustrialIntelligenceError(f"{provenance_value} records require an explicit source timestamp.")
+    if source_timestamp:
+        _iso_timestamp(source_timestamp, "source_timestamp")
     encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(encoded) > MAX_RECORD_BYTES:
         raise IndustrialIntelligenceError(f"Record payload exceeds {MAX_RECORD_BYTES} bytes.")
@@ -985,8 +993,8 @@ def create_record(
         "payload_hash": hashlib.sha256(encoded).hexdigest(),
         "provenance": provenance_value,
         "provenance_limit": PROVENANCE_RELIABILITY[provenance_value],
-        "source_ref": str(source_ref or "").strip()[:500] or None,
-        "source_timestamp": str(body.get("source_timestamp") or "").strip() or None,
+        "source_ref": safe_source_ref or None,
+        "source_timestamp": source_timestamp or None,
         "entity_id": str(entity_id or "").strip()[:160] or None,
         "organization_id": access["organization_id"],
         "workspace_id": access["workspace_id"],
@@ -1166,9 +1174,13 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     allowed = {"PROPOSED", "PENDING_APPROVAL", "APPROVED", "IN_PROGRESS", "IMPLEMENTED", "CLOSED", "VERIFIED", "BLOCKED"}
     if target not in allowed:
         raise IndustrialIntelligenceError(f"Unsupported action status: {target}.")
+    if target == "APPROVED":
+        raise PermissionError("Use approve_action so the authenticated approver, role and audit record are enforced.")
     if target in {"IN_PROGRESS", "IMPLEMENTED"} and action.get("status") not in {"APPROVED", "IN_PROGRESS"}:
         raise PermissionError("An action must have the required independent approvals before implementation.")
     if target == "VERIFIED":
+        if action.get("status") != "IMPLEMENTED":
+            raise PermissionError("An action must be recorded as IMPLEMENTED before independent verification.")
         refs = [_required_text(item, "verification evidence reference", 240) for item in verification_evidence]
         if not refs or not str(actual_result or "").strip():
             raise IndustrialIntelligenceError("Verified closure requires an actual result and verification evidence.")
@@ -1243,11 +1255,21 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
     models = list(_state_list("models"))
     if any(row.get("name") == model_id and row.get("version") == version_id for row in models):
         raise IndustrialIntelligenceError("Model version is immutable and already exists.")
+    if not isinstance(test_cases, Sequence) or isinstance(test_cases, (str, bytes)):
+        raise IndustrialIntelligenceError("Model test_cases must be a sequence of test-case objects.")
     tests = []
     for index, case in enumerate(test_cases, start=1):
         if not isinstance(case, Mapping):
             raise IndustrialIntelligenceError(f"Model test case {index} must be an object.")
-        tests.append({"test_id": _required_text(case.get("test_id"), f"model test {index} test_id"), "expected": _json_safe(case.get("expected")), "actual": _json_safe(case.get("actual")), "passed": bool(case.get("passed", False)), "evidence_id": str(case.get("evidence_id") or "").strip() or None})
+        if "expected" not in case or "actual" not in case:
+            raise IndustrialIntelligenceError(f"Model test case {index} must include expected and actual values.")
+        expected = _json_safe(case.get("expected"))
+        actual = _json_safe(case.get("actual"))
+        if isinstance(expected, (int, float)) and not isinstance(expected, bool) and isinstance(actual, (int, float)) and not isinstance(actual, bool):
+            passed = math.isclose(float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-9)
+        else:
+            passed = expected == actual
+        tests.append({"test_id": _required_text(case.get("test_id"), f"model test {index} test_id"), "expected": expected, "actual": actual, "passed": bool(passed), "evidence_id": str(case.get("evidence_id") or "").strip() or None})
     record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": _hash_payload(definition), "assumptions": [_required_text(item, "model assumption", 500) for item in assumptions], "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
     models.append(record)
     _save_state_list(username, tier, "models", models)
