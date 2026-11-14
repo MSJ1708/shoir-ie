@@ -1516,13 +1516,14 @@ def test_resource_intelligence_ui_declared_tabs_and_indexes_are_consistent():
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "tabs":
             if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
                 tab_indexes.append(node.slice.value)
-    assert tabs_count == 16
+    assert tabs_count == 17
     assert tab_indexes
     assert max(tab_indexes) < tabs_count
     assert '"Environmental Impact"' in source
     assert '"Investment Prioritization"' in source
     assert '"Model Assurance"' in source
     assert '"Reports"' in source
+    assert '"Cluster Twin"' in source
 
 
 def test_combined_network_scenario_applies_supply_demand_and_cost_shocks_together():
@@ -2203,10 +2204,16 @@ def test_cluster_twin_hides_routes_when_any_party_has_not_shared():
     payload = _cluster_twin_fixture()
     payload["supplies"][0]["disclosure_scope"] = "PRIVATE"
     payload["supplies"][0].pop("sharing_approval_reference")
+    payload["dependency_edges"] = [{
+        "source_node_id": "supply:SUP-A1",
+        "target_node_id": "demand:DEM-B1",
+        "relationship": "USES",
+    }]
     result = build_industrial_cluster_twin(payload)
     assert result["cross_company_match_candidates"] == []
     assert result["cross_company_shared_offers"] == []
-    assert result["rejected_or_hidden_routes"][0]["status"] == "NOT_SHARED_BY_ALL_PARTICIPANTS"
+    assert result["rejected_or_hidden_routes"] == []
+    assert result["dependency_edges"] == []
 
 
 def test_cluster_twin_blocks_stale_or_expired_supply_and_does_not_guess_availability():
@@ -2227,6 +2234,7 @@ def test_cluster_twin_surfaces_active_overcommitment_without_silently_rewriting_
         "commitment_id": "EX-1", "supply_id": "SUP-A1", "demand_id": "DEM-B1",
         "quantity": 70, "unit": "m3/day", "status": "ACTIVE",
         "approval_reference": "APPROVAL-REF-1", "valid_from": "2026-01-01T00:00:00Z",
+        "disclosure_scope": "SHARED_WITH_CLUSTER", "sharing_approval_reference": "EXCHANGE-SHARE-1",
     }]
     result = build_industrial_cluster_twin(payload)
     assert result["summary"]["overcommitment_count"] == 1
