@@ -675,6 +675,87 @@ def _yield_intelligence(payload: Mapping[str, Any]) -> dict[str, Any]:
     if first_pass + rework + scrap > incoming + 1e-9:
         raise IndustrialIntelligenceError("First-pass good + rework recovered + scrap cannot exceed input_units.")
     final_good = first_pass + rework
+    batch_variability = None
+    batches = payload.get("batches")
+    if batches is not None:
+        if not isinstance(batches, list) or len(batches) < 2:
+            raise IndustrialIntelligenceError("Batch variability analysis requires at least two batch records.")
+        batch_rows = []
+        for index, batch in enumerate(batches, start=1):
+            if not isinstance(batch, Mapping):
+                raise IndustrialIntelligenceError(f"Batch {index} must be an object.")
+            batch_input = _finite(batch.get("input_units"), f"batch {index} input_units", minimum=0.000001)
+            batch_first = _finite(batch.get("first_pass_good_units"), f"batch {index} first_pass_good_units", minimum=0)
+            batch_rework = _finite(batch.get("rework_recovered_units", 0), f"batch {index} rework_recovered_units", minimum=0)
+            batch_scrap = _finite(batch.get("scrap_units", 0), f"batch {index} scrap_units", minimum=0)
+            if batch_first + batch_rework + batch_scrap > batch_input + 1e-9:
+                raise IndustrialIntelligenceError(f"Batch {index} good + rework + scrap cannot exceed its input.")
+            batch_final = (batch_first + batch_rework) / batch_input * 100.0
+            batch_rows.append({
+                "batch_id": _required_text(batch.get("batch_id"), f"batch {index} batch_id", 120),
+                "input_units": batch_input,
+                "first_pass_yield_pct": batch_first / batch_input * 100.0,
+                "final_yield_pct": batch_final,
+                "scrap_rate_pct": batch_scrap / batch_input * 100.0,
+                "rework_rate_pct": batch_rework / batch_input * 100.0,
+                "unaccounted_units": batch_input - batch_first - batch_rework - batch_scrap,
+                "machine_id": str(batch.get("machine_id") or "").strip() or None,
+                "material_lot": str(batch.get("material_lot") or "").strip() or None,
+                "supplier_id": str(batch.get("supplier_id") or "").strip() or None,
+                "process_route": str(batch.get("process_route") or "").strip() or None,
+            })
+        final_yields = [row["final_yield_pct"] for row in batch_rows]
+        mean_yield = float(pd.Series(final_yields).mean())
+        standard_deviation = float(pd.Series(final_yields).std(ddof=1))
+        sorted_yields = sorted(final_yields)
+        quartiles = pd.Series(sorted_yields).quantile([0.25, 0.75], interpolation="linear")
+        q1, q3 = float(quartiles.loc[0.25]), float(quartiles.loc[0.75])
+        iqr = q3 - q1
+        outliers = []
+        if iqr > 0:
+            low_fence, high_fence = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            outliers = [
+                {"batch_id": row["batch_id"], "final_yield_pct": row["final_yield_pct"], "classification": "BATCH_YIELD_OUTLIER_CANDIDATE"}
+                for row in batch_rows if row["final_yield_pct"] < low_fence or row["final_yield_pct"] > high_fence
+            ]
+        grouping = {}
+        for field in ("machine_id", "material_lot", "supplier_id", "process_route"):
+            groups = defaultdict(list)
+            for row in batch_rows:
+                if row[field]:
+                    groups[row[field]].append(row["final_yield_pct"])
+            grouping[field] = [
+                {
+                    "group": key,
+                    "batch_count": len(values),
+                    "mean_final_yield_pct": float(pd.Series(values).mean()),
+                    "sample_standard_deviation_pct_points": float(pd.Series(values).std(ddof=1)) if len(values) > 1 else None,
+                }
+                for key, values in sorted(groups.items())
+            ]
+        lower_spec = payload.get("final_yield_lower_spec_pct")
+        upper_spec = payload.get("final_yield_upper_spec_pct")
+        spec_flags = []
+        if lower_spec is not None:
+            lower = _finite(lower_spec, "final_yield_lower_spec_pct", minimum=0, maximum=100)
+            spec_flags.extend({"batch_id": row["batch_id"], "final_yield_pct": row["final_yield_pct"], "specification": "BELOW_LOWER_LIMIT", "limit_pct": lower} for row in batch_rows if row["final_yield_pct"] < lower)
+        if upper_spec is not None:
+            upper = _finite(upper_spec, "final_yield_upper_spec_pct", minimum=0, maximum=100)
+            spec_flags.extend({"batch_id": row["batch_id"], "final_yield_pct": row["final_yield_pct"], "specification": "ABOVE_UPPER_LIMIT", "limit_pct": upper} for row in batch_rows if row["final_yield_pct"] > upper)
+        batch_variability = {
+            "batch_count": len(batch_rows),
+            "batches": batch_rows,
+            "mean_final_yield_pct": mean_yield,
+            "sample_standard_deviation_pct_points": standard_deviation,
+            "minimum_final_yield_pct": min(final_yields),
+            "maximum_final_yield_pct": max(final_yields),
+            "range_pct_points": max(final_yields) - min(final_yields),
+            "coefficient_of_variation_pct": standard_deviation / abs(mean_yield) * 100.0 if mean_yield else None,
+            "outlier_candidates": outliers,
+            "specification_flags": spec_flags,
+            "grouped_variation": grouping,
+            "limitations": ["Batch comparisons require consistent product, measurement and batch boundaries.", "Machine/material/supplier group differences are descriptive associations, not causal attribution.", "Capability indices and distributional claims are not produced from this simple batch summary."],
+        }
     return {
         "status": "YIELD_CALCULATED",
         "input_units": incoming,
@@ -687,6 +768,7 @@ def _yield_intelligence(payload: Mapping[str, Any]) -> dict[str, Any]:
         "rework_rate_pct": rework / incoming * 100.0,
         "scrap_rate_pct": scrap / incoming * 100.0,
         "unaccounted_units": incoming - first_pass - rework - scrap,
+        "batch_variability": batch_variability,
         "limitations": ["All quantities must use the same batch boundary and unit.", "No process cause is confirmed from yield arithmetic alone."],
     }
 
