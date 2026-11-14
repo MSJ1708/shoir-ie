@@ -497,7 +497,15 @@ def test_model_validation_uses_actual_expected_values_and_independent_reviewer(m
             }]
         },
     )
-    validated = ii.validate_model_version("synthetic-model-approver", "Enterprise", good["model_id"])
+    model_review_evidence = ii.create_record(
+        "synthetic-model-approver", "Enterprise", "evidence",
+        "Independent model regression evidence", {"test_result": "synthetic pass"},
+        provenance="SYNTHETIC",
+    )
+    validated = ii.validate_model_version(
+        "synthetic-model-approver", "Enterprise", good["model_id"],
+        [model_review_evidence["record_id"]], "Independent golden-case review passed.",
+    )
     assert validated["status"] == "VALIDATED_BY_REVIEWER"
 
 
@@ -553,13 +561,18 @@ def test_event_to_action_to_approval_to_verified_outcome_stays_linked(monkeypatc
 
 def test_actual_benefit_requires_independent_reviewer_and_evidence(monkeypatch):
     session = _configure_org_session(monkeypatch, "synthetic-benefit-author", "owner")
+    actual_evidence = ii.create_record(
+        "synthetic-benefit-author", "Enterprise", "evidence",
+        "Actual meter readings", {"period": "synthetic baseline comparison"},
+        provenance="SYNTHETIC",
+    )
     record = ii.record_benefit(
         "synthetic-benefit-author", "Enterprise", "Pump efficiency project",
-        "kWh per m3", 1.2, 1.1, "kWh/m3", ["SYNTHETIC:actual-meter-data"],
+        "kWh per m3", 1.2, 1.1, "kWh/m3", [actual_evidence["record_id"]],
     )
     assert record["payload"]["benefit_status"] == "ACTUAL_RECORDED_UNVERIFIED"
     with pytest.raises(PermissionError, match="cannot independently verify"):
-        ii.verify_benefit_record("synthetic-benefit-author", "Enterprise", record["record_id"], ["SYNTHETIC:actual-meter-data"])
+        ii.verify_benefit_record("synthetic-benefit-author", "Enterprise", record["record_id"], [actual_evidence["record_id"]])
     session["current_user"] = "synthetic-benefit-approver"
     monkeypatch.setattr(
         __import__("durable_account_store"),
