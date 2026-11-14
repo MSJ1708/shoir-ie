@@ -333,15 +333,21 @@ def _turnaround(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise IndustrialIntelligenceError("Turnaround requires a non-empty tasks list.")
     if not isinstance(resources, list) or not resources:
         raise IndustrialIntelligenceError("Turnaround requires explicit qualified resources.")
-    resource_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for resource in resources:
+    resource_map: dict[str, list[str]] = defaultdict(list)
+    resource_state: dict[str, dict[str, Any]] = {}
+    for index, resource in enumerate(resources, start=1):
         if not isinstance(resource, Mapping):
             raise IndustrialIntelligenceError("Each resource must be an object.")
+        resource_id = _required_text(resource.get("id"), f"resource {index} id")
+        if resource_id in resource_state:
+            raise IndustrialIntelligenceError(f"Duplicate resource ID: {resource_id}.")
         skills = resource.get("skills", [])
         if not isinstance(skills, list) or not skills:
             raise IndustrialIntelligenceError("Each resource must have at least one qualified skill.")
-        for skill in skills:
-            resource_map[str(skill).casefold()].append({"id": _required_text(resource.get("id"), "resource id"), "available_at": 0.0})
+        normalized_skills = {_required_text(skill, f"resource {resource_id} skill", 100).casefold() for skill in skills}
+        resource_state[resource_id] = {"available_at": _finite(resource.get("available_from_hour", 0), f"resource {resource_id} available_from_hour", minimum=0), "skills": normalized_skills}
+        for skill in normalized_skills:
+            resource_map[skill].append(resource_id)
     by_id = {}
     for index, task in enumerate(tasks, start=1):
         if not isinstance(task, Mapping):
@@ -402,11 +408,12 @@ def _turnaround(payload: Mapping[str, Any]) -> dict[str, Any]:
             unscheduled.append({"task_id": task_id, "reason": "A prerequisite task is not schedulable.", "blocked_dependencies": blocked_dependencies})
             continue
         dependency_finish = max((result_by_id[str(dep)]["finish_hour"] for dep in task.get("dependencies", [])), default=0.0)
-        resource = min(options, key=lambda item: (max(item["available_at"], dependency_finish), item["id"]))
+        resource_id = min(options, key=lambda rid: (max(resource_state[rid]["available_at"], dependency_finish), rid))
+        resource = resource_state[resource_id]
         start = max(resource["available_at"], dependency_finish, _finite(task.get("earliest_start_hour", 0), f"Task {task_id} earliest_start_hour", minimum=0))
         finish = start + duration
         resource["available_at"] = finish
-        row = {"task_id": task_id, "resource_id": resource["id"], "start_hour": start, "finish_hour": finish, "duration_hours": duration, "status": "SCHEDULED"}
+        row = {"task_id": task_id, "resource_id": resource_id, "start_hour": start, "finish_hour": finish, "duration_hours": duration, "status": "SCHEDULED"}
         scheduled.append(row)
         result_by_id[task_id] = row
     makespan = max((row["finish_hour"] for row in scheduled), default=0.0)
@@ -952,11 +959,32 @@ def _state_list(key: str) -> list[dict[str, Any]]:
 
 
 def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, Any]], action: str = "write") -> None:
-    _session_authorize(username, tier, action)
+    access = _session_authorize(username, tier, action)
     if len(rows) > MAX_RECORDS:
         raise IndustrialIntelligenceError(f"{key} exceeds the {MAX_RECORDS} record limit.")
-    snapshot = copy.deepcopy(st.session_state.get(STATE_PREFIX + key, []))
-    st.session_state[STATE_PREFIX + key] = rows
+    storage_key = STATE_PREFIX + key
+    snapshot = copy.deepcopy(st.session_state.get(storage_key, []))
+    if not isinstance(snapshot, list):
+        snapshot = []
+    actor_fields = ("created_by", "owner", "actor", "reviewer")
+    def belongs_to_active_scope(item: Any) -> bool:
+        if not isinstance(item, Mapping):
+            return False
+        if access["scope"] == "ORGANIZATION":
+            return (
+                str(item.get("organization_id") or "") == str(access["organization_id"])
+                and str(item.get("workspace_id") or "") == str(access["workspace_id"])
+            )
+        return (
+            item.get("organization_id") is None
+            and str(item.get("workspace_id") or "") == str(access["workspace_id"])
+            and any(str(item.get(field) or "").casefold() == access["actor"].casefold() for field in actor_fields)
+        )
+    retained = [item for item in snapshot if not belongs_to_active_scope(item)]
+    merged = retained + copy.deepcopy(rows)
+    if len(merged) > MAX_RECORDS:
+        raise IndustrialIntelligenceError(f"{key} exceeds the {MAX_RECORDS} retained-record limit.")
+    st.session_state[storage_key] = merged
     try:
         from workspace_persistence import save_user_workspace
         saved = save_user_workspace(username, st.session_state)
@@ -967,7 +995,7 @@ def _save_state_list(username: str, tier: str, key: str, rows: list[dict[str, An
             scoped_rows = _state_list(key)
             st.session_state[visual_key] = pd.DataFrame(copy.deepcopy(scoped_rows))
     except Exception:
-        st.session_state[STATE_PREFIX + key] = snapshot
+        st.session_state[storage_key] = snapshot
         raise
 
 
