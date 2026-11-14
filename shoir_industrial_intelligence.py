@@ -2450,6 +2450,67 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
             except Exception as exc:
                 ui.error(f"Industrial Workbook handoff was not confirmed: {exc}")
 
+    if selected_id == "shift-handover":
+        ui.divider()
+        ui.markdown("### Persistent shift handover register")
+        ui.caption("Create a durable handover in the active organization workspace. Incoming acknowledgement is recorded separately and does not close the issue.")
+        sample_handover = _sample_input("shift-handover")
+        h1, h2 = ui.columns(2)
+        outgoing_shift = h1.text_input("Outgoing shift", value=str(sample_handover.get("outgoing_shift") or ""), key="shoir_ii_handover_outgoing")
+        incoming_shift = h2.text_input("Incoming shift", value=str(sample_handover.get("incoming_shift") or ""), key="shoir_ii_handover_incoming")
+        incoming_owner = ui.text_input("Incoming shift owner username (optional)", key="shoir_ii_handover_owner")
+        handover_issues_json = ui.text_area(
+            "Outstanding issues JSON",
+            value=json.dumps(sample_handover.get("issues", []), ensure_ascii=False, indent=2),
+            height=160,
+            key="shoir_ii_handover_issues",
+        )
+        if ui.button("Save persistent shift handover", key="shoir_ii_handover_create"):
+            try:
+                issue_rows = json.loads(handover_issues_json)
+                if not isinstance(issue_rows, list):
+                    raise IndustrialIntelligenceError("Handover issues must be a JSON list.")
+                handover = record_shift_handover(
+                    username, tier, outgoing_shift, incoming_shift, issue_rows,
+                    incoming_shift_owner=incoming_owner,
+                    provenance=provenance if isinstance(last, dict) and last.get("tool_id") == selected_id else "MANUAL",
+                    source_ref=source_ref if isinstance(last, dict) and last.get("tool_id") == selected_id else "",
+                )
+                ui.success(f"Persistent handover saved: {handover['record_id']}.")
+            except Exception as exc:
+                ui.error(f"Shift handover was not saved: {exc}")
+        handovers = [item for item in _state_list("records") if item.get("record_type") == "shift_handover"]
+        if handovers:
+            selected_handover_id = ui.selectbox(
+                "Handover to acknowledge",
+                [item["record_id"] for item in handovers],
+                format_func=lambda value: next(f"{item.get('name')} · {value}" for item in handovers if item.get("record_id") == value),
+                key="shoir_ii_handover_selected",
+            )
+            handover_state = shift_handover_status(username, tier, selected_handover_id)
+            ui.metric("Issues requiring acknowledgement", handover_state["pending_acknowledgement_count"])
+            ui.dataframe(pd.DataFrame(handover_state["issues"]), use_container_width=True, hide_index=True)
+            pending_issues = [item for item in handover_state["issues"] if item["acknowledgement_status"] != "ACKNOWLEDGED" and not item["issue_closed"]]
+            if pending_issues:
+                issue_to_ack = ui.selectbox(
+                    "Issue to acknowledge",
+                    [item["issue_id"] for item in pending_issues],
+                    key="shoir_ii_handover_ack_issue",
+                )
+                ack_comment = ui.text_input("Incoming shift acknowledgement comment", key="shoir_ii_handover_ack_comment")
+                ack_evidence = ui.text_input("Registered acknowledgement evidence IDs (optional)", key="shoir_ii_handover_ack_evidence")
+                if ui.button("Acknowledge carried-forward issue", key="shoir_ii_handover_ack_submit"):
+                    try:
+                        ack = acknowledge_shift_handover(
+                            username, tier, selected_handover_id, issue_to_ack, ack_comment,
+                            [item.strip() for item in ack_evidence.split(",") if item.strip()],
+                        )
+                        ui.success(f"Issue acknowledgement saved: {ack['record_id']}. The issue remains open until separately verified and closed.")
+                    except Exception as exc:
+                        ui.error(f"Issue acknowledgement was not saved: {exc}")
+            else:
+                ui.info("All open handover issues have an incoming-shift acknowledgement. This does not mark those issues resolved.")
+
     ui.divider()
     workspace_tabs = ui.tabs(["Digital Thread and Evidence", "Decisions, Actions and Approvals", "Model Registry and Benefits", "Industry Templates and Copilot"])
     with workspace_tabs[0]:
