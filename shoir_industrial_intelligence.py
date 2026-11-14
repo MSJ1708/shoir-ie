@@ -1804,12 +1804,22 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
             render_exports(definition["name"], output_tables, [], tier, username)
         except Exception as exc:
             ui.warning(f"Shared Excel/PDF/PowerPoint export is not available for this result: {exc}")
-        if ui.button("Save analysis and add it to the Digital Thread", key=f"shoir_ii_save_{selected_id}"):
+        save_col, workbook_col = ui.columns(2)
+        if save_col.button("Save analysis and add it to the Digital Thread", key=f"shoir_ii_save_{selected_id}"):
             try:
                 saved = create_record(username, tier, "tool_analysis", definition["name"], {"tool_id": selected_id, "input": last["input"], "result": last["result"], "thread_node_type": THREAD_NODE_TYPES[selected_id]}, provenance=last["provenance"], source_ref=last.get("source_ref") or "")
                 ui.success(f"Saved record {saved['record_id']} and created its Digital Thread node.")
             except Exception as exc:
                 ui.error(f"Record was not confirmed saved: {exc}")
+        if workbook_col.button("Send result to Industrial Workbook", key=f"shoir_ii_workbook_{selected_id}"):
+            try:
+                handoff = send_analysis_to_workbook(
+                    username, tier, selected_id, last["input"], last["result"],
+                    last["provenance"], last.get("source_ref") or "",
+                )
+                ui.success(f"Added {handoff['workbook_sheet']} to the Industrial Workbook and saved record {handoff['record_id']}. Existing sheets were preserved.")
+            except Exception as exc:
+                ui.error(f"Industrial Workbook handoff was not confirmed: {exc}")
 
     ui.divider()
     workspace_tabs = ui.tabs(["Digital Thread and Evidence", "Decisions, Actions and Approvals", "Model Registry and Benefits", "Industry Templates and Copilot"])
