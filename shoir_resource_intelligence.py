@@ -1030,10 +1030,15 @@ def optimize_production_maintenance_aware_resource_network(
                     "asset_id": plan["asset_id"],
                     "period_id": plan["period_id"],
                     "planned_quantity": plan["planned_quantity"],
+                    "maximum_quantity_before_maintenance": plan["maximum_quantity_before_maintenance"],
                     "production_capacity_after_maintenance": 0.0,
-                    "maintenance_curtailed_quantity": plan["planned_quantity"],
+                    "rate_curtailed_quantity": max(
+                        0.0, plan["planned_quantity"] - plan["maximum_quantity_before_maintenance"]
+                    ),
+                    "maintenance_curtailed_quantity": plan["maintenance_curtailed_quantity"],
                     "resource_supported_production_quantity": 0.0,
                     "resource_curtailed_quantity": 0.0,
+                    "total_curtailed_quantity_vs_plan": plan["planned_quantity"],
                     "production_unit": plan["production_unit"],
                 }
                 for plan_id, plan in plan_capacity.items()
@@ -1059,9 +1064,10 @@ def optimize_production_maintenance_aware_resource_network(
     served_by_requirement: dict[str, float] = {}
     for allocation in period_result.get("allocations", []):
         requirement_id = str(allocation.get("demand_id") or "")
+        # The shared transportation solver's canonical allocation field is "quantity".
         served_by_requirement[requirement_id] = (
             served_by_requirement.get(requirement_id, 0.0)
-            + float(allocation.get("allocated_quantity") or 0.0)
+            + float(allocation.get("quantity") or 0.0)
         )
 
     production_summaries = []
