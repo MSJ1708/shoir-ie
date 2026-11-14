@@ -2154,6 +2154,65 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
             ui.info(f"No Digital Thread graph is available yet: {exc}")
 
     with workspace_tabs[1]:
+        ui.markdown("#### Decision proposal and independent review")
+        decision_title = ui.text_input("Decision title", key="shoir_ii_decision_title")
+        decision_context = ui.text_area("Decision context / problem statement", key="shoir_ii_decision_context")
+        decision_options_json = ui.text_area(
+            "Decision options JSON (minimum two options)",
+            value='[{"option_id":"A","label":"Option A","description":"Synthetic option A"},{"option_id":"B","label":"Option B","description":"Synthetic option B"}]',
+            key="shoir_ii_decision_options",
+        )
+        decision_option_ids = ["A", "B"]
+        try:
+            decision_option_rows = json.loads(decision_options_json)
+            if isinstance(decision_option_rows, list) and decision_option_rows:
+                decision_option_ids = [str(item.get("option_id")) for item in decision_option_rows if isinstance(item, Mapping) and item.get("option_id")]
+        except Exception:
+            decision_option_rows = []
+        recommended_option = ui.selectbox("Recommended option", decision_option_ids, key="shoir_ii_decision_recommended")
+        decision_rationale = ui.text_area("Decision rationale and trade-offs", key="shoir_ii_decision_rationale")
+        decision_evidence = ui.text_input("Registered evidence record IDs / source references", key="shoir_ii_decision_evidence")
+        if ui.button("Submit decision for independent review", key="shoir_ii_decision_create"):
+            try:
+                options_value = json.loads(decision_options_json)
+                if not isinstance(options_value, list):
+                    raise IndustrialIntelligenceError("Decision options must be a JSON list.")
+                proposed = create_decision(
+                    username, tier, decision_title, decision_context, options_value,
+                    recommended_option, decision_rationale,
+                    [item.strip() for item in decision_evidence.split(",") if item.strip()],
+                )
+                ui.success(f"Decision proposal {proposed['record_id']} saved as PENDING_INDEPENDENT_REVIEW.")
+            except Exception as exc:
+                ui.error(f"Decision proposal was not saved: {exc}")
+        decision_records = [item for item in _state_list("records") if item.get("record_type") == "industrial_decision"]
+        reviewed_decision_ids = {
+            item.get("payload", {}).get("decision_record_id")
+            for item in _state_list("records") if item.get("record_type") == "decision_review"
+        }
+        pending_decisions = [item for item in decision_records if item.get("record_id") not in reviewed_decision_ids]
+        if pending_decisions:
+            selected_decision = ui.selectbox("Decision awaiting review", [item["record_id"] for item in pending_decisions], key="shoir_ii_decision_review_record")
+            review_decision_status = ui.selectbox("Independent decision", ["APPROVED", "REJECTED"], key="shoir_ii_decision_review_status")
+            decision_review_evidence = ui.text_input("Registered independent review evidence ID(s)", key="shoir_ii_decision_review_evidence")
+            decision_review_comment = ui.text_input("Review comment", key="shoir_ii_decision_review_comment")
+            if ui.button("Record independent decision review", key="shoir_ii_decision_review_submit"):
+                try:
+                    reviewed = review_decision(
+                        username, tier, selected_decision, review_decision_status,
+                        [item.strip() for item in decision_review_evidence.split(",") if item.strip()],
+                        decision_review_comment,
+                    )
+                    ui.success(f"Decision {reviewed['decision_record_id']} independently reviewed: {reviewed['status']}.")
+                except Exception as exc:
+                    ui.error(f"Decision review was not recorded: {exc}")
+        if decision_records:
+            ui.dataframe(pd.DataFrame([
+                {"Decision ID": item.get("record_id"), "Title": item.get("name"), "Author": item.get("created_by"), "Recommended option": item.get("payload", {}).get("recommended_option_id"), "Review state": "REVIEWED" if item.get("record_id") in reviewed_decision_ids else "PENDING"}
+                for item in decision_records
+            ]), use_container_width=True, hide_index=True)
+
+        ui.divider()
         ui.markdown("#### Create an accountable action")
         c1, c2 = ui.columns(2)
         with c1:
@@ -2278,7 +2337,7 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
         baseline = b1.number_input("Baseline", value=0.0, key="shoir_ii_benefit_baseline")
         actual_value = b2.number_input("Actual", value=0.0, key="shoir_ii_benefit_actual")
         benefit_unit = b3.text_input("Unit", key="shoir_ii_benefit_unit")
-        benefit_refs = ui.text_input("Actual evidence references", key="shoir_ii_benefit_refs")
+        benefit_refs = ui.text_input("Registered actual evidence record IDs / source references", key="shoir_ii_benefit_refs")
         if ui.button("Record actual benefit (unverified until reviewed)", key="shoir_ii_benefit_save"):
             try:
                 benefit = record_benefit(username, tier, benefit_project, benefit_metric, baseline, actual_value, benefit_unit, [item.strip() for item in benefit_refs.split(",") if item.strip()])
