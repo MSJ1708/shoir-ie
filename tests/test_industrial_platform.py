@@ -552,3 +552,49 @@ def test_local_dataset_registration_initializes_missing_sqlite_schema(tmp_path, 
     assert row[0] == dataset_id
     assert row[1:5] == ("Production", "production.csv", 2, 2)
     assert len(row[5]) == 64
+
+
+def test_staging_dataset_registration_uses_active_organization_workspace_scope(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    captured = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: captured.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 1,
+                "data_hash": kwargs["data_hash"],
+                "version_fingerprint": kwargs["version_fingerprint"],
+                "created_new_version": False,
+            },
+        },
+    )
+    state = {
+        "authenticated": True,
+        "current_user": "synthetic-owner",
+        "user_tier": "Enterprise",
+        "shoir_active_organization_workspace": {
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+            "organization_workspace_id": "00000000-0000-4000-8000-000000000002",
+        },
+    }
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    dataset_id = platform.register_dataset(
+        "Production", "production.csv",
+        pd.DataFrame({"asset_id": ["A-1"], "units": [10]}),
+        username="synthetic-owner", workspace="plant-a", token="session-token",
+    )
+    assert captured[0]["organization_id"].endswith("0001")
+    assert captured[0]["organization_workspace_id"].endswith("0002")
+    dependency = state["shoir_active_dataset_dependency"]
+    assert dependency["dataset_id"] == dataset_id
+    assert dependency["organization_id"].endswith("0001")
+    assert dependency["workspace_id"].endswith("0002")
+    assert dependency["current_version_verified"] is True
+    assert state["shoir_dataset_dependency_tracking_enabled"] is True
+    assert state["shoir_dataset_lineage_blocked"] is False
+
