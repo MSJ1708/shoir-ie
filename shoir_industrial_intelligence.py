@@ -1683,6 +1683,23 @@ def invalidate_dataset_dependents(
     graph_snapshot = _snapshot_thread_graph(username)
     try:
         stale_set = set(stale_ids)
+        superseded_dataset_nodes = _mark_dataset_thread_versions_superseded(
+            username,
+            dataset_id,
+            current_version,
+            current_data_hash,
+            current_version_fingerprint,
+        )
+        current_dependency = {
+            "dataset_id": str(dataset_id).upper(),
+            "version": current_version,
+            "data_hash": current_data_hash,
+            "version_fingerprint": current_version_fingerprint,
+            "organization_id": access["organization_id"],
+            "workspace_id": access["workspace_id"],
+            "current_version_verified": True,
+        }
+        _sync_dataset_thread_dependency(username, tier, current_dependency)
         nodes = st.session_state.get(graph_snapshot["nodes_key"], [])
         for node in nodes:
             if not isinstance(node, Mapping):
@@ -1734,6 +1751,7 @@ def invalidate_dataset_dependents(
         "stale_record_ids": stale_ids,
         "historical_outputs_preserved": True,
         "digital_thread_nodes_marked_stale": len(stale_ids),
+        "superseded_dataset_version_nodes": superseded_dataset_nodes,
         "scope": access["scope"],
     }
 
@@ -1761,6 +1779,125 @@ def _sync_thread_node(username: str, tier: str, node_type: str, name: str, recor
         identity_key=f"{scope_namespace}:{record_id}",
     )
     return node_id
+
+
+
+
+def _sync_dataset_thread_dependency(
+    username: str,
+    tier: str,
+    dependency: Mapping[str, Any],
+    analysis_node_id: str = "",
+) -> str:
+    """Create a canonical Dataset-version node and link it to a dependent analysis node."""
+    access = _session_authorize(username, tier, "write")
+    dataset_id = _required_text(dependency.get("dataset_id"), "dataset_id", 80).upper()
+    version = dependency.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise IndustrialIntelligenceError("Dataset Thread version must be a positive integer.")
+    organization_id = str(access.get("organization_id") or "").strip() or None
+    workspace_id = str(access.get("workspace_id") or "").strip()
+    if (str(dependency.get("organization_id") or "").strip() or None) != organization_id:
+        raise PermissionError("Dataset Thread node belongs to a different organization.")
+    if str(dependency.get("workspace_id") or "").strip() != workspace_id:
+        raise PermissionError("Dataset Thread node belongs to a different workspace.")
+
+    import shoir_digital_thread as thread
+    thread.ensure_thread_state(username)
+    namespace = f"{organization_id or access['actor']}::{workspace_id}"
+    identity_key = f"{namespace}:dataset:{dataset_id}:v{version}"
+    source = f"dataset-version:{namespace}:{dataset_id}:v{version}"
+    node_id = thread._upsert_node(
+        "Dataset",
+        f"{dataset_id} · v{version}",
+        source=source,
+        module="Industrial Data Platform",
+        status="Current" if dependency.get("current_version_verified") is True else "Historical",
+        metadata={
+            "dataset_id": dataset_id,
+            "version": version,
+            "data_hash": str(dependency.get("data_hash") or "").lower(),
+            "version_fingerprint": str(dependency.get("version_fingerprint") or "").lower(),
+            "source_name": str(dependency.get("source_name") or "")[:240],
+            "registered_at": str(dependency.get("registered_at") or "")[:80] or None,
+            "current_version_verified": dependency.get("current_version_verified") is True,
+            "dataset_dependency_status": "CURRENT" if dependency.get("current_version_verified") is True else "HISTORICAL",
+            "organization_id": organization_id,
+            "workspace_id": workspace_id,
+            "workspace_scope": access["scope"],
+        },
+        identity_key=identity_key,
+    )
+    if analysis_node_id:
+        edge_metadata = {
+            "dataset_id": dataset_id,
+            "version": version,
+            "data_hash": str(dependency.get("data_hash") or "").lower(),
+            "version_fingerprint": str(dependency.get("version_fingerprint") or "").lower(),
+            "relationship_basis": "EXACT_IMMUTABLE_DATASET_VERSION_REFERENCE",
+            "current_version_verified": dependency.get("current_version_verified") is True,
+        }
+        thread._upsert_edge(
+            node_id,
+            str(analysis_node_id),
+            "INPUT_TO",
+            status="Linked",
+            metadata=edge_metadata,
+        )
+    return node_id
+
+
+def _mark_dataset_thread_versions_superseded(
+    username: str,
+    dataset_id: str,
+    current_version: int,
+    current_data_hash: str,
+    current_version_fingerprint: str,
+) -> int:
+    """Keep historical dataset-version nodes but mark prior versions superseded."""
+    import shoir_digital_thread as thread
+
+    keys = thread.ensure_thread_state(username)
+    nodes = st.session_state.get(keys["nodes"], [])
+    updated = 0
+    active_org = st.session_state.get("shoir_active_organization_workspace")
+    organization_id = (
+        str(active_org.get("organization_id") or "").strip()
+        if isinstance(active_org, Mapping) else ""
+    )
+    workspace_id = (
+        str(active_org.get("organization_workspace_id") or "").strip()
+        if isinstance(active_org, Mapping)
+        else str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or "personal")
+    )
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        metadata = node.get("metadata")
+        if not isinstance(metadata, Mapping):
+            continue
+        if str(metadata.get("dataset_id") or "").strip().upper() != str(dataset_id).upper():
+            continue
+        if (str(metadata.get("organization_id") or "").strip() or None) != (organization_id or None):
+            continue
+        if str(metadata.get("workspace_id") or "").strip() != workspace_id:
+            continue
+        version = metadata.get("version")
+        if isinstance(version, bool) or not isinstance(version, int) or version >= current_version:
+            continue
+        next_metadata = dict(metadata)
+        next_metadata.update({
+            "dataset_dependency_status": "SUPERSEDED",
+            "current_dataset_version": current_version,
+            "current_data_hash": str(current_data_hash).lower(),
+            "current_version_fingerprint": str(current_version_fingerprint).lower(),
+            "superseded_at": _utc_now(),
+        })
+        node["metadata"] = next_metadata
+        node["status"] = "Superseded"
+        node["updated_at"] = _utc_now()
+        updated += 1
+    return updated
 
 
 def create_record(
@@ -1830,6 +1967,12 @@ def create_record(
                 "dataset_dependency_status": "CURRENT" if dataset_dependencies else "NOT_LINKED",
             },
         )
+        record["dataset_thread_nodes"] = [
+            _sync_dataset_thread_dependency(
+                username, tier, dependency, record["thread_node_id"]
+            )
+            for dependency in dataset_dependencies
+        ]
         rows = list(_state_list("records"))
         rows.append(record)
         _save_state_list(username, tier, "records", rows)
