@@ -89,17 +89,17 @@ Registered evidence means an evidence record ID or source reference already exis
 | II-002 | Operations Intelligence | Industrial Process Mining and Hidden Inefficiency Intelligence | Event-log chronology, variants, directly-follows transitions, explicit wait minutes, repeated-activity candidates and conformance |
 | II-003 | Engineering Intelligence | Engineering Change Impact Twin | Directed dependency traversal and change-impact review register |
 | II-004 | Maintenance and Project Intelligence | Shutdown and Turnaround Intelligence Optimizer | Deterministic precedence/skill/resource schedule, one resource availability clock across skills, permit/inspection/SIMOPS/safety gates |
-| II-005 | Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | Measurement conflicts, unit-group checks and explicit balance residuals; original values retained |
+| II-005 | Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | Measurement conflicts, unit-group checks, balance residuals and optional non-destructive residual-to-selected-stream proposals |
 | II-006 | Maintenance and Project Intelligence | Asset Reliability Mission Board | Transparent criticality/history heuristic and supplied production dependencies |
 | II-007 | Production and Quality Intelligence | Production Yield and Process Variability Intelligence | First-pass yield, recovered rework, final yield, scrap and count reconciliation |
 | II-008 | Maintenance and Project Intelligence | New Factory Commissioning and Production Ramp-up Intelligence | Fail-closed required-check/evidence readiness gate |
 | II-009 | Engineering Intelligence | Industrial Experimentation and Process Improvement Laboratory | Reproducible two-level factorial design and first-order least-squares fit |
 | II-010 | Supply Chain and Procurement Intelligence | Technical Procurement and Supplier Engineering Assurance | Requirement-to-offer compliance, deviation and evidence coverage |
-| II-011 | Energy and Enterprise Assurance | Industrial Energy Flexibility and Peak-Demand Optimizer | Deterministic least-cost flexible-load placement within declared windows and capacities |
+| II-011 | Energy and Enterprise Assurance | Industrial Energy Flexibility and Peak-Demand Optimizer | Deterministic tariff-ordered greedy placement within declared windows and capacities; global cost optimality is not guaranteed |
 | II-012 | Supply Chain and Procurement Intelligence | Critical Spare Parts and Multi-Site Inventory Intelligence | Compatibility, source minimum stock and destination inventory constraints |
 | II-013 | Energy and Enterprise Assurance | Industrial OT Asset and Configuration Assurance | Passive approved-baseline versus observed-configuration comparison |
 | II-014 | Production and Quality Intelligence | Product and Batch Genealogy Intelligence | Forward/backward confirmed-lot traversal; suspected links remain separate |
-| II-015 | Operations Intelligence | Intelligent Shift Handover and Operational Learning | Open issue/action carry-forward and incoming-shift acknowledgement |
+| II-015 | Operations Intelligence | Intelligent Shift Handover and Operational Learning | Persistent organization-scoped handover records with separate incoming acknowledgement; acknowledgement does not close an issue |
 | II-016 | Energy and Enterprise Assurance | Industrial Benchmarking and Improvement Radar | Comparability checks across metric, units, period and denominator |
 
 ### Calculation and operational boundaries
@@ -108,17 +108,17 @@ Registered evidence means an evidence record ID or source reference already exis
 2. Process Mining treats elapsed event time as elapsed time; it counts waiting only when an explicit source field provides it.
 3. Engineering Change reports only supplied dependency edges. Missing dependencies are not guessed.
 4. Turnaround scheduling uses supplied task, resource, skill and constraint data. It does not infer site calendars, labor agreements, weather, lifting constraints, permit authority or all SIMOPS rules; it does not authorize work.
-5. Data Trust flags supplied conflicts and balance residuals. It does not invent calibration uncertainty or silently reconcile source values.
+5. Data Trust flags supplied conflicts and balance residuals. It can create an explicitly targeted residual-assignment proposal, but that proposal is not applied, is not verified, and leaves original readings unchanged. It does not invent calibration uncertainty.
 6. Asset Reliability does not produce a guaranteed failure date or remaining useful life.
 7. Yield calculations require consistent product/batch boundaries and units.
 8. Commissioning status is readiness for authorized review, not statutory or formal system acceptance.
 9. DOE results are bounded by the supplied design and fitted model; first-order fit does not establish causality or omitted interactions.
 10. Procurement Assurance only evaluates claims and evidence IDs supplied by the user; missing substantiation remains unverified.
-11. Energy Flexibility uses supplied tariffs/windows/capacities and does not dispatch plant equipment.
+11. Energy Flexibility uses supplied tariffs/windows/capacities and a deterministic tariff-ordered greedy allocator. Feasibility is checked, but a globally minimum-cost schedule is not guaranteed; the tool does not dispatch plant equipment.
 12. Spare Parts reports eligibility or rejection; it does not execute a stock transfer.
 13. OT Assurance is a passive records comparison. No active discovery, scan, PLC/DCS/SCADA connection or configuration write is performed.
 14. Genealogy traverses only relationships explicitly marked CONFIRMED and does not turn suspected links into genealogy facts.
-15. Shift Handover carries records and acknowledgement; similar issue text does not establish common cause.
+15. Shift Handover carries unresolved issues in a persistent organization-scoped record. A separately authenticated incoming shift owner can acknowledge each issue, but acknowledgement is not issue closure; similar issue text does not establish common cause.
 16. Benchmarking suppresses misleading comparisons when required definitions, units, periods or denominators are incompatible.
 
 ## Eight shared intelligence capabilities
@@ -181,7 +181,7 @@ Each provides focus tools, starter KPIs and an explicit industry warning. Templa
 
 ## Acceptance test inventory
 
-\`tests/test_shoir_industrial_intelligence.py\` currently defines **49 tests**. It includes coverage for:
+\`tests/test_shoir_industrial_intelligence.py\` currently defines **55 tests**. It includes coverage for:
 
 - 16-tool catalogue cardinality, stable II-001–II-016 IDs and exact/alias search.
 - All 16 deterministic analysis engines and their expected synthetic acceptance cases.
@@ -190,17 +190,17 @@ Each provides focus tools, starter KPIs and an explicit industry warning. Templa
 - Process mining elapsed time, explicit waits, rework/repeated activities and conformance.
 - Engineering Change dependency traversal.
 - Turnaround feasible/infeasible schedules and global resource non-overlap across multiple skills.
-- Measurement conflicts and original-value retention.
+- Measurement conflicts, original-value retention, explicit reconciliation proposals and rejection of negative proposed values.
 - Asset priority and dependency outputs.
 - Yield arithmetic and reconciliation.
 - Commissioning fail-closed readiness.
 - Reproducible experiment design.
 - Supplier claim compliance and missing evidence.
-- Energy capacity/window constraints.
+- Energy capacity/window constraints and an explicit assertion that greedy allocation carries no global optimality guarantee.
 - Spare-part compatibility and source minimum stock.
 - Passive OT configuration differences.
 - Confirmed genealogy traversal.
-- Shift handover acknowledgement.
+- Shift handover persistence, incoming-role acknowledgement, duplicate-ack rejection and the rule that acknowledgement does not close the issue.
 - Benchmark comparability.
 - Provenance/source metadata validation.
 - Persistence failure behaviour.
