@@ -81,6 +81,7 @@ MODULE_CATEGORY_GROUPS = {
     "production": "Production",
     "project & traceability": "Platform & Governance",
     "quality": "Quality",
+    "resource intelligence": "Operations",
     "reporting": "Platform & Governance",
     "research & experimentation": "Research",
     "research ai": "Research",
