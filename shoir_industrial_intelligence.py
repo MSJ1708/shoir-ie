@@ -1461,6 +1461,30 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
     ui.markdown(f"### {definition['name']}")
     ui.write(definition["purpose"])
     ui.caption("Enter validated JSON input. The populated example is explicitly synthetic and must not be represented as plant data.")
+    saved_records = list(_state_list("records"))
+    saved_record_options = [""] + [str(item.get("record_id")) for item in saved_records]
+    selected_saved_record = ui.selectbox(
+        "Reuse a record already saved in this workspace (optional)",
+        saved_record_options,
+        format_func=lambda value: "Do not reuse a saved record" if not value else next(
+            f"{item.get('name')} · {item.get('record_type')} · {value}"
+            for item in saved_records if str(item.get("record_id")) == value
+        ),
+        key=f"shoir_ii_saved_source_{selected_id}",
+    )
+    if ui.button("Load saved record payload into this tool", disabled=not selected_saved_record, key=f"shoir_ii_load_saved_{selected_id}"):
+        try:
+            source_record = next(item for item in saved_records if str(item.get("record_id")) == selected_saved_record)
+            source_payload = source_record.get("payload", {})
+            candidate = source_payload.get("input") if source_record.get("record_type") == "tool_analysis" and isinstance(source_payload, Mapping) else source_payload
+            if not isinstance(candidate, Mapping):
+                raise IndustrialIntelligenceError("The selected record does not contain a reusable JSON object.")
+            ui.session_state[f"shoir_ii_input_{selected_id}"] = json.dumps(candidate, ensure_ascii=False, indent=2)
+            ui.session_state[f"shoir_ii_provenance_{selected_id}"] = source_record.get("provenance", "IMPORTED")
+            ui.session_state[f"shoir_ii_source_{selected_id}"] = source_record.get("source_ref") or selected_record
+            ui.success(f"Loaded authorized record {selected_record}. Review the fields before running.")
+        except Exception as exc:
+            ui.error(f"Saved record could not be reused: {exc}")
     defaults = json.dumps(_sample_input(selected_id), ensure_ascii=False, indent=2)
     input_text = ui.text_area("Tool input JSON", value=defaults, height=280, key=f"shoir_ii_input_{selected_id}")
     provenance_options = list(PROVENANCE)
@@ -1549,6 +1573,32 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 {"Evidence ID": item.get("record_id"), "Name": item.get("name"), "Source": item.get("source_ref"), "Provenance": item.get("provenance"), "Created": item.get("created_at")}
                 for item in evidence_records
             ]), use_container_width=True, hide_index=True)
+        ui.markdown("#### Record an operational event")
+        event_col1, event_col2 = ui.columns(2)
+        with event_col1:
+            event_type = ui.text_input("Event type", key="shoir_ii_event_type")
+            event_entity = ui.text_input("Related entity ID (optional)", key="shoir_ii_event_entity")
+            event_timestamp = ui.text_input("Event timestamp (blank = current UTC)", key="shoir_ii_event_timestamp")
+        with event_col2:
+            event_description = ui.text_area("Observed event description", height=80, key="shoir_ii_event_description")
+            event_provenance = ui.selectbox("Event provenance", list(PROVENANCE), index=2, key="shoir_ii_event_provenance")
+            event_evidence = ui.text_input("Registered evidence IDs / source refs", key="shoir_ii_event_evidence")
+        if ui.button("Record operational event", key="shoir_ii_event_save"):
+            try:
+                event = create_operational_event(
+                    username, tier, event_type, event_description, event_entity,
+                    event_timestamp or None, event_provenance,
+                    [item.strip() for item in event_evidence.split(",") if item.strip()],
+                )
+                ui.success(f"Operational event saved: {event['record_id']}.")
+            except Exception as exc:
+                ui.error(f"Operational event was not saved: {exc}")
+        operational_events = _state_list("events")
+        if operational_events:
+            ui.dataframe(pd.DataFrame([
+                {"Event ID": item.get("record_id"), "Type": item.get("name"), "Event time": item.get("event_timestamp"), "Provenance": item.get("provenance"), "Entity": item.get("entity_id")}
+                for item in operational_events
+            ]), use_container_width=True, hide_index=True)
         try:
             graph = thread_snapshot(username, tier)
             ui.metric("Industrial entities", graph["record_nodes"])
@@ -1599,6 +1649,31 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                     ui.success(f"Action status updated to {updated['status']}.")
                 except Exception as exc:
                     ui.error(f"Action status was not changed: {exc}")
+        ui.markdown("#### Risk and barrier screening register")
+        risk_title = ui.text_input("Hazard / risk title", key="shoir_ii_risk_title")
+        rc1, rc2 = ui.columns(2)
+        risk_severity = rc1.selectbox("Severity (1–5)", [1, 2, 3, 4, 5], index=2, key="shoir_ii_risk_severity")
+        risk_likelihood = rc2.selectbox("Likelihood (1–5)", [1, 2, 3, 4, 5], index=2, key="shoir_ii_risk_likelihood")
+        barriers_json = ui.text_area(
+            "Barrier records JSON (barrier_id, owner, evidence_id, status)",
+            value='[{"barrier_id":"B-01","owner":"engineer-01","evidence_id":"","status":"UNKNOWN"}]',
+            key="shoir_ii_risk_barriers",
+        )
+        if ui.button("Save risk/barrier screening (not safety approval)", key="shoir_ii_risk_save"):
+            try:
+                barriers = json.loads(barriers_json)
+                if not isinstance(barriers, list):
+                    raise IndustrialIntelligenceError("Barrier records must be a JSON list.")
+                risk_record = record_risk_barrier(username, tier, risk_title, risk_severity, risk_likelihood, barriers)
+                ui.success(f"Risk/barrier screening saved: {risk_record['record_id']}. Formal safety approval is not granted.")
+            except Exception as exc:
+                ui.error(f"Risk/barrier screening was not saved: {exc}")
+        risk_records = [item for item in _state_list("records") if item.get("record_type") == "risk_barrier_assurance"]
+        if risk_records:
+            ui.dataframe(pd.DataFrame([
+                {"Record ID": item.get("record_id"), "Hazard": item.get("name"), "Status": item.get("record_status"), "Created": item.get("created_at")}
+                for item in risk_records
+            ]), use_container_width=True, hide_index=True)
 
     with workspace_tabs[2]:
         ui.markdown("#### Register immutable engineering model versions")
@@ -1671,6 +1746,27 @@ def render_industrial_intelligence_suite(streamlit_module, username: str, tier: 
                 ui.success("Industry template configuration saved to the active workspace.")
             except Exception as exc:
                 ui.error(f"Industry template selection was not saved: {exc}")
+        ui.markdown("#### Cause-and-effect investigation")
+        cause_title = ui.text_input("Investigation title", key="shoir_ii_cause_title")
+        cause_observations = ui.text_area("Observed facts (one per line)", key="shoir_ii_cause_observations")
+        cause_links_json = ui.text_area(
+            "Candidate relationships JSON (SUSPECTED or SUPPORTED; supported links require registered evidence IDs)",
+            value='[{"from":"material lot","to":"yield variation","relationship":"POSSIBLE_CAUSE","supporting_evidence":[],"contradicting_evidence":[],"validation_status":"SUSPECTED"}]',
+            key="shoir_ii_cause_links",
+        )
+        if ui.button("Save cause-and-effect investigation", key="shoir_ii_cause_save"):
+            try:
+                links = json.loads(cause_links_json)
+                if not isinstance(links, list):
+                    raise IndustrialIntelligenceError("Candidate relationships must be a JSON list.")
+                investigation = record_cause_effect_investigation(
+                    username, tier, cause_title,
+                    [item.strip() for item in cause_observations.splitlines() if item.strip()],
+                    links,
+                )
+                ui.success(f"Investigation saved: {investigation['record_id']}. Causation remains unconfirmed.")
+            except Exception as exc:
+                ui.error(f"Cause-and-effect investigation was not saved: {exc}")
         ui.markdown("#### Evidence-backed Knowledge Copilot context")
         copilot_query = ui.text_input("Question / evidence search", key="shoir_ii_copilot_query")
         if ui.button("Retrieve authorized evidence", key="shoir_ii_copilot_search"):
