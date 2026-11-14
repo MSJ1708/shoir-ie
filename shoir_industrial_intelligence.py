@@ -1043,7 +1043,7 @@ def _append_audit(username: str, tier: str, event_type: str, record_id: str, pay
 
 
 def _sync_thread_node(username: str, tier: str, node_type: str, name: str, record_id: str, status: str, metadata: Mapping[str, Any]) -> str:
-    _session_authorize(username, tier, "write")
+    access = _session_authorize(username, tier, "write")
     import shoir_digital_thread as thread
     thread.ensure_thread_state(username)
     organization_id = str(access["organization_id"] or "")
