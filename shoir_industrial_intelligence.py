@@ -1683,12 +1683,20 @@ def record_shift_handover(
         status = str(issue.get("status") or "OPEN").upper()
         if status not in {"OPEN", "IN_PROGRESS", "BLOCKED", "IMPLEMENTED", "VERIFIED", "CLOSED"}:
             raise IndustrialIntelligenceError(f"Unsupported handover issue status: {status}.")
+        source_record_id = str(issue.get("source_record_id") or "").strip()
+        if source_record_id and not any(
+            str(record.get("record_id") or "") == source_record_id
+            for record in _state_list("records")
+        ):
+            raise IndustrialIntelligenceError(
+                f"Handover issue {issue_id} links to a source record that is not registered in this workspace."
+            )
         normalized.append({
             "issue_id": issue_id,
             "owner": str(issue.get("owner") or "").strip() or None,
             "status": status,
             "description": str(issue.get("description") or "")[:2000],
-            "source_record_id": str(issue.get("source_record_id") or "").strip() or None,
+            "source_record_id": source_record_id or None,
             "acknowledged_by_incoming": False,
         })
     payload = {
