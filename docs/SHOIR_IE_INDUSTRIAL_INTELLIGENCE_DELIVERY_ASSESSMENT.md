@@ -232,3 +232,18 @@ The source branch continued to receive follow-on changes after the original `e04
 These changes improve the foundation and address earlier gaps in persistence rollback, safe measurement reconciliation, privacy and acknowledgement semantics. They do not resolve dataset-version dependency invalidation or hosted Digital Thread acceptance.
 
 At head `cd77aab60e4ee7e85c4510ae6b4e418a8c091ed5`, eight required GitHub Actions workflow runs were again observed queued, and the separate live-deployment smoke job was skipped. The later exact head must still have a complete set of successful required checks and inspected artifacts before any passing status is recorded.
+
+
+---
+
+## 10. Current candidate refresh — security entitlement and handover reference checks
+
+A further review of the current candidate source and its dedicated foundation report confirms these additional safeguards:
+
+- **Authenticated tier enforcement:** `_session_authorize` normalizes and checks the Enterprise entitlement from the authenticated session's `user_tier`. The caller-supplied tier is also constrained and cannot elevate a lower-tier account. The acceptance suite now contains `test_enterprise_entitlement_uses_authenticated_session_tier_not_caller_argument`.
+- **Handover source integrity:** a handover issue that names a `source_record_id` is rejected unless that record already exists in the same active workspace. A dedicated negative-path regression assertion covers an unknown record reference.
+- **Current test count:** the current `tests/test_shoir_industrial_intelligence.py` file contains **56 test functions**. This is test-source coverage only; it is not a passing test result. `tests/test_shoir_digital_thread.py` remains a separate acceptance suite.
+
+These additions strengthen the candidate's entitlement and record-linkage boundaries. They do not close the open dataset-version dependency invalidation, hosted graph continuity, cross-tenant proof, exact-head CI, browser/export or independent engineering/security acceptance gates.
+
+At the time of this source review, the candidate was at `807b8667b52fd3b5b80158563f63115941587271`. Its combined status and workflow-run query did not return completed CI evidence. Keep `IMPLEMENTED — VALIDATION PENDING` as the code-delivery label.
