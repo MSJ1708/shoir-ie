@@ -1054,6 +1054,25 @@ def _append_audit(username: str, tier: str, event_type: str, record_id: str, pay
     return audit_id
 
 
+def _snapshot_thread_graph(username: str) -> dict[str, Any]:
+    """Capture only the canonical thread lists needed for a safe graph rollback."""
+    import shoir_digital_thread as thread
+    thread.ensure_thread_state(username)
+    keys = thread._keys()
+    return {
+        "thread_module": thread,
+        "nodes_key": keys["nodes"],
+        "edges_key": keys["edges"],
+        "nodes": copy.deepcopy(st.session_state.get(keys["nodes"], [])),
+        "edges": copy.deepcopy(st.session_state.get(keys["edges"], [])),
+    }
+
+
+def _restore_thread_graph(snapshot: Mapping[str, Any]) -> None:
+    st.session_state[snapshot["nodes_key"]] = copy.deepcopy(snapshot["nodes"])
+    st.session_state[snapshot["edges_key"]] = copy.deepcopy(snapshot["edges"])
+
+
 def _sync_thread_node(username: str, tier: str, node_type: str, name: str, record_id: str, status: str, metadata: Mapping[str, Any]) -> str:
     access = _session_authorize(username, tier, "write")
     import shoir_digital_thread as thread
@@ -1123,14 +1142,19 @@ def create_record(
         "created_at": created_at,
         "record_status": "RECORDED",
     }
-    rows = list(_state_list("records"))
-    rows.append(record)
-    _save_state_list(username, tier, "records", rows)
-    node_type = str(body.get("thread_node_type") or "Dataset")
-    node_id = _sync_thread_node(username, tier, node_type, record["name"], record_id, "Observed", {"record_type": record["record_type"], "provenance": provenance_value, "payload_hash": record["payload_hash"]})
-    record["thread_node_id"] = node_id
-    rows[-1] = record
-    _save_state_list(username, tier, "records", rows)
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        node_type = str(body.get("thread_node_type") or "Dataset")
+        record["thread_node_id"] = _sync_thread_node(
+            username, tier, node_type, record["name"], record_id, "Observed",
+            {"record_type": record["record_type"], "provenance": provenance_value, "payload_hash": record["payload_hash"]},
+        )
+        rows = list(_state_list("records"))
+        rows.append(record)
+        _save_state_list(username, tier, "records", rows)
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "record.created", record_id, {"record_type": record["record_type"], "provenance": provenance_value, "payload_hash": record["payload_hash"]})
     return copy.deepcopy(record)
 
@@ -1274,13 +1298,18 @@ def add_entity(username: str, tier: str, entity_type: str, entity_id: str, name:
         "created_by": access["actor"],
         "created_at": _utc_now(),
     }
-    nodes = list(_state_list("nodes"))
-    nodes.append(record)
-    _save_state_list(username, tier, "nodes", nodes)
-    thread_id = _sync_thread_node(username, tier, node_type, record["name"], business_id, "Observed", {"entity_id": business_id, "provenance": record["provenance"], **attrs})
-    record["thread_node_id"] = thread_id
-    nodes[-1] = record
-    _save_state_list(username, tier, "nodes", nodes)
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        record["thread_node_id"] = _sync_thread_node(
+            username, tier, node_type, record["name"], business_id, "Observed",
+            {"entity_id": business_id, "provenance": record["provenance"], **attrs},
+        )
+        nodes = list(_state_list("nodes"))
+        nodes.append(record)
+        _save_state_list(username, tier, "nodes", nodes)
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "entity.created", business_id, {"entity_type": node_type, "provenance": record["provenance"]})
     return copy.deepcopy(record)
 
@@ -1308,27 +1337,26 @@ def add_relationship(username: str, tier: str, source_id: str, target_id: str, r
         raise IndustrialIntelligenceError("This relationship already exists; use a new evidence revision rather than replacing it.")
     edge = {"edge_id": edge_id, "source_id": source, "target_id": target, "relation": relation_name, "status": state, "evidence_refs": refs, "created_by": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "created_at": _utc_now()}
     edges.append(edge)
-    _save_state_list(username, tier, "edges", edges)
-    import shoir_digital_thread as thread
-    thread.ensure_thread_state(username)
-    thread._upsert_edge(
-        nodes[source].get("thread_node_id", source),
-        nodes[target].get("thread_node_id", target),
-        relation_name,
-        state,
-        {
-            "evidence_refs": refs,
-            "industrial_edge_id": edge_id,
-            "organization_id": access["organization_id"],
-            "workspace_id": access["workspace_id"],
-            "workspace_scope": access["scope"],
-        },
-    )
-    from workspace_persistence import save_user_workspace
-    if not save_user_workspace(username, st.session_state):
-        edges.pop()
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        import shoir_digital_thread as thread
+        thread._upsert_edge(
+            nodes[source].get("thread_node_id", source),
+            nodes[target].get("thread_node_id", target),
+            relation_name,
+            state,
+            {
+                "evidence_refs": refs,
+                "industrial_edge_id": edge_id,
+                "organization_id": access["organization_id"],
+                "workspace_id": access["workspace_id"],
+                "workspace_scope": access["scope"],
+            },
+        )
         _save_state_list(username, tier, "edges", edges)
-        raise RuntimeError(str(st.session_state.get("_workspace_save_error") or "Digital Thread relationship persistence failed."))
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "relationship.created", edge_id, edge)
     return copy.deepcopy(edge)
 
@@ -1486,15 +1514,18 @@ def create_action(username: str, tier: str, title: str, owner: str, due_date: st
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
     }
-    actions = list(_state_list("actions"))
-    actions.append(row)
-    _save_state_list(username, tier, "actions", actions)
-    row["thread_node_id"] = _sync_thread_node(
-        username, tier, "Action", row["title"], action_id, "Proposed",
-        {"owner": row["owner"], "status": row["status"]},
-    )
-    actions[-1] = row
-    _save_state_list(username, tier, "actions", actions)
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        row["thread_node_id"] = _sync_thread_node(
+            username, tier, "Action", row["title"], action_id, "Proposed",
+            {"owner": row["owner"], "status": row["status"]},
+        )
+        actions = list(_state_list("actions"))
+        actions.append(row)
+        _save_state_list(username, tier, "actions", actions)
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "action.created", action_id, {"owner": row["owner"], "due_date": due, "priority": row["priority"]})
     return copy.deepcopy(row)
 
@@ -1519,8 +1550,13 @@ def approve_action(username: str, tier: str, action_id: str, comment: str = "") 
     action["updated_at"] = _utc_now()
     index = actions.index(next(item for item in actions if item.get("action_id") == str(action_id)))
     actions[index] = action
-    _save_state_list(username, tier, "actions", actions, action="approve")
-    _sync_thread_node(username, tier, "Action", action["title"], action_id, action["status"].title(), {"owner": action["owner"], "status": action["status"], "approval_count": len(approvals), "organization_id": access["organization_id"], "workspace_id": access["workspace_id"]})
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        _sync_thread_node(username, tier, "Action", action["title"], action_id, action["status"].title(), {"owner": action["owner"], "status": action["status"], "approval_count": len(approvals), "organization_id": access["organization_id"], "workspace_id": access["workspace_id"]})
+        _save_state_list(username, tier, "actions", actions, action="approve")
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "action.approved", action_id, {"approver": access["actor"], "approval_count": len(approvals), "status": action["status"]})
     return copy.deepcopy(action)
 
@@ -1571,8 +1607,13 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     action["status"] = target
     action["updated_at"] = _utc_now()
     actions[index] = action
-    _save_state_list(username, tier, "actions", actions)
-    _sync_thread_node(username, tier, "Action", action["title"], action_id, target.title(), {"owner": action["owner"], "status": target, "verification": action.get("verification")})
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        _sync_thread_node(username, tier, "Action", action["title"], action_id, target.title(), {"owner": action["owner"], "status": target, "verification": action.get("verification")})
+        _save_state_list(username, tier, "actions", actions)
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "action.status_changed", action_id, {"status": target, "actual_result": actual_result if target == "VERIFIED" else None})
     return copy.deepcopy(action)
 
@@ -1740,14 +1781,17 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
         raise IndustrialIntelligenceError("At least one expected-versus-actual model test case is required.")
     definition_hash = _hash_payload({"definition": definition, "assumptions": normalized_assumptions, "test_cases": tests})
     record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": definition_hash, "assumptions": normalized_assumptions, "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
-    models.append(record)
-    _save_state_list(username, tier, "models", models)
-    record["thread_node_id"] = _sync_thread_node(
-        username, tier, "Model", f"{model_id} · {version_id}", record["model_id"],
-        "Registered", {"version": version_id, "definition_hash": record["definition_hash"], "status": record["status"]},
-    )
-    models[-1] = record
-    _save_state_list(username, tier, "models", models)
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        record["thread_node_id"] = _sync_thread_node(
+            username, tier, "Model", f"{model_id} · {version_id}", record["model_id"],
+            "Registered", {"version": version_id, "definition_hash": record["definition_hash"], "status": record["status"]},
+        )
+        models.append(record)
+        _save_state_list(username, tier, "models", models)
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "model.version_registered", record["model_id"], {"version": version_id, "definition_hash": record["definition_hash"]})
     return copy.deepcopy(record)
 
@@ -1767,8 +1811,13 @@ def validate_model_version(username: str, tier: str, model_id: str, verification
     model["status"] = "VALIDATED_BY_REVIEWER"
     model["review"] = {"reviewer": access["actor"], "evidence_refs": refs, "comment": str(reviewer_comment or "")[:2000], "reviewed_at": _utc_now()}
     models[index] = model
-    _save_state_list(username, tier, "models", models, action="approve")
-    _sync_thread_node(username, tier, "Model", f"{model['name']} · {model['version']}", model_id, "Validated", {"version": model["version"], "definition_hash": model["definition_hash"], "status": model["status"], "reviewer": access["actor"]})
+    graph_snapshot = _snapshot_thread_graph(username)
+    try:
+        _sync_thread_node(username, tier, "Model", f"{model['name']} · {model['version']}", model_id, "Validated", {"version": model["version"], "definition_hash": model["definition_hash"], "status": model["status"], "reviewer": access["actor"]})
+        _save_state_list(username, tier, "models", models, action="approve")
+    except Exception:
+        _restore_thread_graph(graph_snapshot)
+        raise
     _append_audit(username, tier, "model.version_validated", model_id, model["review"])
     return copy.deepcopy(model)
 
