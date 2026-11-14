@@ -1681,6 +1681,22 @@ Deno.serve(async (req) => {
         );
       }
       const payload = record.payload_json as Record<string, unknown>;
+      const { data: headRecord, error: headError } = await supabase
+        .from("shoir_platform_records")
+        .select("payload_json")
+        .eq("workspace_key", workspaceKey)
+        .eq("record_type", "dataset")
+        .eq("entity_key", datasetId)
+        .maybeSingle();
+      if (headError) throw headError;
+      if (!headRecord?.payload_json) {
+        return sendResponse({ error: "Dataset head was not found in this workspace." }, 409);
+      }
+      const headPayload = headRecord.payload_json as Record<string, unknown>;
+      const currentVersion = Number(headPayload.version || 0);
+      if (!Number.isSafeInteger(currentVersion) || currentVersion < 1) {
+        return sendResponse({ error: "Dataset head version metadata is invalid." }, 409);
+      }
       const storageKey = String(payload.storage_key || "");
       const expectedPrefix = workspaceKey + "/" + datasetId + "/";
       if (
@@ -1705,7 +1721,10 @@ Deno.serve(async (req) => {
         ok: true,
         download_url: data.signedUrl,
         data_hash: String(payload.data_hash || ""),
+        version_fingerprint: String(payload.version_fingerprint || ""),
         version: Number(payload.version || requestedVersion || 1),
+        current_version: currentVersion,
+        is_current_version: Number(payload.version || requestedVersion || 1) === currentVersion,
         row_count: Number(payload.row_count || 0),
         column_count: Number(payload.column_count || 0),
         version_record_id: String(payload.version_record_id || ""),
