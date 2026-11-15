@@ -1394,6 +1394,99 @@ def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(
         ii._require_evidence_refs([record["record_id"]], "Decision evidence")
 
 
+def test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_validation(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF998877",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic-model-input.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    evidence = ii.create_record(
+        "synthetic-owner", "Enterprise", "evidence", "Model input evidence",
+        {"result": {"value": 10}}, provenance="SYNTHETIC",
+    )
+    model = ii.register_model_version(
+        "synthetic-owner", "Enterprise", "Dataset-linked model", "1.0", "calculation",
+        {"formula": "output = input * 2"}, ["Input and output use the same unit"],
+        [{"test_id": "golden-1", "expected": 20, "actual": 20, "evidence_id": evidence["record_id"]}],
+    )
+    assert model["dataset_dependency_status"] == "CURRENT"
+    assert model["dataset_dependencies"][0]["dataset_id"] == "DS-ABCDEF998877"
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF998877", 2, "c" * 64, "d" * 64,
+    )
+    assert result["stale_model_ids"] == [model["model_id"]]
+    assert result["stale_model_count"] == 1
+    stale_model = next(
+        row for row in session[ii.STATE_PREFIX + "models"]
+        if row["model_id"] == model["model_id"]
+    )
+    assert stale_model["dataset_dependency_status"] == "STALE"
+    assert stale_model["dataset_dependencies"][0]["version"] == 1
+    assert len(stale_model["stale_dataset_dependencies"]) == 1
+    model_node = next(
+        node for node in session["global_thread_nodes"]
+        if node.get("metadata", {}).get("industrial_record_id") == model["model_id"]
+    )
+    assert model_node["status"] == "Stale"
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Model evidence is stale"):
+        ii.validate_model_version(
+            "synthetic-owner", "Enterprise", model["model_id"], ["SYNTHETIC:independent-review"]
+        )
+
+
+def test_dataset_version_invalidation_marks_linked_actions_stale_and_blocks_approval(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF112233",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic-action-input.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    evidence = ii.create_record(
+        "synthetic-owner", "Enterprise", "evidence", "Action input evidence",
+        {"result": {"value": 10}}, provenance="SYNTHETIC",
+    )
+    action = ii.create_action(
+        "synthetic-owner", "Enterprise", "Dataset-linked action", "synthetic-maintainer",
+        "2026-12-15T00:00:00Z", "HIGH", "Review the current dataset-derived finding.",
+        [evidence["record_id"]],
+    )
+    assert action["dataset_dependency_status"] == "CURRENT"
+    assert action["dataset_dependencies"][0]["version"] == 1
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF112233", 2, "c" * 64, "d" * 64,
+    )
+    assert result["stale_action_ids"] == [action["action_id"]]
+    assert result["stale_action_count"] == 1
+    stale_action = next(
+        row for row in session[ii.STATE_PREFIX + "actions"]
+        if row["action_id"] == action["action_id"]
+    )
+    assert stale_action["dataset_dependency_status"] == "STALE"
+    assert stale_action["status"] == "PROPOSED"
+    action_node = next(
+        node for node in session["global_thread_nodes"]
+        if node.get("metadata", {}).get("industrial_record_id") == action["action_id"]
+    )
+    assert action_node["status"] == "Stale"
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Action evidence is stale"):
+        ii.approve_action("synthetic-owner", "Enterprise", action["action_id"])
+
+
 def test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_records():
     source_records = [
         {
