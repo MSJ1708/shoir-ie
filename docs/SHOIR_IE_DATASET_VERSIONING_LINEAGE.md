@@ -82,3 +82,21 @@ Hosted fresh-session/re-login, cross-organization isolation, signed-object acces
 The candidate now also invalidates the duplicate Industrial Intelligence `events` ledger in the same workspace save as `records`, `models` and `actions`. The rollback regression test checks the event mirror is restored when the managed save is rejected. Copilot evidence retrieval excludes stale dataset-derived records from citations and reports `excluded_stale_evidence_count`.
 
 Two focused regression tests were added for event-mirror invalidation and stale-evidence exclusion in Copilot. The current Industrial Intelligence test-source count is 76 before the most recent test additions; test-source counts are not passing CI results. Exact-head validation remains pending.
+
+
+## Legacy SQLite lineage integration update — 2026-11-15
+
+The candidate now adds a separate additive dataset-version registry for the legacy local Industrial Platform path:
+
+- `platform_dataset_versions` stores immutable local metadata versions by dataset ID, version number, SHA-256 content hash, version fingerprint, schema, transformations, row/column counts, actor and timestamp.
+- `platform_datasets` tracks the current version and fingerprint. Re-registering identical content does not create another version; a changed content/schema/transformation fingerprint advances the version.
+- Legacy model, experiment, scenario and platform-decision rows now have dependency, freshness and stale-marker columns. New saves resolve caller-declared dataset references against the registered immutable history; unresolved references are recorded as `UNVERIFIED_REFERENCE`, not `CURRENT`.
+- A version advance invalidates dependent rows in `platform_models`, `platform_experiments`, `platform_scenarios`, `platform_decisions`, the mirrored `experience_decisions`, and existing `experience_decision_outcomes`. Historical model parameters, scenario inputs/KPIs, experiment payloads, decision metrics and outcome payloads are retained.
+- New model/scenario/experiment/decision saves reject stale source references. Standalone Experience decision approval/implementation/verification transitions and outcome insertion reject both `STALE` and `UNVERIFIED_REFERENCE` lineage.
+- The Experience decision/outcome tables receive additive schema migration columns; older rows default to `NOT_LINKED` unless actual dependency evidence is present.
+- The local SQLite dataset path is explicitly disabled unless `APP_ENVIRONMENT` is `local`, `development` or `test`. A production deployment without managed dataset configuration fails closed and does not create a local SQLite substitute.
+- Regression tests cover local immutable versioning, unchanged-content idempotence, invalidation of legacy artifact types, decision mirror/outcome invalidation, unverified-source approval denial, old-schema migration/backfill and production fallback denial.
+
+### Limits that remain
+
+This local registry stores dataset version metadata and hashes, not the original workbook or raw file bytes. It is not a substitute for the managed staging Storage implementation. Historical artifacts without verifiable dataset references remain `NOT_LINKED`; the system deliberately does not infer their dependencies after the fact. The new local registry does not establish managed hosted dataset upload/download, Storage object retention, resumable upload, orphan cleanup, fresh-session continuity or cross-organization acceptance. Exact-head CI and independent engineering review are still required before this code is accepted.
