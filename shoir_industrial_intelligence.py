@@ -1445,7 +1445,7 @@ def _require_evidence_refs(evidence_refs: Sequence[str], label: str) -> list[str
         raise IndustrialIntelligenceError(f"{label} evidence references must be a list of registered record IDs or source references.")
     refs = [_required_text(item, f"{label} evidence reference", 240) for item in evidence_refs]
     if not refs:
-        raise IndustrialIntelligenceError(f"{label} requires at least one evidence reference.")
+        raise IndustrialIntelligenceError(f"{label} requires at least one registered evidence reference.")
     records = _state_list("records")
     available = set()
     stale_references = set()
@@ -1548,7 +1548,7 @@ def _require_current_dataset_artifact(record: Mapping[str, Any], label: str) -> 
         or str(record.get("dataset_dependency_status") or "").upper() == "STALE"
     ):
         raise IndustrialIntelligenceError(
-            f"{label} evidence is stale because its source dataset changed. Re-run it against the current dataset version before review or approval."
+            f"{label} is stale because its source dataset evidence changed. Re-run it against the current dataset version before review or approval."
         )
 
 

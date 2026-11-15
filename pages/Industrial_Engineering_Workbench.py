@@ -1954,11 +1954,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 result["original_workbook_bytes_retained_in_session"] = bool(workbook_result.get("_raw_bytes") == raw_dataset_workbook)
                                 st.session_state["excel_studio_signature"] = result["data_hash"]
                             elif selected_tool["tool_id"] in {"T061", "T067", "T068"}:
-                                payload_json = {
-                                    "T061": tool061_payload_json,
-                                    "T067": tool067_payload_json,
-                                    "T068": tool068_payload_json,
-                                }[selected_tool["tool_id"]]
+                                if selected_tool["tool_id"] == "T061":
+                                    payload_json = tool061_payload_json
+                                elif selected_tool["tool_id"] == "T067":
+                                    payload_json = tool067_payload_json
+                                else:
+                                    payload_json = tool068_payload_json
                                 try:
                                     parsed_payload = json.loads(payload_json)
                                 except json.JSONDecodeError as exc:

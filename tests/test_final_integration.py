@@ -62,7 +62,7 @@ def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(t
         db_path=db, username="alice",
     )
     first_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         version = conn.execute(
             "SELECT version,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
             (dataset_id,),
@@ -97,7 +97,7 @@ def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(t
         db_path=db, username="alice",
     )
 
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         platform_status = conn.execute(
             "SELECT dataset_dependency_status FROM platform_decisions WHERE decision_id=?",
             (decision_id,),
@@ -140,7 +140,7 @@ def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks
         "Demand history", "demand.csv", first, db_path=db, username="alice"
     )
     data_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         version, fingerprint = conn.execute(
             "SELECT version,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
             (dataset_id,),
@@ -160,7 +160,7 @@ def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks
             "version_fingerprint": fingerprint,
         }],
     )
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         before = conn.execute(
             "SELECT dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
@@ -172,7 +172,7 @@ def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks
     platform.register_dataset(
         "Demand history", "demand.csv", second, db_path=db, username="alice"
     )
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         after = conn.execute(
             "SELECT dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
             (decision_id,),

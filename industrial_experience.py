@@ -531,7 +531,7 @@ def transition_decision(
         freshness = str(row[2] or "NOT_LINKED").upper()
         if freshness in {"STALE", "UNVERIFIED_REFERENCE"} and to_status in {"Approved", "Implemented", "Verified"}:
             raise ValueError(
-                "A decision with stale or unverified dataset lineage cannot be approved, implemented or verified. "
+                "A stale dataset-linked decision is blocked because its dataset lineage is stale or unverified and cannot be approved, implemented or verified. "
                 "Register/verify the dataset source and rerun the decision against the current dataset version first."
             )
         if require_owner and (owner is None or str(owner) != str(actor)):
@@ -613,7 +613,7 @@ def record_decision_outcome(
         freshness = str(row[1] or "NOT_LINKED").upper()
         if freshness in {"STALE", "UNVERIFIED_REFERENCE"}:
             raise ValueError(
-                "Cannot record a new decision outcome because the source dataset version is stale or unverified. "
+                "Cannot record a new decision outcome because dataset lineage is stale or unverified: the source dataset version is no longer current. "
                 "Register/verify the source and rerun and reapprove the decision against current data."
             )
         decision_dependencies_json = str(row[2] or "[]")
@@ -640,7 +640,7 @@ def record_decision_outcome(
         freshness = str(current_decision[1] or "NOT_LINKED").upper()
         if freshness in {"STALE", "UNVERIFIED_REFERENCE"}:
             raise ValueError(
-                "Cannot record a new decision outcome because the source dataset version is stale or unverified. "
+                "Cannot record a new decision outcome because dataset lineage is stale or unverified: the source dataset version is no longer current. "
                 "Register/verify the source and rerun and reapprove the decision against current data."
             )
         decision_dependencies_json = str(current_decision[2] or "[]")
