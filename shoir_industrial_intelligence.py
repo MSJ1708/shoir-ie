@@ -1956,6 +1956,30 @@ def invalidate_dataset_dependents(
                 raise IndustrialIntelligenceError(f"{key} exceeds the {MAX_RECORDS} active-workspace record limit.")
             st.session_state[storage_keys[key]] = copy.deepcopy(scoped_rows)
 
+        lineage_status = "DEPENDENTS_MARKED_STALE" if stale_all_ids else "NO_STALE_DEPENDENTS"
+        lineage_summary = {
+            "status": lineage_status,
+            "dataset_id": str(dataset_id).upper(),
+            "current_version": current_version,
+            "stale_record_count": len(stale_ids),
+            "stale_record_ids": stale_ids,
+            "stale_event_count": len(stale_event_ids),
+            "stale_event_ids": stale_event_ids,
+            "stale_model_count": len(stale_model_ids),
+            "stale_model_ids": stale_model_ids,
+            "stale_action_count": len(stale_action_ids),
+            "stale_action_ids": stale_action_ids,
+            "lineage_event_id": event_id,
+            "current_dataset_thread_node_id": current_dataset_node_id,
+            "historical_outputs_preserved": True,
+            "digital_thread_nodes_marked_stale": stale_nodes,
+            "superseded_dataset_version_nodes": superseded_dataset_nodes,
+            "scope": access["scope"],
+        }
+        st.session_state["shoir_dataset_lineage_blocked"] = False
+        st.session_state["shoir_dataset_lineage_invalidation"] = lineage_summary
+        st.session_state["shoir_active_dataset_thread_node_id"] = current_dataset_node_id
+        st.session_state["shoir_dataset_thread_sync_status"] = "SAVED"
         from workspace_persistence import save_user_workspace
         if not save_user_workspace(username, st.session_state):
             raise RuntimeError(
@@ -1972,6 +1996,14 @@ def invalidate_dataset_dependents(
             if visual_key:
                 st.session_state[visual_key] = pd.DataFrame(copy.deepcopy(_state_list(key)))
         _restore_thread_graph(graph_snapshot)
+        st.session_state["shoir_dataset_lineage_blocked"] = True
+        st.session_state["shoir_dataset_thread_sync_status"] = "SAVE_FAILED"
+        st.session_state["shoir_dataset_lineage_invalidation"] = {
+            "status": "INVALIDATION_FAILED",
+            "dataset_id": str(dataset_id).upper(),
+            "current_version": current_version,
+            "error": "Managed workspace lineage save was not confirmed.",
+        }
         raise
     return {
         "status": "DEPENDENTS_MARKED_STALE" if stale_all_ids else "NO_STALE_DEPENDENTS",
