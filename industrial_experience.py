@@ -306,13 +306,25 @@ def create_decision(
     owner: str,
     status: str = "Draft",
     db_path: str = "enterprise_full_workspace.db",
+    dataset_dependencies: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> str:
     ensure_experience_db(db_path)
     did = "DEC-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
     with _db(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        from industrial_platform import _resolve_legacy_dataset_dependencies
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
+            conn, {"dataset_dependencies": dataset_dependencies or []}
+        )
+        if dependency_status == "STALE":
+            raise ValueError("Cannot create a decision from a stale dataset version. Reload the current dataset before creating the decision.")
         conn.execute(
-            "INSERT INTO experience_decisions VALUES(?,?,?,?,?,?,?,?,?,?)",
+            """INSERT INTO experience_decisions(
+                decision_id,title,module,status,metrics_json,assumptions_json,uncertainty_json,
+                owner,created_at,updated_at,dataset_dependencies_json,
+                dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 did,
                 str(title)[:180],
@@ -324,6 +336,9 @@ def create_decision(
                 owner,
                 stamp,
                 stamp,
+                json.dumps(dependencies, sort_keys=True),
+                dependency_status,
+                "[]",
             ),
         )
         conn.commit()
@@ -350,13 +365,21 @@ def save_decision_spec(
     with _db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         parent = conn.execute(
-            "SELECT owner FROM experience_decisions WHERE decision_id=?",
+            "SELECT owner,dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
         if not parent:
             raise ValueError("Decision not found.")
         if str(parent[0] or "") != owner:
             raise PermissionError("Decision not found or not owned by this user.")
+        if str(parent[1] or "NOT_LINKED").upper() == "STALE":
+            raise ValueError("Cannot edit or revalidate a decision specification while its source dataset is stale. Reload and rerun the analysis first.")
+        from industrial_platform import _resolve_legacy_dataset_dependencies
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
+            conn, baseline, alternatives, constraints, kpis, uncertainty, evidence, verification
+        )
+        if dependency_status == "STALE":
+            raise ValueError("Decision specification references a stale dataset version. Reload the current dataset before saving.")
 
         conn.execute(
             """
@@ -390,6 +413,19 @@ def save_decision_spec(
                 now,
             ),
         )
+        if dependencies:
+            conn.execute(
+                """UPDATE experience_decisions
+                   SET dataset_dependencies_json=?,dataset_dependency_status=?,updated_at=?
+                   WHERE decision_id=? AND owner=?""",
+                (
+                    json.dumps(dependencies, sort_keys=True),
+                    dependency_status,
+                    now,
+                    decision_id,
+                    owner,
+                ),
+            )
         # If a legacy/corrupt specification row has a different owner, the
         # conditional ON CONFLICT deliberately updated nothing.
         current = conn.execute(
@@ -471,12 +507,14 @@ def transition_decision(
         raise ValueError("Invalid approval state.")
     with _db() as conn:
         row = conn.execute(
-            "SELECT status,owner FROM experience_decisions WHERE decision_id=?",
+            "SELECT status,owner,dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
         if not row:
             raise ValueError("Decision not found.")
         current, owner = str(row[0]), row[1]
+        if str(row[2] or "NOT_LINKED").upper() == "STALE" and to_status in {"Approved", "Implemented", "Verified"}:
+            raise ValueError("A stale dataset-linked decision cannot be approved, implemented or verified. Rerun it against the current dataset version first.")
         if require_owner and (owner is None or str(owner) != str(actor)):
             raise PermissionError("Decision not found or not owned by this user.")
         if current in states and states.index(to_status) < states.index(current) and to_status not in {"Draft", "Review"}:
