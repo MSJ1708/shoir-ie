@@ -18,7 +18,9 @@ def test_execution_audit_accounts_for_all_100_tools_and_distinguishes_route_type
         "MAPPED_LEGACY_MODULE_LAUNCH",
         "NO_DECLARED_EXECUTION_ROUTE",
     })
-    assert route_counts.get("FOCUSED_METHOD_DISPATCH", 0) > 0
+    assert route_counts.get("FOCUSED_METHOD_DISPATCH", 0) == 75
+    assert route_counts.get("MAPPED_LEGACY_MODULE_LAUNCH", 0) == 25
+    assert route_counts.get("NO_DECLARED_EXECUTION_ROUTE", 0) == 0
     assert report["verified_working_count"] == 0
 
 
