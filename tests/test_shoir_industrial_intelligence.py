@@ -1394,6 +1394,124 @@ def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(
         ii._require_evidence_refs([record["record_id"]], "Decision evidence")
 
 
+def test_records_inherit_dataset_dependencies_from_referenced_evidence_and_stale_decisions_cannot_be_approved(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-decision-author", "owner")
+    access = ii._session_authorize("synthetic-decision-author", "Enterprise", "write")
+    evidence = ii.create_record(
+        "synthetic-decision-author", "Enterprise", "evidence", "Versioned decision evidence",
+        {
+            "result": {"value": 10},
+            "dataset_dependencies": [{
+                "dataset_id": "DS-ABCDEF778899",
+                "version": 1,
+                "data_hash": "a" * 64,
+                "version_fingerprint": "b" * 64,
+                "organization_id": access["organization_id"],
+                "workspace_id": access["workspace_id"],
+                "current_version_verified": True,
+            }],
+        },
+        provenance="SYNTHETIC",
+    )
+    decision = ii.create_decision(
+        "synthetic-decision-author", "Enterprise", "Versioned production decision",
+        "Compare the two controlled options.",
+        [
+            {"option_id": "A", "label": "Option A"},
+            {"option_id": "B", "label": "Option B"},
+        ],
+        "A", "Option A is supported by the registered evidence.", [evidence["record_id"]],
+    )
+    assert decision["dataset_dependency_status"] == "CURRENT"
+    assert decision["dataset_dependencies"][0]["dataset_id"] == "DS-ABCDEF778899"
+    assert decision["dataset_dependencies"][0]["version"] == 1
+
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-decision-author", "Enterprise", "DS-ABCDEF778899",
+        2, "c" * 64, "d" * 64,
+    )
+    assert decision["record_id"] in result["stale_record_ids"]
+    stale_decision = next(
+        row for row in ii.list_records("synthetic-decision-author", "Enterprise")
+        if row["record_id"] == decision["record_id"]
+    )
+    assert stale_decision["dataset_dependency_status"] == "STALE"
+
+    session["current_user"] = "synthetic-decision-approver"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "approver", "status": "active",
+            }]
+        },
+    )
+    verification = ii.create_record(
+        "synthetic-decision-approver", "Enterprise", "evidence",
+        "Independent decision review evidence", {"result": "synthetic review"},
+        provenance="SYNTHETIC",
+    )
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Decision proposal is stale"):
+        ii.review_decision(
+            "synthetic-decision-approver", "Enterprise", decision["record_id"],
+            "APPROVED", [verification["record_id"]],
+        )
+
+
+def test_dataset_linked_benefit_cannot_be_independently_verified_after_source_change(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-benefit-author", "owner")
+    access = ii._session_authorize("synthetic-benefit-author", "Enterprise", "write")
+    evidence = ii.create_record(
+        "synthetic-benefit-author", "Enterprise", "evidence", "Versioned benefit evidence",
+        {
+            "dataset_dependencies": [{
+                "dataset_id": "DS-ABCDEF554433",
+                "version": 1,
+                "data_hash": "a" * 64,
+                "version_fingerprint": "b" * 64,
+                "organization_id": access["organization_id"],
+                "workspace_id": access["workspace_id"],
+                "current_version_verified": True,
+            }],
+        },
+        provenance="SYNTHETIC",
+    )
+    benefit = ii.record_benefit(
+        "synthetic-benefit-author", "Enterprise", "Synthetic project",
+        "Energy intensity", 100, 90, "kWh/unit", [evidence["record_id"]],
+    )
+    assert benefit["dataset_dependency_status"] == "CURRENT"
+    assert benefit["dataset_dependencies"][0]["version"] == 1
+    ii.invalidate_dataset_dependents(
+        "synthetic-benefit-author", "Enterprise", "DS-ABCDEF554433",
+        2, "c" * 64, "d" * 64,
+    )
+
+    session["current_user"] = "synthetic-benefit-approver"
+    monkeypatch.setattr(
+        __import__("durable_account_store"),
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "approver", "status": "active",
+            }]
+        },
+    )
+    verification = ii.create_record(
+        "synthetic-benefit-approver", "Enterprise", "evidence",
+        "Independent benefit review evidence", {"result": "synthetic review"},
+        provenance="SYNTHETIC",
+    )
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Benefit record is stale"):
+        ii.verify_benefit_record(
+            "synthetic-benefit-approver", "Enterprise", benefit["record_id"],
+            [verification["record_id"]],
+        )
+
+
 def test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_validation(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
