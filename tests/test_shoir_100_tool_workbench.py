@@ -1206,6 +1206,7 @@ def test_workbench_routes_team_collaboration_to_staging_gated_rbac_ui():
 
 def test_workbench_t095_builds_sanitized_xlsx_from_entitled_source_result():
     from io import BytesIO
+    import pandas as pd
     from openpyxl import load_workbook
     from streamlit.testing.v1 import AppTest
 

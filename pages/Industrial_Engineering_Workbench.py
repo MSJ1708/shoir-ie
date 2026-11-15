@@ -14,7 +14,7 @@ import re
 import sqlite3
 from shoir_sqlite import sqlite_connect as sqlite_connection
 from shoir_sqlite import ClosingSQLiteConnection
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import numpy as np
@@ -2026,6 +2026,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
                         st.session_state.pop("shoir_tool_inputs_" + selected_tool["tool_id"], None)
                         st.session_state.pop("shoir_tool_save_status_" + selected_tool["tool_id"], None)
+                        t095_artifact_bytes = None
+                        if selected_tool["tool_id"] == "T095":
+                            # Remove an older in-session file before a new report attempt.
+                            st.session_state.pop("shoir_tool_bundle_bytes_T095", None)
+                            st.session_state.pop("shoir_tool_bundle_filename_T095", None)
+                            st.session_state.pop("shoir_tool_bundle_mime_T095", None)
                         try:
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
@@ -2971,7 +2977,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         "Data Provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
                                         "Input Snapshot SHA-256": inputs_hash or "NOT_AVAILABLE",
                                         "Exported By": USER,
-                                        "Generated At UTC": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                        "Generated At UTC": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                         "Redacted Columns": table_stats["redacted_column_count"],
                                     }]
                                     fmt = str(report_format).upper()
@@ -3014,9 +3020,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         "data_provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
                                         "warning": "This is a formatted export of the selected result. It does not independently verify source data or engineering correctness; inspect assumptions and provenance before distribution. The artifact is a session download, not a managed document repository.",
                                     }
-                                    st.session_state["shoir_tool_bundle_bytes_T095"] = artifact_bytes
-                                    st.session_state["shoir_tool_bundle_filename_T095"] = result["filename"]
-                                    st.session_state["shoir_tool_bundle_mime_T095"] = mime
+                                    t095_artifact_bytes = artifact_bytes
                                 elif selected_tool["tool_id"] == "T087":
                                     if source_result_tool_id == "NONE":
                                         raise ValueError("Run an entitled source tool first; no completed result is available to package.")
@@ -3048,6 +3052,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
+                            if t095_artifact_bytes is not None:
+                                # Keep the binary file in the browser session only;
+                                # persist only its manifest/result metadata.
+                                st.session_state["shoir_tool_bundle_bytes_T095"] = t095_artifact_bytes
+                                st.session_state["shoir_tool_bundle_filename_T095"] = result["filename"]
+                                st.session_state["shoir_tool_bundle_mime_T095"] = result["mime_type"]
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
