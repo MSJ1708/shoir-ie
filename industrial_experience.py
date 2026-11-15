@@ -360,6 +360,8 @@ def save_decision_spec(
 ) -> None:
     """Persist decision specifications only for the owning workspace user."""
     ensure_experience_db()
+    from industrial_platform import init_platform_db
+    init_platform_db()
     decision_id = str(decision_id or "").strip()
     owner = str(owner or "").strip()
     if not decision_id or not owner:
