@@ -760,12 +760,80 @@ def register_dataset(
     # reach this path without that startup sequence. This is idempotent and local
     # only; staging has already returned through the authenticated managed API.
     init_platform_db(db_path)
+    created_new_version = False
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint FROM platform_datasets WHERE dataset_id=?",
+            (resolved_dataset_id,),
+        ).fetchone()
+        current_version = int(existing[0] or 0) if existing else 0
+        current_hash = str(existing[1] or "").strip().lower() if existing else ""
+        current_fingerprint = str(existing[2] or "").strip().lower() if existing else ""
+        if (
+            existing
+            and current_hash == data_hash
+            and current_fingerprint == fingerprint
+        ):
+            version_number = current_version or 1
+        else:
+            version_number = current_version + 1 if current_version else 1
+            created_new_version = True
+            conn.execute(
+                """INSERT INTO platform_dataset_versions(
+                    dataset_id,version,data_hash,version_fingerprint,schema_json,
+                    transformations_json,row_count,column_count,created_by,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    resolved_dataset_id, version_number, data_hash, fingerprint,
+                    json.dumps(schema, sort_keys=True, ensure_ascii=False),
+                    json.dumps(transform_log, sort_keys=True, ensure_ascii=False),
+                    int(len(df)), int(len(df.columns)), str(username or "") or None, _now(),
+                ),
+            )
         conn.execute(
-            "INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",
-            (resolved_dataset_id, name, source_name, len(df), len(df.columns), data_hash, _now(), json.dumps(schema)),
+            """INSERT INTO platform_datasets(
+                dataset_id,name,source_name,row_count,column_count,sha256,created_at,
+                schema_json,current_version,version_fingerprint
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(dataset_id) DO UPDATE SET
+                name=excluded.name,
+                source_name=excluded.source_name,
+                row_count=excluded.row_count,
+                column_count=excluded.column_count,
+                sha256=excluded.sha256,
+                created_at=excluded.created_at,
+                schema_json=excluded.schema_json,
+                current_version=excluded.current_version,
+                version_fingerprint=excluded.version_fingerprint""",
+            (
+                resolved_dataset_id, name, source_name, len(df), len(df.columns),
+                data_hash, _now(), json.dumps(schema, sort_keys=True, ensure_ascii=False),
+                version_number, fingerprint,
+            ),
         )
+        invalidated = {}
+        if created_new_version and version_number > 1:
+            invalidated = _mark_legacy_dataset_artifacts_stale(
+                conn, resolved_dataset_id, version_number, data_hash, fingerprint
+            )
         conn.commit()
+
+    registration = {
+        "dataset_id": resolved_dataset_id,
+        "version": version_number,
+        "data_hash": data_hash,
+        "version_fingerprint": fingerprint,
+        "registered_at": _now(),
+        "created_new_version": created_new_version,
+        "invalidated_legacy_artifacts": invalidated,
+    }
+    state["data_platform_latest_registration"] = dict(registration)
+    state["data_platform_latest_dataset_id"] = resolved_dataset_id
+    state["data_platform_latest_version"] = version_number
+    _activate_registered_dataset_dependency(
+        state, username, workspace, source_name, registration, dataset_scope
+    )
     return resolved_dataset_id
 
 def load_registered_dataset(
