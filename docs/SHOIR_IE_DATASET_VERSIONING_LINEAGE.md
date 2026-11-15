@@ -100,3 +100,15 @@ The candidate now adds a separate additive dataset-version registry for the lega
 ### Limits that remain
 
 This local registry stores dataset version metadata and hashes, not the original workbook or raw file bytes. It is not a substitute for the managed staging Storage implementation. Historical artifacts without verifiable dataset references remain `NOT_LINKED`; the system deliberately does not infer their dependencies after the fact. The new local registry does not establish managed hosted dataset upload/download, Storage object retention, resumable upload, orphan cleanup, fresh-session continuity or cross-organization acceptance. Exact-head CI and independent engineering review are still required before this code is accepted.
+
+
+## Initial-import Digital Thread and unresolved-lineage fail-closed update — 2026-11-15
+
+- The first verified dataset registration now creates a canonical Dataset-version node immediately, even when no analysis record depends on it yet. The node stores dataset ID, version, content hash, version fingerprint, source name, registration time and current-version verification state.
+- The initial Dataset node is saved through the authenticated workspace persistence path. A failed save records `shoir_dataset_thread_sync_status=SAVE_FAILED`, sets the workspace lineage block and prevents new dataset-dependent record creation.
+- If a dataset-version invalidation save fails, the active workspace remains lineage-blocked. Model validation, action approval/status transitions, decision review, benefit verification, risk/barrier review, cause/effect review and shift-handover acknowledgement now also refuse to proceed while that block is set.
+- Copilot returns `DATASET_LINEAGE_UNRESOLVED` and no citations while the workspace lineage block is active. Stale or unresolved data cannot be silently presented as current evidence.
+- The local immutable metadata registry now supports a content reversion lifecycle A → B → A as versions 1 → 2 → 3. The earlier content-hash uniqueness index is removed by an additive, history-preserving SQLite table rebuild when encountered.
+- Regression tests cover first-import Dataset Thread persistence, failed initial graph save, unresolved-lineage approval/Copilot blocking, A → B → A versioning and old-table uniqueness migration.
+
+CI for the latest candidate head remains pending. These are source changes and authored tests, not hosted acceptance evidence.
