@@ -722,6 +722,19 @@ def test_legacy_artifact_with_unregistered_dataset_reference_is_not_claimed_curr
     assert row[1] == "[]"
 
 
+def test_dataset_registration_refuses_local_sqlite_fallback_in_production(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    db = tmp_path / "must-not-create-production-local-db.sqlite"
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "production")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: {})
+    frame = pd.DataFrame({"Output": [10.0]})
+    with pytest.raises(RuntimeError, match="local SQLite fallback is disabled"):
+        platform.register_dataset("Production dataset", "input.csv", frame, db_path=str(db))
+    assert not db.exists()
+
+
 def test_local_dataset_registration_returns_stable_generated_id(tmp_path, monkeypatch):
     import durable_account_store
     import industrial_platform as platform
