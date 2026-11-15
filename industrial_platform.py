@@ -487,7 +487,7 @@ def _mark_legacy_dataset_artifacts_stale(
                     and existing.get("previous_version") == old_version
                     and existing.get("current_version") == current_version
                     and str(existing.get("current_data_hash") or "").lower() == data_hash
-                    for existing in markers
+                    for existing in [*markers, *matching]
                 ):
                     matching.append(marker)
             # Older model snapshots already have dataset_id/data_hash columns.
