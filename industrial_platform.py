@@ -174,7 +174,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("mes_quality_releases","CREATE TABLE IF NOT EXISTS mes_quality_releases(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,status TEXT,defect_qty REAL,notes TEXT,operator TEXT,created_at TEXT)"),
             ("mes_genealogy","CREATE TABLE IF NOT EXISTS mes_genealogy(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,parent_lot TEXT,material TEXT,quantity REAL,created_at TEXT)"),
             ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT, current_version INTEGER, version_fingerprint TEXT)"),
-            ("platform_dataset_versions","CREATE TABLE IF NOT EXISTS platform_dataset_versions(dataset_id TEXT NOT NULL, version INTEGER NOT NULL, data_hash TEXT NOT NULL, version_fingerprint TEXT NOT NULL, schema_json TEXT NOT NULL, transformations_json TEXT NOT NULL DEFAULT '[]', row_count INTEGER NOT NULL, column_count INTEGER NOT NULL, created_by TEXT, created_at TEXT NOT NULL, PRIMARY KEY(dataset_id,version), UNIQUE(dataset_id,data_hash,version_fingerprint))"),
+            ("platform_dataset_versions","CREATE TABLE IF NOT EXISTS platform_dataset_versions(dataset_id TEXT NOT NULL, version INTEGER NOT NULL, data_hash TEXT NOT NULL, version_fingerprint TEXT NOT NULL, schema_json TEXT NOT NULL, transformations_json TEXT NOT NULL DEFAULT '[]', row_count INTEGER NOT NULL, column_count INTEGER NOT NULL, created_by TEXT, created_at TEXT NOT NULL, PRIMARY KEY(dataset_id,version))"),
             ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
             ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
@@ -192,6 +192,60 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
+
+        # Older candidate schemas enforced one row per dataset/content hash. That
+        # prevents a valid A -> B -> A lifecycle from receiving a new monotonically
+        # increasing version number. Rebuild only that table/index shape, retaining
+        # every historical version row and its immutable metadata.
+        unique_indexes = conn.execute(
+            "PRAGMA index_list('platform_dataset_versions')"
+        ).fetchall()
+        rebuild_version_table = False
+        for index_row in unique_indexes:
+            index_name = str(index_row[1])
+            is_unique = bool(index_row[2])
+            if not is_unique:
+                continue
+            escaped_index = index_name.replace('"', '""')
+            indexed_columns = tuple(
+                str(column_row[2])
+                for column_row in conn.execute(f'PRAGMA index_info("{escaped_index}")').fetchall()
+            )
+            if set(indexed_columns) == {"dataset_id", "data_hash", "version_fingerprint"} and len(indexed_columns) == 3:
+                rebuild_version_table = True
+                break
+        if rebuild_version_table:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """CREATE TABLE platform_dataset_versions_rebuilt(
+                    dataset_id TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    data_hash TEXT NOT NULL,
+                    version_fingerprint TEXT NOT NULL,
+                    schema_json TEXT NOT NULL,
+                    transformations_json TEXT NOT NULL DEFAULT '[]',
+                    row_count INTEGER NOT NULL,
+                    column_count INTEGER NOT NULL,
+                    created_by TEXT,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(dataset_id,version)
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO platform_dataset_versions_rebuilt(
+                    dataset_id,version,data_hash,version_fingerprint,schema_json,
+                    transformations_json,row_count,column_count,created_by,created_at
+                )
+                SELECT dataset_id,version,data_hash,version_fingerprint,schema_json,
+                       transformations_json,row_count,column_count,created_by,created_at
+                FROM platform_dataset_versions"""
+            )
+            conn.execute("DROP TABLE platform_dataset_versions")
+            conn.execute(
+                "ALTER TABLE platform_dataset_versions_rebuilt RENAME TO platform_dataset_versions"
+            )
+            conn.commit()
+
         column_migrations = {
             "platform_datasets": {
                 "current_version": "INTEGER",
