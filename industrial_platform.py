@@ -420,9 +420,17 @@ def _mark_legacy_dataset_artifacts_stale(
         "platform_experiments": ("experiment_id",),
         "platform_scenarios": ("scenario_id",),
         "platform_decisions": ("decision_id",),
+        "experience_decisions": ("decision_id",),
+        "experience_decision_outcomes": ("outcome_id",),
     }
     affected: dict[str, list[str]] = {table: [] for table in targets}
     for table, (id_column,) in targets.items():
+        table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not table_exists:
+            continue
         rows = conn.execute(
             f"SELECT {id_column},dataset_dependencies_json,stale_dataset_dependencies_json,dataset_dependency_status "
             f"FROM {table}"
@@ -1276,8 +1284,9 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
             c.execute(
                 """INSERT OR REPLACE INTO experience_decisions(
                     decision_id,title,module,status,metrics_json,assumptions_json,
-                    uncertainty_json,owner,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    uncertainty_json,owner,created_at,updated_at,dataset_dependencies_json,
+                    dataset_dependency_status,stale_dataset_dependencies_json
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     did,
                     str(card.get("title", ""))[:180],
@@ -1289,6 +1298,9 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
                     str(username),
                     str(card.get("created_at") or _now()),
                     _now(),
+                    json.dumps(dependencies, sort_keys=True),
+                    dependency_status,
+                    "[]",
                 ),
             )
             c.commit()
