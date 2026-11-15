@@ -564,6 +564,22 @@ def record_decision_outcome(
     predicted_payload = dict(predicted or {})
     variance_payload = variance.to_dict("records")
     with _db(db_path) as conn:
+        # Serialize the final freshness check and outcome insert against dataset
+        # invalidation; do not race a new dataset version between the earlier
+        # ownership check and this write.
+        conn.execute("BEGIN IMMEDIATE")
+        current_decision = conn.execute(
+            "SELECT owner,dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        if not current_decision:
+            raise ValueError("Decision not found.")
+        if str(current_decision[0]) != owner:
+            raise PermissionError("Decision belongs to another workspace owner.")
+        if str(current_decision[1] or "NOT_LINKED").upper() == "STALE":
+            raise ValueError("Cannot record a new decision outcome because its source dataset version is stale. Rerun and reapprove the decision against current data.")
+        decision_dependencies_json = str(current_decision[2] or "[]")
+        decision_dependency_status = str(current_decision[1] or "NOT_LINKED")
         conn.execute(
             """INSERT INTO experience_decision_outcomes(
                 outcome_id,decision_id,owner,implementation_status,predicted_json,
