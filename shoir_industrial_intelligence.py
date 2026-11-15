@@ -2667,13 +2667,19 @@ def record_shift_handover(
         if status not in {"OPEN", "IN_PROGRESS", "BLOCKED", "IMPLEMENTED", "VERIFIED", "CLOSED"}:
             raise IndustrialIntelligenceError(f"Unsupported handover issue status: {status}.")
         source_record_id = str(issue.get("source_record_id") or "").strip()
-        if source_record_id and not any(
-            str(record.get("record_id") or "") == source_record_id
-            for record in _state_list("records")
-        ):
-            raise IndustrialIntelligenceError(
-                f"Handover issue {issue_id} links to a source record that is not registered in this workspace."
+        if source_record_id:
+            source_record = next(
+                (
+                    record for record in _state_list("records")
+                    if str(record.get("record_id") or "") == source_record_id
+                ),
+                None,
             )
+            if not source_record:
+                raise IndustrialIntelligenceError(
+                    f"Handover issue {issue_id} links to a source record that is not registered in this workspace."
+                )
+            _require_current_dataset_artifact(source_record, f"Handover issue {issue_id} source record")
         normalized.append({
             "issue_id": issue_id,
             "owner": str(issue.get("owner") or "").strip() or None,
@@ -2687,6 +2693,7 @@ def record_shift_handover(
         "incoming_shift": _required_text(incoming_shift, "incoming_shift", 120),
         "incoming_shift_owner": str(incoming_shift_owner or "").strip() or None,
         "issues": normalized,
+        "evidence_refs": sorted({item["source_record_id"] for item in normalized if item.get("source_record_id")}),
         "handover_status": "ACKNOWLEDGEMENT_REQUIRED",
         "acknowledgement_is_not_issue_closure": True,
         "thread_node_type": "Event",
@@ -2715,6 +2722,7 @@ def acknowledge_shift_handover(
     )
     if not handover:
         raise IndustrialIntelligenceError("Shift handover does not exist in this workspace.")
+    _require_current_dataset_artifact(handover, "Shift handover")
     if str(handover.get("created_by") or "").casefold() == access["actor"].casefold():
         raise PermissionError("The outgoing-shift handover creator cannot acknowledge their own handover.")
     payload = handover.get("payload", {})
@@ -2802,6 +2810,7 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
     like = _finite(likelihood, "likelihood", minimum=1, maximum=5)
     rows = []
     effectiveness = []
+    barrier_evidence_refs: list[str] = []
     for index, barrier in enumerate(barriers, start=1):
         if not isinstance(barrier, Mapping):
             raise IndustrialIntelligenceError(f"Barrier {index} must be an object.")
@@ -2813,6 +2822,7 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
             try:
                 _require_evidence_refs([evidence], f"Barrier {index}")
                 evidence_valid = True
+                barrier_evidence_refs.append(evidence)
             except IndustrialIntelligenceError:
                 evidence_valid = False
         barrier_id = _required_text(barrier.get("barrier_id"), f"barrier {index} barrier_id")
@@ -2823,7 +2833,7 @@ def record_risk_barrier(username: str, tier: str, hazard: str, severity: int, li
     initial = sev * like
     reduction = sum(effectiveness) / len(effectiveness) if effectiveness else 0.0
     residual = initial * (1.0 - 0.6 * reduction)
-    record = create_record(username, tier, "risk_barrier_assurance", hazard, {"hazard": _required_text(hazard, "hazard"), "severity": sev, "likelihood": like, "initial_screening_score": initial, "barriers": rows, "residual_screening_score": residual, "formal_safety_approval": False, "thread_node_type": "Risk"}, "MANUAL")
+    record = create_record(username, tier, "risk_barrier_assurance", hazard, {"hazard": _required_text(hazard, "hazard"), "severity": sev, "likelihood": like, "initial_screening_score": initial, "barriers": rows, "evidence_refs": sorted(set(barrier_evidence_refs)), "residual_screening_score": residual, "formal_safety_approval": False, "thread_node_type": "Risk"}, "MANUAL")
     return record
 
 
@@ -2844,6 +2854,7 @@ def review_barrier_effectiveness(
     )
     if not risk_record:
         raise IndustrialIntelligenceError("Risk/barrier record does not exist in this workspace.")
+    _require_current_dataset_artifact(risk_record, "Risk/barrier record")
     if str(risk_record.get("created_by", "")).casefold() == access["actor"].casefold():
         raise PermissionError("The risk/barrier record creator cannot independently review its barriers.")
     key = _required_text(barrier_id, "barrier_id")
@@ -3024,7 +3035,12 @@ def record_cause_effect_investigation(username: str, tier: str, title: str, obse
         if validation == "SUPPORTED":
             evidence = _require_evidence_refs(evidence, f"Cause-effect candidate {index}")
         links.append({"from": _required_text(item.get("from"), "candidate from"), "to": _required_text(item.get("to"), "candidate to"), "relationship": str(item.get("relationship") or "POSSIBLE_CAUSE"), "supporting_evidence": evidence, "contradicting_evidence": counter, "validation_status": validation})
-    return create_record(username, tier, "cause_effect_investigation", title, {"title": _required_text(title, "title"), "observations": [_required_text(item, "observation", 1000) for item in observations], "candidate_relationships": links, "causal_claim": "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED", "thread_node_type": "Decision"}, "MANUAL")
+    evidence_refs = sorted({
+        ref
+        for link in links
+        for ref in [*link["supporting_evidence"], *link["contradicting_evidence"]]
+    })
+    return create_record(username, tier, "cause_effect_investigation", title, {"title": _required_text(title, "title"), "observations": [_required_text(item, "observation", 1000) for item in observations], "candidate_relationships": links, "evidence_refs": evidence_refs, "causal_claim": "UNCONFIRMED_UNLESS_INDIVIDUALLY_REVIEWED", "thread_node_type": "Decision"}, "MANUAL")
 
 
 def review_cause_effect_investigation(
@@ -3073,6 +3089,7 @@ def review_cause_effect_investigation(
             "candidate_relationship": _json_safe(candidate),
             "decision": status,
             "supporting_evidence": refs,
+            "evidence_refs": refs,
             "reviewer": access["actor"],
             "role": access["role"],
             "comment": str(reviewer_comment or "")[:2000],
