@@ -326,3 +326,23 @@ These are test-source counts only, not passing test results. The latest candidat
 ### Remaining limitations
 
 The local SQLite registry holds metadata/history, not original source-file bytes. Existing historical analyses lacking explicit/verifiable source references remain `NOT_LINKED` and cannot be retrospectively represented as dataset-derived. Managed staging Storage lifecycle, object retention and cleanup, upload resumability, authenticated browser journeys, cross-tenant isolation, full exports, independent engineering/security review and external configuration remain separate gates.
+
+
+## 14. Initial import and unresolved-lineage safety — 2026-11-15
+
+The dataset lifecycle now creates the canonical Digital Thread Dataset-version node at the first verified import, rather than waiting for an analysis or later version change. That node is persisted through the authenticated workspace snapshot path. If that save is not confirmed, the workspace is marked lineage-blocked and new dataset-dependent records are refused.
+
+The same workspace-wide block now applies to all governed review/approval/verification paths and Copilot retrieval. A failed invalidation cannot leave old records eligible for approval simply because their stale flags were not persisted; model validation, action approval/status changes, decision review, benefit verification, risk/barrier review, cause/effect review, shift-handover acknowledgement and Copilot evidence retrieval all fail closed until lineage resolution is restored.
+
+The local SQLite dataset history also supports content reversion (A → B → A) as immutable version entries 1 → 2 → 3. An additive table rebuild removes the earlier content-hash uniqueness constraint while preserving historical rows.
+
+Latest candidate test-source inventory:
+- Industrial Intelligence: 79 test functions
+- Resource Intelligence: 130
+- Remaining tool engines: 21
+- Legacy Industrial Platform: 34
+- Final integration: 21
+- Industrial Experience: 18
+- 100-tool route audit: 2
+
+These are authored test counts only. Exact-head CI is still queued and no test pass is claimed.
