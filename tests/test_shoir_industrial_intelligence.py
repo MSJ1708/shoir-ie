@@ -1512,6 +1512,133 @@ def test_dataset_linked_benefit_cannot_be_independently_verified_after_source_ch
         )
 
 
+def test_dataset_linked_risk_barrier_cannot_be_reviewed_after_source_change(monkeypatch):
+    session = _configure_org_session(monkeypatch, "synthetic-risk-owner", "owner")
+    access = ii._session_authorize("synthetic-risk-owner", "Enterprise", "write")
+    evidence = ii.create_record(
+        "synthetic-risk-owner", "Enterprise", "evidence", "Versioned barrier evidence",
+        {
+            "dataset_dependencies": [{
+                "dataset_id": "DS-ABCDEF330011",
+                "version": 1,
+                "data_hash": "a" * 64,
+                "version_fingerprint": "b" * 64,
+                "organization_id": access["organization_id"],
+                "workspace_id": access["workspace_id"],
+                "current_version_verified": True,
+            }],
+        },
+        provenance="SYNTHETIC",
+    )
+    risk = ii.record_risk_barrier(
+        "synthetic-risk-owner", "Enterprise", "Pump guarding exposure", 4, 3,
+        [{
+            "barrier_id": "B-001",
+            "owner": "synthetic-risk-owner",
+            "evidence_id": evidence["record_id"],
+            "status": "REPORTED_EFFECTIVE",
+        }],
+    )
+    assert risk["dataset_dependency_status"] == "CURRENT"
+    assert risk["dataset_dependencies"][0]["version"] == 1
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-risk-owner", "Enterprise", "DS-ABCDEF330011",
+        2, "c" * 64, "d" * 64,
+    )
+    assert risk["record_id"] in result["stale_record_ids"]
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Risk/barrier record is stale"):
+        ii.review_barrier_effectiveness(
+            "synthetic-risk-owner", "Enterprise", risk["record_id"],
+            "B-001", "VERIFIED_EFFECTIVE", evidence["record_id"],
+        )
+
+
+def test_dataset_linked_cause_effect_investigation_cannot_be_reviewed_after_source_change(monkeypatch):
+    _configure_org_session(monkeypatch, "synthetic-cause-owner", "owner")
+    access = ii._session_authorize("synthetic-cause-owner", "Enterprise", "write")
+    evidence = ii.create_record(
+        "synthetic-cause-owner", "Enterprise", "evidence", "Versioned cause evidence",
+        {
+            "dataset_dependencies": [{
+                "dataset_id": "DS-ABCDEF440022",
+                "version": 1,
+                "data_hash": "a" * 64,
+                "version_fingerprint": "b" * 64,
+                "organization_id": access["organization_id"],
+                "workspace_id": access["workspace_id"],
+                "current_version_verified": True,
+            }],
+        },
+        provenance="SYNTHETIC",
+    )
+    investigation = ii.record_cause_effect_investigation(
+        "synthetic-cause-owner", "Enterprise", "Cooling pump vibration investigation",
+        ["Vibration increased during the recorded operating period."],
+        [{
+            "from": "Cooling pump vibration",
+            "to": "Cooling header pressure fluctuation",
+            "relationship": "POSSIBLE_CAUSE",
+            "supporting_evidence": [evidence["record_id"]],
+            "validation_status": "SUPPORTED",
+        }],
+    )
+    assert investigation["dataset_dependency_status"] == "CURRENT"
+    assert investigation["dataset_dependencies"][0]["version"] == 1
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-cause-owner", "Enterprise", "DS-ABCDEF440022",
+        2, "c" * 64, "d" * 64,
+    )
+    assert investigation["record_id"] in result["stale_record_ids"]
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Cause-and-effect investigation is stale"):
+        ii.review_cause_effect_investigation(
+            "synthetic-cause-owner", "Enterprise", investigation["record_id"],
+            0, "CONFIRMED", [evidence["record_id"]],
+        )
+
+
+def test_dataset_linked_shift_handover_cannot_be_acknowledged_after_source_change(monkeypatch):
+    _configure_org_session(monkeypatch, "synthetic-handover-owner", "owner")
+    access = ii._session_authorize("synthetic-handover-owner", "Enterprise", "write")
+    evidence = ii.create_record(
+        "synthetic-handover-owner", "Enterprise", "evidence", "Versioned handover source",
+        {
+            "dataset_dependencies": [{
+                "dataset_id": "DS-ABCDEF550033",
+                "version": 1,
+                "data_hash": "a" * 64,
+                "version_fingerprint": "b" * 64,
+                "organization_id": access["organization_id"],
+                "workspace_id": access["workspace_id"],
+                "current_version_verified": True,
+            }],
+        },
+        provenance="SYNTHETIC",
+    )
+    handover = ii.record_shift_handover(
+        "synthetic-handover-owner", "Enterprise", "Night Shift", "Day Shift",
+        [{
+            "issue_id": "ISSUE-DATASET-1",
+            "status": "OPEN",
+            "description": "Review the dataset-derived process deviation.",
+            "source_record_id": evidence["record_id"],
+        }],
+        incoming_shift_owner="synthetic-incoming-owner",
+        provenance="SYNTHETIC",
+    )
+    assert handover["dataset_dependency_status"] == "CURRENT"
+    assert handover["dataset_dependencies"][0]["version"] == 1
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-handover-owner", "Enterprise", "DS-ABCDEF550033",
+        2, "c" * 64, "d" * 64,
+    )
+    assert handover["record_id"] in result["stale_record_ids"]
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Shift handover is stale"):
+        ii.acknowledge_shift_handover(
+            "synthetic-handover-owner", "Enterprise", handover["record_id"],
+            "ISSUE-DATASET-1",
+        )
+
+
 def test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_validation(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
