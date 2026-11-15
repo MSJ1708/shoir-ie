@@ -1267,6 +1267,7 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
     """Persist one Decision Center card into the shared decision lifecycle ledger."""
     did="DEC-"+hashlib.sha256(json.dumps(card,sort_keys=True,default=str).encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+        c.execute("BEGIN IMMEDIATE")
         dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, card)
         if dependency_status == "STALE":
             raise ValueError("Cannot register a new decision from a stale dataset version. Reload the current dataset and rerun the decision analysis.")
@@ -1293,6 +1294,16 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
         ensure_experience_db(db_path)
         lifecycle_status = {"Under Review": "Review"}.get(str(card.get("status")), str(card.get("status", "Draft")))
         with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+            c.execute("BEGIN IMMEDIATE")
+            platform_lineage = c.execute(
+                """SELECT dataset_dependencies_json,dataset_dependency_status,
+                          stale_dataset_dependencies_json
+                   FROM platform_decisions WHERE decision_id=?""",
+                (did,),
+            ).fetchone()
+            mirror_dependencies_json = str(platform_lineage[0] or "[]") if platform_lineage else json.dumps(dependencies, sort_keys=True)
+            mirror_dependency_status = str(platform_lineage[1] or dependency_status) if platform_lineage else dependency_status
+            mirror_stale_json = str(platform_lineage[2] or "[]") if platform_lineage else "[]"
             c.execute(
                 """INSERT OR REPLACE INTO experience_decisions(
                     decision_id,title,module,status,metrics_json,assumptions_json,
@@ -1310,9 +1321,9 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
                     str(username),
                     str(card.get("created_at") or _now()),
                     _now(),
-                    json.dumps(dependencies, sort_keys=True),
-                    dependency_status,
-                    "[]",
+                    mirror_dependencies_json,
+                    mirror_dependency_status,
+                    mirror_stale_json,
                 ),
             )
             c.commit()
@@ -1340,6 +1351,7 @@ def save_model_snapshot(
     base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{version}|{solver_version}|{result_hash}|{dataset_id}|{run_id}"
     mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+        c.execute("BEGIN IMMEDIATE")
         dependency_payload = {"dataset_id": dataset_id, "data_hash": data_hash} if dataset_id else {}
         dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, dependency_payload)
         if dependency_status == "STALE":
@@ -1434,6 +1446,7 @@ def save_experiment(name: str, module: str, scenarios: list, results: dict, user
         f"{name}|{module}|{username}|{time.time_ns()}".encode("utf-8")
     ).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+        c.execute("BEGIN IMMEDIATE")
         dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, scenarios, results)
         if dependency_status == "STALE":
             raise ValueError("Cannot save an experiment from a stale dataset version. Reload the current dataset and rerun the experiment.")
@@ -1835,6 +1848,7 @@ def ml_demand_forecast(
 def save_scenario(name: str, parent_name: str, parameters: dict, kpis: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     sid="SCN-"+hashlib.sha256((name+username).encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+        c.execute("BEGIN IMMEDIATE")
         dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, parameters, kpis)
         if dependency_status == "STALE":
             raise ValueError("Cannot save a scenario from a stale dataset version. Reload the current dataset and rerun the scenario.")
