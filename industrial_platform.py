@@ -1247,7 +1247,22 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
     """Persist one Decision Center card into the shared decision lifecycle ledger."""
     did="DEC-"+hashlib.sha256(json.dumps(card,sort_keys=True,default=str).encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
-        c.execute("INSERT OR REPLACE INTO platform_decisions VALUES(?,?,?,?,?,?,?,?,?)",(did,card["title"],card["module"],json.dumps(card["metrics"],default=str),json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),username,card["created_at"],card["status"]))
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, card)
+        if dependency_status == "STALE":
+            raise ValueError("Cannot register a new decision from a stale dataset version. Reload the current dataset and rerun the decision analysis.")
+        c.execute(
+            """INSERT OR REPLACE INTO platform_decisions(
+                decision_id,title,module,metrics_json,assumptions_json,uncertainty_json,
+                created_by,created_at,status,dataset_dependencies_json,
+                dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                did,card["title"],card["module"],json.dumps(card["metrics"],default=str),
+                json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),
+                username,card["created_at"],card["status"],
+                json.dumps(dependencies,sort_keys=True),dependency_status,"[]",
+            ),
+        )
         c.commit()
 
     # Mirror the same decision ID into the experience lifecycle so
@@ -1301,17 +1316,22 @@ def save_model_snapshot(
     base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{version}|{solver_version}|{result_hash}|{dataset_id}|{run_id}"
     mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+        dependency_payload = {"dataset_id": dataset_id, "data_hash": data_hash} if dataset_id else {}
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, dependency_payload)
+        if dependency_status == "STALE":
+            raise ValueError("Cannot register a new model snapshot against a stale dataset version. Reload the current dataset and rerun the model.")
         c.execute(
             """
             INSERT OR REPLACE INTO platform_models
-            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash,dataset_id,run_id)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash,dataset_id,run_id,dataset_dependencies_json,dataset_dependency_status,stale_dataset_dependencies_json)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 mid, name, str(version or "1.0.0"), model_type,
                 json.dumps(parameters, default=str), data_hash,
                 json.dumps(assumptions, default=str), username, _now(), status,
                 solver_version, result_hash, dataset_id, run_id,
+                json.dumps(dependencies,sort_keys=True), dependency_status, "[]",
             ),
         )
         c.commit()
@@ -1390,15 +1410,20 @@ def save_experiment(name: str, module: str, scenarios: list, results: dict, user
         f"{name}|{module}|{username}|{time.time_ns()}".encode("utf-8")
     ).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, scenarios, results)
+        if dependency_status == "STALE":
+            raise ValueError("Cannot save an experiment from a stale dataset version. Reload the current dataset and rerun the experiment.")
         c.execute(
             """INSERT INTO platform_experiments
-               (experiment_id, name, module, scenarios_json, results_json, created_by, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (experiment_id, name, module, scenarios_json, results_json, created_by, created_at,
+                dataset_dependencies_json,dataset_dependency_status,stale_dataset_dependencies_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 eid, name, module,
                 json.dumps(scenarios, default=str),
                 json.dumps(results, default=str),
                 username, created_at,
+                json.dumps(dependencies,sort_keys=True), dependency_status, "[]",
             ),
         )
         c.commit()
@@ -1786,7 +1811,20 @@ def ml_demand_forecast(
 def save_scenario(name: str, parent_name: str, parameters: dict, kpis: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     sid="SCN-"+hashlib.sha256((name+username).encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
-        c.execute("INSERT OR REPLACE INTO platform_scenarios VALUES(?,?,?,?,?,?,?)",(sid,name,parent_name,json.dumps(parameters,default=str),json.dumps(kpis,default=str),username,_now())); c.commit()
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(c, parameters, kpis)
+        if dependency_status == "STALE":
+            raise ValueError("Cannot save a scenario from a stale dataset version. Reload the current dataset and rerun the scenario.")
+        c.execute(
+            """INSERT OR REPLACE INTO platform_scenarios(
+                scenario_id,name,parent_name,parameters_json,kpis_json,created_by,created_at,
+                dataset_dependencies_json,dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                sid,name,parent_name,json.dumps(parameters,default=str),json.dumps(kpis,default=str),
+                username,_now(),json.dumps(dependencies,sort_keys=True),dependency_status,"[]",
+            ),
+        )
+        c.commit()
     return sid
 
 def scenario_table(db_path="enterprise_full_workspace.db") -> pd.DataFrame:
