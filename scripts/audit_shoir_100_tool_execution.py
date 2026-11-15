@@ -16,7 +16,7 @@ from typing import Any
 from shoir_tool_registry import TOOL_TARGETS, tool_status_counts
 
 
-TOOL_ID_PATTERN = re.compile(r"^T\\d{3}$")
+TOOL_ID_PATTERN = re.compile(r"^T\d{3}$")
 
 
 def _selected_tool_id_subscript(node: ast.AST) -> bool:
@@ -87,7 +87,7 @@ def build_execution_audit(repo_root: Path) -> dict[str, Any]:
             text = test_path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             continue
-        for match in re.finditer(r"\\bT\\d{3}\\b", text):
+        for match in re.finditer(r"\bT\d{3}\b", text):
             tool_id = match.group(0)
             if tool_id in test_references:
                 test_references[tool_id] += 1
