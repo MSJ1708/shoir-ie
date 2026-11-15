@@ -894,6 +894,26 @@ def test_staging_dataset_registration_uses_active_organization_workspace_scope(m
     captured = []
     monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(
+        durable_account_store,
+        "validate_remote_organization_workspace_access",
+        lambda _username: True,
+    )
+    monkeypatch.setattr(
+        durable_account_store,
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "owner",
+                "status": "active",
+            }]
+        },
+    )
+    monkeypatch.setattr(
+        "workspace_persistence.save_user_workspace",
+        lambda _username, _state: True,
+    )
+    monkeypatch.setattr(
         durable_account_store, "edge_upload_and_register_dataset_version",
         lambda **kwargs: captured.append(kwargs) or {
             "ok": True,
@@ -910,6 +930,7 @@ def test_staging_dataset_registration_uses_active_organization_workspace_scope(m
         "authenticated": True,
         "current_user": "synthetic-owner",
         "user_tier": "Enterprise",
+        "remote_session_token": "session-token",
         "shoir_active_organization_workspace": {
             "organization_id": "00000000-0000-4000-8000-000000000001",
             "organization_workspace_id": "00000000-0000-4000-8000-000000000002",

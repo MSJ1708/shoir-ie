@@ -30,12 +30,13 @@ MAX_RECORD_BYTES = 64000
 MAX_GRAPH_NODES = 10000
 MAX_GRAPH_EDGES = 20000
 VISUAL_STATE_KEYS = {
-    "records": "shoir_industrial_intelligence_records",
-    "nodes": "shoir_industrial_intelligence_nodes",
-    "edges": "shoir_industrial_intelligence_edges",
-    "actions": "shoir_industrial_intelligence_actions",
-    "events": "shoir_industrial_intelligence_events",
-    "models": "shoir_industrial_intelligence_models",
+    # Keep DataFrame views separate from the canonical tenant-scoped lists.
+    "records": "shoir_industrial_intelligence_records_df",
+    "nodes": "shoir_industrial_intelligence_nodes_df",
+    "edges": "shoir_industrial_intelligence_edges_df",
+    "actions": "shoir_industrial_intelligence_actions_df",
+    "events": "shoir_industrial_intelligence_events_df",
+    "models": "shoir_industrial_intelligence_models_df",
 }
 
 PROVENANCE = (
@@ -1137,7 +1138,7 @@ def _energy_flexibility(payload: Mapping[str, Any]) -> dict[str, Any]:
         period_rows[period_id]["scheduled_kwh"] += energy
         allocations.append({"load_id": load_id, "period_id": period_id, "energy_kwh": energy, "tariff": tariff, "estimated_cost": energy * tariff, "flexible": bool(load.get("flexible"))})
     total_cost = sum(row["estimated_cost"] for row in allocations)
-    return {"status": "FEASIBLE" if not infeasible else "INFEASIBLE", "allocation_method": "DETERMINISTIC_TARIFF_GREEDY", "optimality_guarantee": False, "allocations": allocations, "unallocated_loads": infeasible, "period_summary": [{"period_id": key, **value, "total_kwh": value["base_kwh"] + value["scheduled_kwh"]} for key, value in period_rows.items()], "modeled_energy_cost": total_cost if not infeasible else None, "limitations": ["Tariffs and load data are user-supplied.", "The tariff-ordered greedy allocator is deterministic but does not guarantee a globally minimum-cost schedule.", "Only supplied period capacities and flexible windows are enforced.", "This is a planning result; it does not dispatch or control equipment."]}
+    return {"status": "FEASIBLE" if not infeasible else "INFEASIBLE", "allocation_method": "DETERMINISTIC_TARIFF_GREEDY", "optimality_guarantee": False, "allocations": allocations, "unallocated_loads": infeasible, "period_summary": [{"period_id": key, **value, "total_kwh": value["base_kwh"] + value["scheduled_kwh"]} for key, value in period_rows.items()], "modeled_energy_cost": total_cost if not infeasible else None, "limitations": ["Tariffs and load data are user-supplied.", "The tariff-ordered greedy allocator is deterministic but provides no global minimum-cost guarantee.", "Only supplied period capacities and flexible windows are enforced.", "This is a planning result; it does not dispatch or control equipment."]}
 
 
 def _spare_parts(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -3098,15 +3099,15 @@ def record_cause_effect_investigation(username: str, tier: str, title: str, obse
     for index, item in enumerate(candidate_links, start=1):
         if not isinstance(item, Mapping):
             raise IndustrialIntelligenceError(f"Candidate link {index} must be an object.")
+        validation = str(item.get("validation_status") or "SUSPECTED").upper()
+        if validation not in {"SUSPECTED", "SUPPORTED"}:
+            raise IndustrialIntelligenceError("Cause-effect links must be recorded as SUSPECTED or SUPPORTED; confirmation requires a separate independent review workflow.")
         evidence = [_required_text(value, "evidence reference", 240) for value in item.get("supporting_evidence", [])]
         counter = [_required_text(value, "counter-evidence reference", 240) for value in item.get("contradicting_evidence", [])]
         if evidence:
             evidence = _require_evidence_refs(evidence, f"Cause-effect candidate {index} supporting")
         if counter:
             counter = _require_evidence_refs(counter, f"Cause-effect candidate {index} contradicting")
-        validation = str(item.get("validation_status") or "SUSPECTED").upper()
-        if validation not in {"SUSPECTED", "SUPPORTED"}:
-            raise IndustrialIntelligenceError("Cause-effect links must be recorded as SUSPECTED or SUPPORTED; confirmation requires a separate independent review workflow.")
         if validation == "SUPPORTED":
             evidence = _require_evidence_refs(evidence, f"Cause-effect candidate {index}")
         links.append({"from": _required_text(item.get("from"), "candidate from"), "to": _required_text(item.get("to"), "candidate to"), "relationship": str(item.get("relationship") or "POSSIBLE_CAUSE"), "supporting_evidence": evidence, "contradicting_evidence": counter, "validation_status": validation})

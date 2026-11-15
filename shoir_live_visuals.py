@@ -47,7 +47,7 @@ def _module_widget_token(module: str) -> str:
 
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
-    "Industrial Operating System": ["os_compare_result", "os_process_result", "os_drift_result", "os_verify_result", "shoir_industrial_intelligence_records", "shoir_industrial_intelligence_nodes", "shoir_industrial_intelligence_edges", "shoir_industrial_intelligence_actions", "shoir_industrial_intelligence_events", "shoir_industrial_intelligence_models"],
+    "Industrial Operating System": ["os_compare_result", "os_process_result", "os_drift_result", "os_verify_result", "shoir_industrial_intelligence_records_df", "shoir_industrial_intelligence_nodes_df", "shoir_industrial_intelligence_edges_df", "shoir_industrial_intelligence_actions_df", "shoir_industrial_intelligence_events_df", "shoir_industrial_intelligence_models_df"],
     "Global Project & Digital Thread": ["global_thread_nodes", "global_thread_edges", "global_thread_project"],
     "Advanced Engineering Copilot": ["copilot_orchestrator_run", "copilot_orchestrator_figure_json", "copilot_staged_decision_id", "copilot_orchestrator_export", "copilot_clean_audit"],
     "MILP Solvers": ["milp_result_df", "milp_summary_df", "milp_allocation_flow_df"],

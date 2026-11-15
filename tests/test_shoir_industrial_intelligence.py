@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+import pandas as pd
 import pytest
 
 import shoir_industrial_intelligence as ii
@@ -500,7 +503,7 @@ def test_model_validation_uses_actual_expected_values_and_independent_reviewer(m
     )
     assert failed["passed_test_count"] == 0
     with pytest.raises(ii.IndustrialIntelligenceError, match="all registered test cases pass"):
-        ii.validate_model_version("synthetic-model-author", "Enterprise", failed["model_id"])
+        ii.validate_model_version("synthetic-model-author", "Enterprise", failed["model_id"], [], "Failing golden case must block approval.")
 
     good = ii.register_model_version(
         "synthetic-model-author", "Enterprise", "Yield model", "1.1", "calculation",
@@ -738,7 +741,7 @@ def test_existing_workbench_route_reaches_suite_before_generic_fallback():
     workbench_source = (root / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
     platform_source = (root / "industrial_platform.py").read_text(encoding="utf-8")
     app_source = (root / "app.py").read_text(encoding="utf-8")
-    assert "search_tools(q)" in workbench_source
+    assert "_search_industrial_tools(q)" in workbench_source
     assert 'st.session_state["shoir_pending_industrial_tool"] = exact_match["id"]' in workbench_source
     dispatcher_start = platform_source.index("def render_module(")
     suite_route = platform_source.index('if module == "Industrial Operating System":', dispatcher_start)
@@ -918,17 +921,33 @@ def test_copilot_context_redacts_secrets_and_includes_scoped_thread_links(monkey
         "synthetic-copilot-user", "Enterprise", "Process", "PROCESS-COPILOT-01",
         "Cooling water circulation", {"unit": "U-01"}, "SYNTHETIC",
     )
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Sensitive field"):
+        ii.create_record(
+            "synthetic-copilot-user", "Enterprise", "evidence",
+            "Rejected secret-bearing record", {
+                "api_token": "do-not-store-this",
+                "nested": {"password": "never-store"},
+            },
+            provenance="IMPORTED",
+            source_ref="https://user:sourcepass@example.test/import.csv?api_key=do-not-send-this",
+        )
     evidence = ii.create_record(
         "synthetic-copilot-user", "Enterprise", "evidence",
         "Pump vibration measurement", {
             "asset_id": "PUMP-COPILOT-01",
             "vibration_mm_s": 7.2,
-            "api_token": "do-not-send-this",
-            "nested": {"password": "never-export"},
         },
         provenance="IMPORTED",
         source_ref="https://user:sourcepass@example.test/import.csv?api_key=do-not-send-this",
     )
+    # Simulate a legacy row created before the no-secret-at-rest rule. The
+    # retrieval boundary must still redact it before Copilot sees it.
+    stored = next(
+        row for row in ii.st.session_state[ii.STATE_PREFIX + "records"]
+        if row.get("record_id") == evidence["record_id"]
+    )
+    stored["payload"]["api_token"] = "do-not-send-this"
+    stored["payload"]["nested"] = {"password": "never-export"}
     ii.add_relationship(
         "synthetic-copilot-user", "Enterprise",
         "PUMP-COPILOT-01", "PROCESS-COPILOT-01", "SERVES",

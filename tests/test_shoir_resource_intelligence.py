@@ -1288,7 +1288,7 @@ def test_production_maintenance_optimizer_reduces_capacity_then_reports_resource
         supplies=[{
             "resource_id": "WATER-SUPPLY", "period_id": "SHIFT-A",
             "resource_type": "water", "available_quantity": 200,
-            "unit": "m3", "quality": {}, "provenance": "SYNTHETIC",
+            "unit": "m3", "quality": {"tds_mg_l": 50}, "provenance": "SYNTHETIC",
         }],
         production_plans=[{
             "plan_id": "PLAN-A", "asset_id": "LINE-01", "period_id": "SHIFT-A",
@@ -1304,7 +1304,7 @@ def test_production_maintenance_optimizer_reduces_capacity_then_reports_resource
         resource_requirements=[{
             "requirement_id": "REQ-WATER", "plan_id": "PLAN-A",
             "resource_type": "water", "unit": "m3",
-            "quantity_per_production_unit": 2, "quality_limits": {},
+            "quantity_per_production_unit": 2, "quality_limits": {"tds_mg_l": {"max": 100}},
             "source_reference": "SYNTHETIC:water-intensity", "provenance": "SYNTHETIC",
         }],
         routes=[{

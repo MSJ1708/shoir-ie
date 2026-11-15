@@ -3958,7 +3958,7 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
         demand_id = _text(row.get("demand_id"), f"route {route_id}.demand_id")
         if supply_id not in normalized_supplies or demand_id not in normalized_demands:
             raise ResourceValidationError(
-                f"route {route_id} must refer to an existing supply and demand."
+                f"route {route_id} references an unknown supply or demand."
             )
         supply = normalized_supplies[supply_id]
         demand = normalized_demands[demand_id]
@@ -4303,6 +4303,7 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
         "model_scope": "EXPLICIT_INPUT_TIME_AWARE_CLUSTER_GRAPH",
         "summary": {
             "shared_facility_count": sum(1 for key in facilities if f"facility:{key}" in shareable_nodes),
+            "facility_count": sum(1 for key in facilities if f"facility:{key}" in shareable_nodes),
             "shared_supply_count": sum(1 for key in normalized_supplies if f"supply:{key}" in shareable_nodes),
             "shared_demand_count": sum(1 for key in normalized_demands if f"demand:{key}" in shareable_nodes),
             "shared_route_count": sum(1 for key in normalized_routes if f"route:{key}" in shareable_nodes),
@@ -4311,6 +4312,7 @@ def build_industrial_cluster_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
             "shared_active_commitment_count": len(commitment_rows),
             "cross_company_candidate_count": len(matches),
             "shared_overcommitment_count": len(overcommitments),
+            "overcommitment_count": len(overcommitments),
         },
         "cross_company_shared_offers": public_offers,
         "cross_company_shared_needs": public_needs,

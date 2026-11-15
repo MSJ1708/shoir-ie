@@ -1690,12 +1690,18 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (headError) throw headError;
       if (!headRecord?.payload_json) {
-        return sendResponse({ error: "Dataset head was not found in this workspace." }, 409);
+        return sendResponse(
+          { error: "Dataset head was not found in this workspace." },
+          409,
+        );
       }
       const headPayload = headRecord.payload_json as Record<string, unknown>;
       const currentVersion = Number(headPayload.version || 0);
       if (!Number.isSafeInteger(currentVersion) || currentVersion < 1) {
-        return sendResponse({ error: "Dataset head version metadata is invalid." }, 409);
+        return sendResponse(
+          { error: "Dataset head version metadata is invalid." },
+          409,
+        );
       }
       const storageKey = String(payload.storage_key || "");
       const expectedPrefix = workspaceKey + "/" + datasetId + "/";
@@ -1726,7 +1732,8 @@ Deno.serve(async (req) => {
         source_name: String(payload.source_name || ""),
         version: Number(payload.version || requestedVersion || 1),
         current_version: currentVersion,
-        is_current_version: Number(payload.version || requestedVersion || 1) === currentVersion,
+        is_current_version:
+          Number(payload.version || requestedVersion || 1) === currentVersion,
         row_count: Number(payload.row_count || 0),
         column_count: Number(payload.column_count || 0),
         version_record_id: String(payload.version_record_id || ""),
