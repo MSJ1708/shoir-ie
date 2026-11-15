@@ -346,3 +346,27 @@ Latest candidate test-source inventory:
 - 100-tool route audit: 2
 
 These are authored test counts only. Exact-head CI is still queued and no test pass is claimed.
+
+
+## 15. Retry-safe dataset activation and current candidate test inventory — 2026-11-15
+
+The final activation/persistence ordering has been tightened:
+
+- The active immutable dataset dependency and lineage-tracking state are set before the authenticated invalidation routine saves the workspace.
+- Every authenticated Enterprise dataset activation, including a fresh-session reopen of the same version, reruns idempotent invalidation. This repairs a previously failed save without requiring a new dataset version.
+- Current Dataset node, active dataset dependency, lineage status and the per-version lineage event are saved together. A save failure rolls back the artifact lists and Digital Thread graph, then fails closed with `SAVE_FAILED` and the lineage block.
+- One lineage event is reused per dataset/version, and the event keeps the union of previously affected record/event/model/action IDs.
+- Added a fresh-session retry regression test that deliberately fails the first save, reopens the same version, verifies a successful retry, and inspects the persisted snapshot fields.
+- Added a Workbench AppTest for T094 to prove future-dated KPI data cannot open an alert through the actual Workbench form.
+
+Current authored test-function inventory:
+- Industrial Intelligence: 80
+- Resource Intelligence: 130
+- Remaining tool engines: 21
+- Legacy Industrial Platform: 35
+- Final integration: 21
+- Industrial Experience: 18
+- 100-tool route audit: 2
+- 100-tool Workbench: 29
+
+These counts are test-source inventory only. They are not pass counts. The latest candidate head at the time of this refresh is `2dcff01880b3dfeec85a3c88a81a30a1024217cf`; its eight required exact-head GitHub Actions checks were all queued or pending, and the combined commit status was empty. No exact-head CI pass or hosted acceptance is claimed.
