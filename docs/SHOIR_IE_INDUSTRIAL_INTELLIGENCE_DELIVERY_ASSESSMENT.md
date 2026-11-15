@@ -247,3 +247,38 @@ A further review of the current candidate source and its dedicated foundation re
 These additions strengthen the candidate's entitlement and record-linkage boundaries. They do not close the open dataset-version dependency invalidation, hosted graph continuity, cross-tenant proof, exact-head CI, browser/export or independent engineering/security acceptance gates.
 
 At the time of this source review, the candidate was at `807b8667b52fd3b5b80158563f63115941587271`. Its combined status and workflow-run query did not return completed CI evidence. Keep `IMPLEMENTED — VALIDATION PENDING` as the code-delivery label.
+
+
+
+---
+
+## 11. Dataset lineage hardening update — 2026-11-15
+
+The current candidate adds explicit lineage propagation and stale-state controls beyond the earlier Industrial Intelligence record-only path:
+
+- Generic Industrial Intelligence records now inherit exact immutable dataset-version dependencies from their registered evidence references when the evidence carries those dependencies. This covers evidence-backed operational events, decisions, benefits, cause/effect investigations, risk/barrier records and shift handovers.
+- The separate Industrial Intelligence model registry and action ledger now attach the dataset-version dependencies of their test/evidence records.
+- When a dataset head changes, the invalidation routine now evaluates the active workspace's `records`, Industrial Intelligence `models`, and Industrial Intelligence `actions` ledgers; preserves their original payloads/definitions; marks dependent artifacts stale; updates corresponding Digital Thread nodes; records the affected native IDs in a lineage event; and saves the affected workspace state as one managed workspace snapshot.
+- A failed managed workspace save restores the prior in-memory record/model/action lists and Digital Thread nodes/edges. Regression coverage was added for this rollback.
+- Stale source-linked artifacts cannot be approved or independently reviewed through the corresponding model-validation, action-approval, decision-review, benefit-verification, risk/barrier-review, cause/effect-review and shift-handover acknowledgement paths.
+- T094 now explicitly classifies future-dated KPI measurements as `FUTURE_TIMESTAMP` and does not open threshold alerts from them. An observation exactly at the evaluation timestamp remains eligible under a zero-minute freshness boundary.
+
+New regression coverage includes:
+- `test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_records`
+- `test_dataset_dependency_invalidation_rolls_back_records_models_actions_and_graph_when_save_fails`
+- `test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_validation`
+- `test_dataset_version_invalidation_marks_linked_actions_stale_and_blocks_approval`
+- `test_records_inherit_dataset_dependencies_from_referenced_evidence_and_stale_decisions_cannot_be_approved`
+- `test_dataset_linked_benefit_cannot_be_independently_verified_after_source_change`
+- `test_dataset_linked_risk_barrier_cannot_be_reviewed_after_source_change`
+- `test_dataset_linked_cause_effect_investigation_cannot_be_reviewed_after_source_change`
+- `test_dataset_linked_shift_handover_cannot_be_acknowledged_after_source_change`
+- T094 future-timestamp and exact-evaluation-boundary cases in `tests/test_shoir_remaining_tool_engines.py`.
+
+At this refresh, `tests/test_shoir_industrial_intelligence.py` contains 74 test functions and `tests/test_shoir_resource_intelligence.py` contains 130 test functions. These are test-source counts, **not** passing CI results.
+
+### Remaining lineage boundary
+
+This hardening applies to the Industrial Intelligence workspace record, model-registry and action ledgers. It does **not** yet automatically invalidate every legacy local SQLite artifact in `industrial_platform.py`, including its separate `platform_models`, `platform_scenarios`, `platform_experiments` and `platform_decisions` stores. Those stores remain a separate integration gap and must not be represented as fully covered by the new managed workspace lineage routine.
+
+The exact candidate head remains subject to all required CI and hosted acceptance. The current exact-head workflow runs were queued when checked; the separate live-deployment smoke remains skipped unless a new authenticated staging run proves it. No CI pass or hosted acceptance is claimed by this source update.
