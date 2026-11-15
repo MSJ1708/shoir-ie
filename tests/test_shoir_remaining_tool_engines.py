@@ -221,6 +221,54 @@ def test_kpi_alert_evaluation_handles_threshold_freshness_and_dedupe():
     assert again["new_alert_count"] == 0
 
 
+def test_kpi_alert_evaluation_blocks_future_dated_measurements():
+    out = evaluate_kpi_alerts({
+        "as_of": "2026-10-26T12:00:00Z",
+        "kpis": [{
+            "name": "future-scrap",
+            "value": 9,
+            "threshold": 3,
+            "operator": "gt",
+            "measured_at": "2026-10-26T12:30:00Z",
+            "max_age_minutes": 120,
+            "rule_id": "future-scrap-high",
+            "severity": "CRITICAL",
+            "source": "SYNTHETIC acceptance fixture",
+        }],
+        "existing_alerts": [],
+    })
+    row = out["kpis"].iloc[0]
+    assert row["status"] == "FUTURE_TIMESTAMP"
+    assert row["freshness"] == "FUTURE"
+    assert row["minutes_until_observation"] == pytest.approx(30.0)
+    assert out["future_kpi_count"] == 1
+    assert out["stale_kpi_count"] == 0
+    assert out["breached_kpi_count"] == 0
+    assert out["open_alert_count"] == 0
+    assert out["new_alert_count"] == 0
+    assert out["alert_records"] == []
+
+
+def test_kpi_alert_evaluation_accepts_measurement_exactly_at_as_of_boundary():
+    out = evaluate_kpi_alerts({
+        "as_of": "2026-10-26T12:00:00Z",
+        "kpis": [{
+            "name": "boundary-scrap",
+            "value": 4,
+            "threshold": 3,
+            "operator": "gt",
+            "measured_at": "2026-10-26T12:00:00Z",
+            "max_age_minutes": 0,
+            "rule_id": "boundary-scrap-high",
+        }],
+        "existing_alerts": [],
+    })
+    assert out["future_kpi_count"] == 0
+    assert out["breached_kpi_count"] == 1
+    assert out["new_alert_count"] == 1
+    assert out["alert_records"][0]["new_alert"] is True
+
+
 def test_integration_status_checks_env_presence_without_returning_secret(monkeypatch):
     monkeypatch.setenv("SHOIR_CONNECTOR_PLANT_ENDPOINT", "https://plant.example.test/api")
     monkeypatch.setenv("SHOIR_CONNECTOR_PLANT_TOKEN", "never-return-this-secret")
