@@ -173,7 +173,8 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("industrial_relationships","CREATE TABLE IF NOT EXISTS industrial_relationships(source_entity_id TEXT,target_entity_id TEXT,relationship TEXT,attributes_json TEXT,updated_at TEXT,PRIMARY KEY(source_entity_id,target_entity_id,relationship))"),
             ("mes_quality_releases","CREATE TABLE IF NOT EXISTS mes_quality_releases(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,status TEXT,defect_qty REAL,notes TEXT,operator TEXT,created_at TEXT)"),
             ("mes_genealogy","CREATE TABLE IF NOT EXISTS mes_genealogy(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,parent_lot TEXT,material TEXT,quantity REAL,created_at TEXT)"),
-            ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
+            ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT, current_version INTEGER, version_fingerprint TEXT)"),
+            ("platform_dataset_versions","CREATE TABLE IF NOT EXISTS platform_dataset_versions(dataset_id TEXT NOT NULL, version INTEGER NOT NULL, data_hash TEXT NOT NULL, version_fingerprint TEXT NOT NULL, schema_json TEXT NOT NULL, transformations_json TEXT NOT NULL DEFAULT '[]', row_count INTEGER NOT NULL, column_count INTEGER NOT NULL, created_by TEXT, created_at TEXT NOT NULL, PRIMARY KEY(dataset_id,version), UNIQUE(dataset_id,data_hash,version_fingerprint))"),
             ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
             ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
@@ -191,16 +192,86 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
-        for column, definition in [
-            ("solver_version", "TEXT"),
-            ("result_hash", "TEXT"),
-            ("dataset_id", "TEXT"),
-            ("run_id", "TEXT"),
-        ]:
+        column_migrations = {
+            "platform_datasets": {
+                "current_version": "INTEGER",
+                "version_fingerprint": "TEXT",
+            },
+            "platform_models": {
+                "solver_version": "TEXT",
+                "result_hash": "TEXT",
+                "dataset_id": "TEXT",
+                "run_id": "TEXT",
+                "dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+                "dataset_dependency_status": "TEXT NOT NULL DEFAULT 'NOT_LINKED'",
+                "stale_dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+            },
+            "platform_experiments": {
+                "dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+                "dataset_dependency_status": "TEXT NOT NULL DEFAULT 'NOT_LINKED'",
+                "stale_dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+            },
+            "platform_scenarios": {
+                "dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+                "dataset_dependency_status": "TEXT NOT NULL DEFAULT 'NOT_LINKED'",
+                "stale_dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+            },
+            "platform_decisions": {
+                "dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+                "dataset_dependency_status": "TEXT NOT NULL DEFAULT 'NOT_LINKED'",
+                "stale_dataset_dependencies_json": "TEXT NOT NULL DEFAULT '[]'",
+            },
+        }
+        for table_name, columns in column_migrations.items():
+            existing_columns = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            for column, definition in columns.items():
+                if column not in existing_columns:
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {definition}")
+
+        # Backfill an explicit version-1 history entry for legacy datasets. This
+        # records only the hash and schema that were already present; it does not
+        # claim that historical artifacts were linked to that dataset.
+        legacy_datasets = conn.execute(
+            "SELECT dataset_id,sha256,schema_json,row_count,column_count,created_at,current_version,version_fingerprint FROM platform_datasets"
+        ).fetchall()
+        for dataset_id, data_hash, schema_json, row_count, column_count, created_at, current_version, version_fingerprint in legacy_datasets:
+            dataset_id = str(dataset_id or "").strip().upper()
+            data_hash = str(data_hash or "").strip().lower()
+            if not dataset_id or not re.fullmatch(r"[0-9a-f]{64}", data_hash):
+                continue
+            schema_text = str(schema_json or "{}")
             try:
-                conn.execute(f"ALTER TABLE platform_models ADD COLUMN {column} {definition}")
-            except sqlite3.OperationalError:
-                pass
+                schema_value = json.loads(schema_text)
+                if not isinstance(schema_value, Mapping):
+                    schema_value = {}
+            except Exception:
+                schema_value = {}
+            fingerprint = str(version_fingerprint or "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+                fingerprint = hashlib.sha256(json.dumps({
+                    "dataset_id": dataset_id,
+                    "data_hash": data_hash,
+                    "schema": schema_value,
+                    "transformations": [],
+                }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+            version_value = int(current_version or 1)
+            conn.execute(
+                """INSERT OR IGNORE INTO platform_dataset_versions(
+                    dataset_id,version,data_hash,version_fingerprint,schema_json,
+                    transformations_json,row_count,column_count,created_by,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    dataset_id, version_value, data_hash, fingerprint, schema_text,
+                    "[]", int(row_count or 0), int(column_count or 0), None,
+                    str(created_at or _now()),
+                ),
+            )
+            conn.execute(
+                "UPDATE platform_datasets SET current_version=?,version_fingerprint=? WHERE dataset_id=?",
+                (version_value, fingerprint, dataset_id),
+            )
         conn.commit()
         if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok": raise RuntimeError("SQLite quick_check failed")
     return True
