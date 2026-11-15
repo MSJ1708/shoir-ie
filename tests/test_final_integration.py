@@ -1,6 +1,7 @@
 from shoir_sqlite import sqlite_connect as sqlite_connection
 import json
 import pandas as pd
+import pytest
 
 from benchmark_harness import calculate_roi_evidence, benchmark_callable
 from shoir_digital_thread import CANONICAL_LIFECYCLE, canonical_flow_figure
