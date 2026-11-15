@@ -279,6 +279,239 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+
+def _collect_legacy_dataset_references(value: Any, *, depth: int = 0) -> list[dict[str, Any]]:
+    """Collect explicit dataset references from known artifact metadata containers."""
+    if depth > 8 or not isinstance(value, Mapping):
+        return []
+    references: list[dict[str, Any]] = []
+    direct = value.get("dataset_dependencies")
+    if direct is not None:
+        if isinstance(direct, (str, bytes)) or not isinstance(direct, Sequence):
+            raise ValueError("dataset_dependencies must be a list of reference objects.")
+        for item in direct:
+            if not isinstance(item, Mapping):
+                raise ValueError("Each dataset dependency must be an object.")
+            references.append(dict(item))
+    elif value.get("dataset_id") or value.get("data_hash"):
+        references.append({
+            "dataset_id": value.get("dataset_id"),
+            "version": value.get("dataset_version", value.get("version")),
+            "data_hash": value.get("data_hash"),
+            "version_fingerprint": value.get("version_fingerprint"),
+        })
+    for key in (
+        "parameters", "kpis", "metrics", "assumptions", "uncertainty",
+        "scenarios", "results", "input", "output", "source",
+        "dataset_context", "provenance",
+    ):
+        nested = value.get(key)
+        if isinstance(nested, Mapping):
+            references.extend(_collect_legacy_dataset_references(nested, depth=depth + 1))
+        elif isinstance(nested, (list, tuple)):
+            for item in nested[:1000]:
+                if isinstance(item, Mapping):
+                    references.extend(_collect_legacy_dataset_references(item, depth=depth + 1))
+    return references
+
+
+def _resolve_legacy_dataset_dependencies(
+    conn: sqlite3.Connection,
+    *payloads: Any,
+) -> tuple[list[dict[str, Any]], str]:
+    """Resolve caller-declared references against the local immutable version registry."""
+    raw_refs: list[dict[str, Any]] = []
+    for payload in payloads:
+        if isinstance(payload, Mapping):
+            raw_refs.extend(_collect_legacy_dataset_references(payload))
+        elif isinstance(payload, (list, tuple)):
+            for item in payload[:1000]:
+                if isinstance(item, Mapping):
+                    raw_refs.extend(_collect_legacy_dataset_references(item))
+
+    if not raw_refs:
+        return [], "NOT_LINKED"
+
+    resolved: dict[tuple[str, int | None, str], dict[str, Any]] = {}
+    unresolved = False
+    stale = False
+    for raw in raw_refs:
+        dataset_id = str(raw.get("dataset_id") or "").strip().upper()
+        data_hash = str(raw.get("data_hash") or "").strip().lower()
+        version = raw.get("version")
+        fingerprint = str(raw.get("version_fingerprint") or "").strip().lower()
+        if not re.fullmatch(r"DS-[A-F0-9]{12,32}", dataset_id):
+            unresolved = True
+            continue
+        if not re.fullmatch(r"[0-9a-f]{64}", data_hash):
+            unresolved = True
+            continue
+        if version is not None and (
+            isinstance(version, bool) or not isinstance(version, int) or version < 1
+        ):
+            unresolved = True
+            continue
+        if fingerprint and not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            unresolved = True
+            continue
+
+        query = (
+            "SELECT version,data_hash,version_fingerprint,created_at "
+            "FROM platform_dataset_versions WHERE dataset_id=? AND data_hash=?"
+        )
+        params: list[Any] = [dataset_id, data_hash]
+        if version is not None:
+            query += " AND version=?"
+            params.append(version)
+        query += " ORDER BY version DESC LIMIT 1"
+        found = conn.execute(query, params).fetchone()
+        if not found:
+            unresolved = True
+            continue
+        resolved_version, resolved_hash, resolved_fingerprint, registered_at = found
+        if fingerprint and fingerprint != resolved_fingerprint:
+            unresolved = True
+            continue
+        head = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        is_current = bool(
+            head
+            and int(head[0] or 0) == int(resolved_version)
+            and str(head[1] or "").lower() == str(resolved_hash).lower()
+            and str(head[2] or "").lower() == str(resolved_fingerprint).lower()
+        )
+        if not is_current:
+            stale = True
+        item = {
+            "dataset_id": dataset_id,
+            "version": int(resolved_version),
+            "data_hash": str(resolved_hash),
+            "version_fingerprint": str(resolved_fingerprint),
+            "registered_at": str(registered_at or ""),
+            "resolved_from_local_registry": True,
+            "current_version_verified": is_current,
+        }
+        resolved[(dataset_id, int(resolved_version), str(resolved_hash))] = item
+    dependencies = list(resolved.values())
+    if stale:
+        return dependencies, "STALE"
+    if unresolved:
+        return dependencies, "UNVERIFIED_REFERENCE"
+    return dependencies, "CURRENT" if dependencies else "NOT_LINKED"
+
+
+def _mark_legacy_dataset_artifacts_stale(
+    conn: sqlite3.Connection,
+    dataset_id: str,
+    current_version: int,
+    current_data_hash: str,
+    current_version_fingerprint: str,
+) -> dict[str, list[str]]:
+    """Invalidate local SQLite artifacts that explicitly reference an older dataset version."""
+    import json as _json
+
+    normalized_id = str(dataset_id).strip().upper()
+    data_hash = str(current_data_hash).strip().lower()
+    fingerprint = str(current_version_fingerprint).strip().lower()
+    targets = {
+        "platform_models": ("model_id",),
+        "platform_experiments": ("experiment_id",),
+        "platform_scenarios": ("scenario_id",),
+        "platform_decisions": ("decision_id",),
+    }
+    affected: dict[str, list[str]] = {table: [] for table in targets}
+    for table, (id_column,) in targets.items():
+        rows = conn.execute(
+            f"SELECT {id_column},dataset_dependencies_json,stale_dataset_dependencies_json,dataset_dependency_status "
+            f"FROM {table}"
+        ).fetchall()
+        for artifact_id, raw_dependencies, raw_stale, current_status in rows:
+            try:
+                dependencies = _json.loads(raw_dependencies or "[]")
+                markers = _json.loads(raw_stale or "[]")
+            except Exception:
+                # Corrupt lineage metadata must not be silently rewritten.
+                continue
+            if not isinstance(dependencies, list) or not isinstance(markers, list):
+                continue
+            matching: list[dict[str, Any]] = []
+            for dependency in dependencies:
+                if not isinstance(dependency, Mapping):
+                    continue
+                if str(dependency.get("dataset_id") or "").strip().upper() != normalized_id:
+                    continue
+                old_version = dependency.get("version")
+                old_hash = str(dependency.get("data_hash") or "").strip().lower()
+                old_fingerprint = str(dependency.get("version_fingerprint") or "").strip().lower()
+                if (
+                    old_version == current_version
+                    and old_hash == data_hash
+                    and old_fingerprint == fingerprint
+                ):
+                    continue
+                marker = {
+                    "dataset_id": normalized_id,
+                    "previous_version": old_version,
+                    "previous_data_hash": old_hash or None,
+                    "previous_version_fingerprint": old_fingerprint or None,
+                    "current_version": current_version,
+                    "current_data_hash": data_hash,
+                    "current_version_fingerprint": fingerprint,
+                    "reason": "The local dataset head no longer matches the immutable version used by this artifact.",
+                }
+                if not any(
+                    isinstance(existing, Mapping)
+                    and str(existing.get("dataset_id") or "").upper() == normalized_id
+                    and existing.get("previous_version") == old_version
+                    and existing.get("current_version") == current_version
+                    and str(existing.get("current_data_hash") or "").lower() == data_hash
+                    for existing in markers
+                ):
+                    matching.append(marker)
+            # Older model snapshots already have dataset_id/data_hash columns.
+            # Link those only when the old hash resolves to a recorded historical version.
+            if table == "platform_models" and not dependencies:
+                model = conn.execute(
+                    "SELECT dataset_id,data_hash FROM platform_models WHERE model_id=?",
+                    (artifact_id,),
+                ).fetchone()
+                if model and str(model[0] or "").strip().upper() == normalized_id:
+                    old = conn.execute(
+                        "SELECT version,version_fingerprint FROM platform_dataset_versions "
+                        "WHERE dataset_id=? AND data_hash=? ORDER BY version DESC LIMIT 1",
+                        (normalized_id, str(model[1] or "").strip().lower()),
+                    ).fetchone()
+                    if old and (
+                        int(old[0]) != current_version
+                        or str(model[1] or "").lower() != data_hash
+                        or str(old[1] or "").lower() != fingerprint
+                    ):
+                        matching.append({
+                            "dataset_id": normalized_id,
+                            "previous_version": int(old[0]),
+                            "previous_data_hash": str(model[1] or "").lower(),
+                            "previous_version_fingerprint": str(old[1] or "").lower(),
+                            "current_version": current_version,
+                            "current_data_hash": data_hash,
+                            "current_version_fingerprint": fingerprint,
+                            "reason": "The model snapshot references an older registered dataset hash.",
+                        })
+            if matching:
+                markers.extend(matching)
+                conn.execute(
+                    f"UPDATE {table} SET dataset_dependency_status='STALE', "
+                    "stale_dataset_dependencies_json=? WHERE " + id_column + "=?",
+                    (_json.dumps(markers, ensure_ascii=False, sort_keys=True), artifact_id),
+                )
+                affected[table].append(str(artifact_id))
+    return affected
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 def log_security_event(username: str, event_type: str, details: str="", db_path: str="enterprise_full_workspace.db"):
     try:
         with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as c:
