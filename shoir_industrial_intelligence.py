@@ -1536,7 +1536,12 @@ def _dataset_dependencies_for_evidence_refs(
 
 
 def _require_current_dataset_artifact(record: Mapping[str, Any], label: str) -> None:
-    """Fail closed when a governed record is stale against its source dataset."""
+    """Fail closed when a governed record or its active workspace lineage is unresolved."""
+    if st.session_state.get("shoir_dataset_lineage_blocked") is True:
+        raise IndustrialIntelligenceError(
+            "Dataset lineage invalidation is unresolved for this workspace. "
+            "Review, approval and verification actions are blocked until the dataset lineage save is repaired."
+        )
     if (
         str(record.get("record_status") or "").upper() == "STALE"
         or str(record.get("dataset_dependency_status") or "").upper() == "STALE"
@@ -2561,8 +2566,7 @@ def approve_action(username: str, tier: str, action_id: str, comment: str = "") 
     action = next((item for item in actions if item.get("action_id") == str(action_id)), None)
     if not action:
         raise IndustrialIntelligenceError("Action does not exist in this workspace.")
-    if str(action.get("dataset_dependency_status") or "").upper() == "STALE":
-        raise IndustrialIntelligenceError("Action evidence is stale because its source dataset changed. Re-run and re-register the action against the current dataset version.")
+    _require_current_dataset_artifact(action, "Action")
     if action.get("status") not in {"PROPOSED", "PENDING_APPROVAL"}:
         raise IndustrialIntelligenceError("Only proposed actions can receive approval.")
     _require_evidence_refs(action.get("evidence_refs", []), "Action approval")
@@ -2595,8 +2599,7 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     if index is None:
         raise IndustrialIntelligenceError("Action does not exist in this workspace.")
     action = actions[index]
-    if str(action.get("dataset_dependency_status") or "").upper() == "STALE":
-        raise IndustrialIntelligenceError("Action evidence is stale because its source dataset changed. Re-run and re-register the action against the current dataset version.")
+    _require_current_dataset_artifact(action, "Action")
     target = str(new_status or "").upper()
     allowed = {"PROPOSED", "PENDING_APPROVAL", "APPROVED", "IN_PROGRESS", "IMPLEMENTED", "CLOSED", "VERIFIED", "BLOCKED"}
     if target not in allowed:
@@ -3005,8 +3008,7 @@ def validate_model_version(username: str, tier: str, model_id: str, verification
     if index is None:
         raise IndustrialIntelligenceError("Model version does not exist.")
     model = models[index]
-    if str(model.get("dataset_dependency_status") or "").upper() == "STALE":
-        raise IndustrialIntelligenceError("Model evidence is stale because its source dataset changed. Register and test a new model version against the current dataset.")
+    _require_current_dataset_artifact(model, "Model")
     if not model.get("test_cases") or model["passed_test_count"] != model["test_count"]:
         raise IndustrialIntelligenceError("A model cannot be validated until all registered test cases pass.")
     if model.get("owner", "").casefold() == access["actor"].casefold():
@@ -3143,11 +3145,13 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
     if not term:
         raise IndustrialIntelligenceError("Enter a question or search term.")
     records = _state_list("records")
+    lineage_blocked = st.session_state.get("shoir_dataset_lineage_blocked") is True
     current_records = []
     excluded_stale_evidence_count = 0
     for row in records:
         if (
-            str(row.get("record_status") or "").upper() == "STALE"
+            lineage_blocked
+            or str(row.get("record_status") or "").upper() == "STALE"
             or str(row.get("dataset_dependency_status") or "").upper() == "STALE"
         ):
             excluded_stale_evidence_count += 1
@@ -3195,9 +3199,13 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
         for node_id in linked_ids if node_id in node_by_id
     ]
     return {
-        "status": "EVIDENCE_RETRIEVED" if results else "INSUFFICIENT_MATCHING_EVIDENCE",
+        "status": (
+            "DATASET_LINEAGE_UNRESOLVED" if lineage_blocked
+            else ("EVIDENCE_RETRIEVED" if results else "INSUFFICIENT_MATCHING_EVIDENCE")
+        ),
         "query": query,
         "citations": results,
+        "dataset_lineage_blocked": lineage_blocked,
         "excluded_stale_evidence_count": excluded_stale_evidence_count,
         "digital_thread": {"nodes": linked_nodes, "relationships": [_copilot_safe_payload(edge, 800) for edge in linked_edges[:40]]},
         "answer_boundary": "This is workspace-scoped evidence retrieval, not an AI-generated causal conclusion. Cite record IDs, distinguish observed facts from hypotheses, and disclose missing or contradictory evidence.",
