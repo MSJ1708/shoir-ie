@@ -1804,8 +1804,13 @@ def test_dataset_dependency_invalidation_rolls_back_records_models_actions_and_g
         "2026-12-20T00:00:00Z", "MEDIUM", "Review dataset-derived evidence.",
         [evidence["record_id"]],
     )
+    event = ii.create_operational_event(
+        "synthetic-lineage-rollback", "Enterprise", "PROCESS_DEVIATION",
+        "Dataset-linked operational event for rollback coverage.",
+        "ASSET-ROLLBACK", "2026-10-15T09:00:00Z", "SYNTHETIC",
+    )
 
-    state_keys = ("records", "models", "actions")
+    state_keys = ("records", "events", "models", "actions")
     before = {key: copy.deepcopy(session[ii.STATE_PREFIX + key]) for key in state_keys}
     graph_keys = thread._keys()
     before_nodes = copy.deepcopy(session[graph_keys["nodes"]])
@@ -1824,6 +1829,7 @@ def test_dataset_dependency_invalidation_rolls_back_records_models_actions_and_g
     assert session[graph_keys["edges"]] == before_edges
     assert next(row for row in ii._state_list("models") if row["model_id"] == model["model_id"])["dataset_dependency_status"] == "CURRENT"
     assert next(row for row in ii._state_list("actions") if row["action_id"] == action["action_id"])["dataset_dependency_status"] == "CURRENT"
+    assert next(row for row in ii._state_list("events") if row["record_id"] == event["record_id"])["dataset_dependency_status"] == "CURRENT"
 
 
 def test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_records():
