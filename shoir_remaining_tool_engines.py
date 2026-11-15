@@ -495,7 +495,7 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
         for item in history
         if str(item.get("state", "OPEN")).upper() == "OPEN" and item.get("fingerprint")
     }
-    results, alerts, stale_count = [], [], 0
+    results, alerts, stale_count, future_count = [], [], 0, 0
     valid_ops = {"gt": lambda v, t: v > t, "gte": lambda v, t: v >= t, "lt": lambda v, t: v < t, "lte": lambda v, t: v <= t}
     for item in kpis:
         name = _nonempty_text(item.get("name"), "KPI name", 200)
@@ -508,20 +508,26 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{name}.operator must be one of gt, gte, lt, lte, >, >=, <, <=.")
         measured_at = _utc_timestamp(item.get("measured_at"), f"{name}.measured_at")
         max_age = _number(item.get("max_age_minutes", 60), f"{name}.max_age_minutes", minimum=0)
-        age_minutes = max(0.0, (as_of - measured_at).total_seconds() / 60.0)
-        stale = age_minutes > max_age
+        delta_minutes = (as_of - measured_at).total_seconds() / 60.0
+        future = delta_minutes < 0
+        age_minutes = max(0.0, delta_minutes)
+        minutes_until_observation = max(0.0, -delta_minutes)
+        stale = not future and age_minutes > max_age
         breached = bool(valid_ops[op](val, threshold))
-        state = "STALE" if stale else ("BREACHED" if breached else "OK")
+        state = "FUTURE_TIMESTAMP" if future else ("STALE" if stale else ("BREACHED" if breached else "OK"))
         if stale:
             stale_count += 1
+        if future:
+            future_count += 1
         rule_id = str(item.get("rule_id") or "").strip()
         severity = str(item.get("severity") or "").strip()
         source = str(item.get("source") or "").strip()
+        freshness = "FUTURE" if future else ("STALE" if stale else "FRESH")
         row = {
             "name": name, "value": val, "threshold": threshold, "operator": op,
             "unit": str(item.get("unit") or ""), "measured_at": measured_at.isoformat(),
-            "age_minutes": age_minutes, "max_age_minutes": max_age,
-            "freshness": "STALE" if stale else "FRESH", "status": state,
+            "age_minutes": age_minutes, "minutes_until_observation": minutes_until_observation,
+            "max_age_minutes": max_age, "freshness": freshness, "status": state,
         }
         if rule_id:
             row["rule_id"] = rule_id
@@ -530,7 +536,7 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
         if source:
             row["source"] = source
         results.append(row)
-        if not stale and breached:
+        if not stale and not future and breached:
             fingerprint_input = {
                 "name": name.casefold(),
                 "operator": op,
@@ -555,13 +561,14 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
         "as_of": as_of.isoformat(),
         "kpi_count": len(results),
         "stale_kpi_count": stale_count,
+        "future_kpi_count": future_count,
         "breached_kpi_count": sum(r["status"] == "BREACHED" for r in results),
         "open_alert_count": len(alerts),
         "new_alert_count": sum(bool(a["new_alert"]) for a in alerts),
         "kpis": pd.DataFrame(results),
         "alerts": pd.DataFrame(alerts),
         "alert_records": alerts,
-        "warning": "Alerts are computed from the KPI records supplied to this run. Cross-session deduplication and notification delivery require saving alert_records to a protected durable store and configuring an approved notification service.",
+        "warning": "Alerts are computed from the KPI records supplied to this run. Future-dated or stale readings never open alerts. Cross-session deduplication and notification delivery require saving alert_records to a protected durable store and configuring an approved notification service.",
     }
 
 
