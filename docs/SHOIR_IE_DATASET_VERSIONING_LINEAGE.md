@@ -75,3 +75,10 @@ Focused regression tests were added for dependency propagation, repeat invalidat
 The managed invalidation routine currently covers the Industrial Intelligence `records`, `models` and `actions` workspace stores. Legacy local SQLite stores in `industrial_platform.py`—including `platform_models`, `platform_scenarios`, `platform_experiments` and `platform_decisions`—are not yet automatically invalidated or blocked by this routine. Full model/run/scenario/decision/outcome lineage across those legacy routes remains incomplete.
 
 Hosted fresh-session/re-login, cross-organization isolation, signed-object access, original XLSX retention, resumable upload, reference-aware orphan cleanup, backup/recovery, browser/export acceptance and independent engineering review remain separate gates.
+
+
+## Further stale-consumer update — 2026-11-15
+
+The candidate now also invalidates the duplicate Industrial Intelligence `events` ledger in the same workspace save as `records`, `models` and `actions`. The rollback regression test checks the event mirror is restored when the managed save is rejected. Copilot evidence retrieval excludes stale dataset-derived records from citations and reports `excluded_stale_evidence_count`.
+
+Two focused regression tests were added for event-mirror invalidation and stale-evidence exclusion in Copilot. The current Industrial Intelligence test-source count is 76 before the most recent test additions; test-source counts are not passing CI results. Exact-head validation remains pending.
