@@ -626,6 +626,84 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
     assert json.loads(model[1])[0]["version"] == 1
 
 
+def test_platform_database_migrates_existing_dataset_and_artifact_tables_without_claiming_old_lineage(tmp_path):
+    import sqlite3
+    import re
+    from industrial_platform import init_platform_db
+
+    db = str(tmp_path / "pre-lineage-schema.db")
+    dataset_id = "DS-ABCDEF998877"
+    old_hash = "a" * 64
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """CREATE TABLE platform_datasets(
+                dataset_id TEXT PRIMARY KEY,name TEXT,source_name TEXT,row_count INTEGER,
+                column_count INTEGER,sha256 TEXT,created_at TEXT,schema_json TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_models(
+                model_id TEXT PRIMARY KEY,name TEXT,version TEXT,model_type TEXT,
+                parameters_json TEXT,data_hash TEXT,assumptions_json TEXT,created_by TEXT,
+                created_at TEXT,status TEXT,solver_version TEXT,result_hash TEXT,
+                dataset_id TEXT,run_id TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_experiments(
+                experiment_id TEXT PRIMARY KEY,name TEXT,module TEXT,scenarios_json TEXT,
+                results_json TEXT,created_by TEXT,created_at TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_scenarios(
+                scenario_id TEXT PRIMARY KEY,name TEXT UNIQUE,parent_name TEXT,
+                parameters_json TEXT,kpis_json TEXT,created_by TEXT,created_at TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_decisions(
+                decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,metrics_json TEXT,
+                assumptions_json TEXT,uncertainty_json TEXT,created_by TEXT,created_at TEXT,status TEXT
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",
+            (dataset_id, "Existing dataset", "legacy.csv", 2, 1, old_hash,
+             "2026-10-01T00:00:00Z", '{"Energy":{"dtype":"float64","nullable":false}}'),
+        )
+        conn.execute(
+            "INSERT INTO platform_models VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("MOD-LEGACY-1","Legacy model","1.0","Regression","{}",
+             old_hash,"{}","alice","2026-10-01T00:00:00Z","Saved","legacy","result",
+             dataset_id,"RUN-LEGACY-1"),
+        )
+        conn.commit()
+
+    assert init_platform_db(db) is True
+    with sqlite3.connect(db) as conn:
+        version = conn.execute(
+            "SELECT version,data_hash,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        model = conn.execute(
+            "SELECT dataset_dependencies_json,dataset_dependency_status FROM platform_models WHERE model_id=?",
+            ("MOD-LEGACY-1",),
+        ).fetchone()
+        table_columns = {
+            table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for table in ("platform_experiments","platform_scenarios","platform_decisions")
+        }
+    assert version[0] == 1
+    assert version[1] == old_hash
+    assert re.fullmatch(r"[0-9a-f]{64}", version[2])
+    # The migration records the dataset baseline but does not invent which
+    # dataset version the historical model actually consumed.
+    assert model == ("[]", "NOT_LINKED")
+    for columns in table_columns.values():
+        assert {"dataset_dependencies_json","dataset_dependency_status","stale_dataset_dependencies_json"}.issubset(columns)
+
+
 def test_legacy_artifact_with_unregistered_dataset_reference_is_not_claimed_current(tmp_path):
     from industrial_platform import init_platform_db, save_model_snapshot
 
