@@ -309,6 +309,9 @@ def create_decision(
     dataset_dependencies: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> str:
     ensure_experience_db(db_path)
+    if dataset_dependencies:
+        from industrial_platform import init_platform_db
+        init_platform_db(db_path)
     did = "DEC-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
     with _db(db_path) as conn:
