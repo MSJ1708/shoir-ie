@@ -53,3 +53,25 @@ The migration `20261104192112_shoir_atomic_dataset_version_registry.sql` was app
 6. A hosted disposable-account workflow registers two versions, loads a version after a fresh session, and verifies private object access.
 7. Hosted disposable-account acceptance verifies signed upload, server-side byte hashing, private object retrieval after a fresh session, and no cross-workspace access.
 8. Raw original-workbook retention, resumable uploads, reference-aware orphan cleanup, and model/run downstream invalidation/lineage are separately implemented and tested before claiming complete dataset lifecycle management.
+
+
+---
+
+## Candidate lineage hardening update — 2026-11-15
+
+The candidate's Industrial Intelligence lineage path has since been extended:
+
+- Dataset-version references propagate automatically from registered evidence into newly created Industrial Intelligence records.
+- The Industrial Intelligence model registry and action ledger carry dataset-version dependency metadata from their model-test/action evidence.
+- A new dataset version invalidates dependent Industrial Intelligence records, models and actions in the active workspace; preserves the historical payload/model definition/action; marks corresponding Digital Thread nodes stale; and records affected IDs in the lineage event.
+- Managed workspace save is attempted once for the affected lists; in-memory state and graph state are restored if the save is not confirmed.
+- Stale model validation, action approval, decision review, benefit verification, risk/barrier review, cause/effect review and shift-handover acknowledgement are blocked.
+- T094 future-dated KPI readings are explicitly classified and excluded from alert generation.
+
+Focused regression tests were added for dependency propagation, repeat invalidation idempotence, model/action/decision/benefit/risk/cause-effect/handover stale guards, save rollback and T094 future timestamps. The 74 Industrial Intelligence test functions and 130 Resource Intelligence test functions currently present are test-source counts only. Exact-head CI is still pending; no passing result is inferred from test source.
+
+### Still outside this coverage
+
+The managed invalidation routine currently covers the Industrial Intelligence `records`, `models` and `actions` workspace stores. Legacy local SQLite stores in `industrial_platform.py`—including `platform_models`, `platform_scenarios`, `platform_experiments` and `platform_decisions`—are not yet automatically invalidated or blocked by this routine. Full model/run/scenario/decision/outcome lineage across those legacy routes remains incomplete.
+
+Hosted fresh-session/re-login, cross-organization isolation, signed-object access, original XLSX retention, resumable upload, reference-aware orphan cleanup, backup/recovery, browser/export acceptance and independent engineering review remain separate gates.
