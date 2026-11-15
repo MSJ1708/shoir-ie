@@ -506,6 +506,7 @@ def transition_decision(
     if to_status not in states:
         raise ValueError("Invalid approval state.")
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT status,owner,dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
