@@ -625,6 +625,24 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
     assert json.loads(decision[1])["Energy"] == 4.25
     assert json.loads(model[1])[0]["version"] == 1
 
+    # Reverting to identical historical content creates a third immutable
+    # version rather than colliding with the version-1 content hash.
+    assert platform.register_dataset(
+        "Line A measurements", "line-a.csv", first.copy(),
+        db_path=db, username="engineer-a",
+    ) == dataset_id
+    with sqlite_connection(db) as conn:
+        reverted_head = conn.execute(
+            "SELECT current_version,sha256 FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        reverted_versions = conn.execute(
+            "SELECT version,data_hash FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
+            (dataset_id,),
+        ).fetchall()
+    assert reverted_head == (3, first_hash)
+    assert reverted_versions == [(1, first_hash), (2, second_hash), (3, first_hash)]
+
 
 def test_platform_database_migrates_existing_dataset_and_artifact_tables_without_claiming_old_lineage(tmp_path):
     import sqlite3
@@ -639,6 +657,16 @@ def test_platform_database_migrates_existing_dataset_and_artifact_tables_without
             """CREATE TABLE platform_datasets(
                 dataset_id TEXT PRIMARY KEY,name TEXT,source_name TEXT,row_count INTEGER,
                 column_count INTEGER,sha256 TEXT,created_at TEXT,schema_json TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_dataset_versions(
+                dataset_id TEXT NOT NULL,version INTEGER NOT NULL,data_hash TEXT NOT NULL,
+                version_fingerprint TEXT NOT NULL,schema_json TEXT NOT NULL,
+                transformations_json TEXT NOT NULL DEFAULT '[]',row_count INTEGER NOT NULL,
+                column_count INTEGER NOT NULL,created_by TEXT,created_at TEXT NOT NULL,
+                PRIMARY KEY(dataset_id,version),
+                UNIQUE(dataset_id,data_hash,version_fingerprint)
             )"""
         )
         conn.execute(
@@ -694,6 +722,15 @@ def test_platform_database_migrates_existing_dataset_and_artifact_tables_without
             table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
             for table in ("platform_experiments","platform_scenarios","platform_decisions")
         }
+        unique_content_indexes = []
+        for index_row in conn.execute("PRAGMA index_list('platform_dataset_versions')").fetchall():
+            if bool(index_row[2]):
+                index_name = str(index_row[1]).replace('"', '""')
+                columns = tuple(
+                    row[2] for row in conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
+                )
+                if set(columns) == {"dataset_id","data_hash","version_fingerprint"} and len(columns) == 3:
+                    unique_content_indexes.append(columns)
     assert version[0] == 1
     assert version[1] == old_hash
     assert re.fullmatch(r"[0-9a-f]{64}", version[2])
@@ -702,6 +739,7 @@ def test_platform_database_migrates_existing_dataset_and_artifact_tables_without
     assert model == ("[]", "NOT_LINKED")
     for columns in table_columns.values():
         assert {"dataset_dependencies_json","dataset_dependency_status","stale_dataset_dependencies_json"}.issubset(columns)
+    assert unique_content_indexes == []
 
 
 def test_legacy_artifact_with_unregistered_dataset_reference_is_not_claimed_current(tmp_path):
