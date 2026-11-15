@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 import re
 import sqlite3
 from shoir_sqlite import sqlite_connect as sqlite_connection
@@ -226,6 +227,90 @@ def _focused_tool_inputs_match(tool_id, current_inputs):
     saved = st.session_state.get("shoir_tool_inputs_" + tool_id)
     return isinstance(saved, dict) and saved == current_inputs
 
+
+
+
+def _t095_safe_metadata(value, depth=0):
+    """Redact secret-like fields before result metadata enters a report."""
+    sensitive = ("password", "secret", "token", "api_key", "apikey", "credential", "private_key", "access_key", "authorization", "cookie")
+    if depth > 5:
+        return "[DEPTH_LIMIT]"
+    if isinstance(value, dict):
+        return {
+            str(key): "[REDACTED]" if any(word in str(key).casefold() for word in sensitive)
+            else _t095_safe_metadata(item, depth + 1)
+            for key, item in list(value.items())[:100]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_t095_safe_metadata(item, depth + 1) for item in list(value)[:100]]
+    if isinstance(value, str):
+        return value[:600]
+    if value is None or isinstance(value, (bool, int, float, np.integer, np.floating)):
+        return value.item() if isinstance(value, (np.integer, np.floating)) else value
+    return str(value)[:600]
+
+
+def _t095_extract_report_tables(source_result):
+    """Convert structured results to export tables, removing secret-named columns."""
+    if not isinstance(source_result, dict):
+        raise ValueError("The selected source result is not a structured tool result.")
+    sensitive = ("password", "secret", "token", "api_key", "apikey", "credential", "private_key", "access_key", "authorization", "cookie")
+    tables = []
+    redacted_columns = []
+    for key, value in source_result.items():
+        if str(key).startswith("_") or key in {"bundle_bytes", "excel_workbook_result", "artifact_bytes"}:
+            continue
+        frame = None
+        if isinstance(value, pd.DataFrame):
+            frame = value.copy(deep=True)
+        elif isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+            frame = pd.DataFrame(value)
+        if frame is None:
+            continue
+        unsafe = [column for column in frame.columns if any(word in str(column).casefold() for word in sensitive)]
+        redacted_columns.extend(f"{key}.{column}" for column in unsafe)
+        if unsafe:
+            frame = frame.drop(columns=unsafe)
+        if len(frame) > 50000:
+            raise ValueError(f"Result table '{key}' has more than 50,000 rows; narrow the source result before exporting.")
+        if len(frame.columns) == 0:
+            continue
+        for column in frame.columns:
+            if frame[column].dtype == "object":
+                frame[column] = frame[column].map(
+                    lambda item: item if item is None or isinstance(item, (str, int, float, bool, pd.Timestamp))
+                    else json.dumps(_t095_safe_metadata(item), ensure_ascii=False, default=str)
+                )
+        tables.append((str(key)[:31], frame))
+    if not tables:
+        scalar = {
+            str(key): _t095_safe_metadata(value)
+            for key, value in source_result.items()
+            if not str(key).startswith("_")
+            and not isinstance(value, (dict, list, pd.DataFrame, np.ndarray, bytes, bytearray))
+            and not any(word in str(key).casefold() for word in sensitive)
+        }
+        tables.append(("Result summary", pd.DataFrame([scalar or {"Status": "No tabular output supplied"}])))
+    metadata_rows = []
+    for key in ("tool_id", "status", "data_provenance", "method", "formula", "assumptions", "unit", "warning"):
+        if key in source_result:
+            value = _t095_safe_metadata(source_result[key])
+            metadata_rows.append({
+                "Field": key,
+                "Value": json.dumps(value, ensure_ascii=False, default=str) if isinstance(value, (dict, list)) else value,
+            })
+    if metadata_rows:
+        tables.append(("Method & Provenance", pd.DataFrame(metadata_rows)))
+    if redacted_columns:
+        tables.append(("Export Redactions", pd.DataFrame({
+            "Redacted column": sorted(set(redacted_columns)),
+            "Reason": "Sensitive field name",
+        })))
+    return tables, {
+        "redacted_column_count": len(set(redacted_columns)),
+        "table_count": len(tables),
+        "total_rows": sum(len(frame) for _, frame in tables),
+    }
 
 def _show_focused_tool_persistence(tool_id, result, current_inputs):
     mode = str(result.get("_workspace_persistence", "SESSION_ONLY"))
@@ -466,7 +551,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T065", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T091", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T065", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T091", "T092", "T094", "T095", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -781,6 +866,36 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             solver_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool062_time_limit")
                             solver_tolerance = st.select_slider("Feasibility tolerance", options=[1e-7, 1e-6, 1e-5, 1e-4, 1e-3], value=1e-7, key="tool062_tolerance")
                             run_method = st.form_submit_button("Solve and diagnose model", type="primary", use_container_width=True, key="tool062_run")
+                        elif selected_tool["tool_id"] == "T095":
+                            source_result_candidates = sorted({
+                                key.replace("shoir_tool_result_", "")
+                                for key in st.session_state.keys()
+                                if key.startswith("shoir_tool_result_T")
+                                and key not in {"shoir_tool_result_T087", "shoir_tool_result_T095"}
+                                and isinstance(st.session_state.get(key), dict)
+                                and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                            })
+                            source_result_options = source_result_candidates or ["NONE"]
+                            source_result_tool_id = st.selectbox(
+                                "Completed authorized result",
+                                options=source_result_options,
+                                format_func=lambda tool_id: (
+                                    f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
+                                    if tool_id != "NONE" else "No completed authorized result"
+                                ),
+                                disabled=not bool(source_result_candidates),
+                                key="tool095_source_id",
+                            )
+                            export_formats = ["XLSX", "ZIP"]
+                            if tier_allows(RAW_TIER, "Enterprise"):
+                                export_formats.extend(["PDF", "PPTX"])
+                            report_format = st.selectbox("Report format", options=export_formats, key="tool095_format")
+                            st.caption("Exports only completed results that your current tier can access. Secret-named columns are removed; the manifest records the source tool, provenance and input snapshot hash. Files are session downloads, not a managed document repository.")
+                            run_method = st.form_submit_button(
+                                "Build verified result report", type="primary",
+                                use_container_width=True, key="tool095_run",
+                                disabled=not bool(source_result_candidates),
+                            )
                         elif selected_tool["tool_id"] == "T087":
                             st.caption("Package a previously completed, authorized tool result with method/environment metadata, configuration fingerprint and SHA-256 checksums. Raw inputs and detailed result tables are opt-in. Review the ZIP contents before sharing.")
                             result_id_candidates = sorted({
@@ -1894,6 +2009,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             "sheet_name": dataset_sheet_input,
                             "dataset_id": existing_dataset_id_input,
                         }
+                    elif selected_tool["tool_id"] == "T095":
+                        current_tool_inputs = {"source_tool_id": source_result_tool_id, "format": report_format}
                     elif selected_tool["tool_id"] == "T087":
                         current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
 
@@ -2833,6 +2950,73 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         and solver_direction == "minimize"
                                         else "MODELLED_FROM_USER_ASSUMPTIONS"
                                     )
+                                elif selected_tool["tool_id"] == "T095":
+                                    if source_result_tool_id == "NONE":
+                                        raise ValueError("Run an entitled source tool first; no completed result is available to export.")
+                                    source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
+                                    source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
+                                    if not isinstance(source_result, dict):
+                                        raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
+                                    tables, table_stats = _t095_extract_report_tables(source_result)
+                                    source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                    inputs_hash = hashlib.sha256(
+                                        json.dumps(_t095_safe_metadata(source_inputs), sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+                                    ).hexdigest() if isinstance(source_inputs, dict) else ""
+                                    source_name = str(source_tool.get("canonical_name") or source_result_tool_id)
+                                    report_title = f"Shoir-IE · {source_name} · Result Export"
+                                    export_audit = [{
+                                        "Source Tool ID": source_result_tool_id,
+                                        "Source Tool": source_name,
+                                        "Result Status": str(source_result.get("status") or "UNSPECIFIED"),
+                                        "Data Provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
+                                        "Input Snapshot SHA-256": inputs_hash or "NOT_AVAILABLE",
+                                        "Exported By": USER,
+                                        "Generated At UTC": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                        "Redacted Columns": table_stats["redacted_column_count"],
+                                    }]
+                                    fmt = str(report_format).upper()
+                                    if fmt in {"PDF", "PPTX"} and not tier_allows(RAW_TIER, "Enterprise"):
+                                        raise PermissionError(f"{fmt} export requires Enterprise. Choose XLSX or ZIP.")
+                                    from shoir_upgrade import build_excel_report, build_workbook_bundle
+                                    if fmt == "XLSX":
+                                        artifact_bytes = build_excel_report(report_title, tables, figures=(), audit=export_audit)
+                                        mime, extension = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
+                                    elif fmt == "ZIP":
+                                        artifact_bytes = build_workbook_bundle(report_title, tables, figures=(), audit=export_audit)
+                                        mime, extension = "application/zip", "zip"
+                                    elif fmt == "PDF":
+                                        from industrial_platform import export_pdf
+                                        artifact_bytes = export_pdf(report_title, tables)
+                                        mime, extension = "application/pdf", "pdf"
+                                    elif fmt == "PPTX":
+                                        from industrial_platform import export_pptx
+                                        artifact_bytes = export_pptx(report_title, tables)
+                                        mime, extension = "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"
+                                    else:
+                                        raise ValueError("Unsupported report format.")
+                                    if not isinstance(artifact_bytes, bytes) or not artifact_bytes:
+                                        raise ValueError("The report builder did not return a valid non-empty file.")
+                                    result = {
+                                        "tool_id": "T095",
+                                        "status": "REPORT_ARTIFACT_BUILT",
+                                        "source_tool_id": source_result_tool_id,
+                                        "source_tool_name": source_name,
+                                        "format": fmt,
+                                        "filename": f"shoir_ie_{source_result_tool_id.lower()}_report.{extension}",
+                                        "mime_type": mime,
+                                        "artifact_bytes": len(artifact_bytes),
+                                        "artifact_sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                                        "table_count": table_stats["table_count"],
+                                        "exported_rows": table_stats["total_rows"],
+                                        "redacted_column_count": table_stats["redacted_column_count"],
+                                        "source_input_snapshot_sha256": inputs_hash or None,
+                                        "artifact_storage": "SESSION_ONLY_DOWNLOAD",
+                                        "data_provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
+                                        "warning": "This is a formatted export of the selected result. It does not independently verify source data or engineering correctness; inspect assumptions and provenance before distribution. The artifact is a session download, not a managed document repository.",
+                                    }
+                                    st.session_state["shoir_tool_bundle_bytes_T095"] = artifact_bytes
+                                    st.session_state["shoir_tool_bundle_filename_T095"] = result["filename"]
+                                    st.session_state["shoir_tool_bundle_mime_T095"] = mime
                                 elif selected_tool["tool_id"] == "T087":
                                     if source_result_tool_id == "NONE":
                                         raise ValueError("Run an entitled source tool first; no completed result is available to package.")
@@ -2867,7 +3051,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T017", "T020", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T073", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T086", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
+                    if selected_tool["tool_id"] in {"T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T017", "T020", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T073", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T086", "T092", "T094", "T095", "T096", "T097", "T098", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -2876,6 +3060,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                            if selected_tool["tool_id"] == "T095":
+                                report_bytes = st.session_state.get("shoir_tool_bundle_bytes_T095")
+                                if isinstance(report_bytes, bytes) and report_bytes:
+                                    st.download_button(
+                                        "Download verified report artifact",
+                                        data=report_bytes,
+                                        file_name=st.session_state.get("shoir_tool_bundle_filename_T095", result.get("filename", "shoir_ie_report.xlsx")),
+                                        mime=st.session_state.get("shoir_tool_bundle_mime_T095", "application/octet-stream"),
+                                        key="tool095_download_report",
+                                        use_container_width=True,
+                                    )
                             if selected_tool["tool_id"] == "T086":
                                 bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T086")
                                 if bundle_bytes:

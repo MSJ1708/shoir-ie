@@ -1202,3 +1202,57 @@ def test_workbench_routes_team_collaboration_to_staging_gated_rbac_ui():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert any("enabled only in the authorized staging environment" in str(element.value) for element in at.info)
+
+
+def test_workbench_t095_builds_sanitized_xlsx_from_entitled_source_result():
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "report-export-canonical-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.session_state["shoir_tool_result_T083"] = {
+        "tool_id": "T083",
+        "status": "SYNTHETIC_TEST_RESULT",
+        "data_provenance": "SYNTHETIC",
+        "metrics": pd.DataFrame({
+            "Metric": ["Scrap rate", "First-pass yield"],
+            "Value": [2.5, 97.5],
+            "api_token": ["must-not-export-1", "must-not-export-2"],
+        }),
+        "warning": "Synthetic result only.",
+    }
+    at.session_state["shoir_tool_inputs_T083"] = {"synthetic": True, "run_id": "SYN-RUN-095"}
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T095 · Verified Reporting and Export Studio")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="tool095_source_id").select("T083")
+    at.run(timeout=90)
+    at.button(key="tool095_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T095")
+    assert result is not None, "T095 did not return a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "REPORT_ARTIFACT_BUILT"
+    assert result["format"] == "XLSX"
+    assert result["source_tool_id"] == "T083"
+    assert result["redacted_column_count"] == 1
+    payload = at.session_state.get("shoir_tool_bundle_bytes_T095")
+    assert isinstance(payload, bytes) and payload[:2] == b"PK"
+    workbook = load_workbook(BytesIO(payload), data_only=True)
+    try:
+        rows = list(workbook["metrics"].values)
+        values = str(rows)
+        assert "Scrap rate" in values
+        assert "First-pass yield" in values
+        assert "must-not-export" not in values
+        assert "api_token" not in values
+    finally:
+        workbook.close()
