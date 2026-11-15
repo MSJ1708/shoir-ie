@@ -1882,15 +1882,20 @@ def invalidate_dataset_dependents(
             str(existing_event.get("record_id") or "")
             if isinstance(existing_event, Mapping) else ""
         ) or ("LIN-" + uuid.uuid4().hex[:14].upper())
+        previous_event_payload = (
+            existing_event.get("payload")
+            if isinstance(existing_event, Mapping) and isinstance(existing_event.get("payload"), Mapping)
+            else {}
+        )
         event_payload = {
             "dataset_id": str(dataset_id).upper(),
             "current_version": current_version,
             "current_data_hash": str(current_data_hash).lower(),
             "current_version_fingerprint": str(current_version_fingerprint).lower(),
-            "stale_record_ids": list(stale_ids),
-            "stale_event_ids": list(stale_event_ids),
-            "stale_model_ids": list(stale_model_ids),
-            "stale_action_ids": list(stale_action_ids),
+            "stale_record_ids": sorted(set(previous_event_payload.get("stale_record_ids", [])) | set(stale_ids)),
+            "stale_event_ids": sorted(set(previous_event_payload.get("stale_event_ids", [])) | set(stale_event_ids)),
+            "stale_model_ids": sorted(set(previous_event_payload.get("stale_model_ids", [])) | set(stale_model_ids)),
+            "stale_action_ids": sorted(set(previous_event_payload.get("stale_action_ids", [])) | set(stale_action_ids)),
             "historical_outputs_preserved": True,
         }
         event_record = {
