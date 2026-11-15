@@ -282,3 +282,19 @@ At this refresh, `tests/test_shoir_industrial_intelligence.py` contains 74 test 
 This hardening applies to the Industrial Intelligence workspace record, model-registry and action ledgers. It does **not** yet automatically invalidate every legacy local SQLite artifact in `industrial_platform.py`, including its separate `platform_models`, `platform_scenarios`, `platform_experiments` and `platform_decisions` stores. Those stores remain a separate integration gap and must not be represented as fully covered by the new managed workspace lineage routine.
 
 The exact candidate head remains subject to all required CI and hosted acceptance. The current exact-head workflow runs were queued when checked; the separate live-deployment smoke remains skipped unless a new authenticated staging run proves it. No CI pass or hosted acceptance is claimed by this source update.
+
+
+---
+
+## 12. Latest stale-lineage consumer hardening — 2026-11-15
+
+Two additional consistency gaps were closed in the candidate:
+
+- The duplicate Industrial Intelligence operational-event ledger is now invalidated alongside the primary record ledger. The lineage event and invalidation return object include stale event IDs; the workspace rollback test now includes record, event, model and action stores plus Digital Thread nodes/edges.
+- Industrial Knowledge Copilot evidence retrieval now excludes records whose record status or dataset dependency status is `STALE`. It returns `excluded_stale_evidence_count` so excluded stale evidence is visible as a limitation rather than cited as current evidence.
+
+Additional focused regression tests:
+- `test_dataset_version_invalidation_marks_operational_event_mirror_stale`
+- `test_copilot_evidence_context_excludes_stale_dataset_dependent_records`
+
+The current `tests/test_shoir_industrial_intelligence.py` source contains 76 test functions at this code-review point; this count is not a passing test result. The current candidate exact-head workflows remain queued, so the new source and tests are not yet CI-verified.
