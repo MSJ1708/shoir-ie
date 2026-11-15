@@ -9,17 +9,17 @@
 | Audit dimension | Count | Meaning |
 |---|---:|---|
 | Canonical registry entries | 100 | Stable T001–T100 metadata rows |
-| Dedicated focused Workbench method branches | 86 | The selected tool ID enters a dedicated method/form dispatch path |
-| Mapped legacy-module launch only | 14 | The directory can open the declared existing module/route, but the selected canonical ID has no dedicated focused method branch |
+| Dedicated focused Workbench method branches | 88 | The selected tool ID enters a dedicated method/form dispatch path |
+| Mapped legacy-module launch only | 12 | The directory can open the declared existing module/route, but the selected canonical ID has no dedicated focused method branch |
 | IDs with no declared mapped route | 0 | All current rows declare an existing module or route |
 | Verified working | 0 | No tool is promoted to verified by this static audit |
 | External configuration required | 4 | T096–T099 still depend on real service/configuration and acceptance |
 
-The 14 mapped-module-only IDs are:
+The 12 mapped-module-only IDs are:
 
-`T001, T003, T008, T020, T053, T057, T064, T065, T073, T088, T090, T091, T093, T095`.
+`T001, T003, T008, T053, T057, T064, T065, T088, T090, T091, T093, T095`.
 
-The directory's **Open mapped Workbench module** action is a navigation route. It is not proof that the selected canonical ID is carried through the target module's calculation, permission check, persistence, export or audit path. The mapped legacy module must enforce its own native server-side entitlement and authorization rules. These 14 IDs therefore remain a concrete canonical-ID wiring/acceptance gap, even though the corresponding legacy module route is declared.
+The directory's **Open mapped Workbench module** action is a navigation route. It is not proof that the selected canonical ID is carried through the target module's calculation, permission check, persistence, export or audit path. The mapped legacy module must enforce its own native server-side entitlement and authorization rules. These 12 IDs therefore remain a concrete canonical-ID wiring/acceptance gap, even though the corresponding legacy module route is declared.
 
 ## What the audit checks
 

@@ -531,7 +531,7 @@ def transition_decision(
         freshness = str(row[2] or "NOT_LINKED").upper()
         if freshness in {"STALE", "UNVERIFIED_REFERENCE"} and to_status in {"Approved", "Implemented", "Verified"}:
             raise ValueError(
-                "A stale dataset-linked decision with unverified dataset lineage cannot be approved, implemented or verified. "
+                "A decision with stale or unverified dataset lineage cannot be approved, implemented or verified. "
                 "Register/verify the dataset source and rerun the decision against the current dataset version first."
             )
         if require_owner and (owner is None or str(owner) != str(actor)):

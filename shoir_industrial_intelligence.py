@@ -1548,7 +1548,7 @@ def _require_current_dataset_artifact(record: Mapping[str, Any], label: str) -> 
         or str(record.get("dataset_dependency_status") or "").upper() == "STALE"
     ):
         raise IndustrialIntelligenceError(
-            f"{label} is stale because its source dataset changed. Re-run it against the current dataset version before review or approval."
+            f"{label} evidence is stale because its source dataset changed. Re-run it against the current dataset version before review or approval."
         )
 
 
@@ -2684,6 +2684,8 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
         "VERIFIED": {"CLOSED"},
         "BLOCKED": {str(action.get("blocked_from_status") or "").upper()},
     }
+    if target == "VERIFIED" and current != "IMPLEMENTED":
+        raise PermissionError("An action must be recorded as IMPLEMENTED before independent verification.")
     if target not in transitions.get(current, set()):
         raise PermissionError(f"Invalid action transition: {current} → {target}.")
     if target == "BLOCKED":
@@ -3235,10 +3237,26 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
     selected_rows = matches[:max(1, min(15, int(limit)))]
     results = []
     matched_node_ids = set()
+    referenced_entity_ids: set[str] = set()
+    reference_fields = {
+        "asset_id", "process_id", "entity_id", "equipment_id", "line_id",
+        "machine_id", "material_id", "work_order_id", "dataset_id",
+    }
     for score, row in selected_rows:
         node_id = str(row.get("thread_node_id") or "")
         if node_id:
             matched_node_ids.add(node_id)
+        raw_payload = row.get("payload")
+        if isinstance(raw_payload, Mapping):
+            for key, value in raw_payload.items():
+                normalized_key = str(key).casefold()
+                if (
+                    normalized_key in reference_fields
+                    or normalized_key.endswith("_entity_id")
+                ) and isinstance(value, (str, int)):
+                    reference = str(value).strip()
+                    if reference:
+                        referenced_entity_ids.add(reference)
         results.append({
             "citation_id": row.get("record_id"),
             "record_type": row.get("record_type"),
@@ -3252,6 +3270,14 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
         })
     graph = thread_snapshot(username, tier)
     node_by_id = {str(item.get("node_id") or ""): item for item in graph.get("nodes", [])}
+    # Evidence may refer to an asset/process by business ID without a direct
+    # evidence->entity edge. Resolve exact IDs only inside the active workspace,
+    # then follow only explicit Digital Thread relationships.
+    for entity in _state_list("nodes"):
+        if str(entity.get("entity_id") or "") in referenced_entity_ids:
+            entity_node_id = str(entity.get("thread_node_id") or "")
+            if entity_node_id:
+                matched_node_ids.add(entity_node_id)
     linked_edges = []
     linked_ids = set(matched_node_ids)
     for edge in graph.get("edges", []):

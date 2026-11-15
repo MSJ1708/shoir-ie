@@ -466,7 +466,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -511,10 +511,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key="tool010_workbench",
                             )
                             run_method = st.form_submit_button("Search engineering help", type="primary", use_container_width=True, key="tool010_run")
-                        elif selected_tool["tool_id"] in {"T004", "T005", "T086", "T092"}:
+                        elif selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
                             payload_labels = {
                                 "T004": "Engineering project (create/list) JSON",
                                 "T005": "Project version history action JSON (create/autosave/history/restore/list)",
+                                "T073": "What-if scenario comparison and branch action JSON",
                                 "T086": "Hypothesis and research protocol action JSON",
                                 "T092": "Decision register action JSON (create/list/request_review/history)",
                             }
@@ -530,12 +531,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 use_container_width=True,
                                 key="tool" + selected_tool["tool_id"][1:] + "_run",
                             )
-                        elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014"}:
+                        elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014", "T020"}:
                             captions = {
                                 "T011": "Import a supported workbook and inspect its sheet inventory. The original source is retained in the Excel Studio workbook record when workspace saving succeeds.",
                                 "T012": "Discover tables and candidate cross-sheet relationships. Suggestions require engineering review; keys are not joined automatically.",
                                 "T013": "Generate per-sheet quality profiles using the existing Excel Studio profile engine.",
                                 "T014": "Preview a reversible cleaned copy. The source workbook and raw sheets remain unchanged; explicit confirmation is required.",
+                                "T020": "Register an immutable dataset version from a workbook through the authenticated managed dataset API. Requires an Enterprise session token.",
                             }
                             st.caption(captions[selected_tool["tool_id"]])
                             canonical_excel_upload = st.file_uploader(
@@ -545,6 +547,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key="tool" + selected_tool["tool_id"][1:] + "_upload",
                             )
                             confirm_cleaning = False
+                            dataset_name_input = ""
+                            dataset_sheet_input = ""
+                            existing_dataset_id_input = ""
+                            if selected_tool["tool_id"] == "T020":
+                                dataset_name_input = st.text_input("Logical dataset name", value="Industrial dataset", max_chars=160, key="tool020_dataset_name")
+                                dataset_sheet_input = st.text_input("Sheet to register (leave blank for first usable sheet)", value="", max_chars=120, key="tool020_sheet_name")
+                                existing_dataset_id_input = st.text_input("Existing dataset ID for a new immutable version (optional)", value="", max_chars=40, key="tool020_existing_dataset_id")
                             if selected_tool["tool_id"] == "T014":
                                 confirm_cleaning = st.checkbox(
                                     "I reviewed the reversible-cleaning disclosure and confirm creating a cleaned copy.",
@@ -1864,13 +1873,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"payload_json": tool067_payload_json}
                     elif selected_tool["tool_id"] == "T068":
                         current_tool_inputs = {"payload_json": tool068_payload_json}
-                    elif selected_tool["tool_id"] in {"T004", "T005", "T086", "T092"}:
+                    elif selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
                         current_tool_inputs = {"payload_json": canonical_payload_json}
-                    elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014"}:
+                    elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014", "T020"}:
                         current_tool_inputs = {
                             "filename": canonical_excel_upload.name if canonical_excel_upload is not None else "",
                             "file_size_bytes": len(canonical_excel_upload.getvalue()) if canonical_excel_upload is not None else 0,
                             "confirm_cleaning": confirm_cleaning,
+                            "dataset_name": dataset_name_input,
+                            "sheet_name": dataset_sheet_input,
+                            "dataset_id": existing_dataset_id_input,
                         }
                     elif selected_tool["tool_id"] == "T087":
                         current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
@@ -1890,7 +1902,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         try:
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
-                            if selected_tool["tool_id"] in {"T004", "T005", "T086", "T092"}:
+                            if selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
                                 try:
                                     parsed_payload = json.loads(canonical_payload_json)
                                 except json.JSONDecodeError as exc:
@@ -1916,6 +1928,31 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 result["workspace_save_succeeded"] = workspace_saved
                                 result["original_workbook_bytes_retained"] = bool(workbook_result.get("_raw_bytes") == raw_workbook)
                                 st.session_state["excel_studio_signature"] = result["source_sha256"]
+                            elif selected_tool["tool_id"] == "T020":
+                                if canonical_excel_upload is None:
+                                    raise ValueError("Upload a supported workbook before registering a dataset version.")
+                                dataset_token = str(st.session_state.get("remote_session_token") or st.session_state.get("access_token") or "").strip()
+                                if not dataset_token:
+                                    raise PermissionError("An authenticated managed-session token is required for immutable staging dataset registration.")
+                                if not dataset_name_input.strip():
+                                    raise ValueError("Enter a logical dataset name before registering a version.")
+                                raw_dataset_workbook = canonical_excel_upload.getvalue()
+                                result = run_additional_tool("T020", {
+                                    "filename": canonical_excel_upload.name,
+                                    "raw_bytes": raw_dataset_workbook,
+                                    "dataset_name": dataset_name_input.strip(),
+                                    "sheet_name": dataset_sheet_input.strip(),
+                                    "dataset_id": existing_dataset_id_input.strip() or None,
+                                    "username": USER,
+                                    "token": dataset_token,
+                                    "workspace": str(st.session_state.get("workspace") or "default"),
+                                })
+                                workbook_result = result.pop("excel_workbook_result")
+                                st.session_state["excel_studio_result"] = workbook_result
+                                from shoir_excel_studio import _excel_persist_result
+                                result["original_workbook_workspace_save_succeeded"] = bool(_excel_persist_result(USER, workbook_result))
+                                result["original_workbook_bytes_retained_in_session"] = bool(workbook_result.get("_raw_bytes") == raw_dataset_workbook)
+                                st.session_state["excel_studio_signature"] = result["data_hash"]
                             elif selected_tool["tool_id"] in {"T061", "T067", "T068"}:
                                 payload_json = {
                                     "T061": tool061_payload_json,
@@ -2819,7 +2856,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T086", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
+                    if selected_tool["tool_id"] in {"T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T017", "T020", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T073", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T086", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)

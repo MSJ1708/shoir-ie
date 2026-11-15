@@ -1391,19 +1391,182 @@ def excel_workbook_target_action(tool_id: str, payload: Mapping[str, Any]) -> di
     }
 
 
+def scenario_manager_action(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare and persist owner-scoped What-If scenario branches (T073)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T073 payload must be a JSON object.")
+    owner = _nonempty_text(payload.get("owner"), "owner", 160)
+    action = str(payload.get("action") or "compare").strip().casefold()
+    import industrial_experience as experience
+    from industrial_platform import analyze_experiment_scenarios
+
+    if action in {"compare", "create", "branch"}:
+        raw_rows = _records(payload.get("scenarios"), "scenarios", minimum=2, maximum=500)
+        baseline = _nonempty_text(payload.get("baseline_scenario") or raw_rows[0].get("Scenario"), "baseline_scenario", 160)
+        comparison = analyze_experiment_scenarios(pd.DataFrame(raw_rows), baseline_scenario=baseline)
+        if action == "compare":
+            return {
+                "tool_id": "T073", "status": "SCENARIOS_COMPARED",
+                "scenario_count": len(comparison), "baseline_scenario": baseline,
+                "comparison": comparison, "data_provenance": str(payload.get("data_provenance") or "USER_ENTERED_UNVERIFIED"),
+                "warning": "This is a user-input KPI comparison, not an optimizer recommendation or verified operational outcome.",
+            }
+        name = _nonempty_text(payload.get("name") or "What-If Scenario Study", "name", 160)
+        parent_project_id = str(payload.get("parent_project_id") or "").strip()
+        if action == "branch":
+            if not parent_project_id:
+                raise ValueError("branch requires a parent_project_id owned by the authenticated user.")
+            experience.ensure_experience_db()
+            with experience._db() as conn:
+                parent = conn.execute(
+                    "SELECT name,module,owner FROM experience_projects WHERE project_id=?",
+                    (parent_project_id,),
+                ).fetchone()
+            if not parent or str(parent[2] or "") != owner or str(parent[1] or "") != "Scenario Manager":
+                raise PermissionError("Parent scenario project not found or not owned by this user.")
+            name = _nonempty_text(payload.get("name") or (str(parent[0]) + " · Branch"), "name", 160)
+        stored = {
+            "scenario_name": name,
+            "baseline_scenario": baseline,
+            "scenarios": raw_rows,
+            "comparison": comparison.to_dict(orient="records"),
+            "parent_project_id": parent_project_id or None,
+            "data_provenance": str(payload.get("data_provenance") or "USER_ENTERED_UNVERIFIED"),
+        }
+        project_id = experience.save_project(name, "Scenario Manager", owner, _json_clone(stored))
+        return {
+            "tool_id": "T073", "status": "SCENARIO_BRANCH_SAVED" if action == "branch" else "SCENARIO_SET_SAVED",
+            "project_id": project_id, "parent_project_id": parent_project_id or None,
+            "scenario_count": len(comparison), "baseline_scenario": baseline,
+            "comparison": comparison, "data_provenance": stored["data_provenance"],
+            "warning": "Scenario assumptions and KPI deltas are saved as a versioned owner-scoped project. They are not forecasts, optimized plans or verified savings.",
+        }
+    if action == "list":
+        experience.ensure_experience_db()
+        with experience._db() as conn:
+            rows = conn.execute(
+                "SELECT project_id,name,status,created_at,updated_at FROM experience_projects "
+                "WHERE owner=? AND module='Scenario Manager' ORDER BY updated_at DESC",
+                (owner,),
+            ).fetchall()
+        return {
+            "tool_id": "T073", "status": "SCENARIO_PROJECTS_LISTED",
+            "project_count": len(rows),
+            "projects": pd.DataFrame(rows, columns=["project_id","name","status","created_at","updated_at"]),
+            "data_provenance": "MANUAL",
+        }
+    if action == "history":
+        project_id = _nonempty_text(payload.get("project_id"), "project_id", 80)
+        experience.ensure_experience_db()
+        with experience._db() as conn:
+            parent = conn.execute("SELECT owner,module FROM experience_projects WHERE project_id=?", (project_id,)).fetchone()
+            if not parent or str(parent[0] or "") != owner or str(parent[1] or "") != "Scenario Manager":
+                raise PermissionError("Scenario project not found or not owned by this user.")
+            rows = conn.execute(
+                "SELECT snapshot_no,payload_json,created_at FROM experience_project_snapshots "
+                "WHERE project_id=? ORDER BY snapshot_no ASC",
+                (project_id,),
+            ).fetchall()
+        history = []
+        for number, raw, stamp in rows:
+            data = json.loads(raw or "{}")
+            if not isinstance(data, dict):
+                raise ValueError("A scenario snapshot is not a valid JSON object.")
+            history.append({"snapshot_no": int(number), "payload": data, "created_at": stamp})
+        return {"tool_id": "T073", "status": "SCENARIO_HISTORY_LOADED", "project_id": project_id, "snapshot_count": len(history), "history": history, "data_provenance": "MANUAL"}
+    raise ValueError("T073 action must be compare, create, branch, list, or history.")
+
+
+def dataset_version_register_action(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Register an immutable workbook-derived dataset version through the existing managed API (T020)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T020 payload must be a JSON object.")
+    filename = _nonempty_text(payload.get("filename"), "filename", 240)
+    raw = payload.get("raw_bytes")
+    if not isinstance(raw, bytes) or not raw:
+        raise ValueError("Upload a non-empty supported workbook before registering a dataset version.")
+    if len(raw) > 50 * 1024 * 1024:
+        raise ValueError("Workbook exceeds the 50 MiB upload limit.")
+    dataset_name = _nonempty_text(payload.get("dataset_name"), "dataset_name", 160)
+    sheet_requested = str(payload.get("sheet_name") or "").strip()
+    existing_dataset_id = str(payload.get("dataset_id") or "").strip().upper() or None
+    username = _nonempty_text(payload.get("username"), "username", 160)
+    token = str(payload.get("token") or "").strip()
+    workspace = str(payload.get("workspace") or "default").strip() or "default"
+    from shoir_excel_studio import process_uploaded_workbook
+    from industrial_platform import register_dataset
+
+    workbook = process_uploaded_workbook(raw, filename)
+    cleaned_sheets = workbook.get("cleaned_sheets", {})
+    available_sheets = list(cleaned_sheets)
+    if not available_sheets:
+        raise ValueError("The workbook contains no cleanable sheets.")
+    sheet = sheet_requested or available_sheets[0]
+    if sheet not in cleaned_sheets:
+        raise ValueError("Selected sheet not found. Available sheets: " + ", ".join(available_sheets[:50]))
+    frame = cleaned_sheets[sheet]
+    if frame.empty or len(frame.columns) == 0:
+        raise ValueError("The selected sheet has no usable rows or columns.")
+    transformations = [
+        {
+            "operation": "Excel Studio validated import",
+            "filename": filename,
+            "source_sha256": str(workbook.get("signature") or hashlib.sha256(raw).hexdigest()),
+            "sheet": sheet,
+            "provenance": "IMPORTED",
+        }
+    ]
+    dataset_id = register_dataset(
+        dataset_name,
+        filename,
+        frame,
+        username=username,
+        workspace=workspace,
+        token=token,
+        transformations=transformations,
+        dataset_id=existing_dataset_id,
+    )
+    state = None
+    try:
+        from industrial_platform import _industrial_platform_session_state
+        state = _industrial_platform_session_state()
+    except Exception:
+        state = {}
+    registration = dict((state or {}).get("data_platform_latest_registration") or {})
+    if str(registration.get("dataset_id") or dataset_id).upper() != dataset_id.upper():
+        raise RuntimeError("Dataset registration returned a different dataset identity than the active version metadata.")
+    return {
+        "tool_id": "T020",
+        "status": "IMMUTABLE_DATASET_VERSION_REGISTERED",
+        "dataset_id": dataset_id,
+        "version": int(registration.get("version") or (state or {}).get("data_platform_latest_version") or 1),
+        "data_hash": str(registration.get("data_hash") or ""),
+        "version_fingerprint": str(registration.get("version_fingerprint") or ""),
+        "created_new_version": bool(registration.get("created_new_version")),
+        "sheet_name": sheet,
+        "row_count": int(len(frame)),
+        "column_count": int(len(frame.columns)),
+        "available_sheets": available_sheets,
+        "data_provenance": "IMPORTED",
+        "excel_workbook_result": workbook,
+        "warning": "The immutable dataset registry stores normalized CSV content and version metadata. The original workbook is retained in the separate Excel Studio workspace record only when that workspace save succeeds; this tool does not claim resumable uploads or orphan cleanup.",
+    }
+
+
 def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Dispatch only the explicitly implemented, deterministic tool IDs."""
     if not isinstance(payload, Mapping):
         raise ValueError("Tool payload must be a JSON object.")
     dispatch = {
         "T004": project_manager_action,
+        "T006": recovery_action,
+        "T073": scenario_manager_action,
         "T005": project_version_history_action,
         "T086": research_hypothesis_register_action,
         "T092": decision_register_action,
         "T061": linear_mixed_integer_optimization,
         "T067": multiobjective_optimization,
         "T068": robust_linear_optimization,
-        "T020": dataset_version_lineage,
         "T039": capa_lifecycle_review,
         "T060": supply_chain_network_plan,
         "T074": calibrate_digital_twin,
@@ -1415,6 +1578,8 @@ def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, A
         "T099": governance_recovery_action,
     }
     selected = str(tool_id or "").strip().upper()
+    if selected == "T020":
+        return dataset_version_register_action(payload)
     if selected in {"T011", "T012", "T013", "T014"}:
         return excel_workbook_target_action(selected, payload)
     if selected not in dispatch:
@@ -1427,6 +1592,18 @@ def get_tool_example_json(tool_id: str) -> str:
     examples = {
         "T004": {"action": "create", "owner": "synthetic-project-owner", "name": "Synthetic capacity improvement study", "module": "Capacity Planning", "description": "Synthetic project metadata", "site": "SYNTHETIC", "linked_artifact_ids": ["RUN-SYN-001"], "metadata": {"provenance": "SYNTHETIC"}},
         "T005": {"action": "create", "owner": "synthetic-project-owner", "name": "Synthetic versioned project", "module": "Engineering Project", "state": {"scope": "SYNTHETIC", "baseline": {"capacity": 100}}},
+        "T073": {
+            "action": "create",
+            "owner": "synthetic-scenario-owner",
+            "name": "Synthetic what-if study",
+            "baseline_scenario": "Baseline",
+            "scenarios": [
+                {"Scenario": "Baseline", "Cost": 100, "Service": 90},
+                {"Scenario": "Alternative A", "Cost": 90, "Service": 92},
+                {"Scenario": "Alternative B", "Cost": 110, "Service": 95},
+            ],
+            "data_provenance": "SYNTHETIC_EXAMPLE",
+        },
         "T086": {"action": "create", "owner": "synthetic-research-owner", "title": "Synthetic process variability study", "research_question": "Does the controlled change alter measured variation?", "hypothesis": "The post-change variation is lower.", "null_hypothesis": "The post-change variation is not lower.", "methodology": "Controlled comparison", "primary_endpoint": "Standard deviation", "data_source": "SYNTHETIC_EXAMPLE", "evidence_references": ["SYNTHETIC-REF-001"]},
         "T092": {"action": "create", "owner": "synthetic-decision-owner", "title": "Synthetic capacity decision", "module": "Engineering Decision Center", "metrics": {"capacity_delta_units": 10}, "assumptions": {"provenance": "SYNTHETIC"}, "uncertainty": {"demand_range": "illustrative"}},
         "T061": {

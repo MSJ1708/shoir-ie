@@ -937,6 +937,15 @@ def test_staging_dataset_registration_uses_active_organization_workspace_scope(m
         },
     }
     monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    import shoir_industrial_intelligence as intelligence
+    monkeypatch.setattr(
+        intelligence,
+        "invalidate_dataset_dependents",
+        lambda *args, **kwargs: {
+            "status": "NO_STALE_DEPENDENTS",
+            "current_dataset_thread_node_id": "THREAD-SYNTHETIC-DATASET-001",
+        },
+    )
     dataset_id = platform.register_dataset(
         "Production", "production.csv",
         pd.DataFrame({"asset_id": ["A-1"], "units": [10]}),

@@ -393,7 +393,7 @@ def test_governance_retention_and_delete_plans_do_not_delete_data():
 
 
 def test_all_target_examples_are_valid_json():
-    for tool_id in ("T004", "T005", "T006", "T020", "T039", "T060", "T061", "T067", "T068", "T074", "T080", "T086", "T092", "T094", "T096", "T097", "T098", "T099"):
+    for tool_id in ("T004", "T005", "T006", "T039", "T060", "T061", "T067", "T068", "T073", "T074", "T080", "T086", "T092", "T094", "T096", "T097", "T098", "T099"):
         value = json.loads(get_tool_example_json(tool_id))
         assert isinstance(value, dict)
         out = run_additional_tool(tool_id, value)
@@ -604,3 +604,84 @@ def test_t011_to_t014_workbook_tools_use_existing_multisheet_pipeline():
     assert cleaned["status"] == "CLEANED_COPY_READY"
     assert cleaned["original_source_preserved_in_workbook_record"] is True
     assert len(cleaned["details"]["sheet_comparison"]) == 2
+
+
+def test_t020_immutable_dataset_version_registration_wraps_existing_managed_pipeline(monkeypatch):
+    import io
+    import industrial_platform as platform
+
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    calls = {}
+
+    def fake_register_dataset(name, source_name, frame, **kwargs):
+        calls.update({"name": name, "source_name": source_name, "frame": frame.copy(), **kwargs})
+        state["data_platform_latest_registration"] = {
+            "dataset_id": "DS-ABCDEF123456",
+            "version": 3,
+            "data_hash": "a" * 64,
+            "version_fingerprint": "b" * 64,
+            "created_new_version": True,
+        }
+        state["data_platform_latest_version"] = 3
+        return "DS-ABCDEF123456"
+
+    monkeypatch.setattr(platform, "register_dataset", fake_register_dataset)
+    raw_io = io.BytesIO()
+    with pd.ExcelWriter(raw_io, engine="openpyxl") as writer:
+        pd.DataFrame({"Asset ID": ["A-1", "A-2"], "Qty": [10, 20]}).to_excel(writer, sheet_name="Assets", index=False)
+    raw = raw_io.getvalue()
+
+    result = run_additional_tool("T020", {
+        "filename": "synthetic-assets.xlsx",
+        "raw_bytes": raw,
+        "dataset_name": "Synthetic asset register",
+        "sheet_name": "Assets",
+        "username": "synthetic-owner",
+        "token": "synthetic-managed-session-token",
+        "workspace": "synthetic-workspace",
+    })
+    assert result["status"] == "IMMUTABLE_DATASET_VERSION_REGISTERED"
+    assert result["dataset_id"] == "DS-ABCDEF123456"
+    assert result["version"] == 3
+    assert result["row_count"] == 2
+    assert calls["username"] == "synthetic-owner"
+    assert calls["token"] == "synthetic-managed-session-token"
+    assert calls["workspace"] == "synthetic-workspace"
+    assert calls["frame"]["Qty"].tolist() == [10, 20]
+    workbook = result.pop("excel_workbook_result")
+    assert workbook["_raw_bytes"] == raw
+
+
+def test_t073_scenario_manager_compares_branches_and_enforces_owner(monkeypatch, tmp_path):
+    _isolate_experience_database(monkeypatch, tmp_path)
+    example = json.loads(get_tool_example_json("T073"))
+    created = run_additional_tool("T073", example)
+    assert created["status"] == "SCENARIO_SET_SAVED"
+    assert created["scenario_count"] == 3
+    assert created["baseline_scenario"] == "Baseline"
+
+    branched = run_additional_tool("T073", {
+        **example,
+        "action": "branch",
+        "owner": "synthetic-scenario-owner",
+        "parent_project_id": created["project_id"],
+        "name": "Synthetic what-if branch B",
+    })
+    assert branched["status"] == "SCENARIO_BRANCH_SAVED"
+    assert branched["parent_project_id"] == created["project_id"]
+
+    history = run_additional_tool("T073", {
+        "action": "history",
+        "owner": "synthetic-scenario-owner",
+        "project_id": created["project_id"],
+    })
+    assert history["snapshot_count"] == 1
+    listed = run_additional_tool("T073", {"action": "list", "owner": "synthetic-scenario-owner"})
+    assert listed["project_count"] == 2
+    with pytest.raises(PermissionError, match="not owned"):
+        run_additional_tool("T073", {
+            "action": "history",
+            "owner": "different-owner",
+            "project_id": created["project_id"],
+        })

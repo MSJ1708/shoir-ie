@@ -1117,6 +1117,7 @@ def test_workbench_runs_canonical_lp_milp_pareto_and_robust_tools():
         ("T061 · Linear and Mixed-Integer Optimization", "tool061_run", "shoir_tool_result_T061"),
         ("T067 · Multi-Objective Optimization", "tool067_run", "shoir_tool_result_T067"),
         ("T068 · Sensitivity and Robust Optimization", "tool068_run", "shoir_tool_result_T068"),
+        ("T073 · What-If Scenario Manager", "tool073_run", "shoir_tool_result_T073"),
     ]
     for label, button_key, result_key in cases:
         at.selectbox(key="shoir_100_tool_inspector").select(label)
@@ -1126,10 +1127,14 @@ def test_workbench_runs_canonical_lp_milp_pareto_and_robust_tools():
         at.run(timeout=90)
         assert not at.exception, f"{label} execution failed: " + "\\n".join(str(error.value) for error in at.exception)
         result = at.session_state.get(result_key)
-        assert result is not None
+        assert result is not None, (
+            f"{label} did not return a result. "
+            f"Streamlit errors: {[str(item.value) for item in at.error]}"
+        )
         assert result["tool_id"] == label.split(" · ", 1)[0]
     assert at.session_state["shoir_tool_result_T067"]["status"] == "PARETO_TRADEOFFS_ANALYZED"
     assert at.session_state["shoir_tool_result_T068"]["status"] == "ROBUST_OPTIMAL"
+    assert at.session_state["shoir_tool_result_T073"]["status"] == "SCENARIO_SET_SAVED"
 
 
 def test_workbench_runs_owner_scoped_project_research_and_decision_registers():
@@ -1150,6 +1155,11 @@ def test_workbench_runs_owner_scoped_project_research_and_decision_registers():
         ("T092 · Decision Register and Approval Workflow", "tool092_run", "T092", "DECISION_DRAFT_CREATED"),
     ]
     for label, button_key, tool_id, expected_status in cases:
+        required_tier = "Research Pack" if tool_id == "T086" else "Enterprise Plus Tier"
+        if at.session_state.get("user_tier") != required_tier:
+            at.session_state["user_tier"] = required_tier
+            at.run(timeout=90)
+            assert not at.exception, f"{tool_id} tier refresh failed: " + "\\n".join(str(error.value) for error in at.exception)
         at.selectbox(key="shoir_100_tool_inspector").select(label)
         at.run(timeout=90)
         assert not at.exception, f"{tool_id} form failed: " + "\\n".join(str(error.value) for error in at.exception)
