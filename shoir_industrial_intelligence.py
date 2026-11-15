@@ -1765,18 +1765,22 @@ def invalidate_dataset_dependents(
 ) -> dict[str, Any]:
     """Invalidate every governed dataset-dependent artifact in the active workspace."""
     access = _session_authorize(username, tier, "write")
-    state_keys = ("records", "models", "actions")
+    state_keys = ("records", "events", "models", "actions")
     storage_keys = {key: STATE_PREFIX + key for key in state_keys}
     snapshots = {
         key: copy.deepcopy(st.session_state.get(storage_key, []))
         for key, storage_key in storage_keys.items()
     }
     previous_records = copy.deepcopy(_state_list("records"))
+    previous_events = copy.deepcopy(_state_list("events"))
     previous_models = copy.deepcopy(_state_list("models"))
     previous_actions = copy.deepcopy(_state_list("actions"))
 
     updated_records, stale_ids = mark_dataset_dependents_stale(
         previous_records, dataset_id, current_version, current_data_hash, current_version_fingerprint
+    )
+    updated_events, stale_event_ids = mark_dataset_dependents_stale(
+        previous_events, dataset_id, current_version, current_data_hash, current_version_fingerprint
     )
 
     # Reuse the same immutable-dependency validator for artifacts stored outside
@@ -1813,7 +1817,7 @@ def invalidate_dataset_dependents(
         row.pop("record_status", None)
         updated_actions.append(row)
 
-    stale_all_ids = set(stale_ids) | set(stale_model_ids) | set(stale_action_ids)
+    stale_all_ids = set(stale_ids) | set(stale_event_ids) | set(stale_model_ids) | set(stale_action_ids)
     graph_snapshot = _snapshot_thread_graph(username)
     try:
         superseded_dataset_nodes = _mark_dataset_thread_versions_superseded(
@@ -1858,6 +1862,7 @@ def invalidate_dataset_dependents(
             "dataset_id": str(dataset_id).upper(),
             "current_version": current_version,
             "stale_record_ids": list(stale_ids),
+            "stale_event_ids": list(stale_event_ids),
             "stale_model_ids": list(stale_model_ids),
             "stale_action_ids": list(stale_action_ids),
             "historical_outputs_preserved": True,
@@ -1885,6 +1890,7 @@ def invalidate_dataset_dependents(
         # different dataset versions if any one list fails to save.
         updates = {
             "records": updated_records,
+            "events": updated_events,
             "models": updated_models,
             "actions": updated_actions,
         }
@@ -1935,6 +1941,8 @@ def invalidate_dataset_dependents(
         "current_version": current_version,
         "stale_record_count": len(stale_ids),
         "stale_record_ids": stale_ids,
+        "stale_event_count": len(stale_event_ids),
+        "stale_event_ids": stale_event_ids,
         "stale_model_count": len(stale_model_ids),
         "stale_model_ids": stale_model_ids,
         "stale_action_count": len(stale_action_ids),
