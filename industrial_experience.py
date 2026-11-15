@@ -683,7 +683,7 @@ def decision_outcomes_frame(
     db_path: str = "enterprise_full_workspace.db",
 ) -> pd.DataFrame:
     ensure_experience_db(db_path)
-    query = "SELECT outcome_id,decision_id,owner,implementation_status,predicted_json,actual_json,variance_json,lesson,verified_at,created_at FROM experience_decision_outcomes"
+    query = "SELECT outcome_id,decision_id,owner,implementation_status,predicted_json,actual_json,variance_json,lesson,verified_at,created_at,dataset_dependency_status,stale_dataset_dependencies_json FROM experience_decision_outcomes"
     clauses = []
     params = []
     if decision_id is not None:
@@ -707,8 +707,9 @@ def decision_to_value_frame(
     outcomes = decision_outcomes_frame(decision_id=decision_id, owner=owner, db_path=db_path)
     if outcomes.empty:
         return pd.DataFrame(columns=[
-            "Outcome ID","Decision ID","Implementation Status","KPI",
-            "Predicted","Actual","Delta","Delta %","Absolute Error","Lesson","Verified At",
+            "Outcome ID","Decision ID","Implementation Status","Dataset Freshness",
+            "Stale Dependency Count","KPI","Predicted","Actual","Delta",
+            "Delta %","Absolute Error","Lesson","Verified At",
         ])
     rows = []
     for row in outcomes.to_dict("records"):
@@ -721,6 +722,8 @@ def decision_to_value_frame(
                 "Outcome ID": row.get("outcome_id"),
                 "Decision ID": row.get("decision_id"),
                 "Implementation Status": row.get("implementation_status"),
+                "Dataset Freshness": row.get("dataset_dependency_status") or "NOT_LINKED",
+                "Stale Dependency Count": len(json.loads(row.get("stale_dataset_dependencies_json") or "[]")),
                 "KPI": item.get("KPI"),
                 "Predicted": item.get("Predicted"),
                 "Actual": item.get("Actual"),
