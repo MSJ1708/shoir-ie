@@ -1080,12 +1080,326 @@ def robust_linear_optimization(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def project_manager_action(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Create and list owner-scoped engineering project records (T004)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T004 payload must be a JSON object.")
+    owner = _nonempty_text(payload.get("owner"), "owner", 160)
+    action = str(payload.get("action") or "list").strip().casefold()
+    import industrial_experience as experience
+
+    if action == "create":
+        name = _nonempty_text(payload.get("name"), "name", 160)
+        module = _nonempty_text(payload.get("module") or "Engineering Project", "module", 120)
+        linked = payload.get("linked_artifact_ids", [])
+        metadata = payload.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            raise ValueError("metadata must be a JSON object.")
+        if isinstance(linked, (str, bytes)) or not isinstance(linked, Sequence):
+            raise ValueError("linked_artifact_ids must be a list of artifact references.")
+        linked_ids = [_nonempty_text(item, "linked_artifact_id", 200) for item in linked]
+        state = _json_clone({
+            "description": str(payload.get("description") or "")[:4000],
+            "site": str(payload.get("site") or "")[:160],
+            "owner": owner,
+            "linked_artifact_ids": list(dict.fromkeys(linked_ids)),
+            "project_metadata": dict(metadata),
+        })
+        project_id = experience.save_project(name, module, owner, state)
+        return {
+            "tool_id": "T004", "status": "PROJECT_CREATED", "project_id": project_id,
+            "name": name, "module": module, "linked_artifact_count": len(state["linked_artifact_ids"]),
+            "data_provenance": "MANUAL",
+            "warning": "Project and artifact references are owner-scoped metadata. Referenced artifacts are not copied, shared, or independently verified.",
+        }
+    if action == "list":
+        experience.ensure_experience_db()
+        with experience._db() as conn:
+            rows = conn.execute(
+                "SELECT project_id,name,module,status,created_at,updated_at "
+                "FROM experience_projects WHERE owner=? ORDER BY updated_at DESC",
+                (owner,),
+            ).fetchall()
+        return {
+            "tool_id": "T004", "status": "PROJECTS_LISTED", "project_count": len(rows),
+            "projects": pd.DataFrame(rows, columns=["project_id","name","module","status","created_at","updated_at"]),
+            "data_provenance": "MANUAL",
+        }
+    raise ValueError("T004 action must be create or list.")
+
+
+def project_version_history_action(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Append and inspect project snapshots with owner checks (T005)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T005 payload must be a JSON object.")
+    owner = _nonempty_text(payload.get("owner"), "owner", 160)
+    action = str(payload.get("action") or "list").strip().casefold()
+    import industrial_experience as experience
+
+    if action == "create":
+        name = _nonempty_text(payload.get("name"), "name", 160)
+        module = _nonempty_text(payload.get("module") or "Engineering Project", "module", 120)
+        state = payload.get("state")
+        if not isinstance(state, Mapping):
+            raise ValueError("state must be a JSON object.")
+        project_id = experience.save_project(name, module, owner, _json_clone(dict(state)))
+        return {"tool_id": "T005", "status": "PROJECT_SNAPSHOT_CREATED", "project_id": project_id, "snapshot_no": 1, "data_provenance": "MANUAL"}
+    if action in {"autosave", "history", "restore"}:
+        project_id = _nonempty_text(payload.get("project_id"), "project_id", 80)
+        experience.ensure_experience_db()
+        if action == "autosave":
+            state = payload.get("state")
+            if not isinstance(state, Mapping):
+                raise ValueError("state must be a JSON object.")
+            number = experience.autosave_project(project_id, _json_clone(dict(state)), owner)
+            return {"tool_id": "T005", "status": "PROJECT_SNAPSHOT_SAVED", "project_id": project_id, "snapshot_no": number, "data_provenance": "MANUAL"}
+        with experience._db() as conn:
+            project = conn.execute("SELECT owner FROM experience_projects WHERE project_id=?", (project_id,)).fetchone()
+            if not project or str(project[0] or "") != owner:
+                raise PermissionError("Project not found or not owned by this user.")
+            rows = conn.execute(
+                "SELECT snapshot_no,payload_json,created_at FROM experience_project_snapshots "
+                "WHERE project_id=? ORDER BY snapshot_no ASC", (project_id,),
+            ).fetchall()
+        history = []
+        for number, raw_json, created_at in rows:
+            try:
+                saved = json.loads(raw_json or "{}")
+            except (TypeError, ValueError) as exc:
+                raise ValueError("A saved project snapshot is corrupt and cannot be restored.") from exc
+            if not isinstance(saved, dict):
+                raise ValueError("A saved project snapshot is not a JSON object.")
+            history.append({"snapshot_no": int(number), "payload": saved, "created_at": created_at})
+        if action == "history":
+            return {"tool_id": "T005", "status": "PROJECT_HISTORY_LOADED", "project_id": project_id, "snapshot_count": len(history), "history": history, "data_provenance": "MANUAL"}
+        number = payload.get("snapshot_no")
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise ValueError("snapshot_no must be a positive whole number.")
+        chosen = next((item for item in history if item["snapshot_no"] == number), None)
+        if chosen is None:
+            raise ValueError("The requested snapshot does not exist.")
+        new_number = experience.autosave_project(project_id, chosen["payload"], owner)
+        return {"tool_id": "T005", "status": "PROJECT_VERSION_RESTORED_AS_NEW_SNAPSHOT", "project_id": project_id, "restored_from_snapshot": number, "snapshot_no": new_number, "data_provenance": "MANUAL"}
+    if action == "list":
+        experience.ensure_experience_db()
+        with experience._db() as conn:
+            rows = conn.execute(
+                "SELECT project_id,name,module,status,created_at,updated_at "
+                "FROM experience_projects WHERE owner=? ORDER BY updated_at DESC", (owner,),
+            ).fetchall()
+        return {"tool_id": "T005", "status": "PROJECTS_LISTED", "projects": pd.DataFrame(rows, columns=["project_id","name","module","status","created_at","updated_at"]), "data_provenance": "MANUAL"}
+    raise ValueError("T005 action must be create, autosave, history, restore, or list.")
+
+
+def research_hypothesis_register_action(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Record and retrieve owner-scoped research protocols and hypothesis metadata (T086)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T086 payload must be a JSON object.")
+    owner = _nonempty_text(payload.get("owner"), "owner", 160)
+    action = str(payload.get("action") or "list").strip().casefold()
+    import industrial_experience as experience
+
+    if action == "list":
+        frame = experience.list_research_studies(owner)
+        return {
+            "tool_id": "T086", "status": "RESEARCH_STUDIES_LISTED",
+            "study_count": len(frame), "studies": frame, "data_provenance": "MANUAL",
+            "warning": "Research protocol metadata is owner-scoped. Listing a study does not mean its evidence or scientific claims are verified.",
+        }
+    if action in {"create", "update"}:
+        title = _nonempty_text(payload.get("title"), "title", 240)
+        question = _nonempty_text(payload.get("research_question"), "research_question", 3000)
+        hypothesis = _nonempty_text(payload.get("hypothesis"), "hypothesis", 3000)
+        null_hypothesis = _nonempty_text(payload.get("null_hypothesis"), "null_hypothesis", 3000)
+        methodology = _nonempty_text(payload.get("methodology"), "methodology", 240)
+        endpoint = _nonempty_text(payload.get("primary_endpoint"), "primary_endpoint", 500)
+        raw_refs = payload.get("evidence_references", [])
+        if isinstance(raw_refs, (str, bytes)) or not isinstance(raw_refs, Sequence):
+            raise ValueError("evidence_references must be a list of user-supplied source references.")
+        evidence_refs = [_nonempty_text(item, "evidence_reference", 500) for item in raw_refs]
+        def positive_integer(key: str, default: int, maximum: int = 1_000_000) -> int:
+            value = payload.get(key, default)
+            numeric = _number(value, key, minimum=1, maximum=maximum)
+            if not float(numeric).is_integer():
+                raise ValueError(f"{key} must be a whole number.")
+            return int(numeric)
+        sample_size = positive_integer("sample_size", 100)
+        replications = positive_integer("replications", 30, 100_000)
+        seed_raw = payload.get("random_seed", 2026)
+        seed_numeric = _number(seed_raw, "random_seed", minimum=0, maximum=2_147_483_647)
+        if not float(seed_numeric).is_integer():
+            raise ValueError("random_seed must be a whole number.")
+        alpha = _number(payload.get("alpha", 0.05), "alpha", minimum=1e-9, maximum=0.999999)
+        confidence = _number(payload.get("confidence_level", 0.95), "confidence_level", minimum=1e-9, maximum=0.999999)
+        study_id = str(payload.get("study_id") or "").strip()
+        if not study_id:
+            seed = f"{owner}|{title}|{datetime.now(timezone.utc).isoformat(timespec='microseconds')}"
+            study_id = "STUDY-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16].upper()
+        protocol = {
+            "title": title,
+            "objective": str(payload.get("objective") or "")[:1500],
+            "research_question": question,
+            "hypothesis": hypothesis,
+            "null_hypothesis": null_hypothesis,
+            "methodology": methodology,
+            "primary_domain": str(payload.get("primary_domain") or "Industrial Engineering")[:120],
+            "transfer_domain": str(payload.get("transfer_domain") or "")[:120],
+            "primary_endpoint": endpoint,
+            "secondary_metrics": payload.get("secondary_metrics") or [],
+            "independent_variables": payload.get("independent_variables") or [],
+            "controls": payload.get("controls") or [],
+            "baseline_definition": str(payload.get("baseline_definition") or "")[:2000],
+            "treatment_definition": str(payload.get("treatment_definition") or "")[:2000],
+            "sample_size": sample_size,
+            "replications": replications,
+            "random_seed": int(seed_numeric),
+            "alpha": alpha,
+            "confidence_level": confidence,
+            "planned_tests": payload.get("planned_tests") or [],
+            "inclusion_criteria": str(payload.get("inclusion_criteria") or "")[:2000],
+            "exclusion_criteria": str(payload.get("exclusion_criteria") or "")[:2000],
+            "data_source": str(payload.get("data_source") or "")[:1200],
+            "protocol_notes": str(payload.get("protocol_notes") or "")[:3000],
+            "evidence_references": evidence_refs,
+            "protocol_locked": False,
+        }
+        research_id, protocol_hash = experience.create_research_protocol(study_id, protocol, owner)
+        return {
+            "tool_id": "T086", "status": "HYPOTHESIS_PROTOCOL_RECORDED",
+            "study_id": study_id, "research_id": research_id, "protocol_hash": protocol_hash,
+            "owner": owner, "evidence_reference_count": len(evidence_refs), "protocol_status": "DRAFT",
+            "data_provenance": "MANUAL",
+            "warning": "Evidence references are user-supplied metadata and are not independently authenticated, peer-reviewed, or verified by this register.",
+        }
+    if action == "load":
+        study_id = _nonempty_text(payload.get("study_id"), "study_id", 120)
+        protocol = experience.load_research_protocol(study_id, owner=owner)
+        if not protocol:
+            raise PermissionError("Research study not found or not owned by this user.")
+        return {"tool_id": "T086", "status": "RESEARCH_PROTOCOL_LOADED", "study_id": study_id, "protocol": protocol, "data_provenance": "MANUAL"}
+    if action == "export":
+        study_id = _nonempty_text(payload.get("study_id"), "study_id", 120)
+        bundle = experience.research_evidence_bundle(study_id, owner)
+        return {"tool_id": "T086", "status": "RESEARCH_EVIDENCE_BUNDLE_CREATED", "study_id": study_id, "bundle_bytes": bundle, "bundle_size_bytes": len(bundle), "data_provenance": "MANUAL", "warning": "The bundle exports saved owner-scoped research records; it does not certify scientific validity."}
+    raise ValueError("T086 action must be create, update, list, load, or export.")
+
+
+def decision_register_action(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Create/list owner-scoped decisions and request human review without self-approval (T092)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T092 payload must be a JSON object.")
+    owner = _nonempty_text(payload.get("owner"), "owner", 160)
+    action = str(payload.get("action") or "list").strip().casefold()
+    import industrial_experience as experience
+
+    if action == "list":
+        frame = experience.research_decisions_frame(owner)
+        return {"tool_id": "T092", "status": "DECISIONS_LISTED", "decision_count": len(frame), "decisions": frame, "data_provenance": "MANUAL"}
+    if action == "create":
+        title = _nonempty_text(payload.get("title"), "title", 180)
+        module = _nonempty_text(payload.get("module") or "Engineering Decision Center", "module", 120)
+        metrics, assumptions, uncertainty = payload.get("metrics") or {}, payload.get("assumptions") or {}, payload.get("uncertainty") or {}
+        if not all(isinstance(item, Mapping) for item in (metrics, assumptions, uncertainty)):
+            raise ValueError("metrics, assumptions and uncertainty must be JSON objects.")
+        dependencies = payload.get("dataset_dependencies") or []
+        if isinstance(dependencies, (str, bytes)) or not isinstance(dependencies, Sequence) or any(not isinstance(item, Mapping) for item in dependencies):
+            raise ValueError("dataset_dependencies must be a list of registered dataset version objects.")
+        did = experience.create_decision(
+            title, module, _json_clone(dict(metrics)), _json_clone(dict(assumptions)),
+            _json_clone(dict(uncertainty)), owner, status="Draft",
+            dataset_dependencies=[dict(item) for item in dependencies],
+        )
+        return {
+            "tool_id": "T092", "status": "DECISION_DRAFT_CREATED", "decision_id": did,
+            "owner": owner, "workflow_status": "Draft", "dataset_dependency_count": len(dependencies),
+            "data_provenance": "MANUAL",
+            "warning": "This creates a draft only. Approval, implementation and verification remain separate human-governed transitions.",
+        }
+    if action in {"request_review", "history"}:
+        decision_id = _nonempty_text(payload.get("decision_id"), "decision_id", 80)
+        if action == "request_review":
+            experience.transition_decision(decision_id, owner, "Review", str(payload.get("comment") or "Review requested by decision owner")[:500], require_owner=True)
+        frame = experience.decision_approval_history(decision_id, owner=owner)
+        return {
+            "tool_id": "T092", "status": "DECISION_REVIEW_REQUESTED" if action == "request_review" else "DECISION_HISTORY_LOADED",
+            "decision_id": decision_id, "approval_history": frame, "data_provenance": "MANUAL",
+            "warning": "This tool does not approve a decision. Approval requires a separately authorized reviewer.",
+        }
+    raise ValueError("T092 action must be create, list, request_review, or history.")
+
+
+def excel_workbook_target_action(tool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Run the existing governed workbook pipeline for canonical T011–T014."""
+    selected = str(tool_id or "").strip().upper()
+    if selected not in {"T011", "T012", "T013", "T014"}:
+        raise ValueError("Excel workbook target action must be T011, T012, T013 or T014.")
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{selected} payload must be a JSON object.")
+    filename = _nonempty_text(payload.get("filename"), "filename", 240)
+    raw = payload.get("raw_bytes")
+    if not isinstance(raw, bytes) or not raw:
+        raise ValueError("Select a non-empty supported workbook before running this tool.")
+    if len(raw) > 50 * 1024 * 1024:
+        raise ValueError("Workbook exceeds the 50 MiB upload limit.")
+    if os.path.splitext(filename.casefold())[1] not in {".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt"}:
+        raise ValueError("Supported workbook formats are XLSX, XLSM, XLS, CSV, TSV and TXT.")
+    if selected == "T014" and payload.get("confirm_cleaning") is not True:
+        raise ValueError("Review the reversible cleaning preview and explicitly confirm before applying the cleaned copy.")
+    from shoir_excel_studio import process_uploaded_workbook
+
+    workbook = process_uploaded_workbook(raw, filename)
+    raw_sheets = workbook.get("raw_sheets", {})
+    cleaned_sheets = workbook.get("cleaned_sheets", {})
+    profiles = workbook.get("profiles", {})
+    catalog = workbook.get("table_catalog", [])
+    if selected == "T011":
+        status = "WORKBOOK_IMPORTED"
+        detail = {
+            "import_diagnostics": workbook.get("import_diagnostics", {}),
+            "sheet_summary": pd.DataFrame([{"Sheet": name, "Rows": len(frame), "Columns": len(frame.columns)} for name, frame in raw_sheets.items()]),
+        }
+    elif selected == "T012":
+        status = "WORKBOOK_STRUCTURE_MAPPED"
+        detail = {
+            "table_catalog": pd.DataFrame(catalog),
+            "cross_sheet_map": pd.DataFrame(workbook.get("cross_sheet_map", [])),
+            "relationships": pd.DataFrame(workbook.get("relationship_integrity", [])),
+        }
+    elif selected == "T013":
+        status = "WORKBOOK_PROFILED"
+        detail = {"profiles": pd.DataFrame([{"Sheet": name, **dict(profile)} for name, profile in profiles.items() if isinstance(profile, Mapping)])}
+    else:
+        status = "CLEANED_COPY_READY"
+        detail = {
+            "cleaning_audit": pd.DataFrame(workbook.get("audits", [])),
+            "review_register": pd.DataFrame(workbook.get("review_register", [])),
+            "sheet_comparison": pd.DataFrame([{
+                "Sheet": name,
+                "Original rows": len(raw_sheets.get(name, pd.DataFrame())),
+                "Cleaned rows": len(cleaned_sheets.get(name, pd.DataFrame())),
+                "Original columns": len(raw_sheets.get(name, pd.DataFrame()).columns),
+                "Cleaned columns": len(cleaned_sheets.get(name, pd.DataFrame()).columns),
+            } for name in cleaned_sheets]),
+        }
+    return {
+        "tool_id": selected, "status": status, "filename": filename,
+        "source_sha256": str(workbook.get("signature") or workbook.get("import_diagnostics", {}).get("SHA256") or hashlib.sha256(raw).hexdigest()),
+        "source_size_bytes": len(raw), "sheet_count": len(raw_sheets), "table_count": len(catalog),
+        "original_source_preserved_in_workbook_record": bool(workbook.get("_raw_bytes") == raw),
+        "data_provenance": "IMPORTED", "details": detail, "excel_workbook_result": workbook,
+        "warning": "The original source bytes and raw sheets remain in the Excel Studio workbook record. Cleaning creates a governed copy; it never overwrites the original sheet values.",
+    }
+
+
 def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Dispatch only the explicitly implemented, deterministic tool IDs."""
     if not isinstance(payload, Mapping):
         raise ValueError("Tool payload must be a JSON object.")
     dispatch = {
-        "T006": recovery_action,
+        "T004": project_manager_action,
+        "T005": project_version_history_action,
+        "T086": research_hypothesis_register_action,
+        "T092": decision_register_action,
         "T061": linear_mixed_integer_optimization,
         "T067": multiobjective_optimization,
         "T068": robust_linear_optimization,
@@ -1101,6 +1415,8 @@ def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, A
         "T099": governance_recovery_action,
     }
     selected = str(tool_id or "").strip().upper()
+    if selected in {"T011", "T012", "T013", "T014"}:
+        return excel_workbook_target_action(selected, payload)
     if selected not in dispatch:
         raise ValueError(f"No additional deterministic handler is registered for {selected or 'blank tool ID'}.")
     return dispatch[selected](payload)
@@ -1109,6 +1425,10 @@ def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, A
 def get_tool_example_json(tool_id: str) -> str:
     """Return clearly synthetic example inputs for the Workbench JSON editor."""
     examples = {
+        "T004": {"action": "create", "owner": "synthetic-project-owner", "name": "Synthetic capacity improvement study", "module": "Capacity Planning", "description": "Synthetic project metadata", "site": "SYNTHETIC", "linked_artifact_ids": ["RUN-SYN-001"], "metadata": {"provenance": "SYNTHETIC"}},
+        "T005": {"action": "create", "owner": "synthetic-project-owner", "name": "Synthetic versioned project", "module": "Engineering Project", "state": {"scope": "SYNTHETIC", "baseline": {"capacity": 100}}},
+        "T086": {"action": "create", "owner": "synthetic-research-owner", "title": "Synthetic process variability study", "research_question": "Does the controlled change alter measured variation?", "hypothesis": "The post-change variation is lower.", "null_hypothesis": "The post-change variation is not lower.", "methodology": "Controlled comparison", "primary_endpoint": "Standard deviation", "data_source": "SYNTHETIC_EXAMPLE", "evidence_references": ["SYNTHETIC-REF-001"]},
+        "T092": {"action": "create", "owner": "synthetic-decision-owner", "title": "Synthetic capacity decision", "module": "Engineering Decision Center", "metrics": {"capacity_delta_units": 10}, "assumptions": {"provenance": "SYNTHETIC"}, "uncertainty": {"demand_range": "illustrative"}},
         "T061": {
             "variable_spec": {"x": {"low": 0, "up": 4, "category": "Continuous"}, "y": {"low": 0, "up": 8, "category": "Integer"}},
             "objective_coefficients": {"x": 3, "y": 5},

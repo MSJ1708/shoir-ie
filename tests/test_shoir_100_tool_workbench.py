@@ -1130,3 +1130,32 @@ def test_workbench_runs_canonical_lp_milp_pareto_and_robust_tools():
         assert result["tool_id"] == label.split(" · ", 1)[0]
     assert at.session_state["shoir_tool_result_T067"]["status"] == "PARETO_TRADEOFFS_ANALYZED"
     assert at.session_state["shoir_tool_result_T068"]["status"] == "ROBUST_OPTIMAL"
+
+
+def test_workbench_runs_owner_scoped_project_research_and_decision_registers():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "canonical-record-tool-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T004 · Engineering Project Manager", "tool004_run", "T004", "PROJECT_CREATED"),
+        ("T005 · Autosave and Version History", "tool005_run", "T005", "PROJECT_SNAPSHOT_CREATED"),
+        ("T086 · Hypothesis and Evidence Register", "tool086_run", "T086", "HYPOTHESIS_PROTOCOL_RECORDED"),
+        ("T092 · Decision Register and Approval Workflow", "tool092_run", "T092", "DECISION_DRAFT_CREATED"),
+    ]
+    for label, button_key, tool_id, expected_status in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} form failed: " + "\\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} execution failed: " + "\\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get("shoir_tool_result_" + tool_id)
+        assert result is not None
+        assert result["status"] == expected_status

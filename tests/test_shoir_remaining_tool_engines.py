@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 
+import pandas as pd
 import pytest
 
 from shoir_remaining_tool_engines import (
@@ -391,7 +393,7 @@ def test_governance_retention_and_delete_plans_do_not_delete_data():
 
 
 def test_all_target_examples_are_valid_json():
-    for tool_id in ("T006", "T020", "T039", "T060", "T061", "T067", "T068", "T074", "T080", "T094", "T096", "T097", "T098", "T099"):
+    for tool_id in ("T004", "T005", "T006", "T020", "T039", "T060", "T061", "T067", "T068", "T074", "T080", "T086", "T092", "T094", "T096", "T097", "T098", "T099"):
         value = json.loads(get_tool_example_json(tool_id))
         assert isinstance(value, dict)
         out = run_additional_tool(tool_id, value)
@@ -460,3 +462,145 @@ def test_t068_robust_linear_optimization_solves_worst_case_scenario():
     bad = {"scenario_objectives": [[1, 2], [3]], "bounds": [[0, 1], [0, 1]]}
     with pytest.raises(ValueError, match="same number"):
         run_additional_tool("T068", bad)
+
+
+def _isolate_experience_database(monkeypatch, tmp_path):
+    import industrial_experience as experience
+
+    db_path = str(tmp_path / "experience_acceptance.db")
+    original_db = experience._db
+    original_ensure = experience.ensure_experience_db
+    monkeypatch.setattr(experience, "_db", lambda path="enterprise_full_workspace.db": original_db(db_path))
+    monkeypatch.setattr(experience, "ensure_experience_db", lambda path="enterprise_full_workspace.db": original_ensure(db_path))
+    monkeypatch.setattr(experience, "durable_backend_configured", lambda: False)
+    return experience
+
+
+def test_t004_project_manager_creates_and_lists_only_owner_projects(monkeypatch, tmp_path):
+    _isolate_experience_database(monkeypatch, tmp_path)
+    created = run_additional_tool("T004", {
+        "action": "create", "owner": "project-owner-a", "name": "Capacity improvement",
+        "module": "Capacity Planning", "description": "Synthetic engineering project",
+        "linked_artifact_ids": ["DATASET-SYN-1", "RUN-SYN-2"],
+    })
+    assert created["status"] == "PROJECT_CREATED"
+    assert created["linked_artifact_count"] == 2
+    own = run_additional_tool("T004", {"action": "list", "owner": "project-owner-a"})
+    other = run_additional_tool("T004", {"action": "list", "owner": "project-owner-b"})
+    assert own["project_count"] == 1
+    assert own["projects"].iloc[0]["project_id"] == created["project_id"]
+    assert other["project_count"] == 0
+
+
+def test_t005_project_version_history_appends_restore_and_rejects_other_owner(monkeypatch, tmp_path):
+    _isolate_experience_database(monkeypatch, tmp_path)
+    created = run_additional_tool("T005", {
+        "action": "create", "owner": "version-owner", "name": "Versioned study",
+        "state": {"revision": 1, "value": "original"},
+    })
+    project_id = created["project_id"]
+    saved = run_additional_tool("T005", {
+        "action": "autosave", "owner": "version-owner", "project_id": project_id,
+        "state": {"revision": 2, "value": "updated"},
+    })
+    assert saved["snapshot_no"] == 2
+    history = run_additional_tool("T005", {"action": "history", "owner": "version-owner", "project_id": project_id})
+    assert history["snapshot_count"] == 2
+    restored = run_additional_tool("T005", {
+        "action": "restore", "owner": "version-owner", "project_id": project_id, "snapshot_no": 1,
+    })
+    assert restored["snapshot_no"] == 3
+    final_history = run_additional_tool("T005", {"action": "history", "owner": "version-owner", "project_id": project_id})
+    assert final_history["history"][-1]["payload"] == {"revision": 1, "value": "original"}
+    with pytest.raises(PermissionError, match="not owned"):
+        run_additional_tool("T005", {
+            "action": "autosave", "owner": "different-owner", "project_id": project_id,
+            "state": {"revision": 4},
+        })
+
+
+def test_t086_hypothesis_register_persists_evidence_references_and_enforces_owner(monkeypatch, tmp_path):
+    _isolate_experience_database(monkeypatch, tmp_path)
+    created = run_additional_tool("T086", {
+        "action": "create", "owner": "research-owner-a", "study_id": "STUDY-SYNTHETIC-001",
+        "title": "Synthetic process variability study",
+        "research_question": "Does the intervention reduce variation?",
+        "hypothesis": "Post-intervention variation is lower.",
+        "null_hypothesis": "Post-intervention variation is not lower.",
+        "methodology": "Controlled comparison", "primary_endpoint": "Standard deviation",
+        "evidence_references": ["SYNTHETIC-REF-1"],
+    })
+    assert created["status"] == "HYPOTHESIS_PROTOCOL_RECORDED"
+    loaded = run_additional_tool("T086", {
+        "action": "load", "owner": "research-owner-a", "study_id": "STUDY-SYNTHETIC-001",
+    })
+    assert loaded["protocol"]["hypothesis"] == "Post-intervention variation is lower."
+    assert loaded["protocol"]["evidence_references"] == ["SYNTHETIC-REF-1"]
+    listed = run_additional_tool("T086", {"action": "list", "owner": "research-owner-a"})
+    assert listed["study_count"] == 1
+    with pytest.raises(PermissionError):
+        run_additional_tool("T086", {"action": "load", "owner": "research-owner-b", "study_id": "STUDY-SYNTHETIC-001"})
+    bad = {
+        "action": "create", "owner": "research-owner-a", "title": "Bad study",
+        "research_question": "Q", "hypothesis": "H", "null_hypothesis": "H0",
+        "methodology": "Controlled", "primary_endpoint": "Endpoint", "alpha": 1.2,
+    }
+    with pytest.raises(ValueError, match="alpha"):
+        run_additional_tool("T086", bad)
+
+
+def test_t092_decision_register_creates_draft_and_requests_review_without_approval(monkeypatch, tmp_path):
+    _isolate_experience_database(monkeypatch, tmp_path)
+    created = run_additional_tool("T092", {
+        "action": "create", "owner": "decision-owner-a", "title": "Synthetic capacity decision",
+        "metrics": {"capacity_delta_units": 10}, "assumptions": {"provenance": "SYNTHETIC"},
+        "uncertainty": {"demand_range": "illustrative"},
+    })
+    assert created["workflow_status"] == "Draft"
+    review = run_additional_tool("T092", {
+        "action": "request_review", "owner": "decision-owner-a", "decision_id": created["decision_id"],
+        "comment": "Please review the synthetic scenario.",
+    })
+    assert review["status"] == "DECISION_REVIEW_REQUESTED"
+    assert "does not approve" in review["warning"]
+    own = run_additional_tool("T092", {"action": "list", "owner": "decision-owner-a"})
+    other = run_additional_tool("T092", {"action": "list", "owner": "decision-owner-b"})
+    assert own["decision_count"] == 1
+    assert other["decision_count"] == 0
+    with pytest.raises(ValueError, match="dataset_dependencies"):
+        run_additional_tool("T092", {
+            "action": "create", "owner": "decision-owner-a", "title": "Bad dependencies",
+            "metrics": {}, "assumptions": {}, "uncertainty": {}, "dataset_dependencies": ["not-an-object"],
+        })
+
+
+def test_t011_to_t014_workbook_tools_use_existing_multisheet_pipeline():
+    raw_io = io.BytesIO()
+    with pd.ExcelWriter(raw_io, engine="openpyxl") as writer:
+        pd.DataFrame({"Asset ID": ["A-1", "A-2"], "Qty": [10, 20]}).to_excel(writer, sheet_name="Assets", index=False)
+        pd.DataFrame({"Asset ID": ["A-1", "A-2"], "Cost": [100, 200]}).to_excel(writer, sheet_name="Costs", index=False)
+    raw = raw_io.getvalue()
+
+    imported = run_additional_tool("T011", {"filename": "synthetic-assets.xlsx", "raw_bytes": raw})
+    assert imported["status"] == "WORKBOOK_IMPORTED"
+    assert imported["sheet_count"] == 2
+    assert imported["original_source_preserved_in_workbook_record"] is True
+    workbook = imported.pop("excel_workbook_result")
+    assert workbook["_raw_bytes"] == raw
+
+    mapped = run_additional_tool("T012", {"filename": "synthetic-assets.xlsx", "raw_bytes": raw})
+    assert mapped["status"] == "WORKBOOK_STRUCTURE_MAPPED"
+    assert "table_catalog" in mapped["details"]
+
+    profiled = run_additional_tool("T013", {"filename": "synthetic-assets.xlsx", "raw_bytes": raw})
+    assert profiled["status"] == "WORKBOOK_PROFILED"
+    assert len(profiled["details"]["profiles"]) >= 1
+
+    with pytest.raises(ValueError, match="explicitly confirm"):
+        run_additional_tool("T014", {"filename": "synthetic-assets.xlsx", "raw_bytes": raw})
+    cleaned = run_additional_tool("T014", {
+        "filename": "synthetic-assets.xlsx", "raw_bytes": raw, "confirm_cleaning": True,
+    })
+    assert cleaned["status"] == "CLEANED_COPY_READY"
+    assert cleaned["original_source_preserved_in_workbook_record"] is True
+    assert len(cleaned["details"]["sheet_comparison"]) == 2

@@ -154,7 +154,7 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS idx_exp_module_runs_owner ON experience_module_runs(owner,module,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,evidence_references_json TEXT NOT NULL DEFAULT '[]',protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_runs(run_id TEXT PRIMARY KEY,study_id TEXT NOT NULL,research_id TEXT NOT NULL,owner TEXT NOT NULL,experiment_code TEXT NOT NULL,config_json TEXT NOT NULL,summary_json TEXT NOT NULL,results_csv TEXT NOT NULL,created_at TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS idx_exp_research_runs_study ON experience_research_runs(study_id,created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_exp_research_owner ON experience_research_studies(owner,created_at DESC)",
@@ -178,6 +178,15 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             ):
                 if column not in existing_columns:
                     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {definition}")
+
+        research_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(experience_research_studies)")
+        }
+        if "evidence_references_json" not in research_columns:
+            conn.execute(
+                "ALTER TABLE experience_research_studies "
+                "ADD COLUMN evidence_references_json TEXT NOT NULL DEFAULT '[]'"
+            )
 
         # Backward-compatible migration: keep prior rows with owner=NULL.
         job_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(experience_jobs)")}
@@ -1332,8 +1341,8 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
                 controls_json,baseline_definition,treatment_definition,sample_size,
                 replications,random_seed,alpha,confidence_level,planned_tests_json,
                 inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
-                protocol_hash,protocol_locked,owner,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evidence_references_json,protocol_hash,protocol_locked,owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 study_id,
@@ -1362,6 +1371,7 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
                 str(payload.get("exclusion_criteria", "")).strip()[:2000],
                 str(payload.get("data_source", "")).strip()[:1200],
                 str(payload.get("protocol_notes", "")).strip()[:3000],
+                json.dumps(_research_list(payload.get("evidence_references", [])), ensure_ascii=False),
                 protocol_hash,
                 int(bool(payload.get("protocol_locked", False))),
                 owner,
@@ -1395,8 +1405,8 @@ def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dic
                 controls_json,baseline_definition,treatment_definition,sample_size,
                 replications,random_seed,alpha,confidence_level,planned_tests_json,
                 inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
-                protocol_hash,protocol_locked,owner,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evidence_references_json,protocol_hash,protocol_locked,owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 study_id,
@@ -1425,6 +1435,7 @@ def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dic
                 str(protocol.get("exclusion_criteria", "")).strip()[:2000],
                 str(protocol.get("data_source", "")).strip()[:1200],
                 str(protocol.get("protocol_notes", "")).strip()[:3000],
+                json.dumps(_research_list(protocol.get("evidence_references", [])), ensure_ascii=False),
                 str(protocol.get("protocol_hash") or remote.get("protocol_hash") or _research_hash(protocol)),
                 int(bool(protocol.get("protocol_locked", False))),
                 owner,
@@ -1447,7 +1458,7 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
                    controls_json,baseline_definition,treatment_definition,sample_size,
                    replications,random_seed,alpha,confidence_level,planned_tests_json,
                    inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
-                   protocol_hash,protocol_locked,owner,created_at,updated_at
+                   evidence_references_json,protocol_hash,protocol_locked,owner,created_at,updated_at
             FROM experience_research_studies
             WHERE study_id=?
         """
@@ -1471,11 +1482,11 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
         "primary_endpoint","secondary_metrics","independent_variables","controls",
         "baseline_definition","treatment_definition","sample_size","replications",
         "random_seed","alpha","confidence_level","planned_tests","inclusion_criteria",
-        "exclusion_criteria","data_source","protocol_notes","protocol_hash",
-        "protocol_locked","owner","created_at","updated_at"
+        "exclusion_criteria","data_source","protocol_notes","evidence_references",
+        "protocol_hash","protocol_locked","owner","created_at","updated_at"
     ]
     data = dict(zip(keys, row))
-    for field in ("secondary_metrics", "independent_variables", "controls", "planned_tests"):
+    for field in ("secondary_metrics", "independent_variables", "controls", "planned_tests", "evidence_references"):
         try:
             data[field] = json.loads(data[field] or "[]")
         except Exception:
