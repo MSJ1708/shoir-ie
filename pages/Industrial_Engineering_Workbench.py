@@ -466,7 +466,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T065", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T091", "T092", "T094", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -479,6 +479,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         "The method is not executable on the current package."
                     )
                 else:
+                    if selected_tool["tool_id"] == "T065":
+                        require_tool_access(RAW_TIER, "T065")
+                        from shoir_facility_layout import render_facility_layout
+                        render_facility_layout(RAW_TIER, USER)
+                        st.stop()
+                    if selected_tool["tool_id"] == "T091":
+                        require_tool_access(RAW_TIER, "T091")
+                        from shoir_team_workspaces import render_team_workspaces
+                        render_team_workspaces()
+                        st.stop()
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
                         if selected_tool["tool_id"] == "T007":
                             st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")

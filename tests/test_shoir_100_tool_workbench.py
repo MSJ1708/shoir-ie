@@ -1169,3 +1169,36 @@ def test_workbench_runs_owner_scoped_project_research_and_decision_registers():
         result = at.session_state.get("shoir_tool_result_" + tool_id)
         assert result is not None
         assert result["status"] == expected_status
+
+
+def test_workbench_routes_facility_layout_to_existing_persistent_studio():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "facility-layout-canonical-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="shoir_100_tool_inspector").select("T065 · Facility Layout and SLP Studio")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Facility Layout & Warehousing Studio" in str(element.value) for element in at.markdown)
+    assert any("Department register" in str(element.value) for element in at.markdown)
+
+
+def test_workbench_routes_team_collaboration_to_staging_gated_rbac_ui():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "team-workspace-canonical-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="shoir_100_tool_inspector").select("T091 · Team Collaboration and Review")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("enabled only in the authorized staging environment" in str(element.value) for element in at.info)
