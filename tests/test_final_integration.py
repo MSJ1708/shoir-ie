@@ -124,6 +124,62 @@ def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(t
         )
 
 
+def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks_stale_transition(tmp_path, monkeypatch):
+    import hashlib
+    import durable_account_store
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "experience-decision-lineage.db")
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: {})
+    first = pd.DataFrame({"Demand": [100.0, 110.0]})
+    dataset_id = platform.register_dataset(
+        "Demand history", "demand.csv", first, db_path=db, username="alice"
+    )
+    data_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+    with sqlite3.connect(db) as conn:
+        version, fingerprint = conn.execute(
+            "SELECT version,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    decision_id = exp.create_decision(
+        "Dataset-linked demand decision",
+        "Demand Planning",
+        {"Demand": 110.0},
+        {"unit": "units"},
+        {"note": "Synthetic test fixture"},
+        "alice",
+        db_path=db,
+        dataset_dependencies=[{
+            "dataset_id": dataset_id,
+            "version": int(version),
+            "data_hash": data_hash,
+            "version_fingerprint": fingerprint,
+        }],
+    )
+    with sqlite3.connect(db) as conn:
+        before = conn.execute(
+            "SELECT dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+    assert before[0] == "CURRENT"
+    assert json.loads(before[1])[0]["version"] == 1
+
+    second = pd.DataFrame({"Demand": [100.0, 115.0]})
+    platform.register_dataset(
+        "Demand history", "demand.csv", second, db_path=db, username="alice"
+    )
+    with sqlite3.connect(db) as conn:
+        after = conn.execute(
+            "SELECT dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()[0]
+    assert after == "STALE"
+    with pytest.raises(ValueError, match="stale dataset-linked decision"):
+        exp.transition_decision(decision_id, "alice", "Approved")
+
+
 def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
     import sqlite3
     import industrial_platform as platform
