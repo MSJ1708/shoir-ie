@@ -1485,7 +1485,12 @@ def _dataset_dependencies_for_evidence_refs(
     access: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     """Carry exact dataset-version dependencies from referenced workspace evidence."""
-    refs = {str(item).strip() for item in evidence_refs if str(item).strip()}
+    if isinstance(evidence_refs, (str, bytes)) or not isinstance(evidence_refs, Sequence):
+        raise IndustrialIntelligenceError("Evidence references must be a list of registered record IDs or source references.")
+    refs = {
+        _required_text(item, "evidence reference", 240)
+        for item in evidence_refs
+    }
     if not refs:
         return []
     dependencies: list[dict[str, Any]] = []
@@ -1528,6 +1533,17 @@ def _dataset_dependencies_for_evidence_refs(
         {"dataset_dependencies": list(unique.values())},
         access,
     )
+
+
+def _require_current_dataset_artifact(record: Mapping[str, Any], label: str) -> None:
+    """Fail closed when a governed record is stale against its source dataset."""
+    if (
+        str(record.get("record_status") or "").upper() == "STALE"
+        or str(record.get("dataset_dependency_status") or "").upper() == "STALE"
+    ):
+        raise IndustrialIntelligenceError(
+            f"{label} is stale because its source dataset changed. Re-run it against the current dataset version before review or approval."
+        )
 
 
 def _append_audit(username: str, tier: str, event_type: str, record_id: str, payload: Mapping[str, Any]) -> str:
@@ -2095,6 +2111,10 @@ def create_record(
             "Dataset lineage invalidation is unresolved. Saving new dataset-dependent results is blocked until the lineage check succeeds."
         )
     dataset_dependencies = _normalize_dataset_dependencies(body, access)
+    if not dataset_dependencies and body.get("evidence_refs") is not None:
+        dataset_dependencies = _dataset_dependencies_for_evidence_refs(
+            body.get("evidence_refs"), access
+        )
     if dataset_dependencies:
         body["dataset_dependencies"] = dataset_dependencies
         body["dataset_dependency_status"] = "CURRENT"
@@ -2442,6 +2462,7 @@ def review_decision(
     )
     if not original:
         raise IndustrialIntelligenceError("Decision proposal does not exist in this workspace.")
+    _require_current_dataset_artifact(original, "Decision proposal")
     if str(original.get("created_by", "")).casefold() == access["actor"].casefold():
         raise PermissionError("The decision author cannot independently approve their own decision.")
     if any(
@@ -2894,6 +2915,7 @@ def verify_benefit_record(username: str, tier: str, record_id: str, verification
     record = next((item for item in records if item.get("record_id") == str(record_id) and item.get("record_type") == "benefit_realization"), None)
     if not record:
         raise IndustrialIntelligenceError("Benefit record does not exist in this workspace.")
+    _require_current_dataset_artifact(record, "Benefit record")
     if str(record.get("created_by", "")).casefold() == access["actor"].casefold():
         raise PermissionError("The benefit record creator cannot independently verify the outcome.")
     refs = _require_evidence_refs(verification_evidence, "Independent benefit verification")
@@ -3022,6 +3044,7 @@ def review_cause_effect_investigation(
     )
     if not investigation:
         raise IndustrialIntelligenceError("Cause-and-effect investigation does not exist in this workspace.")
+    _require_current_dataset_artifact(investigation, "Cause-and-effect investigation")
     if str(investigation.get("created_by", "")).casefold() == access["actor"].casefold():
         raise PermissionError("The investigation author cannot independently review its causal claims.")
     links = investigation.get("payload", {}).get("candidate_relationships", [])
