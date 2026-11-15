@@ -1639,6 +1639,43 @@ def test_dataset_linked_shift_handover_cannot_be_acknowledged_after_source_chang
         )
 
 
+def test_copilot_evidence_context_excludes_stale_dataset_dependent_records(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF770055",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic-copilot-source.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    record = ii.create_record(
+        "synthetic-owner", "Enterprise", "maintenance_analysis",
+        "Cooling pump vibration investigation",
+        {"finding": "Synthetic vibration trend requires review."},
+        provenance="SYNTHETIC",
+    )
+    before = ii.copilot_evidence_context(
+        "synthetic-owner", "Enterprise", "cooling pump vibration investigation"
+    )
+    assert any(item["citation_id"] == record["record_id"] for item in before["citations"])
+
+    ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF770055",
+        2, "c" * 64, "d" * 64,
+    )
+    after = ii.copilot_evidence_context(
+        "synthetic-owner", "Enterprise", "cooling pump vibration investigation"
+    )
+    assert all(item["citation_id"] != record["record_id"] for item in after["citations"])
+    assert after["excluded_stale_evidence_count"] == 1
+    assert after["status"] == "INSUFFICIENT_MATCHING_EVIDENCE"
+
+
 def test_dataset_version_invalidation_marks_operational_event_mirror_stale(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
