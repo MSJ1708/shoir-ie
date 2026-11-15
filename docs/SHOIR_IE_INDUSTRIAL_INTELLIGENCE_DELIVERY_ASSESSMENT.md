@@ -298,3 +298,31 @@ Additional focused regression tests:
 - `test_copilot_evidence_context_excludes_stale_dataset_dependent_records`
 
 The current `tests/test_shoir_industrial_intelligence.py` source contains 76 test functions at this code-review point; this count is not a passing test result. The current candidate exact-head workflows remain queued, so the new source and tests are not yet CI-verified.
+
+
+## 13. Legacy dataset lineage and decision-to-outcome hardening — 2026-11-15
+
+The candidate has now extended dataset freshness control into the separate legacy Industrial Platform SQLite stores and the Experience decision lifecycle:
+
+- The local dataset registry now records immutable metadata versions and current-version pointers. Identical content does not create a new version; changed content under the same stable dataset ID advances the version.
+- Legacy `platform_models`, `platform_experiments`, `platform_scenarios` and `platform_decisions` have explicit dataset dependency/freshness/stale-marker metadata.
+- Dataset-version changes invalidate those artifacts and also invalidate the mirrored `experience_decisions` and existing `experience_decision_outcomes`, preserving their original analytical payloads and adding stale dependency evidence.
+- New artifact saves resolve supplied dataset IDs, hashes and optional version/fingerprint against the local registry. A reference that cannot be resolved is `UNVERIFIED_REFERENCE`, never `CURRENT`.
+- The standalone Experience decision API now accepts optional explicit dataset dependencies; decision specification saves resolve evidence refs; status transitions to Approved/Implemented/Verified are blocked for stale or unverified lineage; new outcome insertion rechecks lineage inside a write transaction to avoid a race with dataset invalidation.
+- Outcome reporting exposes dataset freshness and stale dependency count.
+- Local SQLite dataset fallback is permitted only in local/development/test. Production does not fall back to local SQLite when the managed dataset service is unconfigured.
+- Additive migration tests cover an existing pre-lineage SQLite database and preserve the rule that historical artifacts remain `NOT_LINKED` unless their consumed version can be proven.
+
+Current focused test-source inventory at this update:
+- Industrial Intelligence: 76 test functions
+- Resource Intelligence: 130 test functions
+- Remaining tool engines: 21 test functions
+- Legacy Industrial Platform: 34 test functions
+- Final integration: 21 test functions
+- Industrial Experience: 18 test functions
+
+These are test-source counts only, not passing test results. The latest candidate SHA is `9847464833b32958e3df9ba50fecc2e8b6043495`; its exact-head required GitHub Actions remain subject to completion and artifact review.
+
+### Remaining limitations
+
+The local SQLite registry holds metadata/history, not original source-file bytes. Existing historical analyses lacking explicit/verifiable source references remain `NOT_LINKED` and cannot be retrospectively represented as dataset-derived. Managed staging Storage lifecycle, object retention and cleanup, upload resumability, authenticated browser journeys, cross-tenant isolation, full exports, independent engineering/security review and external configuration remain separate gates.
