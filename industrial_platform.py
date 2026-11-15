@@ -431,6 +431,18 @@ def _mark_legacy_dataset_artifacts_stale(
         ).fetchone()
         if not table_exists:
             continue
+        columns = {
+            str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        required_lineage_columns = {
+            "dataset_dependencies_json",
+            "stale_dataset_dependencies_json",
+            "dataset_dependency_status",
+        }
+        if not required_lineage_columns.issubset(columns):
+            # An older experience table is migrated by ensure_experience_db on
+            # its next governed write. Do not attempt a partial update here.
+            continue
         rows = conn.execute(
             f"SELECT {id_column},dataset_dependencies_json,stale_dataset_dependencies_json,dataset_dependency_status "
             f"FROM {table}"
