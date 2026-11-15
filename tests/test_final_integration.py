@@ -182,6 +182,44 @@ def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks
         exp.transition_decision(decision_id, "alice", "Approved")
 
 
+def test_unverified_dataset_reference_cannot_approve_or_record_decision_outcome(tmp_path, monkeypatch):
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "unverified-experience-decision.db")
+    platform.init_platform_db(db)
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(db, timeout=30))
+    decision_id = exp.create_decision(
+        "Decision with unverified source",
+        "Reliability",
+        {"Failure rate": 0.02},
+        {"unit": "failures/hour"},
+        {"note": "Unverified reference fixture"},
+        "alice",
+        db_path=db,
+        dataset_dependencies=[{
+            "dataset_id": "DS-ABCDEF778899",
+            "version": 4,
+            "data_hash": "a" * 64,
+            "version_fingerprint": "b" * 64,
+        }],
+    )
+    with sqlite_connection(db) as conn:
+        row = conn.execute(
+            "SELECT dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+    assert row[0] == "UNVERIFIED_REFERENCE"
+    with pytest.raises(ValueError, match="stale or unverified dataset lineage"):
+        exp.transition_decision(decision_id, "alice", "Approved")
+    with pytest.raises(ValueError, match="dataset lineage is stale or unverified"):
+        exp.record_decision_outcome(
+            decision_id, "alice", "Implemented",
+            {"Failure rate": 0.02}, {"Failure rate": 0.01},
+            db_path=db, persist_artifact=False,
+        )
+
+
 def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
     import sqlite3
     import industrial_platform as platform
