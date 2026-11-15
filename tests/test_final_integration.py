@@ -126,12 +126,14 @@ def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(t
 
 def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks_stale_transition(tmp_path, monkeypatch):
     import hashlib
+    import sqlite3
     import durable_account_store
     import industrial_platform as platform
     import industrial_experience as exp
 
     db = str(tmp_path / "experience-decision-lineage.db")
     monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(db, timeout=30))
     monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: {})
     first = pd.DataFrame({"Demand": [100.0, 110.0]})
     dataset_id = platform.register_dataset(
