@@ -43,6 +43,86 @@ def test_canonical_lifecycle_flow_is_renderable():
     assert "Asset" in CANONICAL_LIFECYCLE and "Outcome" in CANONICAL_LIFECYCLE
     assert canonical_flow_figure(nodes, edges) is not None
 
+def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(tmp_path, monkeypatch):
+    import hashlib
+    import sqlite3
+    import durable_account_store
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "decision-lineage.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    first = pd.DataFrame({"Throughput": [100.0, 105.0], "Energy": [4.0, 4.2]})
+    dataset_id = platform.register_dataset(
+        "Decision input", "decision-input.csv", first,
+        db_path=db, username="alice",
+    )
+    first_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+    with sqlite3.connect(db) as conn:
+        version = conn.execute(
+            "SELECT version,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    dependencies = [{
+        "dataset_id": dataset_id,
+        "version": int(version[0]),
+        "data_hash": first_hash,
+        "version_fingerprint": version[1],
+    }]
+    card = {
+        "title": "Dataset-linked decision",
+        "module": "Engineering Decision Center",
+        "metrics": {"Throughput": 105.0},
+        "assumptions": {"unit": "units/hour"},
+        "uncertainty": {"status": "synthetic test"},
+        "status": "Proposed",
+        "created_at": "2026-10-26T10:00:00Z",
+        "dataset_dependencies": dependencies,
+    }
+    decision_id = platform.save_decision_card(card, "alice", db_path=db)
+    outcome_id = exp.record_decision_outcome(
+        decision_id, "alice", "Implemented",
+        {"Throughput": 105.0}, {"Throughput": 102.0},
+        lesson="Synthetic regression fixture",
+        db_path=db, persist_artifact=False,
+    )
+
+    second = pd.DataFrame({"Throughput": [100.0, 105.0], "Energy": [4.0, 4.8]})
+    platform.register_dataset(
+        "Decision input", "decision-input.csv", second,
+        db_path=db, username="alice",
+    )
+
+    with sqlite3.connect(db) as conn:
+        platform_status = conn.execute(
+            "SELECT dataset_dependency_status FROM platform_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()[0]
+        experience_decision = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        outcome = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json FROM experience_decision_outcomes WHERE outcome_id=?",
+            (outcome_id,),
+        ).fetchone()
+    assert platform_status == "STALE"
+    assert experience_decision[0] == "STALE"
+    assert len(json.loads(experience_decision[1])) == 1
+    assert outcome[0] == "STALE"
+    assert len(json.loads(outcome[1])) == 1
+    with pytest.raises(ValueError, match="source dataset version is stale"):
+        exp.record_decision_outcome(
+            decision_id, "alice", "Verified",
+            {"Throughput": 105.0}, {"Throughput": 105.0},
+            lesson="Must be blocked until decision is rerun",
+            db_path=db, persist_artifact=False,
+        )
+
+
 def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
     import sqlite3
     import industrial_platform as platform
