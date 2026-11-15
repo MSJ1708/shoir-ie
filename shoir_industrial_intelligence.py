@@ -1480,6 +1480,56 @@ def _require_evidence_refs(evidence_refs: Sequence[str], label: str) -> list[str
     return refs
 
 
+def _dataset_dependencies_for_evidence_refs(
+    evidence_refs: Sequence[str],
+    access: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Carry exact dataset-version dependencies from referenced workspace evidence."""
+    refs = {str(item).strip() for item in evidence_refs if str(item).strip()}
+    if not refs:
+        return []
+    dependencies: list[dict[str, Any]] = []
+    for record in _state_list("records"):
+        record_id = str(record.get("record_id") or "").strip()
+        source_ref = str(record.get("source_ref") or "").strip()
+        if record_id not in refs and source_ref not in refs:
+            continue
+        payload = record.get("payload")
+        record_dependencies = record.get("dataset_dependencies")
+        if record_dependencies is None and isinstance(payload, Mapping):
+            record_dependencies = payload.get("dataset_dependencies")
+        if record_dependencies is None:
+            continue
+        if isinstance(record_dependencies, (str, bytes)) or not isinstance(record_dependencies, Sequence):
+            raise IndustrialIntelligenceError(
+                f"Evidence record {record_id or source_ref} has malformed dataset dependency metadata."
+            )
+        dependencies.extend(
+            copy.deepcopy(dict(item))
+            for item in record_dependencies
+            if isinstance(item, Mapping)
+        )
+        if any(not isinstance(item, Mapping) for item in record_dependencies):
+            raise IndustrialIntelligenceError(
+                f"Evidence record {record_id or source_ref} has malformed dataset dependency metadata."
+            )
+    if not dependencies:
+        return []
+    unique: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    for item in dependencies:
+        key = (
+            str(item.get("dataset_id") or "").strip().upper(),
+            item.get("version"),
+            str(item.get("data_hash") or "").strip().lower(),
+            str(item.get("version_fingerprint") or "").strip().lower(),
+        )
+        unique[key] = item
+    return _normalize_dataset_dependencies(
+        {"dataset_dependencies": list(unique.values())},
+        access,
+    )
+
+
 def _append_audit(username: str, tier: str, event_type: str, record_id: str, payload: Mapping[str, Any]) -> str:
     access = _session_authorize(username, tier, "write")
     audits = list(_state_list("audit"))
@@ -1697,15 +1747,59 @@ def invalidate_dataset_dependents(
     current_data_hash: str,
     current_version_fingerprint: str,
 ) -> dict[str, Any]:
-    """Mark older dataset-derived workspace records and their Digital Thread nodes stale."""
+    """Invalidate every governed dataset-dependent artifact in the active workspace."""
     access = _session_authorize(username, tier, "write")
+    state_keys = ("records", "models", "actions")
+    storage_keys = {key: STATE_PREFIX + key for key in state_keys}
+    snapshots = {
+        key: copy.deepcopy(st.session_state.get(storage_key, []))
+        for key, storage_key in storage_keys.items()
+    }
     previous_records = copy.deepcopy(_state_list("records"))
+    previous_models = copy.deepcopy(_state_list("models"))
+    previous_actions = copy.deepcopy(_state_list("actions"))
+
     updated_records, stale_ids = mark_dataset_dependents_stale(
         previous_records, dataset_id, current_version, current_data_hash, current_version_fingerprint
     )
+
+    # Reuse the same immutable-dependency validator for artifacts stored outside
+    # the generic record ledger, retaining each artifact's stable native ID.
+    model_inputs = []
+    for model in previous_models:
+        adapted = copy.deepcopy(model)
+        adapted["record_id"] = str(adapted.get("model_id") or "")
+        model_inputs.append(adapted)
+    updated_model_inputs, stale_model_ids = mark_dataset_dependents_stale(
+        model_inputs, dataset_id, current_version, current_data_hash, current_version_fingerprint
+    )
+    updated_models = []
+    for model in updated_model_inputs:
+        row = dict(model)
+        row.pop("record_id", None)
+        row.pop("record_status", None)
+        if str(row.get("dataset_dependency_status") or "").upper() == "STALE":
+            row["dataset_dependency_status"] = "STALE"
+        updated_models.append(row)
+
+    action_inputs = []
+    for action in previous_actions:
+        adapted = copy.deepcopy(action)
+        adapted["record_id"] = str(adapted.get("action_id") or "")
+        action_inputs.append(adapted)
+    updated_action_inputs, stale_action_ids = mark_dataset_dependents_stale(
+        action_inputs, dataset_id, current_version, current_data_hash, current_version_fingerprint
+    )
+    updated_actions = []
+    for action in updated_action_inputs:
+        row = dict(action)
+        row.pop("record_id", None)
+        row.pop("record_status", None)
+        updated_actions.append(row)
+
+    stale_all_ids = set(stale_ids) | set(stale_model_ids) | set(stale_action_ids)
     graph_snapshot = _snapshot_thread_graph(username)
     try:
-        stale_set = set(stale_ids)
         superseded_dataset_nodes = _mark_dataset_thread_versions_superseded(
             username,
             dataset_id,
@@ -1727,11 +1821,12 @@ def invalidate_dataset_dependents(
             username, tier, current_dependency
         )
         nodes = st.session_state.get(graph_snapshot["nodes_key"], [])
+        stale_nodes = 0
         for node in nodes:
             if not isinstance(node, Mapping):
                 continue
             metadata = node.get("metadata")
-            if not isinstance(metadata, Mapping) or str(metadata.get("industrial_record_id") or "") not in stale_set:
+            if not isinstance(metadata, Mapping) or str(metadata.get("industrial_record_id") or "") not in stale_all_ids:
                 continue
             updated_metadata = dict(metadata)
             updated_metadata["dataset_dependency_status"] = "STALE"
@@ -1740,12 +1835,15 @@ def invalidate_dataset_dependents(
             node["metadata"] = updated_metadata
             node["status"] = "Stale"
             node["updated_at"] = _utc_now()
+            stale_nodes += 1
 
         event_id = "LIN-" + uuid.uuid4().hex[:14].upper()
         event_payload = {
             "dataset_id": str(dataset_id).upper(),
             "current_version": current_version,
             "stale_record_ids": list(stale_ids),
+            "stale_model_ids": list(stale_model_ids),
+            "stale_action_ids": list(stale_action_ids),
             "historical_outputs_preserved": True,
         }
         updated_records.append({
@@ -1765,20 +1863,70 @@ def invalidate_dataset_dependents(
             "created_at": _utc_now(),
             "record_status": "SYSTEM_EVENT",
         })
-        _save_state_list(username, tier, "records", updated_records)
+
+        # Prepare all affected artifact lists in memory and persist the workspace
+        # once. This avoids leaving records, model registry rows and actions at
+        # different dataset versions if any one list fails to save.
+        updates = {
+            "records": updated_records,
+            "models": updated_models,
+            "actions": updated_actions,
+        }
+        for key, rows in updates.items():
+            if access["scope"] == "ORGANIZATION":
+                scoped_rows = [
+                    item for item in rows
+                    if isinstance(item, Mapping)
+                    and str(item.get("organization_id") or "") == str(access["organization_id"])
+                    and str(item.get("workspace_id") or "") == str(access["workspace_id"])
+                ]
+            else:
+                actor_fields = ("created_by", "owner", "actor", "reviewer")
+                scoped_rows = [
+                    item for item in rows
+                    if isinstance(item, Mapping)
+                    and item.get("organization_id") is None
+                    and str(item.get("workspace_id") or "") == str(access["workspace_id"])
+                    and any(
+                        str(item.get(field) or "").casefold() == access["actor"].casefold()
+                        for field in actor_fields
+                    )
+                ]
+            if len(scoped_rows) > MAX_RECORDS:
+                raise IndustrialIntelligenceError(f"{key} exceeds the {MAX_RECORDS} active-workspace record limit.")
+            st.session_state[storage_keys[key]] = copy.deepcopy(scoped_rows)
+
+        from workspace_persistence import save_user_workspace
+        if not save_user_workspace(username, st.session_state):
+            raise RuntimeError(
+                str(st.session_state.get("_workspace_save_error") or "Dataset lineage invalidation save was not confirmed.")
+            )
+        for key in state_keys:
+            visual_key = VISUAL_STATE_KEYS.get(key)
+            if visual_key:
+                st.session_state[visual_key] = pd.DataFrame(copy.deepcopy(_state_list(key)))
     except Exception:
+        for key, storage_key in storage_keys.items():
+            st.session_state[storage_key] = copy.deepcopy(snapshots[key])
+            visual_key = VISUAL_STATE_KEYS.get(key)
+            if visual_key:
+                st.session_state[visual_key] = pd.DataFrame(copy.deepcopy(_state_list(key)))
         _restore_thread_graph(graph_snapshot)
         raise
     return {
-        "status": "DEPENDENTS_MARKED_STALE" if stale_ids else "NO_STALE_DEPENDENTS",
+        "status": "DEPENDENTS_MARKED_STALE" if stale_all_ids else "NO_STALE_DEPENDENTS",
         "dataset_id": str(dataset_id).upper(),
         "current_version": current_version,
         "stale_record_count": len(stale_ids),
         "stale_record_ids": stale_ids,
+        "stale_model_count": len(stale_model_ids),
+        "stale_model_ids": stale_model_ids,
+        "stale_action_count": len(stale_action_ids),
+        "stale_action_ids": stale_action_ids,
         "lineage_event_id": event_id,
         "current_dataset_thread_node_id": current_dataset_node_id,
         "historical_outputs_preserved": True,
-        "digital_thread_nodes_marked_stale": len(stale_ids),
+        "digital_thread_nodes_marked_stale": stale_nodes,
         "superseded_dataset_version_nodes": superseded_dataset_nodes,
         "scope": access["scope"],
     }
@@ -2338,6 +2486,7 @@ def create_action(username: str, tier: str, title: str, owner: str, due_date: st
     refs = [_required_text(item, "evidence reference", 240) for item in evidence_refs]
     if refs:
         refs = _require_evidence_refs(refs, "Action")
+    dataset_dependencies = _dataset_dependencies_for_evidence_refs(refs, access)
     action_id = "IIA-" + uuid.uuid4().hex[:12].upper()
     row = {
         "action_id": action_id,
@@ -2347,6 +2496,8 @@ def create_action(username: str, tier: str, title: str, owner: str, due_date: st
         "priority": str(priority or "MEDIUM").upper(),
         "expected_result": _required_text(expected_result, "expected_result", 2000),
         "evidence_refs": refs,
+        "dataset_dependencies": dataset_dependencies,
+        "dataset_dependency_status": "CURRENT" if dataset_dependencies else "NOT_LINKED",
         "created_by": access["actor"],
         "role_at_creation": access["role"],
         "organization_id": access["organization_id"],
@@ -2381,6 +2532,8 @@ def approve_action(username: str, tier: str, action_id: str, comment: str = "") 
     action = next((item for item in actions if item.get("action_id") == str(action_id)), None)
     if not action:
         raise IndustrialIntelligenceError("Action does not exist in this workspace.")
+    if str(action.get("dataset_dependency_status") or "").upper() == "STALE":
+        raise IndustrialIntelligenceError("Action evidence is stale because its source dataset changed. Re-run and re-register the action against the current dataset version.")
     if action.get("status") not in {"PROPOSED", "PENDING_APPROVAL"}:
         raise IndustrialIntelligenceError("Only proposed actions can receive approval.")
     _require_evidence_refs(action.get("evidence_refs", []), "Action approval")
@@ -2413,6 +2566,8 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     if index is None:
         raise IndustrialIntelligenceError("Action does not exist in this workspace.")
     action = actions[index]
+    if str(action.get("dataset_dependency_status") or "").upper() == "STALE":
+        raise IndustrialIntelligenceError("Action evidence is stale because its source dataset changed. Re-run and re-register the action against the current dataset version.")
     target = str(new_status or "").upper()
     allowed = {"PROPOSED", "PENDING_APPROVAL", "APPROVED", "IN_PROGRESS", "IMPLEMENTED", "CLOSED", "VERIFIED", "BLOCKED"}
     if target not in allowed:
@@ -2764,6 +2919,7 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
     if isinstance(assumptions, (str, bytes)) or not isinstance(assumptions, Sequence):
         raise IndustrialIntelligenceError("Model assumptions must be a sequence of text statements.")
     tests = []
+    model_evidence_refs: list[str] = []
     for index, case in enumerate(test_cases, start=1):
         if not isinstance(case, Mapping):
             raise IndustrialIntelligenceError(f"Model test case {index} must be an object.")
@@ -2778,17 +2934,19 @@ def register_model_version(username: str, tier: str, name: str, version: str, mo
         test_evidence = str(case.get("evidence_id") or "").strip()
         if test_evidence:
             _require_evidence_refs([test_evidence], f"Model test {index}")
+            model_evidence_refs.append(test_evidence)
         tests.append({"test_id": _required_text(case.get("test_id"), f"model test {index} test_id"), "expected": expected, "actual": actual, "passed": bool(passed), "evidence_id": test_evidence or None})
     normalized_assumptions = [_required_text(item, "model assumption", 500) for item in assumptions]
     if not tests:
         raise IndustrialIntelligenceError("At least one expected-versus-actual model test case is required.")
     definition_hash = _hash_payload({"definition": definition, "assumptions": normalized_assumptions, "test_cases": tests})
-    record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": definition_hash, "assumptions": normalized_assumptions, "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
+    dataset_dependencies = _dataset_dependencies_for_evidence_refs(model_evidence_refs, access)
+    record = {"model_id": "IIM-" + uuid.uuid4().hex[:12].upper(), "name": model_id, "version": version_id, "model_type": _required_text(model_type, "model_type"), "definition": _json_safe(definition), "definition_hash": definition_hash, "assumptions": normalized_assumptions, "test_cases": tests, "test_count": len(tests), "passed_test_count": sum(1 for test in tests if test["passed"]), "owner": access["actor"], "organization_id": access["organization_id"], "workspace_id": access["workspace_id"], "dataset_dependencies": dataset_dependencies, "dataset_dependency_status": "CURRENT" if dataset_dependencies else "NOT_LINKED", "status": "REGISTERED_UNVALIDATED", "created_at": _utc_now()}
     graph_snapshot = _snapshot_thread_graph(username)
     try:
         record["thread_node_id"] = _sync_thread_node(
             username, tier, "Model", f"{model_id} · {version_id}", record["model_id"],
-            "Registered", {"version": version_id, "definition_hash": record["definition_hash"], "status": record["status"]},
+            "Registered", {"version": version_id, "definition_hash": record["definition_hash"], "status": record["status"], "dataset_dependencies": dataset_dependencies, "dataset_dependency_status": record["dataset_dependency_status"]},
         )
         models.append(record)
         _save_state_list(username, tier, "models", models)
@@ -2806,6 +2964,8 @@ def validate_model_version(username: str, tier: str, model_id: str, verification
     if index is None:
         raise IndustrialIntelligenceError("Model version does not exist.")
     model = models[index]
+    if str(model.get("dataset_dependency_status") or "").upper() == "STALE":
+        raise IndustrialIntelligenceError("Model evidence is stale because its source dataset changed. Register and test a new model version against the current dataset.")
     if not model.get("test_cases") or model["passed_test_count"] != model["test_count"]:
         raise IndustrialIntelligenceError("A model cannot be validated until all registered test cases pass.")
     if model.get("owner", "").casefold() == access["actor"].casefold():
