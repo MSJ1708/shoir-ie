@@ -675,6 +675,16 @@ def _activate_registered_dataset_dependency(
         "registered_at": str(registration.get("registered_at") or "")[:80] or None,
         "current_version_verified": True,
     }
+    # The invalidation routine persists this active dependency together with
+    # the current Dataset node and lineage event in one managed workspace save.
+    state["shoir_active_dataset_dependency"] = dependency
+    state["shoir_dataset_dependency_tracking_enabled"] = True
+    state["shoir_dataset_lineage_blocked"] = False
+    state["shoir_dataset_lineage_invalidation"] = {
+        "status": "PENDING_AUTHENTICATED_LINEAGE_REVALIDATION",
+        "dataset_id": dataset_id,
+        "current_version": version,
+    }
 
     authenticated_enterprise_session = (
         state.get("authenticated") is True
