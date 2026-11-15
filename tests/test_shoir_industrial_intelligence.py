@@ -1488,6 +1488,7 @@ def test_dataset_version_invalidation_marks_linked_actions_stale_and_blocks_appr
 
 
 def test_dataset_dependency_invalidation_rolls_back_records_models_actions_and_graph_when_save_fails(monkeypatch):
+    import copy
     import shoir_digital_thread as thread
 
     session = _configure_personal_session(monkeypatch, "synthetic-lineage-rollback", "owner")
