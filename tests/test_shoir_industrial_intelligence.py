@@ -1425,6 +1425,43 @@ def test_dataset_version_change_is_persisted_when_no_prior_analysis_depends_on_i
     )["workspace_id"]
 
 
+def test_dataset_lineage_invalidation_reuses_event_and_preserves_affected_ids(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF881122",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic-event-idempotence.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    record = ii.create_record(
+        "synthetic-owner", "Enterprise", "tool_analysis", "Prior dataset analysis",
+        {"result": {"value": 1}}, provenance="SYNTHETIC",
+    )
+    first = ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF881122",
+        2, "c" * 64, "d" * 64,
+    )
+    second = ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF881122",
+        2, "c" * 64, "d" * 64,
+    )
+    assert first["lineage_event_id"] == second["lineage_event_id"]
+    events = [
+        row for row in ii.list_records("synthetic-owner", "Enterprise")
+        if row["record_type"] == "dataset_lineage_invalidation"
+        and row["source_ref"] == "dataset:DS-ABCDEF881122@v2"
+    ]
+    assert len(events) == 1
+    assert events[0]["payload"]["stale_record_ids"] == [record["record_id"]]
+    assert events[0]["payload"]["current_version_fingerprint"] == "d" * 64
+
+
 def test_dataset_version_change_marks_dependents_and_digital_thread_nodes_stale(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
