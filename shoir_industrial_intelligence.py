@@ -1862,17 +1862,38 @@ def invalidate_dataset_dependents(
             node["updated_at"] = _utc_now()
             stale_nodes += 1
 
-        event_id = "LIN-" + uuid.uuid4().hex[:14].upper()
+        lineage_source_ref = f"dataset:{str(dataset_id).upper()}@v{current_version}"
+        existing_event_index = next(
+            (
+                index for index, item in enumerate(updated_records)
+                if isinstance(item, Mapping)
+                and str(item.get("record_type") or "") == "dataset_lineage_invalidation"
+                and str(item.get("source_ref") or "") == lineage_source_ref
+                and str(item.get("organization_id") or "") == str(access["organization_id"] or "")
+                and str(item.get("workspace_id") or "") == str(access["workspace_id"])
+            ),
+            None,
+        )
+        existing_event = (
+            updated_records[existing_event_index]
+            if existing_event_index is not None else None
+        )
+        event_id = (
+            str(existing_event.get("record_id") or "")
+            if isinstance(existing_event, Mapping) else ""
+        ) or ("LIN-" + uuid.uuid4().hex[:14].upper())
         event_payload = {
             "dataset_id": str(dataset_id).upper(),
             "current_version": current_version,
+            "current_data_hash": str(current_data_hash).lower(),
+            "current_version_fingerprint": str(current_version_fingerprint).lower(),
             "stale_record_ids": list(stale_ids),
             "stale_event_ids": list(stale_event_ids),
             "stale_model_ids": list(stale_model_ids),
             "stale_action_ids": list(stale_action_ids),
             "historical_outputs_preserved": True,
         }
-        updated_records.append({
+        event_record = {
             "record_id": event_id,
             "record_type": "dataset_lineage_invalidation",
             "name": f"Dataset {str(dataset_id).upper()} dependency invalidation",
@@ -1880,15 +1901,22 @@ def invalidate_dataset_dependents(
             "payload_hash": _hash_payload(event_payload),
             "provenance": "MANUAL",
             "provenance_limit": PROVENANCE_RELIABILITY["MANUAL"],
-            "source_ref": f"dataset:{str(dataset_id).upper()}@v{current_version}",
+            "source_ref": lineage_source_ref,
             "source_timestamp": _utc_now(),
             "organization_id": access["organization_id"],
             "workspace_id": access["workspace_id"],
             "workspace_scope": access["scope"],
             "created_by": access["actor"],
-            "created_at": _utc_now(),
+            "created_at": (
+                str(existing_event.get("created_at") or _utc_now())
+                if isinstance(existing_event, Mapping) else _utc_now()
+            ),
             "record_status": "SYSTEM_EVENT",
-        })
+        }
+        if existing_event_index is None:
+            updated_records.append(event_record)
+        else:
+            updated_records[existing_event_index] = event_record
 
         # Prepare all affected artifact lists in memory and persist the workspace
         # once. This avoids leaving records, model registry rows and actions at
