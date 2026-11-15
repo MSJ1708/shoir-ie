@@ -760,6 +760,58 @@ def test_legacy_artifact_with_unregistered_dataset_reference_is_not_claimed_curr
     assert row[1] == "[]"
 
 
+def test_reopening_same_dataset_version_retries_failed_lineage_save(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+    import shoir_industrial_intelligence as ii
+
+    db = str(tmp_path / "retry-lineage.db")
+    username = "synthetic-retry-owner"
+    session = {
+        "authenticated": True,
+        "current_user": username,
+        "user_role": "owner",
+        "user_tier": "Enterprise",
+    }
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+    monkeypatch.setattr(ii.st, "session_state", session, raising=False)
+    frame = pd.DataFrame({"Output": [10.0], "Energy": [4.0]})
+
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: False)
+    dataset_id = platform.register_dataset(
+        "Retry lineage dataset", "retry.csv", frame, db_path=db,
+        username=username, workspace="personal",
+    )
+    assert session["shoir_dataset_lineage_blocked"] is True
+    assert session["shoir_dataset_thread_sync_status"] == "SAVE_FAILED"
+
+    # Simulate a fresh authenticated session loading the same immutable head.
+    fresh_session = {
+        "authenticated": True,
+        "current_user": username,
+        "user_role": "owner",
+        "user_tier": "Enterprise",
+    }
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: fresh_session)
+    monkeypatch.setattr(ii.st, "session_state", fresh_session, raising=False)
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: True)
+
+    assert platform.register_dataset(
+        "Retry lineage dataset", "retry.csv", frame.copy(), db_path=db,
+        username=username, workspace="personal",
+    ) == dataset_id
+    assert fresh_session["shoir_dataset_lineage_blocked"] is False
+    assert fresh_session["shoir_dataset_thread_sync_status"] == "SAVED"
+    assert fresh_session["shoir_active_dataset_thread_node_id"]
+    with sqlite_connection(db) as conn:
+        version_rows = conn.execute(
+            "SELECT version FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
+            (dataset_id,),
+        ).fetchall()
+    assert version_rows == [(1,)]
+
+
 def test_dataset_registration_refuses_local_sqlite_fallback_in_production(tmp_path, monkeypatch):
     import durable_account_store
     import industrial_platform as platform
