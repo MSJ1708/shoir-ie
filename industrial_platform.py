@@ -635,7 +635,7 @@ def _activate_registered_dataset_dependency(
     registration: Mapping[str, Any],
     scope: Mapping[str, str],
 ) -> dict[str, Any] | None:
-    """Attach the verified dataset head to future engineering records and invalidate older outputs."""
+    """Revalidate dataset lineage and persist its canonical Thread node on every activation."""
     import re
 
     dataset_id = str(registration.get("dataset_id") or "").strip().upper()
@@ -656,7 +656,6 @@ def _activate_registered_dataset_dependency(
         }
         return None
 
-    context = state.get("shoir_active_organization_workspace")
     organization_id = str(scope.get("organization_id") or "").strip() or None
     workspace_id = str(
         scope.get("organization_workspace_id")
@@ -677,87 +676,62 @@ def _activate_registered_dataset_dependency(
         "current_version_verified": True,
     }
 
-    invalidation = {"status": "NOT_REQUIRED_OR_NO_NEW_VERSION"}
-    if bool(registration.get("created_new_version")) and version > 1:
-        if (
-            state.get("authenticated") is True
-            and str(state.get("current_user") or "").strip().casefold() == str(username).strip().casefold()
-            and tier_allows(str(state.get("user_tier") or "Starter"), "Enterprise")
-        ):
-            try:
-                from shoir_industrial_intelligence import invalidate_dataset_dependents
-                invalidation = invalidate_dataset_dependents(
-                    username,
-                    str(state.get("user_tier") or "Enterprise"),
-                    dataset_id,
-                    version,
-                    data_hash,
-                    fingerprint,
+    authenticated_enterprise_session = (
+        state.get("authenticated") is True
+        and str(state.get("current_user") or "").strip().casefold() == str(username).strip().casefold()
+        and tier_allows(str(state.get("user_tier") or "Starter"), "Enterprise")
+    )
+    if authenticated_enterprise_session:
+        try:
+            # Always re-run the idempotent invalidation, including on a fresh
+            # login that reopens an already-current version. This repairs a
+            # prior failed save after the session-local block was lost.
+            from shoir_industrial_intelligence import invalidate_dataset_dependents
+
+            invalidation = invalidate_dataset_dependents(
+                username,
+                str(state.get("user_tier") or "Enterprise"),
+                dataset_id,
+                version,
+                data_hash,
+                fingerprint,
+            )
+            if invalidation.get("status") not in {
+                "DEPENDENTS_MARKED_STALE",
+                "NO_STALE_DEPENDENTS",
+            } or not invalidation.get("current_dataset_thread_node_id"):
+                raise RuntimeError(
+                    "Dataset lineage invalidation did not confirm a current Digital Thread node."
                 )
-            except Exception as exc:
-                invalidation = {
-                    "status": "INVALIDATION_FAILED",
-                    "dataset_id": dataset_id,
-                    "current_version": version,
-                    "error": str(exc)[:500],
-                }
-                state["shoir_dataset_lineage_blocked"] = True
-        else:
+            state["shoir_dataset_lineage_blocked"] = False
+            state["shoir_active_dataset_thread_node_id"] = invalidation["current_dataset_thread_node_id"]
+            state["shoir_dataset_thread_sync_status"] = "SAVED"
+        except Exception as exc:
             invalidation = {
-                "status": "INVALIDATION_NOT_RUN_NO_AUTHENTICATED_ENTERPRISE_SESSION",
+                "status": "INVALIDATION_FAILED",
                 "dataset_id": dataset_id,
                 "current_version": version,
+                "error": str(exc)[:500],
             }
             state["shoir_dataset_lineage_blocked"] = True
-
-    if invalidation.get("status") not in {
-        "DEPENDENTS_MARKED_STALE",
-        "NO_STALE_DEPENDENTS",
-        "NOT_REQUIRED_OR_NO_NEW_VERSION",
-    }:
-        state["shoir_dataset_lineage_blocked"] = True
+            state["shoir_dataset_thread_sync_status"] = "SAVE_FAILED"
+            state["shoir_dataset_thread_sync_error"] = str(exc)[:500]
     else:
-        state["shoir_dataset_lineage_blocked"] = False
+        invalidation = {
+            "status": "INVALIDATION_NOT_RUN_NO_AUTHENTICATED_ENTERPRISE_SESSION",
+            "dataset_id": dataset_id,
+            "current_version": version,
+        }
+        # A first local metadata import with no authenticated session does not
+        # have prior dependent outputs to invalidate. A later version change
+        # without an authenticated Enterprise session must fail closed.
+        if version > 1 or state.get("shoir_dataset_lineage_blocked") is True:
+            state["shoir_dataset_lineage_blocked"] = True
+        state["shoir_dataset_thread_sync_status"] = "NOT_RUN_NO_AUTHENTICATED_ENTERPRISE_SESSION"
 
     state["shoir_active_dataset_dependency"] = dependency
     state["shoir_dataset_dependency_tracking_enabled"] = True
     state["shoir_dataset_lineage_invalidation"] = invalidation
-
-    # Create the first Dataset-version node at import time, not only after a
-    # later analysis or version change. Repeated registration is idempotent
-    # because the Digital Thread node identity is derived from dataset ID/version.
-    if (
-        state.get("authenticated") is True
-        and str(state.get("current_user") or "").strip().casefold() == str(username).strip().casefold()
-        and tier_allows(str(state.get("user_tier") or "Starter"), "Enterprise")
-    ):
-        try:
-            from shoir_industrial_intelligence import _sync_dataset_thread_dependency
-            from workspace_persistence import save_user_workspace
-
-            dataset_node_id = _sync_dataset_thread_dependency(
-                username,
-                str(state.get("user_tier") or "Enterprise"),
-                dependency,
-            )
-            if not save_user_workspace(username, state):
-                raise RuntimeError(
-                    str(state.get("_workspace_save_error") or "Initial Dataset Thread node save was not confirmed.")
-                )
-            state["shoir_active_dataset_thread_node_id"] = dataset_node_id
-            state["shoir_dataset_thread_sync_status"] = "SAVED"
-        except Exception as exc:
-            state["shoir_dataset_lineage_blocked"] = True
-            state["shoir_dataset_thread_sync_status"] = "SAVE_FAILED"
-            state["shoir_dataset_thread_sync_error"] = str(exc)[:500]
-            state["shoir_dataset_lineage_invalidation"] = {
-                **invalidation,
-                "dataset_thread_status": "SAVE_FAILED",
-                "error": str(exc)[:500],
-            }
-    else:
-        state["shoir_dataset_thread_sync_status"] = "NOT_RUN_NO_AUTHENTICATED_ENTERPRISE_SESSION"
-
     return dependency
 
 
