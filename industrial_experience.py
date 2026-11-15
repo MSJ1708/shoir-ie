@@ -514,8 +514,12 @@ def transition_decision(
         if not row:
             raise ValueError("Decision not found.")
         current, owner = str(row[0]), row[1]
-        if str(row[2] or "NOT_LINKED").upper() == "STALE" and to_status in {"Approved", "Implemented", "Verified"}:
-            raise ValueError("A stale dataset-linked decision cannot be approved, implemented or verified. Rerun it against the current dataset version first.")
+        freshness = str(row[2] or "NOT_LINKED").upper()
+        if freshness in {"STALE", "UNVERIFIED_REFERENCE"} and to_status in {"Approved", "Implemented", "Verified"}:
+            raise ValueError(
+                "A decision with stale or unverified dataset lineage cannot be approved, implemented or verified. "
+                "Register/verify the dataset source and rerun the decision against the current dataset version first."
+            )
         if require_owner and (owner is None or str(owner) != str(actor)):
             raise PermissionError("Decision not found or not owned by this user.")
         if current in states and states.index(to_status) < states.index(current) and to_status not in {"Draft", "Review"}:
@@ -592,8 +596,12 @@ def record_decision_outcome(
             raise ValueError("Decision not found.")
         if str(row[0]) != owner:
             raise PermissionError("Decision belongs to another workspace owner.")
-        if str(row[1] or "NOT_LINKED").upper() == "STALE":
-            raise ValueError("Cannot record a new decision outcome because its source dataset version is stale. Rerun and reapprove the decision against current data.")
+        freshness = str(row[1] or "NOT_LINKED").upper()
+        if freshness in {"STALE", "UNVERIFIED_REFERENCE"}:
+            raise ValueError(
+                "Cannot record a new decision outcome because its dataset lineage is stale or unverified. "
+                "Register/verify the source and rerun and reapprove the decision against current data."
+            )
         decision_dependencies_json = str(row[2] or "[]")
         decision_dependency_status = str(row[1] or "NOT_LINKED")
     variance = calculate_decision_variance(predicted, actual)
@@ -615,8 +623,12 @@ def record_decision_outcome(
             raise ValueError("Decision not found.")
         if str(current_decision[0]) != owner:
             raise PermissionError("Decision belongs to another workspace owner.")
-        if str(current_decision[1] or "NOT_LINKED").upper() == "STALE":
-            raise ValueError("Cannot record a new decision outcome because its source dataset version is stale. Rerun and reapprove the decision against current data.")
+        freshness = str(current_decision[1] or "NOT_LINKED").upper()
+        if freshness in {"STALE", "UNVERIFIED_REFERENCE"}:
+            raise ValueError(
+                "Cannot record a new decision outcome because its dataset lineage is stale or unverified. "
+                "Register/verify the source and rerun and reapprove the decision against current data."
+            )
         decision_dependencies_json = str(current_decision[2] or "[]")
         decision_dependency_status = str(current_decision[1] or "NOT_LINKED")
         conn.execute(
