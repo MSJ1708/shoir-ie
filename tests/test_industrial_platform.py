@@ -795,7 +795,11 @@ def test_reopening_same_dataset_version_retries_failed_lineage_save(tmp_path, mo
     }
     monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: fresh_session)
     monkeypatch.setattr(ii.st, "session_state", fresh_session, raising=False)
-    monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: True)
+    persisted_snapshots = []
+    def capture_lineage_snapshot(_username, state):
+        persisted_snapshots.append(dict(state))
+        return True
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", capture_lineage_snapshot)
 
     assert platform.register_dataset(
         "Retry lineage dataset", "retry.csv", frame.copy(), db_path=db,
@@ -804,6 +808,10 @@ def test_reopening_same_dataset_version_retries_failed_lineage_save(tmp_path, mo
     assert fresh_session["shoir_dataset_lineage_blocked"] is False
     assert fresh_session["shoir_dataset_thread_sync_status"] == "SAVED"
     assert fresh_session["shoir_active_dataset_thread_node_id"]
+    assert len(persisted_snapshots) == 1
+    assert persisted_snapshots[0]["shoir_active_dataset_dependency"]["version"] == 1
+    assert persisted_snapshots[0]["shoir_active_dataset_thread_node_id"] == fresh_session["shoir_active_dataset_thread_node_id"]
+    assert persisted_snapshots[0]["shoir_dataset_lineage_blocked"] is False
     with sqlite_connection(db) as conn:
         version_rows = conn.execute(
             "SELECT version FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
