@@ -1487,6 +1487,59 @@ def test_dataset_version_invalidation_marks_linked_actions_stale_and_blocks_appr
         ii.approve_action("synthetic-owner", "Enterprise", action["action_id"])
 
 
+def test_dataset_dependency_invalidation_rolls_back_records_models_actions_and_graph_when_save_fails(monkeypatch):
+    import shoir_digital_thread as thread
+
+    session = _configure_personal_session(monkeypatch, "synthetic-lineage-rollback", "owner")
+    access = ii._session_authorize("synthetic-lineage-rollback", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF445566",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic-rollback.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+
+    evidence = ii.create_record(
+        "synthetic-lineage-rollback", "Enterprise", "evidence",
+        "Rollback source evidence", {"result": {"value": 10}}, provenance="SYNTHETIC",
+    )
+    model = ii.register_model_version(
+        "synthetic-lineage-rollback", "Enterprise", "Rollback model", "1.0", "calculation",
+        {"formula": "y = 2*x"}, ["same physical unit"],
+        [{"test_id": "golden-1", "expected": 20, "actual": 20, "evidence_id": evidence["record_id"]}],
+    )
+    action = ii.create_action(
+        "synthetic-lineage-rollback", "Enterprise", "Rollback action", "synthetic-owner",
+        "2026-12-20T00:00:00Z", "MEDIUM", "Review dataset-derived evidence.",
+        [evidence["record_id"]],
+    )
+
+    state_keys = ("records", "models", "actions")
+    before = {key: copy.deepcopy(session[ii.STATE_PREFIX + key]) for key in state_keys}
+    graph_keys = thread._keys()
+    before_nodes = copy.deepcopy(session[graph_keys["nodes"]])
+    before_edges = copy.deepcopy(session[graph_keys["edges"]])
+
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: False)
+    with pytest.raises(RuntimeError, match="Dataset lineage invalidation save was not confirmed"):
+        ii.invalidate_dataset_dependents(
+            "synthetic-lineage-rollback", "Enterprise", "DS-ABCDEF445566",
+            2, "c" * 64, "d" * 64,
+        )
+
+    for key in state_keys:
+        assert session[ii.STATE_PREFIX + key] == before[key]
+    assert session[graph_keys["nodes"]] == before_nodes
+    assert session[graph_keys["edges"]] == before_edges
+    assert next(row for row in ii._state_list("models") if row["model_id"] == model["model_id"])["dataset_dependency_status"] == "CURRENT"
+    assert next(row for row in ii._state_list("actions") if row["action_id"] == action["action_id"])["dataset_dependency_status"] == "CURRENT"
+
+
 def test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_records():
     source_records = [
         {
