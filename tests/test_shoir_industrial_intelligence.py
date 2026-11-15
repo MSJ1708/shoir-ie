@@ -1330,6 +1330,68 @@ def test_first_dataset_version_creates_persisted_digital_thread_node_at_import(m
     assert session["shoir_active_dataset_thread_node_id"] == node["node_id"]
 
 
+def test_failed_initial_dataset_thread_save_blocks_record_creation(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    session = _configure_personal_session(monkeypatch, "synthetic-thread-save-failure", "owner")
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: False)
+    frame = pd.DataFrame({"Output": [10.0], "Energy": [4.0]})
+
+    dataset_id = platform.register_dataset(
+        "Initial import with failed Thread save", "failed-thread.csv", frame,
+        username="synthetic-thread-save-failure", workspace="personal",
+    )
+    assert dataset_id
+    assert session["shoir_dataset_thread_sync_status"] == "SAVE_FAILED"
+    assert session["shoir_dataset_lineage_blocked"] is True
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Dataset lineage invalidation is unresolved"):
+        ii.create_record(
+            "synthetic-thread-save-failure", "Enterprise", "tool_analysis",
+            "Blocked dataset-dependent analysis", {"result": {"value": 1}},
+            provenance="SYNTHETIC",
+        )
+
+
+def test_unresolved_dataset_lineage_blocks_review_approval_and_copilot(monkeypatch):
+    session = _configure_personal_session(monkeypatch, "synthetic-lineage-blocked", "owner")
+    evidence = ii.create_record(
+        "synthetic-lineage-blocked", "Enterprise", "evidence",
+        "Current session evidence", {"finding": "Synthetic fixture"}, provenance="SYNTHETIC",
+    )
+    action = ii.create_action(
+        "synthetic-lineage-blocked", "Enterprise", "Lineage-blocked action",
+        "synthetic-reviewer", "2026-12-20T00:00:00Z", "MEDIUM",
+        "Review current evidence.", [evidence["record_id"]],
+    )
+    model = ii.register_model_version(
+        "synthetic-lineage-blocked", "Enterprise", "Lineage-blocked model", "1.0",
+        "calculation", {"formula": "y = 2*x"}, ["Input/output unit is consistent"],
+        [{"test_id": "golden-1", "expected": 2, "actual": 2}],
+    )
+    session["shoir_dataset_lineage_blocked"] = True
+
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Dataset lineage invalidation is unresolved"):
+        ii.approve_action("synthetic-lineage-blocked", "Enterprise", action["action_id"])
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Dataset lineage invalidation is unresolved"):
+        ii.update_action("synthetic-lineage-blocked", "Enterprise", action["action_id"], "BLOCKED")
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Dataset lineage invalidation is unresolved"):
+        ii.validate_model_version(
+            "synthetic-lineage-blocked", "Enterprise", model["model_id"],
+            [evidence["record_id"]],
+        )
+
+    context = ii.copilot_evidence_context(
+        "synthetic-lineage-blocked", "Enterprise", "current session evidence"
+    )
+    assert context["status"] == "DATASET_LINEAGE_UNRESOLVED"
+    assert context["dataset_lineage_blocked"] is True
+    assert context["citations"] == []
+    assert context["excluded_stale_evidence_count"] == 1
+
+
 def test_dataset_version_change_is_persisted_when_no_prior_analysis_depends_on_it(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     result = ii.invalidate_dataset_dependents(
