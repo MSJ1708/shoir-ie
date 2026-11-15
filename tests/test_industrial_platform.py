@@ -500,6 +500,150 @@ def test_dataset_registration_rejects_malformed_existing_dataset_id_before_netwo
 
 
 
+def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_history(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    import durable_account_store
+    import industrial_platform as platform
+
+    db = str(tmp_path / "legacy-lineage.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    first = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 4.5]})
+    dataset_id = platform.register_dataset(
+        "Line A measurements", "line-a.csv", first, db_path=db, username="engineer-a"
+    )
+    first_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+
+    with sqlite_connection(db) as conn:
+        version_one = conn.execute(
+            """SELECT version,data_hash,version_fingerprint
+               FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version""",
+            (dataset_id,),
+        ).fetchone()
+        head_one = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    assert version_one[0] == 1
+    assert version_one[1] == first_hash
+    assert head_one[0] == 1
+
+    model_id = platform.save_model_snapshot(
+        "Line A energy model", "Regression", {"target": "Energy"}, first_hash,
+        "engineer-a", {"unit": "kWh"}, db_path=db, dataset_id=dataset_id,
+    )
+    dependencies = [{
+        "dataset_id": dataset_id,
+        "version": 1,
+        "data_hash": first_hash,
+        "version_fingerprint": version_one[2],
+    }]
+    scenario_id = platform.save_scenario(
+        "Line A baseline", "", {"dataset_dependencies": dependencies, "period": "2026-10"},
+        {"Energy": 4.25}, "engineer-a", db,
+    )
+    experiment_id = platform.save_experiment(
+        "Line A alternatives", "Experiment Lab",
+        [{"Scenario": "Baseline", "dataset_dependencies": dependencies}],
+        {"comparison": "synthetic fixture"}, "engineer-a", db,
+    )
+    decision_id = platform.save_decision_card(
+        {
+            "title": "Line A energy decision",
+            "module": "Engineering Decision Center",
+            "metrics": {"Energy": 4.25},
+            "assumptions": {"unit": "kWh"},
+            "uncertainty": {"status": "test only"},
+            "status": "Proposed",
+            "created_at": "2026-10-26T10:00:00Z",
+            "dataset_dependencies": dependencies,
+        },
+        "engineer-a",
+        db,
+    )
+
+    # Re-registering identical content must not create a new version or stale
+    # artifacts. Changing content under the same logical dataset identity must.
+    assert platform.register_dataset(
+        "Line A measurements", "line-a.csv", first.copy(),
+        db_path=db, username="engineer-a",
+    ) == dataset_id
+    with sqlite_connection(db) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()[0] == 1
+
+    second = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 5.0]})
+    second_hash = hashlib.sha256(second.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+    assert platform.register_dataset(
+        "Line A measurements", "line-a.csv", second,
+        db_path=db, username="engineer-a",
+    ) == dataset_id
+
+    with sqlite_connection(db) as conn:
+        head = conn.execute(
+            "SELECT current_version,sha256 FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        versions = conn.execute(
+            "SELECT version,data_hash FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
+            (dataset_id,),
+        ).fetchall()
+        model = conn.execute(
+            "SELECT dataset_dependency_status,dataset_dependencies_json,stale_dataset_dependencies_json FROM platform_models WHERE model_id=?",
+            (model_id,),
+        ).fetchone()
+        scenario = conn.execute(
+            "SELECT dataset_dependency_status,parameters_json,stale_dataset_dependencies_json FROM platform_scenarios WHERE scenario_id=?",
+            (scenario_id,),
+        ).fetchone()
+        experiment = conn.execute(
+            "SELECT dataset_dependency_status,scenarios_json,stale_dataset_dependencies_json FROM platform_experiments WHERE experiment_id=?",
+            (experiment_id,),
+        ).fetchone()
+        decision = conn.execute(
+            "SELECT dataset_dependency_status,metrics_json,stale_dataset_dependencies_json FROM platform_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+
+    assert head == (2, second_hash)
+    assert versions == [(1, first_hash), (2, second_hash)]
+    for artifact in (model, scenario, experiment, decision):
+        assert artifact[0] == "STALE"
+        stale_markers = json.loads(artifact[2])
+        assert len(stale_markers) == 1
+        assert stale_markers[0]["previous_version"] == 1
+        assert stale_markers[0]["current_version"] == 2
+        assert stale_markers[0]["current_data_hash"] == second_hash
+    # Historical model/scenario/experiment/decision content remains unchanged.
+    assert json.loads(scenario[1])["period"] == "2026-10"
+    assert json.loads(experiment[1])[0]["Scenario"] == "Baseline"
+    assert json.loads(decision[1])["Energy"] == 4.25
+    assert json.loads(model[1])[0]["version"] == 1
+
+
+def test_legacy_artifact_with_unregistered_dataset_reference_is_not_claimed_current(tmp_path):
+    from industrial_platform import init_platform_db, save_model_snapshot
+
+    db = str(tmp_path / "unverified-lineage.db")
+    init_platform_db(db)
+    model_id = save_model_snapshot(
+        "Unregistered source model", "Regression", {"target": "Y"}, "not-a-sha256",
+        "engineer-a", {}, db_path=db, dataset_id="DS-ABCDEF123456",
+    )
+    with sqlite_connection(db) as conn:
+        row = conn.execute(
+            "SELECT dataset_dependency_status,dataset_dependencies_json FROM platform_models WHERE model_id=?",
+            (model_id,),
+        ).fetchone()
+    assert row[0] == "UNVERIFIED_REFERENCE"
+    assert row[1] == "[]"
+
+
 def test_local_dataset_registration_returns_stable_generated_id(tmp_path, monkeypatch):
     import durable_account_store
     import industrial_platform as platform
