@@ -902,12 +902,193 @@ def governance_recovery_action(payload: Mapping[str, Any]) -> dict[str, Any]:
     raise ValueError("action must be create_snapshot, verify_snapshot, retention_review, or deletion_plan.")
 
 
+def linear_mixed_integer_optimization(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Run the existing bounded LP/MILP solver behind canonical T061."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T061 payload must be a JSON object.")
+    variable_spec = payload.get("variable_spec")
+    objective_coefficients = payload.get("objective_coefficients")
+    constraints = payload.get("constraints", [])
+    if not isinstance(variable_spec, Mapping) or not variable_spec:
+        raise ValueError("T061 requires a non-empty variable_spec object.")
+    if not isinstance(objective_coefficients, Mapping) or not objective_coefficients:
+        raise ValueError("T061 requires objective_coefficients keyed by variable name.")
+    if isinstance(constraints, (str, bytes)) or not isinstance(constraints, Sequence):
+        raise ValueError("T061 constraints must be a JSON list.")
+    from shoir_target_engines import run_solver_diagnostics
+
+    result = run_solver_diagnostics(
+        variable_spec,
+        objective_coefficients,
+        constraints,
+        direction=str(payload.get("direction") or "minimize"),
+        time_limit_seconds=_number(payload.get("time_limit_seconds", 10), "time_limit_seconds", minimum=0.1),
+        feasibility_tolerance=_number(payload.get("feasibility_tolerance", 1e-7), "feasibility_tolerance", minimum=1e-10),
+    )
+    result.update({
+        "tool_id": "T061",
+        "method": "PuLP/CBC linear or mixed-integer model with independent feasibility diagnostics",
+        "data_provenance": str(payload.get("data_provenance") or "USER_ENTERED_UNVERIFIED"),
+        "warning": (
+            "The solver validates and solves the supplied mathematical formulation; it cannot prove that "
+            "the model represents the real plant, that coefficients/units are correct, or that the model "
+            "has received engineering approval. A solver error or time limit is not an optimal solution."
+        ),
+    })
+    return result
+
+
+def multiobjective_optimization(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Create a weighted ranking and Pareto candidate set for declared alternatives (T067)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T067 payload must be a JSON object.")
+    alternatives = _records(payload.get("alternatives"), "alternatives", minimum=2, maximum=2000)
+    objective_specs = _records(payload.get("objectives"), "objectives", minimum=2, maximum=20)
+    names = [str(row.get("name") or "").strip() for row in alternatives]
+    if any(not name for name in names) or len({name.casefold() for name in names}) != len(names):
+        raise ValueError("Every alternative needs a unique non-empty name.")
+    fields: list[str] = []
+    weights: list[float] = []
+    minimize: list[bool] = []
+    for index, spec in enumerate(objective_specs, start=1):
+        field = _nonempty_text(spec.get("field"), f"objectives[{index}].field", 120)
+        if field in fields or field.casefold() == "name":
+            raise ValueError("Objective fields must be unique and cannot use the alternative name field.")
+        weight = _number(spec.get("weight"), f"objectives[{index}].weight", minimum=0)
+        direction = str(spec.get("direction") or "").strip().casefold()
+        if direction not in {"minimize", "maximize"}:
+            raise ValueError(f"Objective {field} direction must be minimize or maximize.")
+        fields.append(field)
+        weights.append(weight)
+        minimize.append(direction == "minimize")
+    if not any(weight > 0 for weight in weights):
+        raise ValueError("At least one objective weight must be greater than zero.")
+    for row_index, row in enumerate(alternatives, start=1):
+        for field in fields:
+            _number(row.get(field), f"alternatives[{row_index}].{field}")
+    frame = pd.DataFrame(alternatives)
+    from shoir_optimization import pareto_weight_sweep
+
+    ranked = pareto_weight_sweep(frame, fields, weights=weights, minimize=minimize)
+    candidate_count = int(ranked["Pareto Candidate"].fillna(False).astype(bool).sum())
+    return {
+        "tool_id": "T067",
+        "status": "PARETO_TRADEOFFS_ANALYZED",
+        "alternative_count": len(ranked),
+        "objective_count": len(fields),
+        "pareto_candidate_count": candidate_count,
+        "objective_definitions": [
+            {"field": field, "weight": weight, "direction": "minimize" if mn else "maximize"}
+            for field, weight, mn in zip(fields, weights, minimize)
+        ],
+        "ranked_alternatives": ranked,
+        "data_provenance": str(payload.get("data_provenance") or "USER_ENTERED_UNVERIFIED"),
+        "warning": (
+            "The weighted score is a user-weighted comparison aid, not a universal optimum. Pareto "
+            "candidates are based only on the declared numeric objectives; omitted constraints, units, "
+            "uncertainties and engineering feasibility are not inferred."
+        ),
+    }
+
+
+def robust_linear_optimization(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Minimize the worst-case linear objective over an explicitly declared scenario set (T068)."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("T068 payload must be a JSON object.")
+    raw_scenarios = payload.get("scenario_objectives")
+    if isinstance(raw_scenarios, (str, bytes)) or not isinstance(raw_scenarios, Sequence) or len(raw_scenarios) < 2:
+        raise ValueError("T068 requires at least two scenario objective vectors.")
+    scenarios: list[list[float]] = []
+    variable_count: int | None = None
+    for row_index, row in enumerate(raw_scenarios, start=1):
+        if isinstance(row, (str, bytes)) or not isinstance(row, Sequence) or not row:
+            raise ValueError(f"scenario_objectives[{row_index}] must be a non-empty numeric vector.")
+        values = [_number(value, f"scenario_objectives[{row_index}][{column_index}]") for column_index, value in enumerate(row, start=1)]
+        if variable_count is None:
+            variable_count = len(values)
+        elif len(values) != variable_count:
+            raise ValueError("All scenario objective vectors must have the same number of variables.")
+        scenarios.append(values)
+    if variable_count is None:
+        raise ValueError("T068 needs at least one decision variable.")
+
+    def matrix(name: str) -> list[list[float]] | None:
+        raw = payload.get(name)
+        if raw is None:
+            return None
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+            raise ValueError(f"{name} must be a matrix of numeric rows.")
+        parsed = []
+        for row_index, row in enumerate(raw, start=1):
+            if isinstance(row, (str, bytes)) or not isinstance(row, Sequence) or len(row) != variable_count:
+                raise ValueError(f"{name}[{row_index}] must contain {variable_count} coefficients.")
+            parsed.append([_number(value, f"{name}[{row_index}][{column_index}]") for column_index, value in enumerate(row, start=1)])
+        return parsed
+
+    def vector(name: str, row_count: int | None) -> list[float] | None:
+        raw = payload.get(name)
+        if raw is None:
+            return None
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+            raise ValueError(f"{name} must be a numeric vector.")
+        parsed = [_number(value, f"{name}[{index}]") for index, value in enumerate(raw, start=1)]
+        if row_count is not None and len(parsed) != row_count:
+            raise ValueError(f"{name} length must match its constraint matrix row count.")
+        return parsed
+
+    a_ub, a_eq = matrix("A_ub"), matrix("A_eq")
+    b_ub = vector("b_ub", len(a_ub) if a_ub is not None else None)
+    b_eq = vector("b_eq", len(a_eq) if a_eq is not None else None)
+    if (a_ub is None) != (b_ub is None) or (a_eq is None) != (b_eq is None):
+        raise ValueError("Each supplied constraint matrix must have its matching right-hand-side vector.")
+    raw_bounds = payload.get("bounds")
+    bounds = None
+    if raw_bounds is not None:
+        if isinstance(raw_bounds, (str, bytes)) or not isinstance(raw_bounds, Sequence) or len(raw_bounds) != variable_count:
+            raise ValueError("bounds must have one [lower, upper] pair per decision variable.")
+        bounds = []
+        for index, pair in enumerate(raw_bounds, start=1):
+            if isinstance(pair, (str, bytes)) or not isinstance(pair, Sequence) or len(pair) != 2:
+                raise ValueError(f"bounds[{index}] must be a [lower, upper] pair.")
+            lower = None if pair[0] is None else _number(pair[0], f"bounds[{index}].lower")
+            upper = None if pair[1] is None else _number(pair[1], f"bounds[{index}].upper")
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError(f"bounds[{index}] lower limit exceeds upper limit.")
+            bounds.append((lower, upper))
+
+    from shoir_optimization import solve_robust_linear_program
+
+    result = solve_robust_linear_program(
+        scenarios, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq, bounds=bounds,
+    )
+    solved = bool(result.get("success"))
+    variables = np.asarray(result.get("variables"), dtype=float)
+    return {
+        "tool_id": "T068",
+        "status": "ROBUST_OPTIMAL" if solved else "ROBUST_NOT_SOLVED",
+        "success": solved,
+        "worst_case_objective": float(result["worst_case_objective"]) if solved else None,
+        "decision_variables": variables.tolist() if solved else [],
+        "scenario_objectives": scenarios,
+        "solver_message": str(result.get("message") or ""),
+        "data_provenance": str(payload.get("data_provenance") or "USER_ENTERED_UNVERIFIED"),
+        "warning": (
+            "This is a static worst-case linear objective over the scenarios supplied by the user, "
+            "using one common linear feasible region. It is not a general nonlinear, stochastic, "
+            "multi-period or uncertainty-distribution model. Validate scenario coverage and units."
+        ),
+    }
+
+
 def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Dispatch only the explicitly implemented, deterministic tool IDs."""
     if not isinstance(payload, Mapping):
         raise ValueError("Tool payload must be a JSON object.")
     dispatch = {
         "T006": recovery_action,
+        "T061": linear_mixed_integer_optimization,
+        "T067": multiobjective_optimization,
+        "T068": robust_linear_optimization,
         "T020": dataset_version_lineage,
         "T039": capa_lifecycle_review,
         "T060": supply_chain_network_plan,
@@ -928,6 +1109,36 @@ def run_additional_tool(tool_id: str, payload: Mapping[str, Any]) -> dict[str, A
 def get_tool_example_json(tool_id: str) -> str:
     """Return clearly synthetic example inputs for the Workbench JSON editor."""
     examples = {
+        "T061": {
+            "variable_spec": {"x": {"low": 0, "up": 4, "category": "Continuous"}, "y": {"low": 0, "up": 8, "category": "Integer"}},
+            "objective_coefficients": {"x": 3, "y": 5},
+            "constraints": [{"name": "minimum_output", "coefficients": {"x": 1, "y": 1}, "sense": ">=", "rhs": 10}],
+            "direction": "minimize",
+            "time_limit_seconds": 10,
+            "feasibility_tolerance": 1e-7,
+            "data_provenance": "SYNTHETIC_EXAMPLE",
+        },
+        "T067": {
+            "alternatives": [
+                {"name": "Alternative A", "cost": 100, "quality": 80, "carbon": 25},
+                {"name": "Alternative B", "cost": 90, "quality": 70, "carbon": 20},
+                {"name": "Alternative C", "cost": 110, "quality": 95, "carbon": 30},
+                {"name": "Alternative D", "cost": 120, "quality": 65, "carbon": 40},
+            ],
+            "objectives": [
+                {"field": "cost", "weight": 0.4, "direction": "minimize"},
+                {"field": "quality", "weight": 0.35, "direction": "maximize"},
+                {"field": "carbon", "weight": 0.25, "direction": "minimize"},
+            ],
+            "data_provenance": "SYNTHETIC_EXAMPLE",
+        },
+        "T068": {
+            "scenario_objectives": [[3, 2], [2, 4]],
+            "A_eq": [[1, 1]],
+            "b_eq": [10],
+            "bounds": [[0, 10], [0, 10]],
+            "data_provenance": "SYNTHETIC_EXAMPLE",
+        },
         "T006": {
             "action": "snapshot",
             "current_index": 0,

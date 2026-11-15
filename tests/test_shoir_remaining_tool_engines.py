@@ -391,7 +391,7 @@ def test_governance_retention_and_delete_plans_do_not_delete_data():
 
 
 def test_all_target_examples_are_valid_json():
-    for tool_id in ("T006", "T020", "T039", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"):
+    for tool_id in ("T006", "T020", "T039", "T060", "T061", "T067", "T068", "T074", "T080", "T094", "T096", "T097", "T098", "T099"):
         value = json.loads(get_tool_example_json(tool_id))
         assert isinstance(value, dict)
         out = run_additional_tool(tool_id, value)
@@ -418,3 +418,45 @@ def test_identity_config_separates_invalid_settings_from_missing_provider(monkey
     assert not out["openid_scope_present"]
     assert len(out["configuration_problems"]) >= 3
     assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
+
+
+def test_t061_linear_mixed_integer_optimization_runs_and_checks_constraints():
+    out = run_additional_tool("T061", json.loads(get_tool_example_json("T061")))
+    assert out["tool_id"] == "T061"
+    assert out["status"] in {
+        "OPTIMAL_FEASIBLE",
+        "FEASIBLE_NOT_PROVEN_OPTIMAL",
+        "NO_VERIFIED_FEASIBLE_SOLUTION",
+        "SOLVER_ERROR",
+    }
+    if out["status"] != "SOLVER_ERROR":
+        assert out["variable_count"] == 2
+        assert out["constraint_count"] == 1
+    if out["status"] in {"OPTIMAL_FEASIBLE", "FEASIBLE_NOT_PROVEN_OPTIMAL"}:
+        assert out["independent_feasibility_check"] is True
+        assert out["objective_value"] == pytest.approx(42.0, abs=1e-5)
+
+
+def test_t067_multiobjective_pareto_rejects_invalid_contracts_and_finds_frontier():
+    out = run_additional_tool("T067", json.loads(get_tool_example_json("T067")))
+    assert out["status"] == "PARETO_TRADEOFFS_ANALYZED"
+    assert out["alternative_count"] == 4
+    assert out["pareto_candidate_count"] == 3
+    assert bool(out["ranked_alternatives"].iloc[0]["Pareto Candidate"]) is True
+    bad = json.loads(get_tool_example_json("T067"))
+    for objective in bad["objectives"]:
+        objective["weight"] = 0
+    with pytest.raises(ValueError, match="At least one objective weight"):
+        run_additional_tool("T067", bad)
+
+
+def test_t068_robust_linear_optimization_solves_worst_case_scenario():
+    out = run_additional_tool("T068", json.loads(get_tool_example_json("T068")))
+    assert out["tool_id"] == "T068"
+    assert out["status"] == "ROBUST_OPTIMAL"
+    assert out["success"] is True
+    assert out["worst_case_objective"] == pytest.approx(80.0 / 3.0, abs=1e-6)
+    assert out["decision_variables"][0] == pytest.approx(20.0 / 3.0, abs=1e-6)
+    bad = {"scenario_objectives": [[1, 2], [3]], "bounds": [[0, 1], [0, 1]]}
+    with pytest.raises(ValueError, match="same number"):
+        run_additional_tool("T068", bad)

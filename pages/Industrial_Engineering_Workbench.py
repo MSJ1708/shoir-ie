@@ -466,7 +466,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T096", "T097", "T098", "T099", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -1538,6 +1538,30 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             monte_carlo_seed = st.number_input("Random seed", min_value=0, max_value=4294967295, value=42, step=1, key="tool072_seed")
                             monte_carlo_unit = st.text_input("Net outcome unit / currency label", "SAR (illustrative)", key="tool072_unit")
                             run_method = st.form_submit_button("Run Monte Carlo simulation", type="primary", use_container_width=True, key="tool072_run")
+                        elif selected_tool["tool_id"] == "T061":
+                            st.caption("LP/MILP execution with explicit variable domains, linear constraints and independent post-solve feasibility diagnostics. A solver error or time limit is not an optimal solution.")
+                            tool061_payload_json = st.text_area(
+                                "Optimization model (JSON object: variable_spec, objective_coefficients, constraints)",
+                                value=get_tool_example_json("T061"),
+                                key="tool061_payload",
+                            )
+                            run_method = st.form_submit_button("Solve LP / MILP model", type="primary", use_container_width=True, key="tool061_run")
+                        elif selected_tool["tool_id"] == "T067":
+                            st.caption("Weighted trade-off ranking and Pareto candidates across explicit numeric objectives. The ranking is not a universal optimum.")
+                            tool067_payload_json = st.text_area(
+                                "Alternatives and objective definitions (JSON object)",
+                                value=get_tool_example_json("T067"),
+                                key="tool067_payload",
+                            )
+                            run_method = st.form_submit_button("Calculate Pareto trade-offs", type="primary", use_container_width=True, key="tool067_run")
+                        elif selected_tool["tool_id"] == "T068":
+                            st.caption("Worst-case linear objective over explicit scenario coefficient vectors and a shared feasible region. Scenario coverage and units must be reviewed.")
+                            tool068_payload_json = st.text_area(
+                                "Robust LP scenarios and constraints (JSON object)",
+                                value=get_tool_example_json("T068"),
+                                key="tool068_payload",
+                            )
+                            run_method = st.form_submit_button("Solve robust linear model", type="primary", use_container_width=True, key="tool068_run")
                         elif selected_tool["tool_id"] == "T085":
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -1787,6 +1811,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
                     elif selected_tool["tool_id"] == "T062":
                         current_tool_inputs = {"variables_json": solver_variables_json, "objective_json": solver_objective_json, "constraints_json": solver_constraints_json, "direction": solver_direction, "time_limit_seconds": solver_time_limit, "feasibility_tolerance": solver_tolerance}
+                    elif selected_tool["tool_id"] == "T061":
+                        current_tool_inputs = {"payload_json": tool061_payload_json}
+                    elif selected_tool["tool_id"] == "T067":
+                        current_tool_inputs = {"payload_json": tool067_payload_json}
+                    elif selected_tool["tool_id"] == "T068":
+                        current_tool_inputs = {"payload_json": tool068_payload_json}
                     elif selected_tool["tool_id"] == "T087":
                         current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
 
@@ -1805,7 +1835,25 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         try:
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
-                            if selected_tool["tool_id"] == "T006":
+                            if selected_tool["tool_id"] in {"T061", "T067", "T068"}:
+                                payload_json = {
+                                    "T061": tool061_payload_json,
+                                    "T067": tool067_payload_json,
+                                    "T068": tool068_payload_json,
+                                }[selected_tool["tool_id"]]
+                                try:
+                                    parsed_payload = json.loads(payload_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError(f"{selected_tool['tool_id']} input must be valid JSON.") from exc
+                                if not isinstance(parsed_payload, dict):
+                                    raise ValueError(f"{selected_tool['tool_id']} input must be a JSON object.")
+                                result = run_additional_tool(selected_tool["tool_id"], parsed_payload)
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if parsed_payload.get("data_provenance") == "SYNTHETIC_EXAMPLE"
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T006":
                                 try:
                                     additional_payload = json.loads(tool006_payload_json)
                                 except json.JSONDecodeError as exc:
@@ -2688,7 +2736,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T096", "T097", "T098", "T099", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T094", "T096", "T097", "T098", "T099", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)

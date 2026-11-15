@@ -1100,3 +1100,33 @@ def test_workbench_t094_future_dated_measurement_does_not_open_alert():
     assert at.session_state.get("shoir_kpi_open_alert_records", []) == []
     assert result["kpis"].iloc[0]["status"] == "FUTURE_TIMESTAMP"
 
+
+
+def test_workbench_runs_canonical_lp_milp_pareto_and_robust_tools():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "optimization-tool-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T061 · Linear and Mixed-Integer Optimization", "tool061_run", "shoir_tool_result_T061"),
+        ("T067 · Multi-Objective Optimization", "tool067_run", "shoir_tool_result_T067"),
+        ("T068 · Sensitivity and Robust Optimization", "tool068_run", "shoir_tool_result_T068"),
+    ]
+    for label, button_key, result_key in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{label} form failed: " + "\\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{label} execution failed: " + "\\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(result_key)
+        assert result is not None
+        assert result["tool_id"] == label.split(" · ", 1)[0]
+    assert at.session_state["shoir_tool_result_T067"]["status"] == "PARETO_TRADEOFFS_ANALYZED"
+    assert at.session_state["shoir_tool_result_T068"]["status"] == "ROBUST_OPTIMAL"
