@@ -1639,6 +1639,46 @@ def test_dataset_linked_shift_handover_cannot_be_acknowledged_after_source_chang
         )
 
 
+def test_dataset_version_invalidation_marks_operational_event_mirror_stale(monkeypatch):
+    session = _configure_personal_session(monkeypatch)
+    access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
+    session["shoir_active_dataset_dependency"] = {
+        "dataset_id": "DS-ABCDEF660044",
+        "version": 1,
+        "data_hash": "a" * 64,
+        "version_fingerprint": "b" * 64,
+        "organization_id": access["organization_id"],
+        "workspace_id": access["workspace_id"],
+        "source_name": "synthetic-event-source.csv",
+        "current_version_verified": True,
+    }
+    session["shoir_dataset_dependency_tracking_enabled"] = True
+    event = ii.create_operational_event(
+        "synthetic-owner", "Enterprise", "PROCESS_DEVIATION",
+        "Synthetic process deviation from the current dataset.",
+        "ASSET-001", "2026-10-15T09:00:00Z", "SYNTHETIC",
+    )
+    assert event["dataset_dependency_status"] == "CURRENT"
+    event_mirror = next(
+        row for row in ii._state_list("events")
+        if row["record_id"] == event["record_id"]
+    )
+    assert event_mirror["dataset_dependency_status"] == "CURRENT"
+
+    result = ii.invalidate_dataset_dependents(
+        "synthetic-owner", "Enterprise", "DS-ABCDEF660044",
+        2, "c" * 64, "d" * 64,
+    )
+    assert event["record_id"] in result["stale_record_ids"]
+    assert event["record_id"] in result["stale_event_ids"]
+    stale_mirror = next(
+        row for row in ii._state_list("events")
+        if row["record_id"] == event["record_id"]
+    )
+    assert stale_mirror["record_status"] == "STALE"
+    assert stale_mirror["dataset_dependency_status"] == "STALE"
+
+
 def test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_validation(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     access = ii._session_authorize("synthetic-owner", "Enterprise", "write")
