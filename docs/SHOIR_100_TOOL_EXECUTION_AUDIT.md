@@ -15,11 +15,11 @@
 | Verified working | 0 | No tool is promoted to verified by this static audit |
 | External configuration required | 4 | T096–T099 still depend on real service/configuration and acceptance |
 
-The 25 mapped-module-only IDs are:
+The 22 mapped-module-only IDs are:
 
 `T001, T003, T004, T005, T008, T011, T012, T013, T014, T020, T053, T057, T064, T065, T073, T086, T088, T090, T091, T092, T093, T095`.
 
-The directory's **Open mapped Workbench module** action is a navigation route. It is not proof that the selected canonical ID is carried through the target module's calculation, permission check, persistence, export or audit path. The mapped legacy module must enforce its own native server-side entitlement and authorization rules. These 25 IDs therefore remain a concrete canonical-ID wiring/acceptance gap, even though the corresponding legacy module route is declared.
+The directory's **Open mapped Workbench module** action is a navigation route. It is not proof that the selected canonical ID is carried through the target module's calculation, permission check, persistence, export or audit path. The mapped legacy module must enforce its own native server-side entitlement and authorization rules. These 22 IDs therefore remain a concrete canonical-ID wiring/acceptance gap, even though the corresponding legacy module route is declared.
 
 ## What the audit checks
 
