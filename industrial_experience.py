@@ -142,11 +142,11 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_projects(project_id TEXT PRIMARY KEY,name TEXT,module TEXT,owner TEXT,status TEXT,payload_json TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_project_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,snapshot_no INTEGER,payload_json TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_lineage(id INTEGER PRIMARY KEY AUTOINCREMENT,source_type TEXT,source_id TEXT,target_type TEXT,target_id TEXT,relation TEXT,actor TEXT,created_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_decisions(decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,status TEXT,metrics_json TEXT,assumptions_json TEXT,uncertainty_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decisions(decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,status TEXT,metrics_json TEXT,assumptions_json TEXT,uncertainty_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT,dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE TABLE IF NOT EXISTS experience_decision_specs(decision_id TEXT PRIMARY KEY,baseline_json TEXT,alternatives_json TEXT,constraints_json TEXT,kpis_json TEXT,uncertainty_json TEXT,evidence_json TEXT,verification_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decision_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT,decision_id TEXT,from_status TEXT,to_status TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,decision_id TEXT,actor TEXT,comment TEXT,created_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT,dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE INDEX IF NOT EXISTS idx_exp_decision_outcomes_decision ON experience_decision_outcomes(decision_id,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT,owner TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
@@ -165,6 +165,20 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
         ]
         for statement in statements:
             conn.execute(statement)
+        # Backward-compatible additive lineage migration. Existing decisions and
+        # outcomes remain NOT_LINKED unless they carried explicit dataset evidence.
+        for table_name in ("experience_decisions", "experience_decision_outcomes"):
+            existing_columns = {
+                str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")
+            }
+            for column, definition in (
+                ("dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("dataset_dependency_status", "TEXT NOT NULL DEFAULT 'NOT_LINKED'"),
+                ("stale_dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if column not in existing_columns:
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {definition}")
+
         # Backward-compatible migration: keep prior rows with owner=NULL.
         job_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(experience_jobs)")}
         if "owner" not in job_columns:
@@ -531,11 +545,18 @@ def record_decision_outcome(
     if status not in {"Planned", "Implemented", "Verified"}:
         raise ValueError("Invalid implementation status.")
     with _db(db_path) as conn:
-        row = conn.execute("SELECT owner FROM experience_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        row = conn.execute(
+            "SELECT owner,dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
         if not row:
             raise ValueError("Decision not found.")
         if str(row[0]) != owner:
             raise PermissionError("Decision belongs to another workspace owner.")
+        if str(row[1] or "NOT_LINKED").upper() == "STALE":
+            raise ValueError("Cannot record a new decision outcome because its source dataset version is stale. Rerun and reapprove the decision against current data.")
+        decision_dependencies_json = str(row[2] or "[]")
+        decision_dependency_status = str(row[1] or "NOT_LINKED")
     variance = calculate_decision_variance(predicted, actual)
     outcome_id = "OUT-" + uuid.uuid4().hex[:12].upper()
     now = _now()
@@ -544,13 +565,18 @@ def record_decision_outcome(
     variance_payload = variance.to_dict("records")
     with _db(db_path) as conn:
         conn.execute(
-            "INSERT INTO experience_decision_outcomes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            """INSERT INTO experience_decision_outcomes(
+                outcome_id,decision_id,owner,implementation_status,predicted_json,
+                actual_json,variance_json,lesson,verified_at,created_at,
+                dataset_dependencies_json,dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 outcome_id, decision_id, owner, status,
                 json.dumps(predicted_payload, default=str, sort_keys=True),
                 json.dumps(actual_payload, default=str, sort_keys=True),
                 json.dumps(variance_payload, default=str),
                 str(lesson or "")[:2000], str(verified_at or "") or None, now,
+                decision_dependencies_json, decision_dependency_status, "[]",
             ),
         )
         if lesson or actual_payload:
