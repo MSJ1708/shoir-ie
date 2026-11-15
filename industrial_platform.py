@@ -775,6 +775,12 @@ def register_dataset(
         )
         return resolved_dataset_id
 
+    if str(APP_ENVIRONMENT).casefold() not in {"local", "development", "test"}:
+        raise RuntimeError(
+            "Managed dataset versioning is not configured for this deployment. "
+            "The local SQLite fallback is disabled outside local/development/test environments."
+        )
+
     # Initialise the local schema before standalone registration. The app shell
     # normally does this at startup, but library callers and fresh workspaces may
     # reach this path without that startup sequence. This is idempotent and local
