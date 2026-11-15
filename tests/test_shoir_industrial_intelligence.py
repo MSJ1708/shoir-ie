@@ -1298,6 +1298,38 @@ def test_active_dataset_dependency_is_attached_to_saved_records_and_thread_nodes
 
 
 
+def test_first_dataset_version_creates_persisted_digital_thread_node_at_import(monkeypatch):
+    import hashlib
+    import durable_account_store
+    import industrial_platform as platform
+
+    session = _configure_personal_session(monkeypatch, "synthetic-dataset-import", "owner")
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+    frame = pd.DataFrame({"Output": [10.0, 11.0], "Energy": [4.0, 4.2]})
+    dataset_id = platform.register_dataset(
+        "Initial import dataset", "initial-import.csv", frame,
+        username="synthetic-dataset-import", workspace="personal",
+    )
+    expected_hash = hashlib.sha256(
+        frame.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    ).hexdigest()
+
+    assert session["shoir_active_dataset_dependency"]["dataset_id"] == dataset_id
+    assert session["shoir_active_dataset_dependency"]["version"] == 1
+    assert session["shoir_dataset_thread_sync_status"] == "SAVED"
+    node = next(
+        item for item in session["global_thread_nodes"]
+        if item.get("node_type") == "Dataset"
+        and item.get("metadata", {}).get("dataset_id") == dataset_id
+        and item.get("metadata", {}).get("version") == 1
+    )
+    assert node["status"] == "Current"
+    assert node["metadata"]["data_hash"] == expected_hash
+    assert node["metadata"]["current_version_verified"] is True
+    assert session["shoir_active_dataset_thread_node_id"] == node["node_id"]
+
+
 def test_dataset_version_change_is_persisted_when_no_prior_analysis_depends_on_it(monkeypatch):
     session = _configure_personal_session(monkeypatch)
     result = ii.invalidate_dataset_dependents(
