@@ -722,6 +722,42 @@ def _activate_registered_dataset_dependency(
     state["shoir_active_dataset_dependency"] = dependency
     state["shoir_dataset_dependency_tracking_enabled"] = True
     state["shoir_dataset_lineage_invalidation"] = invalidation
+
+    # Create the first Dataset-version node at import time, not only after a
+    # later analysis or version change. Repeated registration is idempotent
+    # because the Digital Thread node identity is derived from dataset ID/version.
+    if (
+        state.get("authenticated") is True
+        and str(state.get("current_user") or "").strip().casefold() == str(username).strip().casefold()
+        and tier_allows(str(state.get("user_tier") or "Starter"), "Enterprise")
+    ):
+        try:
+            from shoir_industrial_intelligence import _sync_dataset_thread_dependency
+            from workspace_persistence import save_user_workspace
+
+            dataset_node_id = _sync_dataset_thread_dependency(
+                username,
+                str(state.get("user_tier") or "Enterprise"),
+                dependency,
+            )
+            if not save_user_workspace(username, state):
+                raise RuntimeError(
+                    str(state.get("_workspace_save_error") or "Initial Dataset Thread node save was not confirmed.")
+                )
+            state["shoir_active_dataset_thread_node_id"] = dataset_node_id
+            state["shoir_dataset_thread_sync_status"] = "SAVED"
+        except Exception as exc:
+            state["shoir_dataset_lineage_blocked"] = True
+            state["shoir_dataset_thread_sync_status"] = "SAVE_FAILED"
+            state["shoir_dataset_thread_sync_error"] = str(exc)[:500]
+            state["shoir_dataset_lineage_invalidation"] = {
+                **invalidation,
+                "dataset_thread_status": "SAVE_FAILED",
+                "error": str(exc)[:500],
+            }
+    else:
+        state["shoir_dataset_thread_sync_status"] = "NOT_RUN_NO_AUTHENTICATED_ENTERPRISE_SESSION"
+
     return dependency
 
 
