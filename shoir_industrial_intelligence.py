@@ -3143,12 +3143,16 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
     if not term:
         raise IndustrialIntelligenceError("Enter a question or search term.")
     records = _state_list("records")
-    stale_records = [
-        row for row in records
-        if str(row.get("record_status") or "").upper() == "STALE"
-        or str(row.get("dataset_dependency_status") or "").upper() == "STALE"
-    ]
-    current_records = [row for row in records if row not in stale_records]
+    current_records = []
+    excluded_stale_evidence_count = 0
+    for row in records:
+        if (
+            str(row.get("record_status") or "").upper() == "STALE"
+            or str(row.get("dataset_dependency_status") or "").upper() == "STALE"
+        ):
+            excluded_stale_evidence_count += 1
+        else:
+            current_records.append(row)
     tokens = [token for token in re.findall(r"[a-z0-9_-]{3,}", term) if token]
     matches = []
     for row in current_records:
@@ -3194,7 +3198,7 @@ def copilot_evidence_context(username: str, tier: str, query: str, limit: int = 
         "status": "EVIDENCE_RETRIEVED" if results else "INSUFFICIENT_MATCHING_EVIDENCE",
         "query": query,
         "citations": results,
-        "excluded_stale_evidence_count": len(stale_records),
+        "excluded_stale_evidence_count": excluded_stale_evidence_count,
         "digital_thread": {"nodes": linked_nodes, "relationships": [_copilot_safe_payload(edge, 800) for edge in linked_edges[:40]]},
         "answer_boundary": "This is workspace-scoped evidence retrieval, not an AI-generated causal conclusion. Cite record IDs, distinguish observed facts from hypotheses, and disclose missing or contradictory evidence.",
     }
