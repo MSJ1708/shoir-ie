@@ -112,3 +112,16 @@ This local registry stores dataset version metadata and hashes, not the original
 - Regression tests cover first-import Dataset Thread persistence, failed initial graph save, unresolved-lineage approval/Copilot blocking, A → B → A versioning and old-table uniqueness migration.
 
 CI for the latest candidate head remains pending. These are source changes and authored tests, not hosted acceptance evidence.
+
+
+## Retry-safe activation and atomic current-head persistence — 2026-11-15
+
+A final ordering review found that the newly active dataset dependency and Thread save status needed to be part of the same persisted snapshot as the Thread node/event. The candidate now:
+
+- Sets the active dataset dependency and enables lineage tracking before calling the idempotent invalidation/persistence routine.
+- Re-runs idempotent invalidation on every authenticated Enterprise activation, including when the same immutable dataset version is reopened after a fresh login. This retries a previously failed lineage save instead of trusting a session-local flag.
+- Persisting the current Dataset node, active dataset dependency, workspace-wide lineage status and lineage event is one managed workspace save. A confirmed save clears the block; a failed save restores artifact/graph changes and sets `SAVE_FAILED` plus the workspace block.
+- Reuses one lineage event for each dataset ID/version and unions the prior affected artifact IDs into the event payload on subsequent activation. This preserves the audit trail without creating duplicate events or erasing the original affected-ID list.
+- The fresh-session retry regression test verifies that reopening the same version after a deliberately failed save clears the block only after a successful persistence call, and that the saved snapshot includes the active dependency, current node ID and unblocked state.
+
+The latest candidate also includes a Workbench AppTest asserting that a future-dated T094 KPI observation is visible as `FUTURE_TIMESTAMP` but opens no alert. T094 unit and UI tests are both authored; exact-head CI remains pending.
