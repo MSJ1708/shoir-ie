@@ -147,3 +147,95 @@ def test_platform_schema_initialization_is_repeatable_on_a_fresh_database(tmp_pa
         assert {"dataset_id", "run_id", "solver_version", "result_hash"}.issubset(model_columns)
         assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
+
+
+def test_application_sqlite_calls_use_close_aware_connections():
+    """Guard every application/page/script module against raw SQLite handles.
+
+    The central helper is the only allowed raw sqlite3.connect implementation;
+    it installs ClosingSQLiteConnection by default. All other direct sqlite3
+    calls must declare that factory explicitly. Calls through sqlite_connect
+    are safe because the helper supplies the factory.
+    """
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    candidates = (
+        list(root.glob("*.py"))
+        + list((root / "pages").rglob("*.py"))
+        + list((root / "scripts").rglob("*.py"))
+    )
+    violations = []
+
+    for source_path in sorted(set(candidates)):
+        if source_path.name == "shoir_sqlite.py":
+            continue
+        try:
+            source = source_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(source_path))
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            violations.append(f"{source_path.relative_to(root)}: could not audit source ({type(exc).__name__})")
+            continue
+
+        sqlite_module_names = set()
+        sqlite_connect_names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "sqlite3":
+                        sqlite_module_names.add(alias.asname or "sqlite3")
+            elif isinstance(node, ast.ImportFrom) and node.module in {"sqlite3", "sqlite3.dbapi2"}:
+                for alias in node.names:
+                    if alias.name == "connect":
+                        sqlite_connect_names.add(alias.asname or "connect")
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            function = node.func
+            direct_sqlite_connect = (
+                isinstance(function, ast.Attribute)
+                and function.attr == "connect"
+                and isinstance(function.value, ast.Name)
+                and function.value.id in sqlite_module_names
+            ) or (
+                isinstance(function, ast.Name)
+                and function.id in sqlite_connect_names
+            )
+            if not direct_sqlite_connect:
+                continue
+
+            factory = next((kw.value for kw in node.keywords if kw.arg == "factory"), None)
+            if not isinstance(factory, ast.Name) or factory.id != "ClosingSQLiteConnection":
+                relative = source_path.relative_to(root)
+                violations.append(f"{relative}:{node.lineno}: direct sqlite3.connect lacks ClosingSQLiteConnection")
+
+    assert not violations, "Unsafe application SQLite connection callsites:\n" + "\n".join(violations)
+
+
+def test_sqlite_connect_helper_installs_close_aware_factory_by_default():
+    """The central helper must remain the only default raw connection boundary."""
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    source_path = root / "shoir_sqlite.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    helper = next(
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "sqlite_connect"
+    )
+    installs_factory = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "setdefault"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "kwargs"
+        and len(node.args) == 2
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "factory"
+        and isinstance(node.args[1], ast.Name)
+        and node.args[1].id == "ClosingSQLiteConnection"
+        for node in ast.walk(helper)
+    )
+    assert installs_factory, "sqlite_connect must default to ClosingSQLiteConnection."

@@ -33,3 +33,15 @@ These tests were added to the candidate; they have not yet completed a passing e
 ## Acceptance rule
 
 Close this gate only after the full exact-head CI is green with no unapproved skips, the caller inventory is complete, and the application lifecycle test proves repeated use/restart without leaked handles, database-lock failures or schema regression. Do not label the SQLite layer production-ready on the basis of the wrapper tests alone.
+
+
+## Source-callsite audit update — 2026-11-16
+
+A focused source inventory was completed across the tracked application modules, Streamlit pages and repository scripts. Every discovered direct `sqlite3.connect()` call outside the central helper supplies `factory=ClosingSQLiteConnection`; shared helper calls use `sqlite_connect()`, which installs that factory by default. In `app.py`, connections opened through the helper outside a `with` block have explicit `.close()` calls in their surrounding code paths. Long-lived database abstractions are separately managed by their owning object or context.
+
+Two new regression guards now make this contract enforceable in CI:
+
+- `test_application_sqlite_calls_use_close_aware_connections` scans application, `pages/` and `scripts/` Python sources and rejects direct SQLite calls without the close-aware factory.
+- `test_sqlite_connect_helper_installs_close_aware_factory_by_default` verifies the central helper continues to install the close-aware factory.
+
+This closes the **source inventory/guard** item; it does not prove that all database upgrade paths, Streamlit restarts, concurrent production-like workloads or runtime file-handle behaviour have passed. The final status remains **runtime acceptance pending** until these guards, the complete exact-head suite and the extended lifecycle tests pass, and a disposable-runtime lifecycle/restart test is inspected. No SQLite database or hosted environment was changed by this source audit.
