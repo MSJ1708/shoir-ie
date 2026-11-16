@@ -158,7 +158,13 @@ def test_enterprise_user_can_open_excel_intelligence_from_workbench_data(monkeyp
 
     assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
     assert app.session_state["workbench_module_selector"] == "Data · Excel Intelligence"
-    assert any("Available in this staging implementation" in str(item.value) for item in app.info)
+    assert any("Available in this staging implementation" in str(item.value) for item in app.info), (
+    "Excel Intelligence content was not rendered. "
+    f"info={[str(item.value) for item in app.info]} "
+    f"warning={[str(item.value) for item in app.warning]} "
+    f"error={[str(item.value) for item in app.error]} "
+    f"markdown={[str(item.value)[:180] for item in app.markdown[-12:]]}"
+)
 
 
 def test_professional_user_sees_excel_intelligence_locked_in_workbench_data():
