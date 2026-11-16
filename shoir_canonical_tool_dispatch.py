@@ -294,6 +294,12 @@ def execute_canonical_tool(tool_id: str,payload: Mapping[str,Any],tier: str,acto
 
 def _render_result(tid,result):
     import streamlit as st
+    st.caption(
+        "Status: "+str(result.get("status","NOT_RECORDED"))
+        +" · Provenance: "+str(result.get("data_provenance","NOT_DECLARED"))
+        +" · Method: "+str(result.get("method_version","NOT_RECORDED"))
+        +" · Created UTC: "+str(result.get("created_at","NOT_RECORDED"))
+    )
     for label,key in (("Available tools","available_tool_count"),("Recent tools","recent_tool_count"),("Search results","result_count"),("Literature records","record_count"),("Valid source formats","format_valid_count"),("Invalid source formats","invalid_source_count"),("Served stops","served_stop_count"),("Unserved stops","unserved_stop_count"),("Workflow steps","step_count"),("Ready for approval","ready_for_approval_count"),("Blocked steps","blocked_step_count")):
         if key in result: st.metric(label,result[key])
     if tid=="T090":
