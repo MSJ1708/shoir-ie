@@ -217,7 +217,10 @@ def _t088(p,actor):
 def _t090(p,actor):
     title,objective,method=(str(p.get(k) or "").strip() for k in ("study_title","objective","method"))
     if not title or not objective or not method or not str(p.get("limitations") or "").strip(): raise ValueError("Title, objective, method and limitations are required.")
-    inputs=_safe(_obj(p.get("inputs_json") or "{}","Inputs")); results=_safe(_obj(p.get("results_json") or "{}","Results")); assumptions=_safe(_rows(p.get("assumptions_json"),"Assumptions",200)); sources=_safe(_rows(p.get("sources_json"),"Sources",500)) if p.get("sources_json") else []
+    inputs=_safe(_obj(p.get("inputs_json") or "{}","Inputs")); results=_safe(_obj(p.get("results_json") or "{}","Results")); assumptions=_safe(_rows(p.get("assumptions_json"),"Assumptions",200))
+sources_raw=p.get("sources_json") or "[]"; sources_value=_parse(sources_raw,list,"Sources")
+if len(sources_value)>500 or any(not isinstance(item,dict) for item in sources_value): raise ValueError("Sources must be a JSON list with at most 500 object records.")
+sources=_safe(sources_value)
     lines=["# "+title[:300],"","Generated UTC: "+datetime.now(timezone.utc).isoformat(),"Method: "+method[:2000],"Method version: "+str(p.get("method_version") or "Not recorded"),"Data provenance: "+str(p.get("data_provenance") or "NOT_DECLARED"),"","## Objective",objective[:5000],"","## Input summary",json.dumps(inputs,ensure_ascii=False,indent=2,default=str),"","## Supplied results",json.dumps(results,ensure_ascii=False,indent=2,default=str),"","## Assumptions"]
     lines += ["- "+str(x.get("assumption") or x.get("description") or x)[:1000] for x in assumptions]
     lines += ["","## Sources (not independently verified)"]+["- "+str(x.get("citation") or x.get("title") or x)[:1000]+" — "+str(x.get("source") or x.get("doi") or x.get("url") or "No locator supplied")[:1000] for x in sources]
