@@ -1301,9 +1301,15 @@ def test_workbench_routes_and_executes_the_nine_previously_mapped_only_tools():
             # inventory capability.
             at.text_input(key="canonical_t003_query").set_value("home")
         elif tool_id == "T090":
+            # Streamlit form values are submitted together. Do not rerun the
+            # page between editing and submitting, or unsubmitted widget
+            # values may be discarded by AppTest.
+            at.text_input(key="canonical_t090_title").set_value("Synthetic engineering report")
             at.text_area(key="canonical_t090_objective").set_value("Document the supplied study objective.")
             at.text_area(key="canonical_t090_method").set_value("Use the supplied calculation method.")
-            at.run(timeout=120)
+            at.text_area(key="canonical_t090_limits").set_value(
+                "Supplied results and sources have not been independently verified."
+            )
 
         run_button = at.button(key="canonical_run_" + tool_id)
         assert run_button is not None, f"{tool_id} submit control was not rendered."
