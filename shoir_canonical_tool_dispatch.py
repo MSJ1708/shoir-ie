@@ -223,7 +223,7 @@ def _t088(p,actor):
         out.append({"citation_id":str(x.get("citation_id") or f"REF-{i:04d}"),"title":title[:500],"authors":str(x.get("authors") or "")[:500],"year":year,"source":source[:1000],"claim":claim[:2000],"method":method[:1000],"evidence_strength":str(x.get("evidence_strength") or "NOT_ASSESSED"),"review_status":str(x.get("review_status") or "NOT_REVIEWED"),"source_status":"FORMAT_VALID_NOT_VERIFIED" if valid else "INVALID_SOURCE_FORMAT","duplicate_source":source.casefold() in seen})
         seen.add(source.casefold())
     frame=pd.DataFrame(out)
-    return {**_base("T088",actor,"USER_ENTERED_UNVERIFIED","DOI/URL syntax only; no publisher, registry, paper, peer-review status or scientific claim was verified."),"evidence_matrix":frame,"record_count":len(frame),"format_valid_count":int(frame.source_status.eq("FORMAT_VALID_NOT_VERIFIED").sum()),"invalid_source_count":int(frame.source_status.eq("INVALID_SOURCE_FORMAT").sum()),"duplicate_source_count":int(frame.duplicate_source.sum())}
+    return {**_base("T088",actor,"USER_ENTERED_UNVERIFIED","DOI/URL syntax is checked only; sources are not verified against publishers or registries, and paper, peer-review status and scientific claims are not verified."),"evidence_matrix":frame,"record_count":len(frame),"format_valid_count":int(frame.source_status.eq("FORMAT_VALID_NOT_VERIFIED").sum()),"invalid_source_count":int(frame.source_status.eq("INVALID_SOURCE_FORMAT").sum()),"duplicate_source_count":int(frame.duplicate_source.sum())}
 
 def _t090(p,actor):
     title,objective,method=(str(p.get(k) or "").strip() for k in ("study_title","objective","method"))
@@ -237,7 +237,7 @@ def _t090(p,actor):
     lines += ["","## Sources (not independently verified)"]+["- "+str(x.get("citation") or x.get("title") or x)[:1000]+" — "+str(x.get("source") or x.get("doi") or x.get("url") or "No locator supplied")[:1000] for x in sources]
     lines += ["","## Limitations",str(p["limitations"])[:10000],"","This builder formats supplied content only. It does not rerun the analysis, validate calculations, retrieve citations, inspect source documents or verify operational outcomes."]
     body="\n".join(lines)
-    return {**_base("T090",actor,"USER_SUPPLIED_REPORT_CONTENT","Structured report builder only. It does not generate or verify calculations, citations, figures or peer-review evidence."),"report_markdown":body,"sha256":hashlib.sha256(body.encode()).hexdigest(),"filename":re.sub(r"[^A-Za-z0-9_-]+","-",title).strip("-_")[:70] or "shoir_ie_report","report_bytes":len(body.encode()),"source_count":len(sources)}
+    return {**_base("T090",actor,"USER_SUPPLIED_REPORT_CONTENT","Structured report builder only. It does not independently verify supplied calculations, citations, figures or peer-review evidence."),"report_markdown":body,"sha256":hashlib.sha256(body.encode()).hexdigest(),"filename":re.sub(r"[^A-Za-z0-9_-]+","-",title).strip("-_")[:70] or "shoir_ie_report","report_bytes":len(body.encode()),"source_count":len(sources)}
 
 def _t093(p,tier,actor):
     steps=_rows(p.get("steps_json"),"Workflow steps",300); by={}
@@ -364,7 +364,12 @@ def render_canonical_tool(selected_tool,tier,username,require_actor_callback,per
         try:
             require_tool_access(str(tier),tid); actor=require_actor_callback()
             result=execute_canonical_tool(tid,p,tier,actor,st.session_state)
+            result_key="shoir_tool_result_"+tid
+            # Keep the calculated result visible even when a persistence adapter
+            # reports a failed or unconfirmed save. The status remains explicit.
+            st.session_state[result_key]=result
             persist_callback(tid,result,safe_inputs)
+            st.session_state[result_key]=result
             st.success("The method returned a result. Review its limits and save status below.")
         except Exception as exc: st.error("Tool run could not be completed safely: "+str(exc))
     result=st.session_state.get("shoir_tool_result_"+tid)

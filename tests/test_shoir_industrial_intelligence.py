@@ -1908,7 +1908,7 @@ def test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_va
         if node.get("metadata", {}).get("industrial_record_id") == model["model_id"]
     )
     assert model_node["status"] == "Stale"
-    with pytest.raises(ii.IndustrialIntelligenceError, match="Model evidence is stale"):
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Model is stale because its source dataset evidence changed"):
         ii.validate_model_version(
             "synthetic-owner", "Enterprise", model["model_id"], ["SYNTHETIC:independent-review"]
         )
@@ -1955,7 +1955,7 @@ def test_dataset_version_invalidation_marks_linked_actions_stale_and_blocks_appr
         if node.get("metadata", {}).get("industrial_record_id") == action["action_id"]
     )
     assert action_node["status"] == "Stale"
-    with pytest.raises(ii.IndustrialIntelligenceError, match="Action evidence is stale"):
+    with pytest.raises(ii.IndustrialIntelligenceError, match="Action is stale because its source dataset evidence changed"):
         ii.approve_action("synthetic-owner", "Enterprise", action["action_id"])
 
 

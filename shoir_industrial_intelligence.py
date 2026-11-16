@@ -2686,6 +2686,8 @@ def update_action(username: str, tier: str, action_id: str, new_status: str, act
     }
     if target == "VERIFIED" and current != "IMPLEMENTED":
         raise PermissionError("An action must be recorded as IMPLEMENTED before independent verification.")
+    if target == "CLOSED" and current != "VERIFIED":
+        raise PermissionError("An action can only be closed after independent verification.")
     if target not in transitions.get(current, set()):
         raise PermissionError(f"Invalid action transition: {current} → {target}.")
     if target == "BLOCKED":

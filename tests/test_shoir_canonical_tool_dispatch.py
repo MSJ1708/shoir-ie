@@ -33,12 +33,23 @@ def test_t001_home_is_session_scoped_and_tier_filters_recent_tools():
 
 
 def test_t003_searches_permitted_registry_and_current_session_only():
-    result = _run("T003", {"query": "inventory"}, {
-        "shoir_tool_result_T055": {"status": "CALCULATED"},
-    })
+    state = {"shoir_tool_result_T055": {"status": "CALCULATED"}}
+    result = execute_canonical_tool(
+        "T003", {"query": "inventory"}, "Enterprise",
+        "canonical-dispatch-test-user", state,
+    )
     assert result["result_count"] >= 1
     assert "T055" in set(result["results"]["id"])
+    assert "CURRENT_SESSION_RESULT" in set(result["results"]["kind"])
     assert set(result["results"]["kind"]).issubset({"TOOL", "CURRENT_SESSION_RESULT"})
+
+    # Search must not disclose a current-session result for a tool the caller
+    # is not entitled to access, even when the result key is present.
+    restricted = execute_canonical_tool(
+        "T003", {"query": "inventory"}, "Starter",
+        "canonical-dispatch-test-user", state,
+    )
+    assert "T055" not in set(restricted["results"]["id"])
 
 
 def test_t008_inspector_discloses_missing_fields_and_redacts_secret_metadata():

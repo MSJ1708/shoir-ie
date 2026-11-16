@@ -1296,8 +1296,10 @@ def test_workbench_routes_and_executes_the_nine_previously_mapped_only_tools():
         assert not at.exception, f"{tool_id} route render failed: " + "\n".join(str(error.value) for error in at.exception)
 
         if tool_id == "T003":
-            at.text_input(key="canonical_t003_query").set_value("inventory")
-            at.run(timeout=120)
+            # T003 itself is Starter-accessible. "home" gives it a result that
+            # is also available to Starter instead of relying on a Professional
+            # inventory capability.
+            at.text_input(key="canonical_t003_query").set_value("home")
         elif tool_id == "T090":
             at.text_area(key="canonical_t090_objective").set_value("Document the supplied study objective.")
             at.text_area(key="canonical_t090_method").set_value("Use the supplied calculation method.")
@@ -1309,7 +1311,11 @@ def test_workbench_routes_and_executes_the_nine_previously_mapped_only_tools():
         at.run(timeout=120)
         assert not at.exception, f"{tool_id} execution failed: " + "\n".join(str(error.value) for error in at.exception)
         result = at.session_state.get("shoir_tool_result_" + tool_id)
-        assert result is not None, f"{tool_id} did not write its canonical result key."
+        visible_errors = " | ".join(str(item.value) for item in at.error)
+        assert result is not None, f"{tool_id} did not write its canonical result key. Visible UI errors: {visible_errors}"
+        if tool_id == "T003":
+            assert result["result_count"] >= 1
+            assert "T001" in set(result["results"]["id"])
         assert result["tool_id"] == tool_id
         assert result["status"] == "COMPLETED_WITH_DECLARED_LIMITATIONS"
         assert result.get("_workspace_persistence") in {
