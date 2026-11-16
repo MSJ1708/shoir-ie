@@ -194,7 +194,9 @@ def _t064(p,actor):
             d,arrival,sid,finish=min(choices,key=lambda z:(z[0],z[1],z[2])); elapsed=finish; distance+=d; load+=sm[sid]["demand"]; seq+=1; route.append(sid)
             rows.append({"vehicle_id":v["id"],"sequence":seq,"stop_id":sid,"arrival_minute":round(arrival,3),"departure_minute":round(finish,3),"load_after_stop":round(load,3),"travel_distance":d})
             current=sid; remaining.remove(sid)
-        back_d,back_t=arcs[(current,depot)]; distance+=back_d; elapsed+=back_t; route.append(depot)
+        if current==depot: back_d,back_t=0.0,0.0
+        else: back_d,back_t=arcs[(current,depot)]
+        distance+=back_d; elapsed+=back_t; route.append(depot)
         summary.append({"vehicle_id":v["id"],"route":" -> ".join(route),"stops_served":seq,"load":round(load,3),"distance":round(distance,3),"route_minutes":round(elapsed,3),"within_route_limit":elapsed<=v["limit"]})
     return {**_base("T064",actor,"USER_ENTERED_UNVERIFIED","Nearest-feasible-stop heuristic, not an exact/global optimum VRP solver. Distance/time matrix is user entered, not live traffic or verified road routing."),"routes":pd.DataFrame(rows),"vehicle_summary":pd.DataFrame(summary),"unserved_stops":pd.DataFrame([{"stop_id":sid,"reason":"No vehicle satisfies declared capacity, time window and route-duration constraints."} for sid in sorted(remaining)]),"served_stop_count":len(sm)-len(remaining),"unserved_stop_count":len(remaining),"feasible":not remaining,"distance_total":round(sum(x["distance"] for x in summary),3)}
 
