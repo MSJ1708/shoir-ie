@@ -551,7 +551,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T065", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T091", "T092", "T094", "T095", "T096", "T097", "T098", "T099", "T100"}:
+            if selected_tool["tool_id"] in {"T001", "T003", "T008", "T053", "T057", "T064", "T088", "T090", "T093", "T002", "T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T061", "T062", "T063", "T065", "T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T089", "T091", "T092", "T094", "T095", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -564,6 +564,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         "The method is not executable on the current package."
                     )
                 else:
+                    if selected_tool["tool_id"] in {"T001", "T003", "T008", "T053", "T057", "T064", "T088", "T090", "T093"}:
+                        require_tool_access(RAW_TIER, selected_tool["tool_id"])
+                        from shoir_canonical_tool_dispatch import render_canonical_tool
+                        render_canonical_tool(
+                            selected_tool,
+                            RAW_TIER,
+                            USER,
+                            _require_focused_tool_actor,
+                            _persist_focused_tool_result,
+                            _show_focused_tool_persistence,
+                        )
+                        st.stop()
                     if selected_tool["tool_id"] == "T065":
                         require_tool_access(RAW_TIER, "T065")
                         from shoir_facility_layout import render_facility_layout
