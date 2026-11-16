@@ -151,6 +151,10 @@ def test_enterprise_user_can_open_excel_intelligence_from_workbench_data(monkeyp
     app.selectbox(key="shoir_100_tool_inspector").select("T001 · Personalized Engineering Home")
     app.run(timeout=90)
     assert not app.exception, "\n".join(str(error.value) for error in app.exception)
+    assert app.session_state.get("shoir_tool_result_T001") is None
+    app.button(key="canonical_run_T001").click()
+    app.run(timeout=90)
+    assert not app.exception, "\n".join(str(error.value) for error in app.exception)
     assert app.session_state.get("shoir_tool_result_T001") is not None
     assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
 
