@@ -1257,3 +1257,58 @@ def test_workbench_t095_builds_sanitized_xlsx_from_entitled_source_result():
         assert "api_token" not in values
     finally:
         workbook.close()
+
+def test_workbench_routes_and_executes_the_nine_previously_mapped_only_tools():
+    """Exercise the new canonical IDs through the real Workbench renderer."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=120)
+    at.session_state["current_user"] = "canonical-nine-route-test-user"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=120)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T001", "Personalized Engineering Home", "Starter"),
+        ("T003", "Universal Search and Command Center", "Starter"),
+        ("T008", "Formula and Assumption Inspector", "Starter"),
+        ("T053", "Finite-Capacity Production Scheduler", "Professional"),
+        ("T057", "Workforce and Shift Planner", "Professional"),
+        ("T064", "Vehicle Routing Optimizer", "Mid-Tier Pro"),
+        ("T088", "Research and Literature Evidence Matrix", "Research Pack"),
+        ("T090", "Research Report and Methods Builder", "Research Pack"),
+        ("T093", "Cross-Module Workflow Builder", "Enterprise"),
+    ]
+    for tool_id, name, tier in cases:
+        if at.session_state.get("user_tier") != tier:
+            at.session_state["user_tier"] = tier
+            at.run(timeout=120)
+            assert not at.exception, f"{tool_id} tier refresh failed: " + "\n".join(str(error.value) for error in at.exception)
+
+        at.selectbox(key="shoir_100_tool_inspector").select(f"{tool_id} · {name}")
+        at.run(timeout=120)
+        assert not at.exception, f"{tool_id} route render failed: " + "\n".join(str(error.value) for error in at.exception)
+
+        if tool_id == "T003":
+            at.text_input(key="canonical_t003_query").set_value("inventory")
+            at.run(timeout=120)
+        elif tool_id == "T090":
+            at.text_area(key="canonical_t090_objective").set_value("Document the supplied study objective.")
+            at.text_area(key="canonical_t090_method").set_value("Use the supplied calculation method.")
+            at.run(timeout=120)
+
+        run_button = at.button(key="canonical_run_" + tool_id)
+        assert run_button is not None, f"{tool_id} submit control was not rendered."
+        run_button.click()
+        at.run(timeout=120)
+        assert not at.exception, f"{tool_id} execution failed: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get("shoir_tool_result_" + tool_id)
+        assert result is not None, f"{tool_id} did not write its canonical result key."
+        assert result["tool_id"] == tool_id
+        assert result["status"] == "COMPLETED_WITH_DECLARED_LIMITATIONS"
+        assert result.get("_workspace_persistence") in {
+            "SESSION_ONLY", "SAVED_MANAGED_WORKSPACE", "SAVED_LOCAL_FALLBACK",
+            "SAVE_FAILED", "SAVE_STATUS_NOT_CONFIRMED", "SAVE_PENDING",
+        }
