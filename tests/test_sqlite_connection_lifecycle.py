@@ -9,6 +9,7 @@ from __future__ import annotations
 import gc
 import sqlite3
 import warnings
+from pathlib import Path
 
 import pytest
 
