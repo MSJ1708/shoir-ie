@@ -504,7 +504,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
     st.caption(f"Showing {len(directory_rows)} of {len(TOOL_TARGETS)} target tools.")
     if directory_rows:
         st.dataframe(pd.DataFrame(directory_rows), use_container_width=True, hide_index=True)
-        choices = [
+        choices = ["— Select a tool to inspect —"] + [
             f'{item["tool_id"]} · {item["canonical_name"]}'
             for item in TOOL_TARGETS
             if any(row["ID"] == item["tool_id"] for row in directory_rows)
@@ -575,3101 +575,3101 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             _persist_focused_tool_result,
                             _show_focused_tool_persistence,
                         )
-                        st.stop()
-                    if selected_tool["tool_id"] == "T065":
-                        require_tool_access(RAW_TIER, "T065")
-                        from shoir_facility_layout import render_facility_layout
-                        render_facility_layout(RAW_TIER, USER)
-                        st.stop()
-                    if selected_tool["tool_id"] == "T091":
-                        require_tool_access(RAW_TIER, "T091")
-                        from shoir_team_workspaces import render_team_workspaces
-                        render_team_workspaces()
-                        st.stop()
-                    with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T007":
-                            st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")
-                            diagnostic_inspector_text = st.text_area(
-                                "Error or warning text",
-                                value="Example: workbook import failed because a required quantity column is missing.",
-                                key="tool007_diagnostic",
-                            )
-                            diagnostic_category = st.selectbox(
-                                "Subsystem label (context only)",
-                                ["Auto-detect", "Access / login", "Data import / export", "Calculation / units", "Persistence / connectivity", "Other"],
-                                key="tool007_category",
-                            )
-                            run_method = st.form_submit_button("Inspect and redact diagnostic", type="primary", use_container_width=True, key="tool007_run")
-                        elif selected_tool["tool_id"] == "T009":
-                            st.caption("This report summarizes the source registry only. It is not a live health check or authenticated browser acceptance report.")
-                            capability_status_filter = st.selectbox(
-                                "Readiness status",
-                                ["All statuses", *TOOL_STATUS_VALUES],
-                                key="tool009_status_filter",
-                            )
-                            capability_status_limit = st.number_input("Maximum capability rows", min_value=1, max_value=100, value=100, step=5, key="tool009_limit")
-                            run_method = st.form_submit_button("Build capability status report", type="primary", use_container_width=True, key="tool009_run")
-                        elif selected_tool["tool_id"] == "T010":
-                            st.caption("Searchable guidance is generated from canonical tool metadata and its stated limitations; it does not replace method documentation or validation.")
-                            help_query = st.text_input("Search tools, methods, inputs or outputs", key="tool010_query", placeholder="e.g. facility layout, OEE, demand forecast")
-                            help_workbench = st.selectbox(
-                                "Workbench filter",
-                                ["All workbenches"] + sorted({str(item.get("workbench", "")) for item in TOOL_TARGETS if item.get("workbench")}),
-                                key="tool010_workbench",
-                            )
-                            run_method = st.form_submit_button("Search engineering help", type="primary", use_container_width=True, key="tool010_run")
-                        elif selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
-                            payload_labels = {
-                                "T004": "Engineering project (create/list) JSON",
-                                "T005": "Project version history action JSON (create/autosave/history/restore/list)",
-                                "T073": "What-if scenario comparison and branch action JSON",
-                                "T086": "Hypothesis and research protocol action JSON",
-                                "T092": "Decision register action JSON (create/list/request_review/history)",
-                            }
-                            st.caption("This action is owner-scoped and uses the existing Shoir-IE persisted project, research or decision store. The owner field is replaced with the authenticated account; this register does not grant approvals.")
-                            canonical_payload_json = st.text_area(
-                                payload_labels[selected_tool["tool_id"]],
-                                value=get_tool_example_json(selected_tool["tool_id"]),
-                                key="tool" + selected_tool["tool_id"][1:] + "_payload",
-                            )
-                            run_method = st.form_submit_button(
-                                "Run " + selected_tool["canonical_name"],
-                                type="primary",
-                                use_container_width=True,
-                                key="tool" + selected_tool["tool_id"][1:] + "_run",
-                            )
-                        elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014", "T020"}:
-                            captions = {
-                                "T011": "Import a supported workbook and inspect its sheet inventory. The original source is retained in the Excel Studio workbook record when workspace saving succeeds.",
-                                "T012": "Discover tables and candidate cross-sheet relationships. Suggestions require engineering review; keys are not joined automatically.",
-                                "T013": "Generate per-sheet quality profiles using the existing Excel Studio profile engine.",
-                                "T014": "Preview a reversible cleaned copy. The source workbook and raw sheets remain unchanged; explicit confirmation is required.",
-                                "T020": "Register an immutable dataset version from a workbook through the authenticated managed dataset API. Requires an Enterprise session token.",
-                            }
-                            st.caption(captions[selected_tool["tool_id"]])
-                            canonical_excel_upload = st.file_uploader(
-                                "Upload CSV / TSV / TXT / XLS / XLSX / XLSM",
-                                type=["csv", "tsv", "txt", "xls", "xlsx", "xlsm"],
-                                accept_multiple_files=False,
-                                key="tool" + selected_tool["tool_id"][1:] + "_upload",
-                            )
-                            confirm_cleaning = False
-                            dataset_name_input = ""
-                            dataset_sheet_input = ""
-                            existing_dataset_id_input = ""
-                            if selected_tool["tool_id"] == "T020":
-                                dataset_name_input = st.text_input("Logical dataset name", value="Industrial dataset", max_chars=160, key="tool020_dataset_name")
-                                dataset_sheet_input = st.text_input("Sheet to register (leave blank for first usable sheet)", value="", max_chars=120, key="tool020_sheet_name")
-                                existing_dataset_id_input = st.text_input("Existing dataset ID for a new immutable version (optional)", value="", max_chars=40, key="tool020_existing_dataset_id")
-                            if selected_tool["tool_id"] == "T014":
-                                confirm_cleaning = st.checkbox(
-                                    "I reviewed the reversible-cleaning disclosure and confirm creating a cleaned copy.",
-                                    value=False,
-                                    key="tool014_confirm_cleaning",
-                                )
-                            run_method = st.form_submit_button(
-                                "Run " + selected_tool["canonical_name"],
-                                type="primary",
-                                use_container_width=True,
-                                key="tool" + selected_tool["tool_id"][1:] + "_run",
-                                disabled=(canonical_excel_upload is None or (selected_tool["tool_id"] == "T014" and not confirm_cleaning)),
-                            )
-                        elif selected_tool["tool_id"] == "T100":
-                            st.caption("Creates a local, redacted support packet only. No ticketing backend is configured and this action does not transmit diagnostic data.")
-                            support_component = st.selectbox(
-                                "Affected component",
-                                ["Workbench", "Data import / export", "Calculation engine", "Authentication / access", "Workspace persistence", "Integration / connector", "Reporting / export", "Other"],
-                                key="tool100_component",
-                            )
-                            support_severity = st.selectbox("Reported severity", ["LOW", "MEDIUM", "HIGH", "CRITICAL"], index=1, key="tool100_severity")
-                            support_diagnostic_text = st.text_area(
-                                "What happened? Include the tool ID and a reproducible message; exclude production/customer records.",
-                                value="Example: T017 join preview did not return the expected matched row count.",
-                                key="tool100_diagnostic",
-                            )
-                            run_method = st.form_submit_button("Prepare redacted support bundle", type="primary", use_container_width=True, key="tool100_run")
-                        elif selected_tool["tool_id"] == "T015":
-                            st.caption("Field mapping is advisory: exact aliases are still reviewable and fuzzy suggestions always require confirmation.")
-                            field_headers_text = st.text_input(
-                                "Source column headers (comma-separated)",
-                                "Timestamp,Qty,Defects,Machine ID", key="tool015_headers",
-                            )
-                            field_manual_mapping_json = st.text_area(
-                                "Optional manual mapping JSON (source header → canonical ID)",
-                                "{}", key="tool015_manual_mapping",
-                            )
-                            field_min_confidence = st.slider(
-                                "Minimum fuzzy-match confidence", min_value=0.0, max_value=1.0,
-                                value=0.65, step=0.05, key="tool015_confidence",
-                            )
-                            run_method = st.form_submit_button("Map industrial fields", type="primary", use_container_width=True, key="tool015_run")
-                        elif selected_tool["tool_id"] == "T049":
-                            st.caption("Greedy priority heuristic, not a globally optimal schedule. Confirm asset criticality, permits, spares, dependencies and safety constraints before dispatch.")
-                            backlog_orders_json = st.text_area(
-                                "Maintenance work orders (JSON list)",
-                                value='[{"work_order_id":"WO-101","task":"Inspect critical pump","asset":"P-101","criticality_score":5,"days_until_due":-2,"estimated_hours":5,"required_skill":"Mechanical"},{"work_order_id":"WO-102","task":"Replace seal","asset":"P-102","criticality_score":4,"days_until_due":0,"estimated_hours":2,"required_skill":"Mechanical"},{"work_order_id":"WO-103","task":"Check sensor","asset":"S-103","criticality_score":2,"days_until_due":7,"estimated_hours":3,"required_skill":"Electrical"}]',
-                                key="tool049_orders",
-                            )
-                            backlog_hours = st.number_input("Available maintenance labor hours", min_value=0.0, value=7.0, step=0.5, key="tool049_hours")
-                            backlog_skills_text = st.text_input("Available skills (comma-separated)", "Mechanical, Electrical", key="tool049_skills")
-                            run_method = st.form_submit_button("Prioritize maintenance backlog", type="primary", use_container_width=True, key="tool049_run")
-                        elif selected_tool["tool_id"] == "T052":
-                            st.caption("Aggregate deterministic supply/demand reconciliation. Scheduled receipts, planned production and capacity must share one period and product-family basis.")
-                            sop_periods_json = st.text_area(
-                                "Periods (JSON list; demand, planned_production, optional capacity/receipts/safety stock)",
-                                value='[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":40,"production_capacity":50,"scheduled_receipts":10,"target_safety_stock":20}]',
-                                key="tool052_periods",
-                            )
-                            sop_starting_inventory = st.number_input("Starting inventory", min_value=0.0, value=20.0, step=5.0, key="tool052_starting_inventory")
-                            run_method = st.form_submit_button("Reconcile S&OP plan", type="primary", use_container_width=True, key="tool052_run")
-                        elif selected_tool["tool_id"] == "T058":
-                            st.caption("Scores and weights are user-defined. Suppliers with missing criteria are shown as incomplete and are not ranked.")
-                            supplier_scores_json = st.text_area(
-                                "Supplier score records (JSON list)",
-                                value='[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"audit-3"}]',
-                                key="tool058_suppliers",
-                            )
-                            supplier_weights_json = st.text_area(
-                                "Criterion weights (JSON object)", value='{"Delivery":0.4,"Quality":0.6}',
-                                key="tool058_weights",
-                            )
-                            run_method = st.form_submit_button("Score supplier performance", type="primary", use_container_width=True, key="tool058_run")
-                        elif selected_tool["tool_id"] == "T016":
-                            st.caption("Prefilled amount and unit pair are illustrative examples. Physical units use fixed conversion factors; currency conversion requires a dated, sourced rate you provide.")
-                            amount_to_convert = st.number_input("Value to convert", value=100.0, step=1.0, key="tool016_amount")
-                            unit_choices = ["mm", "cm", "m", "km", "in", "ft", "mi", "mg", "g", "kg", "lb", "oz", "ms", "s", "min", "h", "day", "mL", "L", "m³", "gal", "Wh", "kWh", "MJ", "GJ", "Pa", "kPa", "bar", "psi", "°C", "°F", "K", "SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY"]
-                            source_unit = st.selectbox("Source unit or currency", unit_choices, index=0, key="tool016_source")
-                            target_unit = st.selectbox("Target unit or currency", unit_choices, index=1, key="tool016_target")
-                            exchange_rate_value = st.number_input("Exchange rate (target currency per source currency unit)", min_value=0.000001, value=1.0, step=0.01, key="tool016_rate")
-                            exchange_rate_date_value = st.text_input("Exchange-rate date (YYYY-MM-DD; currency conversion only)", key="tool016_rate_date")
-                            exchange_rate_source_value = st.text_input("Exchange-rate source (currency conversion only)", key="tool016_rate_source")
-                            run_method = st.form_submit_button("Convert value", type="primary", use_container_width=True, key="tool016_run")
-                        elif selected_tool["tool_id"] == "T031":
-                            st.caption("The prefilled observations are SYNTHETIC examples, not plant measurements. Individuals/Moving-Range reports points outside calculated 3-sigma limits; control limits are not specification limits.")
-                            spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
-                            spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
-                            run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
-                        elif selected_tool["tool_id"] == "T006":
-                            st.caption(
-                                "Create, undo, redo or recover a verified revision in a supplied JSON history. The returned history must be saved to the authenticated workspace for durable cross-session recovery."
-                            )
-                            tool006_payload_json = st.text_area(
-                                "Revision history action (JSON object)",
-                                value=get_tool_example_json("T006"),
-                                key="tool006_payload",
-                            )
-                            run_method = st.form_submit_button(
-                                "Apply revision-history action",
-                                type="primary",
-                                use_container_width=True,
-                                key="tool006_run",
-                            )
-                        elif selected_tool["tool_id"] == "T039":
-                            st.caption("Structured 8D/CAPA record-completeness, due-date and controlled transition review. Closure requires approval and effectiveness evidence; this does not certify regulatory compliance.")
-                            capa_records_json = st.text_area(
-                                "CAPA / 8D records (JSON list; edit or add records)",
-                                value=_TOOL039_EXAMPLE_RECORDS,
-                                key="tool039_records",
-                            )
-                            capa_as_of_date = st.text_input(
-                                "Review date (YYYY-MM-DD; blank uses current date)",
-                                value="",
-                                key="tool039_as_of_date",
-                            )
-                            capa_transitions_json = st.text_area(
-                                "Optional controlled status transitions (JSON list)",
-                                value="[]",
-                                key="tool039_transitions",
-                            )
-                            run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
-                        elif selected_tool["tool_id"] == "T040":
-                            st.caption("Prefilled quantities/costs are SYNTHETIC examples. Replace with a measured period and traceable costs. Scrap and rework are mutually exclusive dispositions of defective units.")
-                            quality_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool040_period")
-                            quality_currency = st.text_input("Cost currency code", "SAR", key="tool040_currency")
-                            quality_total_units = st.number_input("Total produced units", min_value=1, value=1000, step=100, key="tool040_total")
-                            quality_defects = st.number_input("Defective units", min_value=0, value=40, step=5, key="tool040_defects")
-                            quality_scrap_units = st.number_input("Scrap units", min_value=0, value=10, step=1, key="tool040_scrap_units")
-                            quality_rework_units = st.number_input("Reworked units", min_value=0, value=20, step=1, key="tool040_rework_units")
-                            quality_scrap_cost = st.number_input("Scrap cost per unit", min_value=0.0, value=20.0, step=1.0, key="tool040_scrap_cost")
-                            quality_rework_cost = st.number_input("Rework cost per unit", min_value=0.0, value=8.0, step=1.0, key="tool040_rework_cost")
-                            quality_inspection_cost = st.number_input("Inspection cost for period", min_value=0.0, value=400.0, step=25.0, key="tool040_inspection_cost")
-                            run_method = st.form_submit_button("Calculate quality costs", type="primary", use_container_width=True, key="tool040_run")
-                        elif selected_tool["tool_id"] == "T042":
-                            st.caption("Prefilled repair durations are SYNTHETIC examples, not actual asset history. This uses complete recorded events only and does not infer censored/incomplete intervals.")
-                            mtbf_operating_hours = st.number_input("Accumulated operating hours (repair downtime excluded)", min_value=0.001, value=600.0, step=50.0, key="tool042_operating_hours")
-                            repair_durations_text = st.text_input("Repair durations in hours (comma-separated)", "2, 1.5, 3", key="tool042_repairs")
-                            run_method = st.form_submit_button("Calculate MTBF / MTTR", type="primary", use_container_width=True, key="tool042_run")
-                        elif selected_tool["tool_id"] == "T056":
-                            st.caption("The prefilled SKU JSON is SYNTHETIC sample inventory; replace it with validated history. ABC uses annual usage value and XYZ uses population coefficient of variation over aligned periods.")
-                            inventory_items_json = st.text_area("SKU data (JSON list)", value='[{"sku":"A","annual_demand":100,"unit_cost":8,"period_demand":[8,10,12]},{"sku":"B","annual_demand":50,"unit_cost":3,"period_demand":[1,10,3]},{"sku":"C","annual_demand":25,"unit_cost":2,"period_demand":[1,20,0]}]', key="tool056_items")
-                            inventory_currency = st.text_input("Unit-cost currency", "SAR", key="tool056_currency")
-                            abc_a_threshold = st.number_input("A-class cumulative cutoff (fraction)", min_value=0.01, max_value=0.99, value=0.80, step=0.01, key="tool056_a_threshold")
-                            abc_b_threshold = st.number_input("B-class cumulative cutoff (fraction)", min_value=0.02, max_value=1.0, value=0.95, step=0.01, key="tool056_b_threshold")
-                            xyz_x_cutoff = st.number_input("Maximum X demand CV", min_value=0.0, value=0.50, step=0.05, key="tool056_x_cv")
-                            xyz_y_cutoff = st.number_input("Maximum Y demand CV", min_value=0.01, value=1.0, step=0.05, key="tool056_y_cv")
-                            run_method = st.form_submit_button("Classify ABC / XYZ inventory", type="primary", use_container_width=True, key="tool056_run")
-                        elif selected_tool["tool_id"] == "T002":
-                            st.caption("Build a rule-based study plan from the problem you selected and the fields you already have. The wizard does not calculate results or bypass the access gate of any recommended tool.")
-                            guided_goal = st.selectbox(
-                                "Engineering problem",
-                                options=["capacity_bottleneck", "facility_layout", "quality_capability", "inventory_planning", "maintenance_reliability", "energy_sustainability"],
-                                format_func=lambda key: {
-                                    "capacity_bottleneck": "Production capacity and bottleneck",
-                                    "facility_layout": "Facility layout and material flow",
-                                    "quality_capability": "Quality and process capability",
-                                    "inventory_planning": "Inventory and replenishment",
-                                    "maintenance_reliability": "Maintenance and reliability",
-                                    "energy_sustainability": "Energy and sustainability",
-                                }[key],
-                                key="tool002_goal",
-                            )
-                            guided_fields_text = st.text_input(
-                                "Input fields you already have (comma-separated canonical names)",
-                                value="",
-                                placeholder="source_file, validated_dataset, process_table, demand, time_unit",
-                                key="tool002_available_fields",
-                            )
-                            run_method = st.form_submit_button("Build guided study plan", type="primary", use_container_width=True, key="tool002_run")
-                        elif selected_tool["tool_id"] == "T089":
-                            st.caption("Starter practice mode with fixed, reproducible engineering examples. Answers are checked against an explicit formula and worked solution; examples are not plant data.")
-                            practice_topic = st.selectbox(
-                                "Practice topic",
-                                options=list(_TOOL089_PRACTICE_TOPICS),
-                                format_func=lambda topic: _TOOL089_PRACTICE_TOPICS[topic]["label"],
-                                key="tool089_topic",
-                            )
-                            st.info(_TOOL089_PRACTICE_TOPICS[practice_topic]["question"])
-                            st.caption("Units: " + _TOOL089_PRACTICE_TOPICS[practice_topic]["unit"])
-                            practice_answer = st.number_input("Your numerical answer", value=0.0, step=0.1, key="tool089_answer")
-                            run_method = st.form_submit_button("Check answer and show worked solution", type="primary", use_container_width=True, key="tool089_run")
-                        elif selected_tool["tool_id"] == "T048":
-                            st.caption("Robust point-anomaly screening with configurable threshold and a separate data-freshness result. This is not a predictive-maintenance model and does not identify root cause.")
-                            anomaly_observations_json = st.text_area("Time-series observations (JSON list with timestamp and value)", _TOOL048_EXAMPLE_OBSERVATIONS, key="tool048_observations")
-                            anomaly_timestamp_field = st.text_input("Timestamp field", value="timestamp", key="tool048_timestamp_field")
-                            anomaly_value_field = st.text_input("Numeric value field", value="value", key="tool048_value_field")
-                            anomaly_threshold = st.number_input("Modified-z threshold", min_value=1.0, max_value=10.0, value=3.5, step=0.1, key="tool048_threshold")
-                            anomaly_max_age = st.number_input("Maximum accepted data age (hours)", min_value=0.01, max_value=8760.0, value=72.0, step=1.0, key="tool048_max_age")
-                            anomaly_eval_time = st.text_input("Evaluation time UTC (blank uses current UTC)", value="", key="tool048_eval_time")
-                            run_method = st.form_submit_button("Detect anomalies and check freshness", type="primary", use_container_width=True, key="tool048_run")
-                        elif selected_tool["tool_id"] == "T069":
-                            st.caption("Minimize one-period facility opening and shipment costs. All customer demand must be met; opening, route and facility capacities are hard constraints. This is a modelled plan, not a live logistics recommendation.")
-                            facility_location_facilities_json = st.text_area("Candidate facilities (JSON list: id, fixed_opening_cost, capacity)", _TOOL069_EXAMPLE_FACILITIES, key="tool069_facilities")
-                            facility_location_customers_json = st.text_area("Customer demand (JSON list: id, demand)", _TOOL069_EXAMPLE_CUSTOMERS, key="tool069_customers")
-                            facility_location_routes_json = st.text_area("Available routes (JSON list: facility, customer, unit_cost, capacity; optional available flag)", _TOOL069_EXAMPLE_ROUTES, key="tool069_routes")
-                            facility_location_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool069_time_limit")
-                            run_method = st.form_submit_button("Optimize network flow and facility locations", type="primary", use_container_width=True, key="tool069_run")
-                        elif selected_tool["tool_id"] == "T071":
-                            st.caption("Event-driven FCFS simulation with finite servers, explicit deterministic/exponential arrivals and service times, seeded replications and job-based warm-up exclusion. Not a calibrated digital twin.")
-                            des_steps_json = st.text_area("Ordered stations (JSON list)", value=_TOOL071_EXAMPLE_STATIONS, key="tool071_steps")
-                            des_job_count = st.number_input("Jobs to simulate", min_value=2, max_value=10000, value=50, step=1, key="tool071_jobs")
-                            des_interarrival = st.number_input("Mean interarrival time", min_value=0.001, value=1.0, step=0.5, key="tool071_interarrival")
-                            des_arrival_distribution = st.selectbox("Arrival distribution", ["deterministic", "exponential"], key="tool071_arrival_dist")
-                            des_warmup_jobs = st.number_input("Initial jobs excluded from performance metrics", min_value=0, max_value=9999, value=5, step=1, key="tool071_warmup")
-                            des_replications = st.number_input("Replications", min_value=1, max_value=100, value=10, step=1, key="tool071_replications")
-                            des_seed = st.number_input("Base random seed", min_value=-2147483648, max_value=2147483647, value=42, step=1, key="tool071_seed")
-                            des_time_unit = st.text_input("Time unit", value="minutes", key="tool071_unit")
-                            run_method = st.form_submit_button("Run discrete-event simulation", type="primary", use_container_width=True, key="tool071_run")
-                        elif selected_tool["tool_id"] == "T062":
-                            st.caption("Run a linear or mixed-integer model and independently check variable bounds/integrality and each constraint residual. Solver status is not the same as proof that the model formulation is correct; no IIS is generated.")
-                            solver_variables_json = st.text_area("Variables (JSON object: name → {low, up, category})", value=_TOOL062_EXAMPLE_VARIABLES, key="tool062_variables")
-                            solver_objective_json = st.text_area("Objective coefficients (JSON object)", value=_TOOL062_EXAMPLE_OBJECTIVE, key="tool062_objective")
-                            solver_constraints_json = st.text_area("Linear constraints (JSON list)", value=_TOOL062_EXAMPLE_CONSTRAINTS, key="tool062_constraints")
-                            solver_direction = st.selectbox("Objective direction", ["minimize", "maximize"], key="tool062_direction")
-                            solver_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool062_time_limit")
-                            solver_tolerance = st.select_slider("Feasibility tolerance", options=[1e-7, 1e-6, 1e-5, 1e-4, 1e-3], value=1e-7, key="tool062_tolerance")
-                            run_method = st.form_submit_button("Solve and diagnose model", type="primary", use_container_width=True, key="tool062_run")
-                        elif selected_tool["tool_id"] == "T095":
-                            source_result_candidates = sorted({
-                                key.replace("shoir_tool_result_", "")
-                                for key in st.session_state.keys()
-                                if key.startswith("shoir_tool_result_T")
-                                and key not in {"shoir_tool_result_T087", "shoir_tool_result_T095"}
-                                and isinstance(st.session_state.get(key), dict)
-                                and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
-                            })
-                            source_result_options = source_result_candidates or ["NONE"]
-                            source_result_tool_id = st.selectbox(
-                                "Completed authorized result",
-                                options=source_result_options,
-                                format_func=lambda tool_id: (
-                                    f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
-                                    if tool_id != "NONE" else "No completed authorized result"
-                                ),
-                                disabled=not bool(source_result_candidates),
-                                key="tool095_source_id",
-                            )
-                            export_formats = ["XLSX", "ZIP"]
-                            if tier_allows(RAW_TIER, "Enterprise"):
-                                export_formats.extend(["PDF", "PPTX"])
-                            report_format = st.selectbox("Report format", options=export_formats, key="tool095_format")
-                            st.caption("Exports only completed results that your current tier can access. Secret-named columns are removed; the manifest records the source tool, provenance and input snapshot hash. Files are session downloads, not a managed document repository.")
-                            run_method = st.form_submit_button(
-                                "Build verified result report", type="primary",
-                                use_container_width=True, key="tool095_run",
-                                disabled=not bool(source_result_candidates),
-                            )
-                        elif selected_tool["tool_id"] == "T087":
-                            st.caption("Package a previously completed, authorized tool result with method/environment metadata, configuration fingerprint and SHA-256 checksums. Raw inputs and detailed result tables are opt-in. Review the ZIP contents before sharing.")
-                            result_id_candidates = sorted({
-                                key.replace("shoir_tool_result_", "")
-                                for key in st.session_state.keys()
-                                if key.startswith("shoir_tool_result_T")
-                                and key != "shoir_tool_result_T087"
-                                and isinstance(st.session_state.get(key), dict)
-                                and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
-                            })
-                            if not result_id_candidates:
-                                st.info("Run an entitled engineering tool in this session first. Only completed, currently authorized results are eligible.")
-                            result_id_options = result_id_candidates or ["NONE"]
-                            source_result_tool_id = st.selectbox(
-                                "Completed result to package",
-                                options=result_id_options,
-                                format_func=lambda tool_id: (
-                                    f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
-                                    if tool_id != "NONE" else "No completed authorized result"
-                                ),
-                                disabled=not bool(result_id_candidates),
-                                key="tool087_source_id",
-                            )
-                            reproducibility_metadata_json = st.text_area(
-                                "Run metadata (JSON object; e.g. study reference, reviewer, protocol version)",
-                                value='{"study_reference":"demo-study","method_version":"Shoir-IE target engine","notes":"Review before distribution"}',
-                                key="tool087_metadata",
-                            )
-                            include_input_snapshot = st.checkbox(
-                                "Include redacted input snapshot (opt-in)",
-                                value=False,
-                                key="tool087_include_inputs",
-                            )
-                            include_result_tables = st.checkbox(
-                                "Include sanitized result tables (opt-in)",
-                                value=False,
-                                key="tool087_include_tables",
-                            )
-                            run_method = st.form_submit_button(
-                                "Build reproducibility ZIP",
-                                type="primary",
-                                use_container_width=True,
-                                key="tool087_run",
-                                disabled=not bool(result_id_candidates),
-                            )
-
-                        elif selected_tool["tool_id"] == "T021":
-                            st.caption("Observed times are retained as entered. The allowance is defined as a percentage of standard time.")
-                            observation_text = st.text_input(
-                                "Observed times (comma-separated)", "1, 2, 3",
-                                key="tool021_observations"
-                            )
-                            unit = st.selectbox(
-                                "Time unit for all observations", ["seconds", "minutes", "hours"],
-                                index=1, key="tool021_unit"
-                            )
-                            rating = st.number_input(
-                                "Performance rating (%)", min_value=0.001, value=100.0, step=5.0,
-                                key="tool021_rating"
-                            )
-                            allowance = st.number_input(
-                                "Allowance (% of standard time)", min_value=0.0, max_value=99.9,
-                                value=10.0, step=1.0, key="tool021_allowance"
-                            )
-                            run_method = st.form_submit_button("Calculate standard time", type="primary", use_container_width=True, key="tool021_run")
-                        elif selected_tool["tool_id"] == "T022":
-                            st.caption("Illustrative counts are sample data only. Replace them with observations collected under a representative sampling plan.")
-                            work_sampling_counts_json = st.text_area(
-                                "Activity observation counts (JSON object)",
-                                value=_TOOL022_EXAMPLE_COUNTS,
-                                help='Example format: {"Productive": 60, "Idle": 25, "Setup": 15}. Counts must be non-negative whole observations.',
-                                key="tool022_counts_json",
-                            )
-                            confidence_option = st.selectbox(
-                                "Confidence level", ["90%", "95%", "99%"], index=1, key="tool022_confidence"
-                            )
-                            margin_pct = st.number_input(
-                                "Target margin of error (percentage points)", min_value=0.1,
-                                max_value=49.9, value=5.0, step=0.5, key="tool022_margin"
-                            )
-                            run_method = st.form_submit_button("Analyze work sampling", type="primary", use_container_width=True, key="tool022_run")
-                        elif selected_tool["tool_id"] == "T023":
-                            st.caption("Available time, demand and cycle time must refer to the same production period and time unit.")
-                            available_time = st.number_input(
-                                "Net available production time per period", min_value=0.001,
-                                value=480.0, step=30.0, key="tool023_available"
-                            )
-                            demand_units = st.number_input(
-                                "Demand (whole units per period)", min_value=1, value=120, step=1,
-                                key="tool023_demand"
-                            )
-                            cycle_time = st.number_input(
-                                "Observed cycle time per unit", min_value=0.001,
-                                value=3.0, step=0.25, key="tool023_cycle"
-                            )
-                            unit = st.selectbox(
-                                "Time unit shared by available time and cycle time",
-                                ["seconds", "minutes", "hours"], index=1, key="tool023_unit"
-                            )
-                            run_method = st.form_submit_button("Calculate takt and capacity", type="primary", use_container_width=True, key="tool023_run")
-                        elif selected_tool["tool_id"] == "T028":
-                            st.caption("Pareto concentration is not proof of causation. A complete 5-Why record is optional; use five non-empty lines when recording one.")
-                            pareto_counts_json = st.text_area(
-                                "Cause/category counts (JSON object)",
-                                value=_TOOL028_EXAMPLE_COUNTS,
-                                help="Illustrative counts only. Replace with observed, dated counts before operational use.",
-                                key="tool028_counts_json",
-                            )
-                            problem_statement = st.text_input(
-                                "Problem statement (required for a 5-Why chain)", key="tool028_problem"
-                            )
-                            why_chain_text = st.text_area(
-                                "Optional five Whys (one statement per line)", key="tool028_whys"
-                            )
-                            countermeasure_text = st.text_input("Proposed countermeasure", key="tool028_countermeasure")
-                            action_owner = st.text_input("Action owner", key="tool028_owner")
-                            action_due_date = st.text_input(
-                                "Action due date (YYYY-MM-DD)", key="tool028_due_date"
-                            )
-                            run_method = st.form_submit_button("Analyze Pareto / record causes", type="primary", use_container_width=True, key="tool028_run")
-                        elif selected_tool["tool_id"] == "T029":
-                            st.caption("Illustrative example values are self-assessment data. Replace them with an approved checklist and verifiable evidence.")
-                            audit_items_json = st.text_area(
-                                "5S checklist items (JSON list)",
-                                value=_TOOL029_EXAMPLE_ITEMS,
-                                help='Each item needs category (one per 5S pillar), criterion, score 0–4, and optional evidence/owner/due_date.',
-                                key="tool029_items_json",
-                            )
-                            run_method = st.form_submit_button("Score 5S audit", type="primary", use_container_width=True, key="tool029_run")
-                        elif selected_tool["tool_id"] == "T030":
-                            st.caption("A3 plans and measured outcomes are kept separate. A Verified/Closed status requires an actual, dated review and a post-change evidence reference.")
-                            record_id_input = st.text_input(
-                                "Existing A3 record ID to revise (leave blank to create)", key="tool030_record_id"
-                            )
-                            a3_title = st.text_input("A3 title", key="tool030_title")
-                            a3_problem = st.text_area("Problem statement", key="tool030_problem")
-                            a3_metric = st.text_input("Metric name", key="tool030_metric")
-                            a3_unit = st.text_input("Metric unit", key="tool030_unit")
-                            a3_baseline = st.text_input("Baseline value", key="tool030_baseline")
-                            a3_target = st.text_input("Target value", key="tool030_target")
-                            a3_actual = st.text_input("Actual after-change value (optional until measured)", key="tool030_actual")
-                            a3_root_cause = st.text_area("Root-cause hypothesis", key="tool030_root_cause")
-                            a3_countermeasure = st.text_area("Countermeasure", key="tool030_countermeasure")
-                            a3_owner = st.text_input("Accountable owner", key="tool030_owner")
-                            a3_due_date = st.text_input("Due date (YYYY-MM-DD)", key="tool030_due_date")
-                            a3_baseline_evidence = st.text_input("Baseline evidence reference (optional but recommended)", key="tool030_baseline_evidence")
-                            a3_post_evidence = st.text_input("Post-change evidence reference", key="tool030_post_evidence")
-                            a3_status = st.selectbox(
-                                "Implementation status", ["Planned", "In Progress", "Implemented", "Verified", "Closed"],
-                                index=0, key="tool030_status"
-                            )
-                            a3_review_date = st.text_input("Human review date (YYYY-MM-DD)", key="tool030_review_date")
-                            run_method = st.form_submit_button("Save A3 record / revision", type="primary", use_container_width=True, key="tool030_run")
-                        elif selected_tool["tool_id"] == "T059":
-                            st.caption("Greedy slotting heuristic assigns high-pick items to the nearest compatible slot meeting capacity; it is not globally optimal.")
-                            slotting_items_json = st.text_area("Items (JSON list: sku, picks_per_day, storage_units, compatibility_group, current_distance_m)", value='[{"sku":"SKU-A","picks_per_day":10,"storage_units":4,"compatibility_group":"food","current_distance_m":10},{"sku":"SKU-B","picks_per_day":4,"storage_units":9,"compatibility_group":"chemical","current_distance_m":20}]', key="tool059_items")
-                            slotting_slots_json = st.text_area("Slots (JSON list: slot_id, distance_m, capacity_units, compatibility_group)", value='[{"slot_id":"near-food","distance_m":2,"capacity_units":5,"compatibility_group":"food"},{"slot_id":"near-chemical","distance_m":3,"capacity_units":10,"compatibility_group":"chemical"},{"slot_id":"far-general","distance_m":8,"capacity_units":10,"compatibility_group":"*"}]', key="tool059_slots")
-                            run_method = st.form_submit_button("Assign nearest compatible slots", type="primary", use_container_width=True, key="tool059_run")
-                        elif selected_tool["tool_id"] == "T063":
-                            st.caption("One-to-one minimum-cost assignment only; no calendars, precedence, multi-period or skill constraints.")
-                            assignment_tasks_json = st.text_area("Task names (JSON list)", '["Task A","Task B","Task C"]', key="tool063_tasks")
-                            assignment_resources_json = st.text_area("Resource names (JSON list)", '["Worker 1","Worker 2","Worker 3"]', key="tool063_resources")
-                            assignment_costs_json = st.text_area("Cost matrix (JSON list of rows; task rows × resource columns)", '[[9,2,7],[6,4,3],[5,8,1]]', key="tool063_costs")
-                            run_method = st.form_submit_button("Solve assignment", type="primary", use_container_width=True, key="tool063_run")
-                        elif selected_tool["tool_id"] == "T066":
-                            st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
-                            stock_len = st.number_input(
-                                "Stock length (consistent length unit)", min_value=0.001,
-                                value=12.0, step=0.5, key="tool066_stock_len"
-                            )
-                            kerf = st.number_input(
-                                "Kerf allowance per produced piece", min_value=0.0,
-                                value=0.0, step=0.1, key="tool066_kerf"
-                            )
-                            parts_json = st.text_area(
-                                "Parts as JSON", value='[{"name":"A","length":6,"quantity":4}]',
-                                help='Each item needs a unique name, positive length and positive integer quantity.',
-                                key="tool066_parts_json"
-                            )
-                            run_method = st.form_submit_button("Solve cutting plan", type="primary", use_container_width=True, key="tool066_run")
-                        elif selected_tool["tool_id"] == "T075":
-                            st.caption("Checks aligned forecast/actual observations against an absolute mean-absolute-error threshold.")
-                            predictions_text = st.text_input(
-                                "Predictions (comma-separated)", "10, 20, 30", key="tool075_predictions"
-                            )
-                            actuals_text = st.text_input(
-                                "Later actuals (same order)", "12, 18, 33", key="tool075_actuals"
-                            )
-                            max_mae = st.number_input(
-                                "Maximum acceptable MAE", min_value=0.0, value=2.0, step=0.5,
-                                key="tool075_mae_limit"
-                            )
-                            window = st.number_input(
-                                "Trailing window (0 = all observations)", min_value=0, max_value=10000,
-                                value=0, step=1, key="tool075_window"
-                            )
-                            run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True, key="tool075_run")
-                        elif selected_tool["tool_id"] == "T026":
-                            st.caption("OEE uses aligned planned time, downtime, ideal cycle, total and good output. Values above 100% are flagged for review, not capped.")
-                            oee_planned = st.number_input("Planned production time", min_value=0.001, value=480.0, step=30.0, key="tool026_planned")
-                            oee_downtime = st.number_input("Recorded downtime", min_value=0.0, value=60.0, step=5.0, key="tool026_downtime")
-                            oee_cycle = st.number_input("Ideal cycle time per unit", min_value=0.001, value=2.0, step=0.25, key="tool026_cycle")
-                            oee_total = st.number_input("Total output (whole units)", min_value=1, value=200, step=10, key="tool026_total")
-                            oee_good = st.number_input("Good output (whole units)", min_value=0, value=190, step=10, key="tool026_good")
-                            oee_unit = st.selectbox("Time unit shared by times", ["seconds", "minutes", "hours"], index=1, key="tool026_unit")
-                            run_method = st.form_submit_button("Calculate OEE and losses", type="primary", use_container_width=True, key="tool026_run")
-                        elif selected_tool["tool_id"] == "T032":
-                            st.caption("Enter measurements in chronological order, grouped into equal-size consecutive subgroups. Normality/control are not assumed.")
-                            capability_measurements = st.text_input("Measurements (comma-separated)", "9, 10, 11, 9, 10, 11", key="tool032_measurements")
-                            capability_lsl = st.number_input("Lower specification limit (LSL)", value=8.0, step=0.1, key="tool032_lsl")
-                            capability_usl = st.number_input("Upper specification limit (USL)", value=12.0, step=0.1, key="tool032_usl")
-                            capability_subgroup = st.number_input("Consecutive subgroup size", min_value=2, max_value=100, value=3, step=1, key="tool032_subgroup")
-                            capability_unit = st.text_input("Measurement unit", "units", key="tool032_unit")
-                            run_method = st.form_submit_button("Calculate capability indices", type="primary", use_container_width=True, key="tool032_run")
-                        elif selected_tool["tool_id"] == "T055":
-                            st.caption("Classical EOQ assumes stable independent daily demand and deterministic lead time.")
-                            inv_demand = st.number_input("Mean daily demand (units/day)", min_value=0.001, value=10.0, step=1.0, key="tool055_demand")
-                            inv_sd = st.number_input("Daily demand standard deviation", min_value=0.0, value=2.0, step=0.5, key="tool055_sd")
-                            inv_lead = st.number_input("Lead time (days)", min_value=0.0, value=4.0, step=1.0, key="tool055_lead")
-                            inv_order_cost = st.number_input("Ordering cost per order", min_value=0.001, value=50.0, step=5.0, key="tool055_order_cost")
-                            inv_holding_cost = st.number_input("Annual holding cost per unit", min_value=0.001, value=2.0, step=0.5, key="tool055_holding")
-                            inv_days = st.number_input("Operating days per year", min_value=1, max_value=366, value=250, step=1, key="tool055_days")
-                            service_options = {"90%": 1.2815515655, "95%": 1.6448536270, "97.5%": 1.9599639845, "99%": 2.3263478740}
-                            inv_service = st.selectbox("Target cycle service level (normal z factor)", list(service_options), index=1, key="tool055_service")
-                            run_method = st.form_submit_button("Calculate inventory policy", type="primary", use_container_width=True, key="tool055_run")
-                        elif selected_tool["tool_id"] == "T078":
-                            st.caption("Use a dated, sourced emission factor in kg CO2e per activity unit. Factor validity is not independently verified.")
-                            carbon_amount = st.number_input("Activity amount", min_value=0.0, value=250.0, step=25.0, key="tool078_amount")
-                            carbon_unit = st.text_input("Activity unit", "kWh", key="tool078_unit")
-                            carbon_factor = st.number_input("Emission factor (kg CO2e per activity unit)", min_value=0.0, value=0.4, step=0.05, key="tool078_factor")
-                            carbon_factor_unit = st.text_input("Factor unit label", "kg CO2e/kWh", key="tool078_factor_unit")
-                            carbon_source = st.text_input("Emission factor source", "User supplied factor", key="tool078_source")
-                            carbon_date = st.text_input("Factor date (YYYY-MM-DD)", "2026-01-01", key="tool078_date")
-                            carbon_boundary = st.text_input("Accounting boundary / scope", "Scope 2 location-based electricity", key="tool078_boundary")
-                            run_method = st.form_submit_button("Calculate carbon emissions", type="primary", use_container_width=True, key="tool078_run")
-                        elif selected_tool["tool_id"] == "T081":
-                            st.caption("Cash flows must be equally spaced; CF0 occurs at time zero. IRR is omitted when a supported conventional root cannot be established.")
-                            economics_cash_flows = st.text_input("Cash flows by period (comma-separated; CF0 first)", "-1000, 600, 600", key="tool081_cashflows")
-                            economics_rate = st.number_input("Discount rate (%)", min_value=-99.0, value=10.0, step=1.0, key="tool081_rate")
-                            economics_currency = st.text_input("Currency code", "SAR", key="tool081_currency")
-                            economics_period = st.selectbox("Cash-flow period unit", ["years", "months", "quarters", "weeks", "days"], index=0, key="tool081_period")
-                            run_method = st.form_submit_button("Calculate project economics", type="primary", use_container_width=True, key="tool081_run")
-                        elif selected_tool["tool_id"] == "T024":
-                            st.caption("Greedy precedence-feasible heuristic, not a global optimum proof. JSON task rows are illustrative only.")
-                            line_tasks_json = st.text_area(
-                                "Tasks (JSON list: task_id, duration, optional predecessors)",
-                                value='[{"task_id":"A","duration":2,"predecessors":[]},{"task_id":"B","duration":3,"predecessors":[]},{"task_id":"C","duration":2,"predecessors":["A"]},{"task_id":"D","duration":1,"predecessors":["B","C"]}]',
-                                key="tool024_tasks",
-                            )
-                            line_cycle_time = st.number_input("Station cycle-time limit", min_value=0.001, value=5.0, step=0.5, key="tool024_cycle")
-                            line_time_unit = st.selectbox("Task time unit", ["seconds", "minutes", "hours"], index=1, key="tool024_unit")
-                            run_method = st.form_submit_button("Balance production line", type="primary", use_container_width=True, key="tool024_run")
-                        elif selected_tool["tool_id"] == "T025":
-                            st.caption("Capacity comparison only; capacities must share the same period, product mix and units. Example data are synthetic.")
-                            bottleneck_processes_json = st.text_area(
-                                "Process capacity data (JSON list: process and capacity)",
-                                value='[{"process":"Cutting","capacity":110},{"process":"Welding","capacity":80},{"process":"Packing","capacity":95}]',
-                                key="tool025_processes",
-                            )
-                            bottleneck_demand = st.number_input("Required demand per period", min_value=0.001, value=90.0, step=5.0, key="tool025_demand")
-                            bottleneck_period = st.text_input("Capacity period / unit label", "units/shift", key="tool025_period")
-                            run_method = st.form_submit_button("Identify capacity constraint", type="primary", use_container_width=True, key="tool025_run")
-                        elif selected_tool["tool_id"] == "T027":
-                            st.caption("First-pass VSM estimate using WIP / required flow rate plus availability-adjusted process time. Validate the process sequence and data boundaries.")
-                            vsm_steps_json = st.text_area(
-                                "Process steps (JSON list: step, cycle_time, changeover_time, batch_size, uptime_pct, wip_units, value_added)",
-                                value='[{"step":"Machine","cycle_time":1,"changeover_time":20,"batch_size":10,"uptime_pct":95,"wip_units":25,"value_added":true},{"step":"Inspect","cycle_time":2,"changeover_time":0,"batch_size":1,"uptime_pct":98,"wip_units":10,"value_added":false}]',
-                                key="tool027_steps",
-                            )
-                            vsm_demand = st.number_input("Demand per production period (whole units)", min_value=1, value=100, step=10, key="tool027_demand")
-                            vsm_available_time = st.number_input("Available time in same period", min_value=0.001, value=480.0, step=30.0, key="tool027_available")
-                            vsm_time_unit = st.selectbox("Time unit", ["seconds", "minutes", "hours"], index=1, key="tool027_unit")
-                            run_method = st.form_submit_button("Calculate value-stream lead time", type="primary", use_container_width=True, key="tool027_run")
-                        elif selected_tool["tool_id"] == "T038":
-                            st.caption("RPN bands are screening conventions, not a universal standard. High severity is flagged separately even when RPN is low.")
-                            fmea_json = st.text_area(
-                                "Failure modes (JSON list: failure_mode, severity, occurrence, detection, effect, cause, controls, action, owner, due_date)",
-                                value='[{"failure_mode":"Bearing failure","effect":"Unplanned line stop","cause":"Lubrication loss","existing_controls":"Preventive inspection","severity":8,"occurrence":4,"detection":5,"action":"Review lubrication interval","owner":"","due_date":""}]',
-                                key="tool038_fmea",
-                            )
-                            run_method = st.form_submit_button("Rank FMEA risks", type="primary", use_container_width=True, key="tool038_run")
-                        elif selected_tool["tool_id"] == "T070":
-                            st.caption("Analytical M/M/1 model only; arrivals and service are assumed Poisson/exponential with one stable server.")
-                            queue_arrival_rate = st.number_input("Arrival rate (entities per time unit)", min_value=0.0, value=4.0, step=0.5, key="tool070_arrival")
-                            queue_service_rate = st.number_input("Service rate (entities per time unit)", min_value=0.001, value=6.0, step=0.5, key="tool070_service")
-                            queue_time_unit = st.selectbox("Rate time unit", ["hours", "minutes", "days"], index=0, key="tool070_unit")
-                            run_method = st.form_submit_button("Analyze M/M/1 queue", type="primary", use_container_width=True, key="tool070_run")
-                        elif selected_tool["tool_id"] == "T082":
-                            st.caption("Direct-material variance only. Positive variance is adverse; negative is favorable. Replace all defaults with one comparable measured period.")
-                            cost_standard_qty_per_unit = st.number_input("Standard input quantity per output unit", min_value=0.001, value=2.0, step=0.1, key="tool082_std_qty")
-                            cost_actual_output = st.number_input("Actual output quantity (whole units)", min_value=1, value=100, step=10, key="tool082_output")
-                            cost_actual_input = st.number_input("Actual input quantity", min_value=0.0, value=210.0, step=5.0, key="tool082_actual_qty")
-                            cost_standard_price = st.number_input("Standard unit cost", min_value=0.0, value=5.0, step=0.25, key="tool082_std_price")
-                            cost_actual_price = st.number_input("Actual unit cost", min_value=0.0, value=6.0, step=0.25, key="tool082_actual_price")
-                            cost_currency = st.text_input("Currency code", "SAR", key="tool082_currency")
-                            cost_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool082_period")
-                            run_method = st.form_submit_button("Reconcile cost variance", type="primary", use_container_width=True, key="tool082_run")
-                        elif selected_tool["tool_id"] == "T083":
-                            st.caption("The arithmetic is computed from user-entered costs. Evidence references and a verifier are not treated as proof that savings were realized.")
-                            roi_baseline = st.number_input("Comparable baseline cost", min_value=0.0, value=1000.0, step=50.0, key="tool083_baseline")
-                            roi_post = st.number_input("Comparable post-change cost", min_value=0.0, value=700.0, step=50.0, key="tool083_post")
-                            roi_implementation = st.number_input("Implementation cost", min_value=0.0, value=100.0, step=25.0, key="tool083_implementation")
-                            roi_currency = st.text_input("Currency code", "SAR", key="tool083_currency")
-                            roi_window = st.text_input("Measurement window", key="tool083_window")
-                            roi_baseline_evidence = st.text_input("Baseline evidence reference", key="tool083_baseline_evidence")
-                            roi_outcome_evidence = st.text_input("Post-change evidence reference", key="tool083_outcome_evidence")
-                            roi_verifier = st.text_input("Independent verifier / reviewer", key="tool083_verifier")
-                            run_method = st.form_submit_button("Calculate ROI (verification remains required)", type="primary", use_container_width=True, key="tool083_run")
-                        elif selected_tool["tool_id"] == "T017":
-                            st.caption("Join keys must be validated. Many-to-many matches may multiply rows; use duplicate rejection for keys expected to be unique.")
-                            join_left_json = st.text_area(
-                                "Left table (JSON list of records)",
-                                value='[{"id":1,"part":"A"},{"id":2,"part":"B"},{"id":3,"part":"C"}]',
-                                key="tool017_left",
-                            )
-                            join_right_json = st.text_area(
-                                "Right table (JSON list of records)",
-                                value='[{"component_id":1,"cost":10},{"component_id":3,"cost":30},{"component_id":4,"cost":40}]',
-                                key="tool017_right",
-                            )
-                            join_left_key = st.text_input("Left join key", "id", key="tool017_left_key")
-                            join_right_key = st.text_input("Right join key", "component_id", key="tool017_right_key")
-                            join_type = st.selectbox("Join type", ["left", "inner", "outer", "right"], key="tool017_type")
-                            duplicate_policy = st.selectbox("Duplicate key handling", ["allow", "reject"], key="tool017_duplicates")
-                            run_method = st.form_submit_button("Preview and reconcile join", type="primary", use_container_width=True, key="tool017_run")
-                        elif selected_tool["tool_id"] == "T018":
-                            st.caption("Timestamps are normalized to UTC. Gaps and duplicates are reported; invalid timestamps are rejected rather than silently dropped.")
-                            time_series_json = st.text_area(
-                                "Timestamped records (JSON list)",
-                                value='[{"timestamp":"2026-01-01 00:00:00","count":1,"energy":2.0},{"timestamp":"2026-01-01 02:00:00","count":3,"energy":6.0}]',
-                                key="tool018_records",
-                            )
-                            ts_column = st.text_input("Timestamp column", "timestamp", key="tool018_ts_column")
-                            ts_timezone = st.selectbox("Timezone for naive timestamps", ["UTC", "Asia/Riyadh", "Europe/London", "America/New_York"], index=1, key="tool018_timezone")
-                            ts_expected_interval = st.text_input("Expected sample interval (optional)", "1h", key="tool018_expected_interval")
-                            ts_resample_frequency = st.text_input("Resample frequency (optional, e.g. 15min)", "1h", key="tool018_resample")
-                            ts_aggregation = st.selectbox("Resampling aggregation", ["mean", "sum", "min", "max", "first", "last"], key="tool018_agg")
-                            run_method = st.form_submit_button("Process timestamps and gaps", type="primary", use_container_width=True, key="tool018_run")
-                        elif selected_tool["tool_id"] == "T019":
-                            st.caption("Generated rows are explicitly labelled SYNTHETIC and are intended for teaching/testing, not claims about a live plant.")
-                            synthetic_rows = st.number_input("Rows to generate", min_value=1, max_value=100000, value=100, step=25, key="tool019_rows")
-                            synthetic_seed = st.number_input("Random seed", min_value=0, value=42, step=1, key="tool019_seed")
-                            synthetic_start = st.text_input("Start timestamp (ISO datetime)", "2026-01-01T00:00:00Z", key="tool019_start")
-                            synthetic_interval = st.number_input("Interval (minutes)", min_value=1, value=60, step=15, key="tool019_interval")
-                            synthetic_defect_rate = st.number_input("Defect rate (%)", min_value=0.0, max_value=100.0, value=2.0, step=0.5, key="tool019_defect")
-                            synthetic_downtime = st.number_input("Mean downtime per record (minutes)", min_value=0.0, value=5.0, step=1.0, key="tool019_downtime")
-                            synthetic_energy = st.number_input("Energy per good-scale output unit (kWh)", min_value=0.0, value=0.5, step=0.1, key="tool019_energy")
-                            run_method = st.form_submit_button("Generate synthetic dataset", type="primary", use_container_width=True, key="tool019_run")
-                        elif selected_tool["tool_id"] == "T034":
-                            st.caption("Single-sample binomial plan. Confirm any contractual sampling standard and finite-lot conditions before use.")
-                            sampling_aql = st.number_input("AQL defect fraction (%)", min_value=0.0, max_value=99.0, value=1.0, step=0.5, key="tool034_aql")
-                            sampling_ltpd = st.number_input("LTPD defect fraction (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="tool034_ltpd")
-                            sampling_alpha = st.number_input("Producer risk (%)", min_value=0.1, max_value=99.0, value=5.0, step=1.0, key="tool034_alpha")
-                            sampling_beta = st.number_input("Consumer risk (%)", min_value=0.1, max_value=99.0, value=10.0, step=1.0, key="tool034_beta")
-                            sampling_max_n = st.number_input("Maximum sample size to search", min_value=1, max_value=5000, value=500, step=50, key="tool034_max_n")
-                            run_method = st.form_submit_button("Find attributes sampling plan", type="primary", use_container_width=True, key="tool034_run")
-                        elif selected_tool["tool_id"] == "T041":
-                            st.caption("Two-parameter Weibull maximum-likelihood fit for positive uncensored failure times only. Censored observations and confidence intervals are not supported.")
-                            weibull_times_json = st.text_area("Uncensored failure times (JSON list, consistent time unit)", value='[120,220,300,410,520,680,800,950,1120,1390]', key="tool041_times")
-                            run_method = st.form_submit_button("Fit Weibull reliability model", type="primary", use_container_width=True, key="tool041_run")
-                        elif selected_tool["tool_id"] == "T043":
-                            st.caption("Interval-based due-date planner. It does not optimize labor, parts or downtime windows.")
-                            pm_tasks_json = st.text_area(
-                                "Maintenance tasks (JSON list: asset, task, last_completed_date, interval_days, estimated_duration_hours, required_skill, owner)",
-                                value='[{"asset":"CNC-01","task":"Lubrication","last_completed_date":"2026-10-01","interval_days":20,"estimated_duration_hours":1.5,"required_skill":"Mechanical","owner":""},{"asset":"CNC-01","task":"Inspection","last_completed_date":"2026-10-20","interval_days":7,"estimated_duration_hours":1,"required_skill":"Technician","owner":""}]',
-                                key="tool043_tasks",
-                            )
-                            pm_as_of_date = st.text_input("Plan as-of date (YYYY-MM-DD)", "2026-10-24", key="tool043_as_of")
-                            run_method = st.form_submit_button("Calculate maintenance due list", type="primary", use_container_width=True, key="tool043_run")
-                        elif selected_tool["tool_id"] == "T045":
-                            st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
-                            spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
-                            run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
-                        elif selected_tool["tool_id"] == "T044":
-                            st.caption(
-                                "RCM first-pass task screening. Safety/environmental/high-severity and hidden protective-function cases are escalated; all outputs require a competent reliability review."
-                            )
-                            rcm_records_json = st.text_area(
-                                "Failure-mode records (JSON list)",
-                                value='[{"asset":"P-101","failure_mode":"Bearing wear","consequence":"operational","severity":5,"detectable":true,"on_condition_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"PSV-1","failure_mode":"Pressure trip fails","consequence":"hidden","severity":8,"hidden_protective_function":true,"failure_finding_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"ESD-1","failure_mode":"Emergency shutdown fails on demand","consequence":"safety","severity":9,"evidence_reference":"synthetic-example"}]',
-                                key="tool044_records",
-                            )
-                            run_method = st.form_submit_button("Build RCM task candidates", type="primary", use_container_width=True, key="tool044_run")
-                        elif selected_tool["tool_id"] == "T046":
-                            st.caption(
-                                "Single-task, two-handed NIOSH Revised Lifting Equation screen. "
-                                "Measure H and A at both the origin and destination. Enter FM and "
-                                "CM from the applicable official NIOSH tables; the app does not guess them."
-                            )
-                            st.markdown(
-                                "[NIOSH RNLE Applications Manual (DHHS/NIOSH 94-110, revised 2021)]"
-                                "(https://www.cdc.gov/niosh/publications/numbered/94-110.html)"
-                            )
-                            rnle_units = st.selectbox(
-                                "Measurement units",
-                                ["metric", "imperial"],
-                                key="tool046_units",
-                            )
-                            distance_unit = "cm" if rnle_units == "metric" else "in"
-                            load_unit = "kg" if rnle_units == "metric" else "lb"
-                            default_h = 25.0 if rnle_units == "metric" else 10.0
-                            default_v = 75.0 if rnle_units == "metric" else 30.0
-                            default_d = 25.0 if rnle_units == "metric" else 10.0
-                            h_limit = 63.0 if rnle_units == "metric" else 25.0
-                            v_limit = 175.0 if rnle_units == "metric" else 70.0
-                            rnle_task = st.text_input("Task description", key="tool046_task")
-                            rnle_load = st.number_input(
-                                f"Object weight ({load_unit})",
-                                min_value=0.01,
-                                value=10.0 if rnle_units == "metric" else 22.0,
-                                step=0.5,
-                                key="tool046_load",
-                            )
-                            rnle_h_origin = st.number_input(
-                                f"Horizontal hand location at origin ({distance_unit})",
-                                min_value=0.01,
-                                max_value=h_limit,
-                                value=default_h,
-                                step=1.0,
-                                key="tool046_h_origin",
-                            )
-                            rnle_h_destination = st.number_input(
-                                f"Horizontal hand location at destination ({distance_unit})",
-                                min_value=0.01,
-                                max_value=h_limit,
-                                value=default_h,
-                                step=1.0,
-                                key="tool046_h_destination",
-                            )
-                            rnle_v_start = st.number_input(
-                                f"Vertical hand location at origin ({distance_unit})",
-                                min_value=0.0,
-                                max_value=v_limit,
-                                value=default_v,
-                                step=1.0,
-                                key="tool046_v_start",
-                            )
-                            rnle_distance = st.number_input(
-                                f"Vertical travel distance ({distance_unit})",
-                                min_value=0.01,
-                                max_value=v_limit,
-                                value=default_d,
-                                step=1.0,
-                                key="tool046_distance",
-                            )
-                            rnle_a_origin = st.number_input(
-                                "Asymmetry angle at origin (degrees)",
-                                min_value=0.0,
-                                max_value=135.0,
-                                value=0.0,
-                                step=5.0,
-                                key="tool046_a_origin",
-                            )
-                            rnle_a_destination = st.number_input(
-                                "Asymmetry angle at destination (degrees)",
-                                min_value=0.0,
-                                max_value=135.0,
-                                value=0.0,
-                                step=5.0,
-                                key="tool046_a_destination",
-                            )
-                            rnle_frequency = st.number_input(
-                                "Average lifting frequency (lifts/minute)",
-                                min_value=0.01,
-                                max_value=15.0,
-                                value=1.0,
-                                step=0.25,
-                                key="tool046_frequency",
-                            )
-                            rnle_duration = st.selectbox(
-                                "Task duration (with required recovery)",
-                                [
-                                    "Select duration",
-                                    "Short (≤ 1 hour)",
-                                    "Moderate (> 1 to 2 hours)",
-                                    "Long (> 2 to 8 hours)",
-                                ],
-                                key="tool046_duration",
-                            )
-                            rnle_fm = st.number_input(
-                                "Frequency multiplier (FM) from NIOSH table",
-                                min_value=0.0,
-                                max_value=1.0,
-                                value=0.0,
-                                step=0.01,
-                                key="tool046_fm",
-                            )
-                            rnle_fm_source = st.text_input(
-                                "Frequency multiplier table reference (required)",
-                                key="tool046_fm_source",
-                            )
-                            rnle_coupling = st.selectbox(
-                                "Observed hand-to-load coupling",
-                                ["Select coupling", "Good", "Fair", "Poor"],
-                                key="tool046_coupling",
-                            )
-                            rnle_cm = st.number_input(
-                                "Coupling multiplier (CM) from NIOSH table",
-                                min_value=0.0,
-                                max_value=1.0,
-                                value=0.0,
-                                step=0.01,
-                                key="tool046_cm",
-                            )
-                            rnle_cm_source = st.text_input(
-                                "Coupling multiplier table reference (required)",
-                                key="tool046_cm_source",
-                            )
-                            run_method = st.form_submit_button(
-                                "Calculate RNLE screening estimate",
-                                type="primary",
-                                use_container_width=True,
-                                key="tool046_run",
-                            )
-                        elif selected_tool["tool_id"] == "T060":
-                            st.caption(
-                                "Single-period capacitated transportation optimization. Unmet demand remains visible; this is not a multi-period network design model."
-                            )
-                            supply_network_suppliers_json = st.text_area(
-                                "Suppliers (JSON list)",
-                                value='[{"supplier":"Supplier A","supply_capacity":100},{"supplier":"Supplier B","supply_capacity":60}]',
-                                key="tool060_suppliers",
-                            )
-                            supply_network_sites_json = st.text_area(
-                                "Demand sites (JSON list)",
-                                value='[{"site":"Plant 1","demand":80},{"site":"Plant 2","demand":70}]',
-                                key="tool060_sites",
-                            )
-                            supply_network_routes_json = st.text_area(
-                                "Available and disrupted routes (JSON list)",
-                                value='[{"supplier":"Supplier A","site":"Plant 1","unit_cost":2,"capacity":80,"available":true},{"supplier":"Supplier A","site":"Plant 2","unit_cost":3,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 1","unit_cost":4,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 2","unit_cost":1,"capacity":60,"available":true}]',
-                                key="tool060_routes",
-                            )
-                            supply_network_penalty = st.number_input(
-                                "Unmet-demand penalty per unit", min_value=0.01, value=1000.0, step=50.0, key="tool060_penalty"
-                            )
-                            supply_network_time_limit = st.number_input(
-                                "Solver time limit (seconds)", min_value=0.1, max_value=120.0, value=10.0, step=1.0, key="tool060_time_limit"
-                            )
-                            run_method = st.form_submit_button("Optimize supply chain network", type="primary", use_container_width=True, key="tool060_run")
-                        elif selected_tool["tool_id"] == "T074":
-                            st.caption(
-                                "Affine simulation-output calibration with a chronological holdout. It does not tune simulator physics or connect to live equipment."
-                            )
-                            calibration_simulated_text = st.text_input(
-                                "Simulated outputs (chronological, comma-separated)",
-                                "10, 20, 30, 40, 50, 60",
-                                key="tool074_simulated",
-                            )
-                            calibration_measured_text = st.text_input(
-                                "Measured outputs (same order and unit)",
-                                "21, 41, 61, 81, 101, 121",
-                                key="tool074_measured",
-                            )
-                            calibration_training_fraction = st.slider(
-                                "Training fraction", min_value=0.5, max_value=0.9, value=0.67, step=0.01, key="tool074_fraction"
-                            )
-                            run_method = st.form_submit_button("Fit and validate calibration", type="primary", use_container_width=True, key="tool074_run")
-                        elif selected_tool["tool_id"] == "T080":
-                            st.caption(
-                                "Synthetic Monte Carlo stress test with supplier outages, demand variation and capacity shocks. Outputs are scenario estimates, not live supply availability or a forecast."
-                            )
-                            disruption_suppliers_json = st.text_area(
-                                "Supplier baseline (JSON list)",
-                                value='[{"Supplier":"Supplier A","Capacity":100,"Unit Cost":2,"Lead Days":2,"Risk %":5,"Carbon kg/unit":0.5,"Local Share %":70},{"Supplier":"Supplier B","Capacity":70,"Unit Cost":3,"Lead Days":4,"Risk %":10,"Carbon kg/unit":0.7,"Local Share %":30}]',
-                                key="tool080_suppliers",
-                            )
-                            disruption_demands_json = st.text_area(
-                                "Demand baseline (JSON list)",
-                                value='[{"Destination":"Plant 1","Demand":80,"Priority":5,"Due Days":2},{"Destination":"Plant 2","Demand":70,"Priority":3,"Due Days":5}]',
-                                key="tool080_demands",
-                            )
-                            disruption_iterations = st.number_input(
-                                "Monte Carlo iterations", min_value=10, max_value=250, value=10, step=10, key="tool080_iterations"
-                            )
-                            disruption_seed = st.number_input(
-                                "Random seed", min_value=0, max_value=2147483647, value=17, step=1, key="tool080_seed"
-                            )
-                            disruption_outage_probability = st.slider(
-                                "Supplier outage probability", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_outage"
-                            )
-                            disruption_demand_cv = st.slider(
-                                "Demand coefficient of variation", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_demand_cv"
-                            )
-                            run_method = st.form_submit_button("Run disruption stress test", type="primary", use_container_width=True, key="tool080_run")
-                        elif selected_tool["tool_id"] == "T096":
-                            st.caption(
-                                "Inspect server-side connector configuration without making network requests. "
-                                "Live verification is a separate, explicitly confirmed, staging-only HTTPS read; "
-                                "provider credentials must remain in server-side secrets."
-                            )
-                            integration_action = st.selectbox(
-                                "Integration action",
-                                [
-                                    "Inspect configured connector settings",
-                                    "Verify approved REST connector (staging only)",
-                                ],
-                                key="tool096_action",
-                            )
-                            integration_profiles_json = st.text_area(
-                                "Connector profiles (JSON object with a profiles list)",
-                                value=get_tool_example_json("T096"),
-                                key="tool096_profiles",
-                            )
-                            integration_live_profile_json = st.text_area(
-                                "Single approved REST profile for a live staging read (JSON object)",
-                                value='{"name":"Plant REST API","protocol":"REST","endpoint_env":"SHOIR_CONNECTOR_PLANT_ENDPOINT","credential_env":"SHOIR_CONNECTOR_PLANT_TOKEN"}',
-                                key="tool096_live_profile",
-                                disabled=integration_action != "Verify approved REST connector (staging only)",
-                            )
-                            integration_confirm_live = st.checkbox(
-                                "I confirm this sends a read-only HTTPS request to the server-configured staging connector.",
-                                value=False,
-                                key="tool096_confirm_live",
-                                disabled=integration_action != "Verify approved REST connector (staging only)",
-                            )
-                            run_method = st.form_submit_button(
-                                "Run Integration Management check",
-                                type="primary",
-                                use_container_width=True,
-                                key="tool096_run",
-                            )
-                        elif selected_tool["tool_id"] == "T098":
-                            st.caption(
-                                "Configuration inspection only. This does not start an OIDC login, activate MFA, "
-                                "or prove that an identity provider is connected."
-                            )
-                            st.info(
-                                "Provider-backed SSO/MFA remains unavailable until the staging identity provider, "
-                                "verified claims, secure session handling and audit acceptance are configured."
-                            )
-                            run_method = st.form_submit_button(
-                                "Check identity and audit configuration",
-                                type="primary",
-                                use_container_width=True,
-                                key="tool098_run",
-                            )
-                        elif selected_tool["tool_id"] == "T097":
-                            from plugin_registry import plugin_manifest
-                            plugin_options = [item["name"] for item in plugin_manifest()]
-                            st.caption(
-                                "Inspect the local v1 plugin contract. Execution is available only for explicitly registered server-side handlers; external API hosting and credentials are separate configuration."
-                            )
-                            plugin_name = st.selectbox(
-                                "Registered plugin",
-                                plugin_options,
-                                key="tool097_plugin",
-                            )
-                            plugin_payload_json = st.text_area(
-                                "Optional JSON payload to validate against the plugin input schema",
-                                "{}",
-                                key="tool097_payload",
-                            )
-                            run_method = st.form_submit_button("Inspect plugin contract", type="primary", use_container_width=True, key="tool097_run")
-                        elif selected_tool["tool_id"] == "T099":
-                            st.caption(
-                                "Export or restore a same-account personal workspace backup. Checksum and size are verified before restore. This does not replace Supabase point-in-time recovery or an organisation-level restore rehearsal."
-                            )
-                            governance_action = st.radio(
-                                "Workspace recovery action",
-                                ["Export personal workspace backup", "Restore uploaded personal backup"],
-                                key="tool099_action",
-                            )
-                            governance_backup_upload = st.file_uploader(
-                                "Select a Shoir-IE workspace backup JSON file",
-                                type=["json"],
-                                accept_multiple_files=False,
-                                key="tool099_backup_upload",
-                            )
-                            run_method = st.form_submit_button("Run workspace recovery action", type="primary", use_container_width=True, key="tool099_run")
-                        elif selected_tool["tool_id"] == "T094":
-                            st.caption(
-                                "Freshness-aware KPI threshold evaluation. Use gt/gte/lt/lte or >, >=, <, <= operators; each KPI reading must have one unique name, and each rule must reference that name. No email, SMS or external notification is sent."
-                            )
-                            kpi_records_json = st.text_area(
-                                "KPI readings (JSON list: kpi, value, unit, observed_at, source)",
-                                value="[]",
-                                key="tool094_records",
-                            )
-                            kpi_rules_json = st.text_area(
-                                "Alert rules (JSON list: rule_id, kpi, operator, threshold, severity)",
-                                value="[]",
-                                key="tool094_rules",
-                            )
-                            kpi_as_of = st.text_input(
-                                "Evaluation timestamp (ISO 8601 UTC; blank uses current time)",
-                                "",
-                                key="tool094_as_of",
-                            )
-                            kpi_stale_hours = st.number_input(
-                                "Stale-data threshold (hours)", min_value=0.1, max_value=8760.0, value=24.0, step=1.0, key="tool094_stale"
-                            )
-                            run_method = st.form_submit_button("Evaluate KPI alerts", type="primary", use_container_width=True, key="tool094_run")
-                        elif selected_tool["tool_id"] == "T047":
-                            st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
-                            hazard_json = st.text_area(
-                                "Hazards (JSON list with hazard, severity 1–5, likelihood 1–5 and optional controls/action/residual ratings)",
-                                value='[{"hazard":"Moving conveyor","activity":"Clearing jam","consequence":"Entanglement injury","severity":5,"likelihood":3,"controls":"Lockout/tagout procedure; verify isolation","residual_severity":5,"residual_likelihood":1,"required_action":"Confirm isolation procedure and training","owner":"Safety lead","review_date":"2026-11-01"}]',
-                                key="tool047_hazards",
-                            )
-                            run_method = st.form_submit_button("Screen and review hazards", type="primary", use_container_width=True, key="tool047_run")
-                        elif selected_tool["tool_id"] == "T050":
-                            st.caption("Rates use the entered period-specific work-hour denominator; trends do not establish causation.")
-                            safety_periods_json = st.text_area("Safety periods (JSON list: period, incidents_by_category, work_hours, lost_workdays)", value='[{"period":"2026-Q1","incidents_by_category":{"Slip":2,"Cut":1},"work_hours":20000,"lost_workdays":4},{"period":"2026-Q2","incidents_by_category":{"Slip":1,"Fatigue":1},"work_hours":40000,"lost_workdays":2}]', key="tool050_periods")
-                            safety_rate_base = st.number_input("Rate base work hours", min_value=1.0, value=200000.0, step=25000.0, key="tool050_base")
-                            run_method = st.form_submit_button("Calculate incident trend and rates", type="primary", use_container_width=True, key="tool050_run")
-                        elif selected_tool["tool_id"] == "T054":
-                            st.caption("One-level BOM explosion only. Provide the current validated BOM; this does not recursively explode subassemblies.")
-                            mrp_bom_json = st.text_area(
-                                "Bill of materials (JSON list: component, qty_per_parent, lead_time_periods, lot_size_multiple)",
-                                value='[{"component":"Screw","qty_per_parent":4,"lead_time_periods":2,"lot_size_multiple":10},{"component":"Bolt","qty_per_parent":2,"lead_time_periods":1,"lot_size_multiple":1}]',
-                                key="tool054_bom",
-                            )
-                            mrp_inventory_json = st.text_area(
-                                "Component inventory (JSON object keyed by component)",
-                                value='{"Screw":{"on_hand":20,"scheduled_receipts":0,"safety_stock":5},"Bolt":{"on_hand":30,"scheduled_receipts":0,"safety_stock":0}}',
-                                key="tool054_inventory",
-                            )
-                            mrp_parent_demand = st.number_input("Parent-assembly demand (whole units)", min_value=1, value=10, step=1, key="tool054_demand")
-                            mrp_due_period = st.number_input("Demand due period index (0 = current period)", min_value=-120, max_value=120, value=0, step=1, key="tool054_due")
-                            run_method = st.form_submit_button("Calculate component requirements", type="primary", use_container_width=True, key="tool054_run")
-                        elif selected_tool["tool_id"] == "T076":
-                            st.caption("This reconstructs event-log variants and directly-follows transitions. It is not full conformance checking or causal analysis.")
-                            process_event_log_json = st.text_area(
-                                "Event log (JSON list: case_id, activity, timestamp)",
-                                value='[{"case_id":"1","activity":"Receive","timestamp":"2026-01-01T00:00:00Z"},{"case_id":"1","activity":"Inspect","timestamp":"2026-01-01T01:00:00Z"},{"case_id":"2","activity":"Receive","timestamp":"2026-01-01T00:00:00Z"},{"case_id":"2","activity":"Pack","timestamp":"2026-01-01T02:00:00Z"}]',
-                                key="tool076_event_log",
-                            )
-                            run_method = st.form_submit_button("Analyze event-log flow", type="primary", use_container_width=True, key="tool076_run")
-                        elif selected_tool["tool_id"] == "T077":
-                            st.caption("Scenario comparison only; this does not control industrial equipment or guarantee savings.")
-                            energy_baseline_json = st.text_area("Baseline (JSON object: name, energy_kwh, output_units, cost_per_kwh, emission_factor_kg_per_kwh)", value='{"name":"Baseline","energy_kwh":1000,"output_units":100,"cost_per_kwh":0.2,"emission_factor_kg_per_kwh":0.5}', key="tool077_baseline")
-                            energy_alternatives_json = st.text_area("Alternatives (JSON list with the same metric fields)", value='[{"name":"Improved","energy_kwh":800,"output_units":100,"cost_per_kwh":0.2,"emission_factor_kg_per_kwh":0.5},{"name":"Lower volume","energy_kwh":700,"output_units":70,"cost_per_kwh":0.2,"emission_factor_kg_per_kwh":0.5}]', key="tool077_alternatives")
-                            run_method = st.form_submit_button("Compare energy scenarios", type="primary", use_container_width=True, key="tool077_run")
-                        elif selected_tool["tool_id"] == "T079":
-                            st.caption("Flow balance requires same-unit quantities and comparable measurement boundaries. Unreconciled balance is reported, not silently allocated.")
-                            water_flows_json = st.text_area(
-                                "Process flows (JSON list: process, input_quantity, product_output_quantity, waste_quantity, unit, period)",
-                                value='[{"process":"Wash","input_quantity":100,"product_output_quantity":85,"waste_quantity":15,"unit":"L","period":"2026-09"},{"process":"Rinse","input_quantity":50,"product_output_quantity":45,"waste_quantity":5,"unit":"L","period":"2026-09"}]',
-                                key="tool079_flows",
-                            )
-                            run_method = st.form_submit_button("Balance water and waste flows", type="primary", use_container_width=True, key="tool079_run")
-                        elif selected_tool["tool_id"] == "T084":
-                            st.caption("Criterion weights are subjective inputs. Scores are normalized direction-aware; sensitivity analysis is not yet included.")
-                            portfolio_criteria_json = st.text_area(
-                                "Criteria (JSON list: name, weight, direction maximize/minimize)",
-                                value='[{"name":"Cost","weight":2,"direction":"minimize"},{"name":"Quality","weight":1,"direction":"maximize"}]',
-                                key="tool084_criteria",
-                            )
-                            portfolio_alternatives_json = st.text_area(
-                                "Project alternatives (JSON list: name and scores object keyed by criterion)",
-                                value='[{"name":"Project A","scores":{"Cost":100,"Quality":70}},{"name":"Project B","scores":{"Cost":200,"Quality":90}}]',
-                                key="tool084_alternatives",
-                            )
-                            run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
-                        elif selected_tool["tool_id"] == "T033":
-                            st.caption("Balanced crossed design: every part must be measured by every operator on each repeated trial. Review the organization's MSA standard and acceptance criteria before decisions.")
-                            msa_observations_json = st.text_area(
-                                "Measurements (JSON list with part, operator, trial, measurement)",
-                                value='[{"part":"P1","operator":"A","trial":1,"measurement":9.8},{"part":"P1","operator":"A","trial":2,"measurement":9.9},{"part":"P1","operator":"B","trial":1,"measurement":10.0},{"part":"P1","operator":"B","trial":2,"measurement":10.1},{"part":"P2","operator":"A","trial":1,"measurement":11.8},{"part":"P2","operator":"A","trial":2,"measurement":11.9},{"part":"P2","operator":"B","trial":1,"measurement":12.0},{"part":"P2","operator":"B","trial":2,"measurement":12.1}]',
-                                key="tool033_observations",
-                            )
-                            msa_tolerance = st.number_input("Tolerance width (0 = not supplied)", min_value=0.0, value=6.0, step=0.1, key="tool033_tolerance")
-                            run_method = st.form_submit_button("Analyze crossed Gage R&R", type="primary", use_container_width=True, key="tool033_run")
-                        elif selected_tool["tool_id"] == "T035":
-                            st.caption("Complete 2-level factorial only, factors coded -1/+1, main effects plus pairwise interactions. Plan randomized run order separately; results are not causal proof.")
-                            doe_observations_json = st.text_area(
-                                "Factorial run data (JSON list)",
-                                value='[{"A":-1,"B":-1,"response":6.4},{"A":-1,"B":-1,"response":6.6},{"A":-1,"B":1,"response":9.4},{"A":-1,"B":1,"response":9.6},{"A":1,"B":-1,"response":7.4},{"A":1,"B":-1,"response":7.6},{"A":1,"B":1,"response":16.4},{"A":1,"B":1,"response":16.6}]',
-                                key="tool035_observations",
-                            )
-                            doe_response_field = st.text_input("Response column", "response", key="tool035_response")
-                            doe_factor_fields_text = st.text_input("Factor columns (comma-separated)", "A,B", key="tool035_factors")
-                            doe_alpha = st.number_input("Significance level (alpha)", min_value=0.001, max_value=0.5, value=0.05, step=0.01, key="tool035_alpha")
-                            run_method = st.form_submit_button("Analyze factorial DOE", type="primary", use_container_width=True, key="tool035_run")
-                        elif selected_tool["tool_id"] == "T036":
-                            regression_mode = st.selectbox(
-                                "Analysis method", ["Linear regression", "One-way ANOVA"],
-                                key="tool036_mode",
-                            )
-                            st.caption("Regression fits one numeric predictor. ANOVA compares independent groups. Example values are synthetic and do not establish causality.")
-                            regression_observations_json = st.text_area(
-                                "Regression observations (JSON list of x/y objects)",
-                                value='[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]',
-                                key="tool036_observations",
-                            )
-                            anova_groups_json = st.text_area(
-                                "ANOVA groups (JSON object mapping names to numeric lists)",
-                                value='{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}',
-                                key="tool036_groups",
-                            )
-                            regression_alpha = st.number_input(
-                                "Significance level (alpha)", min_value=0.001, max_value=0.5,
-                                value=0.05, step=0.01, key="tool036_alpha",
-                            )
-                            run_method = st.form_submit_button("Run regression / ANOVA", type="primary", use_container_width=True, key="tool036_run")
-                        elif selected_tool["tool_id"] == "T037":
-                            st.caption("Research Pack method: Welch's two-sided t-test for two independent samples. The method does not assume equal population variances.")
-                            hypothesis_sample_a = st.text_input("Sample A (comma-separated numeric observations)", "2, 3, 4, 5", key="tool037_sample_a")
-                            hypothesis_sample_b = st.text_input("Sample B (comma-separated numeric observations)", "8, 9, 10, 11", key="tool037_sample_b")
-                            hypothesis_alpha = st.number_input(
-                                "Significance level (alpha)", min_value=0.001, max_value=0.5,
-                                value=0.05, step=0.01, key="tool037_alpha",
-                            )
-                            run_method = st.form_submit_button("Run Welch t-test", type="primary", use_container_width=True, key="tool037_run")
-                        elif selected_tool["tool_id"] == "T051":
-                            st.caption("Chronological holdout comparison of naïve, training-mean and trailing moving-average baselines. Forecast intervals and seasonal models are not included.")
-                            demand_history_text = st.text_area("Demand history in chronological order (comma-separated)", "10, 12, 13, 15, 17, 20, 23, 25, 26, 28", key="tool051_history")
-                            demand_holdout = st.number_input("Holdout periods", min_value=2, max_value=100, value=3, step=1, key="tool051_holdout")
-                            demand_horizon = st.number_input("Forecast horizon", min_value=1, max_value=100, value=3, step=1, key="tool051_horizon")
-                            demand_ma_window = st.number_input("Moving-average window", min_value=1, max_value=100, value=3, step=1, key="tool051_window")
-                            run_method = st.form_submit_button("Compare demand baselines", type="primary", use_container_width=True, key="tool051_run")
-                        elif selected_tool["tool_id"] == "T072":
-                            st.caption("Independent-input Monte Carlo screening. Declare each benefit/cost distribution; correlations are not inferred, and outputs are simulations, not verified ROI.")
-                            monte_carlo_components_json = st.text_area(
-                                "Components (JSON list: name, role benefit/cost, distribution and parameters)",
-                                value='[{"name":"Output benefit","role":"benefit","distribution":"triangular","low":70,"mode":90,"high":110},{"name":"Implementation cost","role":"cost","distribution":"normal","mean":50,"sd":5}]',
-                                key="tool072_components",
-                            )
-                            monte_carlo_iterations = st.number_input("Simulation trials", min_value=1000, max_value=100000, value=10000, step=1000, key="tool072_iterations")
-                            monte_carlo_seed = st.number_input("Random seed", min_value=0, max_value=4294967295, value=42, step=1, key="tool072_seed")
-                            monte_carlo_unit = st.text_input("Net outcome unit / currency label", "SAR (illustrative)", key="tool072_unit")
-                            run_method = st.form_submit_button("Run Monte Carlo simulation", type="primary", use_container_width=True, key="tool072_run")
-                        elif selected_tool["tool_id"] == "T061":
-                            st.caption("LP/MILP execution with explicit variable domains, linear constraints and independent post-solve feasibility diagnostics. A solver error or time limit is not an optimal solution.")
-                            tool061_payload_json = st.text_area(
-                                "Optimization model (JSON object: variable_spec, objective_coefficients, constraints)",
-                                value=get_tool_example_json("T061"),
-                                key="tool061_payload",
-                            )
-                            run_method = st.form_submit_button("Solve LP / MILP model", type="primary", use_container_width=True, key="tool061_run")
-                        elif selected_tool["tool_id"] == "T067":
-                            st.caption("Weighted trade-off ranking and Pareto candidates across explicit numeric objectives. The ranking is not a universal optimum.")
-                            tool067_payload_json = st.text_area(
-                                "Alternatives and objective definitions (JSON object)",
-                                value=get_tool_example_json("T067"),
-                                key="tool067_payload",
-                            )
-                            run_method = st.form_submit_button("Calculate Pareto trade-offs", type="primary", use_container_width=True, key="tool067_run")
-                        elif selected_tool["tool_id"] == "T068":
-                            st.caption("Worst-case linear objective over explicit scenario coefficient vectors and a shared feasible region. Scenario coverage and units must be reviewed.")
-                            tool068_payload_json = st.text_area(
-                                "Robust LP scenarios and constraints (JSON object)",
-                                value=get_tool_example_json("T068"),
-                                key="tool068_payload",
-                            )
-                            run_method = st.form_submit_button("Solve robust linear model", type="primary", use_container_width=True, key="tool068_run")
-                        elif selected_tool["tool_id"] == "T085":
-                            st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
-                            effect_size = st.number_input(
-                                "Standardized effect size (Cohen's d)", min_value=0.001,
-                                value=0.5, step=0.1, key="tool085_effect_size"
-                            )
-                            alpha = st.number_input(
-                                "Significance level (alpha)", min_value=0.001, max_value=0.5,
-                                value=0.05, step=0.01, key="tool085_alpha"
-                            )
-                            target_power = st.number_input(
-                                "Target statistical power", min_value=0.01, max_value=0.999,
-                                value=0.80, step=0.05, key="tool085_target_power"
-                            )
-                            search_limit = st.number_input(
-                                "Maximum sample size per group to search", min_value=2, max_value=100000,
-                                value=10000, step=100, key="tool085_search_limit"
-                            )
-                            run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
-
-                    if selected_tool["tool_id"] == "T007":
-                        safe_diagnostic = classify_diagnostic(diagnostic_inspector_text)
-                        current_tool_inputs = {
-                            "reported_subsystem": diagnostic_category,
-                            "safe_summary": safe_diagnostic["safe_summary"],
-                            "redactions_applied": safe_diagnostic["redactions_applied"],
-                            "raw_input_stored": False,
-                        }
-                    elif selected_tool["tool_id"] == "T009":
-                        current_tool_inputs = {"status_filter": capability_status_filter, "row_limit": int(capability_status_limit)}
-                    elif selected_tool["tool_id"] == "T010":
-                        current_tool_inputs = {"query_length": len(help_query), "workbench_filter": help_workbench}
-                    elif selected_tool["tool_id"] == "T100":
-                        safe_diagnostic = redact_diagnostic_text(support_diagnostic_text)
-                        current_tool_inputs = {
-                            "component": support_component,
-                            "severity": support_severity,
-                            "redacted_summary": safe_diagnostic["safe_summary"],
-                            "redactions_applied": safe_diagnostic["redactions_applied"],
-                            "raw_input_stored": False,
-                        }
-                    elif selected_tool["tool_id"] == "T015":
-                        current_tool_inputs = {"source_headers": field_headers_text, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_min_confidence}
-                    elif selected_tool["tool_id"] == "T049":
-                        current_tool_inputs = {"work_orders_json": backlog_orders_json, "available_hours": backlog_hours, "available_skills": backlog_skills_text}
-                    elif selected_tool["tool_id"] == "T052":
-                        current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
-                    elif selected_tool["tool_id"] == "T058":
-                        current_tool_inputs = {"suppliers_json": supplier_scores_json, "weights_json": supplier_weights_json}
-                    elif selected_tool["tool_id"] == "T021":
-                        current_tool_inputs = {
-                            "observation_times_text": observation_text,
-                            "performance_rating_pct": rating,
-                            "allowance_pct_of_standard_time": allowance,
-                            "time_unit": unit,
-                        }
-                    elif selected_tool["tool_id"] == "T022":
-                        current_tool_inputs = {
-                            "activity_counts_json": work_sampling_counts_json,
-                            "confidence_level": confidence_option,
-                            "target_margin_of_error_pct": margin_pct,
-                        }
-                    elif selected_tool["tool_id"] == "T023":
-                        current_tool_inputs = {
-                            "available_time_per_period": available_time,
-                            "demand_units_per_period": demand_units,
-                            "cycle_time_per_unit": cycle_time,
-                            "time_unit": unit,
-                        }
-                    elif selected_tool["tool_id"] == "T028":
-                        current_tool_inputs = {
-                            "category_counts_json": pareto_counts_json,
-                            "problem_statement": problem_statement,
-                            "why_chain_text": why_chain_text,
-                            "countermeasure": countermeasure_text,
-                            "owner": action_owner,
-                            "due_date": action_due_date,
-                        }
-                    elif selected_tool["tool_id"] == "T029":
-                        current_tool_inputs = {"checklist_json": audit_items_json}
-                    elif selected_tool["tool_id"] == "T030":
-                        current_tool_inputs = {
-                            "record_id": record_id_input,
-                            "title": a3_title,
-                            "problem_statement": a3_problem,
-                            "metric_name": a3_metric,
-                            "unit": a3_unit,
-                            "baseline_value": a3_baseline,
-                            "target_value": a3_target,
-                            "actual_after_value": a3_actual,
-                            "root_cause_hypothesis": a3_root_cause,
-                            "countermeasure": a3_countermeasure,
-                            "owner": a3_owner,
-                            "due_date": a3_due_date,
-                            "baseline_evidence": a3_baseline_evidence,
-                            "post_change_evidence": a3_post_evidence,
-                            "implementation_status": a3_status,
-                            "review_date": a3_review_date,
-                        }
-                    elif selected_tool["tool_id"] == "T066":
-                        current_tool_inputs = {
-                            "stock_length": stock_len, "kerf_allowance": kerf,
-                            "parts_json": parts_json,
-                        }
-                    elif selected_tool["tool_id"] == "T075":
-                        current_tool_inputs = {
-                            "predictions_text": predictions_text, "actuals_text": actuals_text,
-                            "maximum_mae": max_mae, "trailing_window": int(window),
-                        }
-                    elif selected_tool["tool_id"] == "T026":
-                        current_tool_inputs = {"planned_time": oee_planned, "downtime": oee_downtime, "ideal_cycle_time": oee_cycle, "total_count": oee_total, "good_count": oee_good, "time_unit": oee_unit}
-                    elif selected_tool["tool_id"] == "T032":
-                        current_tool_inputs = {"measurements_text": capability_measurements, "lsl": capability_lsl, "usl": capability_usl, "subgroup_size": int(capability_subgroup), "unit": capability_unit}
-                    elif selected_tool["tool_id"] == "T055":
-                        current_tool_inputs = {"mean_daily_demand": inv_demand, "daily_demand_stddev": inv_sd, "lead_time_days": inv_lead, "order_cost_per_order": inv_order_cost, "annual_holding_cost_per_unit": inv_holding_cost, "operating_days_per_year": int(inv_days), "service_level": inv_service}
-                    elif selected_tool["tool_id"] == "T078":
-                        current_tool_inputs = {"activity_amount": carbon_amount, "activity_unit": carbon_unit, "emission_factor": carbon_factor, "factor_unit": carbon_factor_unit, "factor_source": carbon_source, "factor_date": carbon_date, "boundary": carbon_boundary}
-                    elif selected_tool["tool_id"] == "T081":
-                        current_tool_inputs = {"cash_flows_text": economics_cash_flows, "discount_rate_pct": economics_rate, "currency": economics_currency, "period_unit": economics_period}
-                    elif selected_tool["tool_id"] == "T024":
-                        current_tool_inputs = {"tasks_json": line_tasks_json, "cycle_time": line_cycle_time, "time_unit": line_time_unit}
-                    elif selected_tool["tool_id"] == "T025":
-                        current_tool_inputs = {"processes_json": bottleneck_processes_json, "demand_units_per_period": bottleneck_demand, "period_label": bottleneck_period}
-                    elif selected_tool["tool_id"] == "T027":
-                        current_tool_inputs = {"steps_json": vsm_steps_json, "demand_units_per_period": vsm_demand, "available_time_per_period": vsm_available_time, "time_unit": vsm_time_unit}
-                    elif selected_tool["tool_id"] == "T038":
-                        current_tool_inputs = {"failure_modes_json": fmea_json}
-                    elif selected_tool["tool_id"] == "T070":
-                        current_tool_inputs = {"arrival_rate_per_time": queue_arrival_rate, "service_rate_per_time": queue_service_rate, "time_unit": queue_time_unit}
-                    elif selected_tool["tool_id"] == "T082":
-                        current_tool_inputs = {"standard_quantity_per_unit": cost_standard_qty_per_unit, "actual_output_units": cost_actual_output, "actual_input_quantity": cost_actual_input, "standard_unit_cost": cost_standard_price, "actual_unit_cost": cost_actual_price, "currency": cost_currency, "period": cost_period}
-                    elif selected_tool["tool_id"] == "T083":
-                        current_tool_inputs = {"baseline_cost": roi_baseline, "post_change_cost": roi_post, "implementation_cost": roi_implementation, "currency": roi_currency, "measurement_window": roi_window, "baseline_evidence": roi_baseline_evidence, "outcome_evidence": roi_outcome_evidence, "verifier": roi_verifier}
-                    elif selected_tool["tool_id"] == "T017":
-                        current_tool_inputs = {"left_records_json": join_left_json, "right_records_json": join_right_json, "left_key": join_left_key, "right_key": join_right_key, "join_type": join_type, "duplicate_policy": duplicate_policy}
-                    elif selected_tool["tool_id"] == "T018":
-                        current_tool_inputs = {"records_json": time_series_json, "timestamp_column": ts_column, "timezone_name": ts_timezone, "expected_interval": ts_expected_interval, "resample_frequency": ts_resample_frequency, "aggregation": ts_aggregation}
-                    elif selected_tool["tool_id"] == "T019":
-                        current_tool_inputs = {"row_count": int(synthetic_rows), "seed": int(synthetic_seed), "start_timestamp": synthetic_start, "interval_minutes": int(synthetic_interval), "defect_rate_pct": synthetic_defect_rate, "mean_downtime_minutes": synthetic_downtime, "energy_kwh_per_unit": synthetic_energy}
-                    elif selected_tool["tool_id"] == "T034":
-                        current_tool_inputs = {"aql_pct": sampling_aql, "ltpd_pct": sampling_ltpd, "producer_risk_pct": sampling_alpha, "consumer_risk_pct": sampling_beta, "max_sample_size": int(sampling_max_n)}
-                    elif selected_tool["tool_id"] == "T041":
-                        current_tool_inputs = {"failure_times_json": weibull_times_json}
-                    elif selected_tool["tool_id"] == "T043":
-                        current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
-                    elif selected_tool["tool_id"] == "T045":
-                        current_tool_inputs = {"parts_json": spare_parts_json}
-                    elif selected_tool["tool_id"] == "T044":
-                        current_tool_inputs = {"failure_modes_json": rcm_records_json}
-                    elif selected_tool["tool_id"] == "T046":
-                        current_tool_inputs = {
-                            "units": rnle_units,
-                            "task_description": rnle_task,
-                            "load_weight": rnle_load,
-                            "horizontal_origin": rnle_h_origin,
-                            "horizontal_destination": rnle_h_destination,
-                            "vertical_hand_start": rnle_v_start,
-                            "vertical_travel_distance": rnle_distance,
-                            "asymmetry_origin": rnle_a_origin,
-                            "asymmetry_destination": rnle_a_destination,
-                            "frequency_lifts_per_minute": rnle_frequency,
-                            "frequency_duration_category": rnle_duration,
-                            "frequency_multiplier": rnle_fm,
-                            "frequency_multiplier_source": rnle_fm_source,
-                            "coupling_quality": rnle_coupling,
-                            "coupling_multiplier": rnle_cm,
-                            "coupling_multiplier_source": rnle_cm_source,
-                        }
-                    elif selected_tool["tool_id"] == "T047":
-                        current_tool_inputs = {"hazards_json": hazard_json}
-                    elif selected_tool["tool_id"] == "T060":
-                        current_tool_inputs = {"suppliers_json": supply_network_suppliers_json, "sites_json": supply_network_sites_json, "routes_json": supply_network_routes_json, "unmet_demand_penalty": supply_network_penalty, "time_limit_seconds": supply_network_time_limit}
-                    elif selected_tool["tool_id"] == "T074":
-                        current_tool_inputs = {"simulated_values": calibration_simulated_text, "measured_values": calibration_measured_text, "training_fraction": calibration_training_fraction}
-                    elif selected_tool["tool_id"] == "T080":
-                        current_tool_inputs = {"suppliers_json": disruption_suppliers_json, "demands_json": disruption_demands_json, "iterations": int(disruption_iterations), "seed": int(disruption_seed), "outage_probability": disruption_outage_probability, "demand_cv": disruption_demand_cv}
-                    elif selected_tool["tool_id"] == "T094":
-                        current_tool_inputs = {"kpi_records_json": kpi_records_json, "alert_rules_json": kpi_rules_json, "as_of": kpi_as_of, "stale_after_hours": kpi_stale_hours}
-                    elif selected_tool["tool_id"] == "T096":
-                        current_tool_inputs = {
-                            "action": integration_action,
-                            "profiles_json": integration_profiles_json,
-                            "live_profile_json": integration_live_profile_json,
-                            "confirm_live": integration_confirm_live,
-                        }
-                    elif selected_tool["tool_id"] == "T097":
-                        current_tool_inputs = {"plugin_name": plugin_name, "payload_json": plugin_payload_json}
-                    elif selected_tool["tool_id"] == "T098":
-                        current_tool_inputs = {"configuration_check": True}
-                    elif selected_tool["tool_id"] == "T099":
-                        current_tool_inputs = {"action": governance_action, "backup_filename": governance_backup_upload.name if governance_backup_upload is not None else ""}
-                    elif selected_tool["tool_id"] == "T050":
-                        current_tool_inputs = {"periods_json": safety_periods_json, "rate_base_hours": safety_rate_base}
-                    elif selected_tool["tool_id"] == "T054":
-                        current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
-                    elif selected_tool["tool_id"] == "T059":
-                        current_tool_inputs = {"items_json": slotting_items_json, "slots_json": slotting_slots_json}
-                    elif selected_tool["tool_id"] == "T063":
-                        current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "costs_json": assignment_costs_json}
-                    elif selected_tool["tool_id"] == "T077":
-                        current_tool_inputs = {"baseline_json": energy_baseline_json, "alternatives_json": energy_alternatives_json}
-                    elif selected_tool["tool_id"] == "T084":
-                        current_tool_inputs = {"criteria_json": portfolio_criteria_json, "alternatives_json": portfolio_alternatives_json}
-                    elif selected_tool["tool_id"] == "T076":
-                        current_tool_inputs = {"event_log_json": process_event_log_json}
-                    elif selected_tool["tool_id"] == "T079":
-                        current_tool_inputs = {"flows_json": water_flows_json}
-                    elif selected_tool["tool_id"] == "T016":
-                        current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
-                    elif selected_tool["tool_id"] == "T031":
-                        current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
-                    elif selected_tool["tool_id"] == "T006":
-                        current_tool_inputs = {"payload_json": tool006_payload_json}
-                    elif selected_tool["tool_id"] == "T039":
-                        current_tool_inputs = {"records_json": capa_records_json, "transitions_json": capa_transitions_json, "as_of_date": capa_as_of_date}
-
-                    elif selected_tool["tool_id"] == "T040":
-                        current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
-                    elif selected_tool["tool_id"] == "T042":
-                        current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
-                    elif selected_tool["tool_id"] == "T056":
-                        current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
-                    elif selected_tool["tool_id"] == "T033":
-                        current_tool_inputs = {"observations_json": msa_observations_json, "tolerance": msa_tolerance}
-                    elif selected_tool["tool_id"] == "T035":
-                        current_tool_inputs = {"observations_json": doe_observations_json, "response_field": doe_response_field, "factor_fields": doe_factor_fields_text, "alpha": doe_alpha}
-                    elif selected_tool["tool_id"] == "T036":
-                        current_tool_inputs = {"mode": regression_mode, "observations_json": regression_observations_json, "groups_json": anova_groups_json, "alpha": regression_alpha}
-                    elif selected_tool["tool_id"] == "T037":
-                        current_tool_inputs = {"sample_a": hypothesis_sample_a, "sample_b": hypothesis_sample_b, "alpha": hypothesis_alpha}
-                    elif selected_tool["tool_id"] == "T051":
-                        current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
-                    elif selected_tool["tool_id"] == "T072":
-                        current_tool_inputs = {"components_json": monte_carlo_components_json, "iterations": int(monte_carlo_iterations), "seed": int(monte_carlo_seed), "unit": monte_carlo_unit}
-                    elif selected_tool["tool_id"] == "T002":
-                        current_tool_inputs = {"goal": guided_goal, "available_data_fields": guided_fields_text}
-
-                    elif selected_tool["tool_id"] == "T089":
-                        current_tool_inputs = {"topic_id": practice_topic, "submitted_answer": practice_answer}
-
-                    elif selected_tool["tool_id"] == "T048":
-                        current_tool_inputs = {"observations_json": anomaly_observations_json, "timestamp_field": anomaly_timestamp_field, "value_field": anomaly_value_field, "modified_z_threshold": anomaly_threshold, "max_age_hours": anomaly_max_age, "evaluation_time_utc": anomaly_eval_time}
-
-                    elif selected_tool["tool_id"] == "T069":
-                        current_tool_inputs = {"facilities_json": facility_location_facilities_json, "customers_json": facility_location_customers_json, "routes_json": facility_location_routes_json, "time_limit_seconds": facility_location_time_limit}
-                    elif selected_tool["tool_id"] == "T071":
-                        current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
-                    elif selected_tool["tool_id"] == "T062":
-                        current_tool_inputs = {"variables_json": solver_variables_json, "objective_json": solver_objective_json, "constraints_json": solver_constraints_json, "direction": solver_direction, "time_limit_seconds": solver_time_limit, "feasibility_tolerance": solver_tolerance}
-                    elif selected_tool["tool_id"] == "T061":
-                        current_tool_inputs = {"payload_json": tool061_payload_json}
-                    elif selected_tool["tool_id"] == "T067":
-                        current_tool_inputs = {"payload_json": tool067_payload_json}
-                    elif selected_tool["tool_id"] == "T068":
-                        current_tool_inputs = {"payload_json": tool068_payload_json}
-                    elif selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
-                        current_tool_inputs = {"payload_json": canonical_payload_json}
-                    elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014", "T020"}:
-                        current_tool_inputs = {
-                            "filename": canonical_excel_upload.name if canonical_excel_upload is not None else "",
-                            "file_size_bytes": len(canonical_excel_upload.getvalue()) if canonical_excel_upload is not None else 0,
-                            "confirm_cleaning": confirm_cleaning,
-                            "dataset_name": dataset_name_input,
-                            "sheet_name": dataset_sheet_input,
-                            "dataset_id": existing_dataset_id_input,
-                        }
-                    elif selected_tool["tool_id"] == "T095":
-                        current_tool_inputs = {"source_tool_id": source_result_tool_id, "format": report_format}
-                    elif selected_tool["tool_id"] == "T087":
-                        current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
-
                     else:
-                        current_tool_inputs = {
-                            "cohen_d": effect_size, "alpha": alpha,
-                            "target_power": target_power, "maximum_n_per_group": int(search_limit),
-                        }
-
-                    if run_method:
-                        # Remove only the in-session output before a new run. The last
-                        # successful saved workspace snapshot remains intact if this run fails.
-                        st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
-                        st.session_state.pop("shoir_tool_inputs_" + selected_tool["tool_id"], None)
-                        st.session_state.pop("shoir_tool_save_status_" + selected_tool["tool_id"], None)
-                        t095_artifact_bytes = None
-                        if selected_tool["tool_id"] == "T095":
-                            # Remove an older in-session file before a new report attempt.
-                            st.session_state.pop("shoir_tool_bundle_bytes_T095", None)
-                            st.session_state.pop("shoir_tool_bundle_filename_T095", None)
-                            st.session_state.pop("shoir_tool_bundle_mime_T095", None)
-                        try:
-                            _require_focused_tool_actor()
-                            require_tool_access(RAW_TIER, selected_tool["tool_id"])
-                            if selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
-                                try:
-                                    parsed_payload = json.loads(canonical_payload_json)
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError(f"{selected_tool['tool_id']} input must be valid JSON.") from exc
-                                if not isinstance(parsed_payload, dict):
-                                    raise ValueError(f"{selected_tool['tool_id']} input must be a JSON object.")
-                                # Do not trust any owner field supplied in the JSON editor.
-                                parsed_payload["owner"] = USER
-                                result = run_additional_tool(selected_tool["tool_id"], parsed_payload)
-                            elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014"}:
-                                if canonical_excel_upload is None:
-                                    raise ValueError("Upload a supported workbook before running this tool.")
-                                raw_workbook = canonical_excel_upload.getvalue()
-                                result = run_additional_tool(selected_tool["tool_id"], {
-                                    "filename": canonical_excel_upload.name,
-                                    "raw_bytes": raw_workbook,
-                                    "confirm_cleaning": confirm_cleaning,
-                                })
-                                workbook_result = result.pop("excel_workbook_result")
-                                st.session_state["excel_studio_result"] = workbook_result
-                                from shoir_excel_studio import _excel_persist_result
-                                workspace_saved = bool(_excel_persist_result(USER, workbook_result))
-                                result["workspace_save_succeeded"] = workspace_saved
-                                result["original_workbook_bytes_retained"] = bool(workbook_result.get("_raw_bytes") == raw_workbook)
-                                st.session_state["excel_studio_signature"] = result["source_sha256"]
-                            elif selected_tool["tool_id"] == "T020":
-                                if canonical_excel_upload is None:
-                                    raise ValueError("Upload a supported workbook before registering a dataset version.")
-                                dataset_token = str(st.session_state.get("remote_session_token") or st.session_state.get("access_token") or "").strip()
-                                if not dataset_token:
-                                    raise PermissionError("An authenticated managed-session token is required for immutable staging dataset registration.")
-                                if not dataset_name_input.strip():
-                                    raise ValueError("Enter a logical dataset name before registering a version.")
-                                raw_dataset_workbook = canonical_excel_upload.getvalue()
-                                result = run_additional_tool("T020", {
-                                    "filename": canonical_excel_upload.name,
-                                    "raw_bytes": raw_dataset_workbook,
-                                    "dataset_name": dataset_name_input.strip(),
-                                    "sheet_name": dataset_sheet_input.strip(),
-                                    "dataset_id": existing_dataset_id_input.strip() or None,
-                                    "username": USER,
-                                    "token": dataset_token,
-                                    "workspace": str(st.session_state.get("workspace") or "default"),
-                                })
-                                workbook_result = result.pop("excel_workbook_result")
-                                st.session_state["excel_studio_result"] = workbook_result
-                                from shoir_excel_studio import _excel_persist_result
-                                result["original_workbook_workspace_save_succeeded"] = bool(_excel_persist_result(USER, workbook_result))
-                                result["original_workbook_bytes_retained_in_session"] = bool(workbook_result.get("_raw_bytes") == raw_dataset_workbook)
-                                st.session_state["excel_studio_signature"] = result["data_hash"]
-                            elif selected_tool["tool_id"] in {"T061", "T067", "T068"}:
-                                if selected_tool["tool_id"] == "T061":
-                                    payload_json = tool061_payload_json
-                                elif selected_tool["tool_id"] == "T067":
-                                    payload_json = tool067_payload_json
-                                else:
-                                    payload_json = tool068_payload_json
-                                try:
-                                    parsed_payload = json.loads(payload_json)
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError(f"{selected_tool['tool_id']} input must be valid JSON.") from exc
-                                if not isinstance(parsed_payload, dict):
-                                    raise ValueError(f"{selected_tool['tool_id']} input must be a JSON object.")
-                                result = run_additional_tool(selected_tool["tool_id"], parsed_payload)
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if parsed_payload.get("data_provenance") == "SYNTHETIC_EXAMPLE"
-                                    else "USER_ENTERED_UNVERIFIED"
+                        if selected_tool["tool_id"] == "T065":
+                            require_tool_access(RAW_TIER, "T065")
+                            from shoir_facility_layout import render_facility_layout
+                            render_facility_layout(RAW_TIER, USER)
+                            st.stop()
+                        if selected_tool["tool_id"] == "T091":
+                            require_tool_access(RAW_TIER, "T091")
+                            from shoir_team_workspaces import render_team_workspaces
+                            render_team_workspaces()
+                            st.stop()
+                        with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
+                            if selected_tool["tool_id"] == "T007":
+                                st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")
+                                diagnostic_inspector_text = st.text_area(
+                                    "Error or warning text",
+                                    value="Example: workbook import failed because a required quantity column is missing.",
+                                    key="tool007_diagnostic",
                                 )
-                            elif selected_tool["tool_id"] == "T006":
-                                try:
-                                    additional_payload = json.loads(tool006_payload_json)
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError("Revision-history input must be valid JSON.") from exc
-                                if not isinstance(additional_payload, dict):
-                                    raise ValueError("Revision-history input must be a JSON object.")
-                                result = run_additional_tool("T006", additional_payload)
-                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if "SYNTHETIC" in tool006_payload_json else "USER_ENTERED_UNVERIFIED"
-                            elif selected_tool["tool_id"] == "T039":
-                                try:
-                                    parsed_capa_records = json.loads(capa_records_json)
-                                    parsed_capa_transitions = json.loads(capa_transitions_json or "[]")
-                                except json.JSONDecodeError as exc:
-                                    raise ValueError("CAPA/8D records and transitions must be valid JSON.") from exc
-                                if not isinstance(parsed_capa_records, list) or not isinstance(parsed_capa_transitions, list):
-                                    raise ValueError("CAPA/8D records and transitions must each be JSON lists.")
-                                result = run_additional_tool("T039", {
-                                    "records": parsed_capa_records,
-                                    "transitions": parsed_capa_transitions,
-                                    "as_of_date": capa_as_of_date.strip() or None,
-                                })
-                                result["data_provenance"] = (
-                                    "SYNTHETIC_EXAMPLE"
-                                    if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
-                                    else "USER_ENTERED_UNVERIFIED"
+                                diagnostic_category = st.selectbox(
+                                    "Subsystem label (context only)",
+                                    ["Auto-detect", "Access / login", "Data import / export", "Calculation / units", "Persistence / connectivity", "Other"],
+                                    key="tool007_category",
                                 )
-                            elif selected_tool["tool_id"] == "T096":
-                                if integration_action == "Inspect configured connector settings":
-                                    try:
-                                        integration_payload = json.loads(integration_profiles_json)
-                                    except json.JSONDecodeError as exc:
-                                        raise ValueError("Connector profiles must be valid JSON.") from exc
-                                    if not isinstance(integration_payload, dict):
-                                        raise ValueError("Connector profiles input must be a JSON object.")
-                                    if not isinstance(integration_payload.get("profiles"), list):
-                                        raise ValueError("Connector profiles input must contain a profiles JSON list.")
-                                    result = run_additional_tool("T096", integration_payload)
-                                    result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
-                                else:
-                                    if not integration_confirm_live:
-                                        raise PermissionError("Confirm the staging-only read-only connector request before running it.")
-                                    try:
-                                        live_profile = json.loads(integration_live_profile_json)
-                                    except json.JSONDecodeError as exc:
-                                        raise ValueError("The approved REST connector profile must be valid JSON.") from exc
-                                    if not isinstance(live_profile, dict):
-                                        raise ValueError("The approved REST connector profile must be a JSON object.")
-                                    result = run_additional_tool("T096", {
-                                        "action": "verify_rest_read",
-                                        "profile": live_profile,
-                                        "include_sample_data": False,
-                                    })
-                                    result["data_provenance"] = "EXPLICIT_STAGING_READ_ONLY_CONNECTOR_TEST"
-                                    result["warning"] = (
-                                        str(result.get("warning") or "")
-                                        + " Sample payload preview is disabled in the Workbench; "
-                                        "only redacted connection/data-retrieval metadata is retained."
-                                    )
-                            elif selected_tool["tool_id"] == "T098":
-                                result = run_additional_tool("T098", {})
-                                result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
-                            elif selected_tool["tool_id"] == "T097":
-                                import json as _plugin_json
-                                from plugin_registry import plugin_manifest, get_plugin, validate_plugin_payload
-                                selected_plugin = get_plugin(plugin_name)
-                                if selected_plugin is None:
-                                    raise ValueError("Selected plugin is no longer registered.")
-                                try:
-                                    parsed_plugin_payload = _plugin_json.loads(plugin_payload_json or "{}")
-                                except _plugin_json.JSONDecodeError as exc:
-                                    raise ValueError("Plugin payload must be valid JSON.") from exc
-                                if not isinstance(parsed_plugin_payload, dict):
-                                    raise ValueError("Plugin payload must be a JSON object.")
-                                validated_payload = validate_plugin_payload(selected_plugin, parsed_plugin_payload)
-                                plugin_row = next(item for item in plugin_manifest() if item["name"] == plugin_name)
-                                result = {
-                                    "status": "PLUGIN_CONTRACT_VALIDATED",
-                                    "plugin": plugin_row,
-                                    "payload_valid": True,
-                                    "payload_keys": sorted(validated_payload.keys()),
-                                    "execution_status": plugin_row["execution_status"],
-                                    "warning": "No external endpoint was called. Metadata-only adapters remain non-executable until a reviewed server-side handler and external credentials are configured.",
+                                run_method = st.form_submit_button("Inspect and redact diagnostic", type="primary", use_container_width=True, key="tool007_run")
+                            elif selected_tool["tool_id"] == "T009":
+                                st.caption("This report summarizes the source registry only. It is not a live health check or authenticated browser acceptance report.")
+                                capability_status_filter = st.selectbox(
+                                    "Readiness status",
+                                    ["All statuses", *TOOL_STATUS_VALUES],
+                                    key="tool009_status_filter",
+                                )
+                                capability_status_limit = st.number_input("Maximum capability rows", min_value=1, max_value=100, value=100, step=5, key="tool009_limit")
+                                run_method = st.form_submit_button("Build capability status report", type="primary", use_container_width=True, key="tool009_run")
+                            elif selected_tool["tool_id"] == "T010":
+                                st.caption("Searchable guidance is generated from canonical tool metadata and its stated limitations; it does not replace method documentation or validation.")
+                                help_query = st.text_input("Search tools, methods, inputs or outputs", key="tool010_query", placeholder="e.g. facility layout, OEE, demand forecast")
+                                help_workbench = st.selectbox(
+                                    "Workbench filter",
+                                    ["All workbenches"] + sorted({str(item.get("workbench", "")) for item in TOOL_TARGETS if item.get("workbench")}),
+                                    key="tool010_workbench",
+                                )
+                                run_method = st.form_submit_button("Search engineering help", type="primary", use_container_width=True, key="tool010_run")
+                            elif selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
+                                payload_labels = {
+                                    "T004": "Engineering project (create/list) JSON",
+                                    "T005": "Project version history action JSON (create/autosave/history/restore/list)",
+                                    "T073": "What-if scenario comparison and branch action JSON",
+                                    "T086": "Hypothesis and research protocol action JSON",
+                                    "T092": "Decision register action JSON (create/list/request_review/history)",
                                 }
-                                result["data_provenance"] = "LOCAL_PLUGIN_REGISTRY"
+                                st.caption("This action is owner-scoped and uses the existing Shoir-IE persisted project, research or decision store. The owner field is replaced with the authenticated account; this register does not grant approvals.")
+                                canonical_payload_json = st.text_area(
+                                    payload_labels[selected_tool["tool_id"]],
+                                    value=get_tool_example_json(selected_tool["tool_id"]),
+                                    key="tool" + selected_tool["tool_id"][1:] + "_payload",
+                                )
+                                run_method = st.form_submit_button(
+                                    "Run " + selected_tool["canonical_name"],
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool" + selected_tool["tool_id"][1:] + "_run",
+                                )
+                            elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014", "T020"}:
+                                captions = {
+                                    "T011": "Import a supported workbook and inspect its sheet inventory. The original source is retained in the Excel Studio workbook record when workspace saving succeeds.",
+                                    "T012": "Discover tables and candidate cross-sheet relationships. Suggestions require engineering review; keys are not joined automatically.",
+                                    "T013": "Generate per-sheet quality profiles using the existing Excel Studio profile engine.",
+                                    "T014": "Preview a reversible cleaned copy. The source workbook and raw sheets remain unchanged; explicit confirmation is required.",
+                                    "T020": "Register an immutable dataset version from a workbook through the authenticated managed dataset API. Requires an Enterprise session token.",
+                                }
+                                st.caption(captions[selected_tool["tool_id"]])
+                                canonical_excel_upload = st.file_uploader(
+                                    "Upload CSV / TSV / TXT / XLS / XLSX / XLSM",
+                                    type=["csv", "tsv", "txt", "xls", "xlsx", "xlsm"],
+                                    accept_multiple_files=False,
+                                    key="tool" + selected_tool["tool_id"][1:] + "_upload",
+                                )
+                                confirm_cleaning = False
+                                dataset_name_input = ""
+                                dataset_sheet_input = ""
+                                existing_dataset_id_input = ""
+                                if selected_tool["tool_id"] == "T020":
+                                    dataset_name_input = st.text_input("Logical dataset name", value="Industrial dataset", max_chars=160, key="tool020_dataset_name")
+                                    dataset_sheet_input = st.text_input("Sheet to register (leave blank for first usable sheet)", value="", max_chars=120, key="tool020_sheet_name")
+                                    existing_dataset_id_input = st.text_input("Existing dataset ID for a new immutable version (optional)", value="", max_chars=40, key="tool020_existing_dataset_id")
+                                if selected_tool["tool_id"] == "T014":
+                                    confirm_cleaning = st.checkbox(
+                                        "I reviewed the reversible-cleaning disclosure and confirm creating a cleaned copy.",
+                                        value=False,
+                                        key="tool014_confirm_cleaning",
+                                    )
+                                run_method = st.form_submit_button(
+                                    "Run " + selected_tool["canonical_name"],
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool" + selected_tool["tool_id"][1:] + "_run",
+                                    disabled=(canonical_excel_upload is None or (selected_tool["tool_id"] == "T014" and not confirm_cleaning)),
+                                )
+                            elif selected_tool["tool_id"] == "T100":
+                                st.caption("Creates a local, redacted support packet only. No ticketing backend is configured and this action does not transmit diagnostic data.")
+                                support_component = st.selectbox(
+                                    "Affected component",
+                                    ["Workbench", "Data import / export", "Calculation engine", "Authentication / access", "Workspace persistence", "Integration / connector", "Reporting / export", "Other"],
+                                    key="tool100_component",
+                                )
+                                support_severity = st.selectbox("Reported severity", ["LOW", "MEDIUM", "HIGH", "CRITICAL"], index=1, key="tool100_severity")
+                                support_diagnostic_text = st.text_area(
+                                    "What happened? Include the tool ID and a reproducible message; exclude production/customer records.",
+                                    value="Example: T017 join preview did not return the expected matched row count.",
+                                    key="tool100_diagnostic",
+                                )
+                                run_method = st.form_submit_button("Prepare redacted support bundle", type="primary", use_container_width=True, key="tool100_run")
+                            elif selected_tool["tool_id"] == "T015":
+                                st.caption("Field mapping is advisory: exact aliases are still reviewable and fuzzy suggestions always require confirmation.")
+                                field_headers_text = st.text_input(
+                                    "Source column headers (comma-separated)",
+                                    "Timestamp,Qty,Defects,Machine ID", key="tool015_headers",
+                                )
+                                field_manual_mapping_json = st.text_area(
+                                    "Optional manual mapping JSON (source header → canonical ID)",
+                                    "{}", key="tool015_manual_mapping",
+                                )
+                                field_min_confidence = st.slider(
+                                    "Minimum fuzzy-match confidence", min_value=0.0, max_value=1.0,
+                                    value=0.65, step=0.05, key="tool015_confidence",
+                                )
+                                run_method = st.form_submit_button("Map industrial fields", type="primary", use_container_width=True, key="tool015_run")
+                            elif selected_tool["tool_id"] == "T049":
+                                st.caption("Greedy priority heuristic, not a globally optimal schedule. Confirm asset criticality, permits, spares, dependencies and safety constraints before dispatch.")
+                                backlog_orders_json = st.text_area(
+                                    "Maintenance work orders (JSON list)",
+                                    value='[{"work_order_id":"WO-101","task":"Inspect critical pump","asset":"P-101","criticality_score":5,"days_until_due":-2,"estimated_hours":5,"required_skill":"Mechanical"},{"work_order_id":"WO-102","task":"Replace seal","asset":"P-102","criticality_score":4,"days_until_due":0,"estimated_hours":2,"required_skill":"Mechanical"},{"work_order_id":"WO-103","task":"Check sensor","asset":"S-103","criticality_score":2,"days_until_due":7,"estimated_hours":3,"required_skill":"Electrical"}]',
+                                    key="tool049_orders",
+                                )
+                                backlog_hours = st.number_input("Available maintenance labor hours", min_value=0.0, value=7.0, step=0.5, key="tool049_hours")
+                                backlog_skills_text = st.text_input("Available skills (comma-separated)", "Mechanical, Electrical", key="tool049_skills")
+                                run_method = st.form_submit_button("Prioritize maintenance backlog", type="primary", use_container_width=True, key="tool049_run")
+                            elif selected_tool["tool_id"] == "T052":
+                                st.caption("Aggregate deterministic supply/demand reconciliation. Scheduled receipts, planned production and capacity must share one period and product-family basis.")
+                                sop_periods_json = st.text_area(
+                                    "Periods (JSON list; demand, planned_production, optional capacity/receipts/safety stock)",
+                                    value='[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":40,"production_capacity":50,"scheduled_receipts":10,"target_safety_stock":20}]',
+                                    key="tool052_periods",
+                                )
+                                sop_starting_inventory = st.number_input("Starting inventory", min_value=0.0, value=20.0, step=5.0, key="tool052_starting_inventory")
+                                run_method = st.form_submit_button("Reconcile S&OP plan", type="primary", use_container_width=True, key="tool052_run")
+                            elif selected_tool["tool_id"] == "T058":
+                                st.caption("Scores and weights are user-defined. Suppliers with missing criteria are shown as incomplete and are not ranked.")
+                                supplier_scores_json = st.text_area(
+                                    "Supplier score records (JSON list)",
+                                    value='[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"audit-3"}]',
+                                    key="tool058_suppliers",
+                                )
+                                supplier_weights_json = st.text_area(
+                                    "Criterion weights (JSON object)", value='{"Delivery":0.4,"Quality":0.6}',
+                                    key="tool058_weights",
+                                )
+                                run_method = st.form_submit_button("Score supplier performance", type="primary", use_container_width=True, key="tool058_run")
+                            elif selected_tool["tool_id"] == "T016":
+                                st.caption("Prefilled amount and unit pair are illustrative examples. Physical units use fixed conversion factors; currency conversion requires a dated, sourced rate you provide.")
+                                amount_to_convert = st.number_input("Value to convert", value=100.0, step=1.0, key="tool016_amount")
+                                unit_choices = ["mm", "cm", "m", "km", "in", "ft", "mi", "mg", "g", "kg", "lb", "oz", "ms", "s", "min", "h", "day", "mL", "L", "m³", "gal", "Wh", "kWh", "MJ", "GJ", "Pa", "kPa", "bar", "psi", "°C", "°F", "K", "SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY"]
+                                source_unit = st.selectbox("Source unit or currency", unit_choices, index=0, key="tool016_source")
+                                target_unit = st.selectbox("Target unit or currency", unit_choices, index=1, key="tool016_target")
+                                exchange_rate_value = st.number_input("Exchange rate (target currency per source currency unit)", min_value=0.000001, value=1.0, step=0.01, key="tool016_rate")
+                                exchange_rate_date_value = st.text_input("Exchange-rate date (YYYY-MM-DD; currency conversion only)", key="tool016_rate_date")
+                                exchange_rate_source_value = st.text_input("Exchange-rate source (currency conversion only)", key="tool016_rate_source")
+                                run_method = st.form_submit_button("Convert value", type="primary", use_container_width=True, key="tool016_run")
+                            elif selected_tool["tool_id"] == "T031":
+                                st.caption("The prefilled observations are SYNTHETIC examples, not plant measurements. Individuals/Moving-Range reports points outside calculated 3-sigma limits; control limits are not specification limits.")
+                                spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
+                                spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
+                                run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
+                            elif selected_tool["tool_id"] == "T006":
+                                st.caption(
+                                    "Create, undo, redo or recover a verified revision in a supplied JSON history. The returned history must be saved to the authenticated workspace for durable cross-session recovery."
+                                )
+                                tool006_payload_json = st.text_area(
+                                    "Revision history action (JSON object)",
+                                    value=get_tool_example_json("T006"),
+                                    key="tool006_payload",
+                                )
+                                run_method = st.form_submit_button(
+                                    "Apply revision-history action",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool006_run",
+                                )
+                            elif selected_tool["tool_id"] == "T039":
+                                st.caption("Structured 8D/CAPA record-completeness, due-date and controlled transition review. Closure requires approval and effectiveness evidence; this does not certify regulatory compliance.")
+                                capa_records_json = st.text_area(
+                                    "CAPA / 8D records (JSON list; edit or add records)",
+                                    value=_TOOL039_EXAMPLE_RECORDS,
+                                    key="tool039_records",
+                                )
+                                capa_as_of_date = st.text_input(
+                                    "Review date (YYYY-MM-DD; blank uses current date)",
+                                    value="",
+                                    key="tool039_as_of_date",
+                                )
+                                capa_transitions_json = st.text_area(
+                                    "Optional controlled status transitions (JSON list)",
+                                    value="[]",
+                                    key="tool039_transitions",
+                                )
+                                run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
+                            elif selected_tool["tool_id"] == "T040":
+                                st.caption("Prefilled quantities/costs are SYNTHETIC examples. Replace with a measured period and traceable costs. Scrap and rework are mutually exclusive dispositions of defective units.")
+                                quality_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool040_period")
+                                quality_currency = st.text_input("Cost currency code", "SAR", key="tool040_currency")
+                                quality_total_units = st.number_input("Total produced units", min_value=1, value=1000, step=100, key="tool040_total")
+                                quality_defects = st.number_input("Defective units", min_value=0, value=40, step=5, key="tool040_defects")
+                                quality_scrap_units = st.number_input("Scrap units", min_value=0, value=10, step=1, key="tool040_scrap_units")
+                                quality_rework_units = st.number_input("Reworked units", min_value=0, value=20, step=1, key="tool040_rework_units")
+                                quality_scrap_cost = st.number_input("Scrap cost per unit", min_value=0.0, value=20.0, step=1.0, key="tool040_scrap_cost")
+                                quality_rework_cost = st.number_input("Rework cost per unit", min_value=0.0, value=8.0, step=1.0, key="tool040_rework_cost")
+                                quality_inspection_cost = st.number_input("Inspection cost for period", min_value=0.0, value=400.0, step=25.0, key="tool040_inspection_cost")
+                                run_method = st.form_submit_button("Calculate quality costs", type="primary", use_container_width=True, key="tool040_run")
+                            elif selected_tool["tool_id"] == "T042":
+                                st.caption("Prefilled repair durations are SYNTHETIC examples, not actual asset history. This uses complete recorded events only and does not infer censored/incomplete intervals.")
+                                mtbf_operating_hours = st.number_input("Accumulated operating hours (repair downtime excluded)", min_value=0.001, value=600.0, step=50.0, key="tool042_operating_hours")
+                                repair_durations_text = st.text_input("Repair durations in hours (comma-separated)", "2, 1.5, 3", key="tool042_repairs")
+                                run_method = st.form_submit_button("Calculate MTBF / MTTR", type="primary", use_container_width=True, key="tool042_run")
+                            elif selected_tool["tool_id"] == "T056":
+                                st.caption("The prefilled SKU JSON is SYNTHETIC sample inventory; replace it with validated history. ABC uses annual usage value and XYZ uses population coefficient of variation over aligned periods.")
+                                inventory_items_json = st.text_area("SKU data (JSON list)", value='[{"sku":"A","annual_demand":100,"unit_cost":8,"period_demand":[8,10,12]},{"sku":"B","annual_demand":50,"unit_cost":3,"period_demand":[1,10,3]},{"sku":"C","annual_demand":25,"unit_cost":2,"period_demand":[1,20,0]}]', key="tool056_items")
+                                inventory_currency = st.text_input("Unit-cost currency", "SAR", key="tool056_currency")
+                                abc_a_threshold = st.number_input("A-class cumulative cutoff (fraction)", min_value=0.01, max_value=0.99, value=0.80, step=0.01, key="tool056_a_threshold")
+                                abc_b_threshold = st.number_input("B-class cumulative cutoff (fraction)", min_value=0.02, max_value=1.0, value=0.95, step=0.01, key="tool056_b_threshold")
+                                xyz_x_cutoff = st.number_input("Maximum X demand CV", min_value=0.0, value=0.50, step=0.05, key="tool056_x_cv")
+                                xyz_y_cutoff = st.number_input("Maximum Y demand CV", min_value=0.01, value=1.0, step=0.05, key="tool056_y_cv")
+                                run_method = st.form_submit_button("Classify ABC / XYZ inventory", type="primary", use_container_width=True, key="tool056_run")
+                            elif selected_tool["tool_id"] == "T002":
+                                st.caption("Build a rule-based study plan from the problem you selected and the fields you already have. The wizard does not calculate results or bypass the access gate of any recommended tool.")
+                                guided_goal = st.selectbox(
+                                    "Engineering problem",
+                                    options=["capacity_bottleneck", "facility_layout", "quality_capability", "inventory_planning", "maintenance_reliability", "energy_sustainability"],
+                                    format_func=lambda key: {
+                                        "capacity_bottleneck": "Production capacity and bottleneck",
+                                        "facility_layout": "Facility layout and material flow",
+                                        "quality_capability": "Quality and process capability",
+                                        "inventory_planning": "Inventory and replenishment",
+                                        "maintenance_reliability": "Maintenance and reliability",
+                                        "energy_sustainability": "Energy and sustainability",
+                                    }[key],
+                                    key="tool002_goal",
+                                )
+                                guided_fields_text = st.text_input(
+                                    "Input fields you already have (comma-separated canonical names)",
+                                    value="",
+                                    placeholder="source_file, validated_dataset, process_table, demand, time_unit",
+                                    key="tool002_available_fields",
+                                )
+                                run_method = st.form_submit_button("Build guided study plan", type="primary", use_container_width=True, key="tool002_run")
+                            elif selected_tool["tool_id"] == "T089":
+                                st.caption("Starter practice mode with fixed, reproducible engineering examples. Answers are checked against an explicit formula and worked solution; examples are not plant data.")
+                                practice_topic = st.selectbox(
+                                    "Practice topic",
+                                    options=list(_TOOL089_PRACTICE_TOPICS),
+                                    format_func=lambda topic: _TOOL089_PRACTICE_TOPICS[topic]["label"],
+                                    key="tool089_topic",
+                                )
+                                st.info(_TOOL089_PRACTICE_TOPICS[practice_topic]["question"])
+                                st.caption("Units: " + _TOOL089_PRACTICE_TOPICS[practice_topic]["unit"])
+                                practice_answer = st.number_input("Your numerical answer", value=0.0, step=0.1, key="tool089_answer")
+                                run_method = st.form_submit_button("Check answer and show worked solution", type="primary", use_container_width=True, key="tool089_run")
+                            elif selected_tool["tool_id"] == "T048":
+                                st.caption("Robust point-anomaly screening with configurable threshold and a separate data-freshness result. This is not a predictive-maintenance model and does not identify root cause.")
+                                anomaly_observations_json = st.text_area("Time-series observations (JSON list with timestamp and value)", _TOOL048_EXAMPLE_OBSERVATIONS, key="tool048_observations")
+                                anomaly_timestamp_field = st.text_input("Timestamp field", value="timestamp", key="tool048_timestamp_field")
+                                anomaly_value_field = st.text_input("Numeric value field", value="value", key="tool048_value_field")
+                                anomaly_threshold = st.number_input("Modified-z threshold", min_value=1.0, max_value=10.0, value=3.5, step=0.1, key="tool048_threshold")
+                                anomaly_max_age = st.number_input("Maximum accepted data age (hours)", min_value=0.01, max_value=8760.0, value=72.0, step=1.0, key="tool048_max_age")
+                                anomaly_eval_time = st.text_input("Evaluation time UTC (blank uses current UTC)", value="", key="tool048_eval_time")
+                                run_method = st.form_submit_button("Detect anomalies and check freshness", type="primary", use_container_width=True, key="tool048_run")
+                            elif selected_tool["tool_id"] == "T069":
+                                st.caption("Minimize one-period facility opening and shipment costs. All customer demand must be met; opening, route and facility capacities are hard constraints. This is a modelled plan, not a live logistics recommendation.")
+                                facility_location_facilities_json = st.text_area("Candidate facilities (JSON list: id, fixed_opening_cost, capacity)", _TOOL069_EXAMPLE_FACILITIES, key="tool069_facilities")
+                                facility_location_customers_json = st.text_area("Customer demand (JSON list: id, demand)", _TOOL069_EXAMPLE_CUSTOMERS, key="tool069_customers")
+                                facility_location_routes_json = st.text_area("Available routes (JSON list: facility, customer, unit_cost, capacity; optional available flag)", _TOOL069_EXAMPLE_ROUTES, key="tool069_routes")
+                                facility_location_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool069_time_limit")
+                                run_method = st.form_submit_button("Optimize network flow and facility locations", type="primary", use_container_width=True, key="tool069_run")
+                            elif selected_tool["tool_id"] == "T071":
+                                st.caption("Event-driven FCFS simulation with finite servers, explicit deterministic/exponential arrivals and service times, seeded replications and job-based warm-up exclusion. Not a calibrated digital twin.")
+                                des_steps_json = st.text_area("Ordered stations (JSON list)", value=_TOOL071_EXAMPLE_STATIONS, key="tool071_steps")
+                                des_job_count = st.number_input("Jobs to simulate", min_value=2, max_value=10000, value=50, step=1, key="tool071_jobs")
+                                des_interarrival = st.number_input("Mean interarrival time", min_value=0.001, value=1.0, step=0.5, key="tool071_interarrival")
+                                des_arrival_distribution = st.selectbox("Arrival distribution", ["deterministic", "exponential"], key="tool071_arrival_dist")
+                                des_warmup_jobs = st.number_input("Initial jobs excluded from performance metrics", min_value=0, max_value=9999, value=5, step=1, key="tool071_warmup")
+                                des_replications = st.number_input("Replications", min_value=1, max_value=100, value=10, step=1, key="tool071_replications")
+                                des_seed = st.number_input("Base random seed", min_value=-2147483648, max_value=2147483647, value=42, step=1, key="tool071_seed")
+                                des_time_unit = st.text_input("Time unit", value="minutes", key="tool071_unit")
+                                run_method = st.form_submit_button("Run discrete-event simulation", type="primary", use_container_width=True, key="tool071_run")
+                            elif selected_tool["tool_id"] == "T062":
+                                st.caption("Run a linear or mixed-integer model and independently check variable bounds/integrality and each constraint residual. Solver status is not the same as proof that the model formulation is correct; no IIS is generated.")
+                                solver_variables_json = st.text_area("Variables (JSON object: name → {low, up, category})", value=_TOOL062_EXAMPLE_VARIABLES, key="tool062_variables")
+                                solver_objective_json = st.text_area("Objective coefficients (JSON object)", value=_TOOL062_EXAMPLE_OBJECTIVE, key="tool062_objective")
+                                solver_constraints_json = st.text_area("Linear constraints (JSON list)", value=_TOOL062_EXAMPLE_CONSTRAINTS, key="tool062_constraints")
+                                solver_direction = st.selectbox("Objective direction", ["minimize", "maximize"], key="tool062_direction")
+                                solver_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool062_time_limit")
+                                solver_tolerance = st.select_slider("Feasibility tolerance", options=[1e-7, 1e-6, 1e-5, 1e-4, 1e-3], value=1e-7, key="tool062_tolerance")
+                                run_method = st.form_submit_button("Solve and diagnose model", type="primary", use_container_width=True, key="tool062_run")
+                            elif selected_tool["tool_id"] == "T095":
+                                source_result_candidates = sorted({
+                                    key.replace("shoir_tool_result_", "")
+                                    for key in st.session_state.keys()
+                                    if key.startswith("shoir_tool_result_T")
+                                    and key not in {"shoir_tool_result_T087", "shoir_tool_result_T095"}
+                                    and isinstance(st.session_state.get(key), dict)
+                                    and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                                })
+                                source_result_options = source_result_candidates or ["NONE"]
+                                source_result_tool_id = st.selectbox(
+                                    "Completed authorized result",
+                                    options=source_result_options,
+                                    format_func=lambda tool_id: (
+                                        f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
+                                        if tool_id != "NONE" else "No completed authorized result"
+                                    ),
+                                    disabled=not bool(source_result_candidates),
+                                    key="tool095_source_id",
+                                )
+                                export_formats = ["XLSX", "ZIP"]
+                                if tier_allows(RAW_TIER, "Enterprise"):
+                                    export_formats.extend(["PDF", "PPTX"])
+                                report_format = st.selectbox("Report format", options=export_formats, key="tool095_format")
+                                st.caption("Exports only completed results that your current tier can access. Secret-named columns are removed; the manifest records the source tool, provenance and input snapshot hash. Files are session downloads, not a managed document repository.")
+                                run_method = st.form_submit_button(
+                                    "Build verified result report", type="primary",
+                                    use_container_width=True, key="tool095_run",
+                                    disabled=not bool(source_result_candidates),
+                                )
+                            elif selected_tool["tool_id"] == "T087":
+                                st.caption("Package a previously completed, authorized tool result with method/environment metadata, configuration fingerprint and SHA-256 checksums. Raw inputs and detailed result tables are opt-in. Review the ZIP contents before sharing.")
+                                result_id_candidates = sorted({
+                                    key.replace("shoir_tool_result_", "")
+                                    for key in st.session_state.keys()
+                                    if key.startswith("shoir_tool_result_T")
+                                    and key != "shoir_tool_result_T087"
+                                    and isinstance(st.session_state.get(key), dict)
+                                    and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                                })
+                                if not result_id_candidates:
+                                    st.info("Run an entitled engineering tool in this session first. Only completed, currently authorized results are eligible.")
+                                result_id_options = result_id_candidates or ["NONE"]
+                                source_result_tool_id = st.selectbox(
+                                    "Completed result to package",
+                                    options=result_id_options,
+                                    format_func=lambda tool_id: (
+                                        f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
+                                        if tool_id != "NONE" else "No completed authorized result"
+                                    ),
+                                    disabled=not bool(result_id_candidates),
+                                    key="tool087_source_id",
+                                )
+                                reproducibility_metadata_json = st.text_area(
+                                    "Run metadata (JSON object; e.g. study reference, reviewer, protocol version)",
+                                    value='{"study_reference":"demo-study","method_version":"Shoir-IE target engine","notes":"Review before distribution"}',
+                                    key="tool087_metadata",
+                                )
+                                include_input_snapshot = st.checkbox(
+                                    "Include redacted input snapshot (opt-in)",
+                                    value=False,
+                                    key="tool087_include_inputs",
+                                )
+                                include_result_tables = st.checkbox(
+                                    "Include sanitized result tables (opt-in)",
+                                    value=False,
+                                    key="tool087_include_tables",
+                                )
+                                run_method = st.form_submit_button(
+                                    "Build reproducibility ZIP",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool087_run",
+                                    disabled=not bool(result_id_candidates),
+                                )
+    
+                            elif selected_tool["tool_id"] == "T021":
+                                st.caption("Observed times are retained as entered. The allowance is defined as a percentage of standard time.")
+                                observation_text = st.text_input(
+                                    "Observed times (comma-separated)", "1, 2, 3",
+                                    key="tool021_observations"
+                                )
+                                unit = st.selectbox(
+                                    "Time unit for all observations", ["seconds", "minutes", "hours"],
+                                    index=1, key="tool021_unit"
+                                )
+                                rating = st.number_input(
+                                    "Performance rating (%)", min_value=0.001, value=100.0, step=5.0,
+                                    key="tool021_rating"
+                                )
+                                allowance = st.number_input(
+                                    "Allowance (% of standard time)", min_value=0.0, max_value=99.9,
+                                    value=10.0, step=1.0, key="tool021_allowance"
+                                )
+                                run_method = st.form_submit_button("Calculate standard time", type="primary", use_container_width=True, key="tool021_run")
+                            elif selected_tool["tool_id"] == "T022":
+                                st.caption("Illustrative counts are sample data only. Replace them with observations collected under a representative sampling plan.")
+                                work_sampling_counts_json = st.text_area(
+                                    "Activity observation counts (JSON object)",
+                                    value=_TOOL022_EXAMPLE_COUNTS,
+                                    help='Example format: {"Productive": 60, "Idle": 25, "Setup": 15}. Counts must be non-negative whole observations.',
+                                    key="tool022_counts_json",
+                                )
+                                confidence_option = st.selectbox(
+                                    "Confidence level", ["90%", "95%", "99%"], index=1, key="tool022_confidence"
+                                )
+                                margin_pct = st.number_input(
+                                    "Target margin of error (percentage points)", min_value=0.1,
+                                    max_value=49.9, value=5.0, step=0.5, key="tool022_margin"
+                                )
+                                run_method = st.form_submit_button("Analyze work sampling", type="primary", use_container_width=True, key="tool022_run")
+                            elif selected_tool["tool_id"] == "T023":
+                                st.caption("Available time, demand and cycle time must refer to the same production period and time unit.")
+                                available_time = st.number_input(
+                                    "Net available production time per period", min_value=0.001,
+                                    value=480.0, step=30.0, key="tool023_available"
+                                )
+                                demand_units = st.number_input(
+                                    "Demand (whole units per period)", min_value=1, value=120, step=1,
+                                    key="tool023_demand"
+                                )
+                                cycle_time = st.number_input(
+                                    "Observed cycle time per unit", min_value=0.001,
+                                    value=3.0, step=0.25, key="tool023_cycle"
+                                )
+                                unit = st.selectbox(
+                                    "Time unit shared by available time and cycle time",
+                                    ["seconds", "minutes", "hours"], index=1, key="tool023_unit"
+                                )
+                                run_method = st.form_submit_button("Calculate takt and capacity", type="primary", use_container_width=True, key="tool023_run")
+                            elif selected_tool["tool_id"] == "T028":
+                                st.caption("Pareto concentration is not proof of causation. A complete 5-Why record is optional; use five non-empty lines when recording one.")
+                                pareto_counts_json = st.text_area(
+                                    "Cause/category counts (JSON object)",
+                                    value=_TOOL028_EXAMPLE_COUNTS,
+                                    help="Illustrative counts only. Replace with observed, dated counts before operational use.",
+                                    key="tool028_counts_json",
+                                )
+                                problem_statement = st.text_input(
+                                    "Problem statement (required for a 5-Why chain)", key="tool028_problem"
+                                )
+                                why_chain_text = st.text_area(
+                                    "Optional five Whys (one statement per line)", key="tool028_whys"
+                                )
+                                countermeasure_text = st.text_input("Proposed countermeasure", key="tool028_countermeasure")
+                                action_owner = st.text_input("Action owner", key="tool028_owner")
+                                action_due_date = st.text_input(
+                                    "Action due date (YYYY-MM-DD)", key="tool028_due_date"
+                                )
+                                run_method = st.form_submit_button("Analyze Pareto / record causes", type="primary", use_container_width=True, key="tool028_run")
+                            elif selected_tool["tool_id"] == "T029":
+                                st.caption("Illustrative example values are self-assessment data. Replace them with an approved checklist and verifiable evidence.")
+                                audit_items_json = st.text_area(
+                                    "5S checklist items (JSON list)",
+                                    value=_TOOL029_EXAMPLE_ITEMS,
+                                    help='Each item needs category (one per 5S pillar), criterion, score 0–4, and optional evidence/owner/due_date.',
+                                    key="tool029_items_json",
+                                )
+                                run_method = st.form_submit_button("Score 5S audit", type="primary", use_container_width=True, key="tool029_run")
+                            elif selected_tool["tool_id"] == "T030":
+                                st.caption("A3 plans and measured outcomes are kept separate. A Verified/Closed status requires an actual, dated review and a post-change evidence reference.")
+                                record_id_input = st.text_input(
+                                    "Existing A3 record ID to revise (leave blank to create)", key="tool030_record_id"
+                                )
+                                a3_title = st.text_input("A3 title", key="tool030_title")
+                                a3_problem = st.text_area("Problem statement", key="tool030_problem")
+                                a3_metric = st.text_input("Metric name", key="tool030_metric")
+                                a3_unit = st.text_input("Metric unit", key="tool030_unit")
+                                a3_baseline = st.text_input("Baseline value", key="tool030_baseline")
+                                a3_target = st.text_input("Target value", key="tool030_target")
+                                a3_actual = st.text_input("Actual after-change value (optional until measured)", key="tool030_actual")
+                                a3_root_cause = st.text_area("Root-cause hypothesis", key="tool030_root_cause")
+                                a3_countermeasure = st.text_area("Countermeasure", key="tool030_countermeasure")
+                                a3_owner = st.text_input("Accountable owner", key="tool030_owner")
+                                a3_due_date = st.text_input("Due date (YYYY-MM-DD)", key="tool030_due_date")
+                                a3_baseline_evidence = st.text_input("Baseline evidence reference (optional but recommended)", key="tool030_baseline_evidence")
+                                a3_post_evidence = st.text_input("Post-change evidence reference", key="tool030_post_evidence")
+                                a3_status = st.selectbox(
+                                    "Implementation status", ["Planned", "In Progress", "Implemented", "Verified", "Closed"],
+                                    index=0, key="tool030_status"
+                                )
+                                a3_review_date = st.text_input("Human review date (YYYY-MM-DD)", key="tool030_review_date")
+                                run_method = st.form_submit_button("Save A3 record / revision", type="primary", use_container_width=True, key="tool030_run")
+                            elif selected_tool["tool_id"] == "T059":
+                                st.caption("Greedy slotting heuristic assigns high-pick items to the nearest compatible slot meeting capacity; it is not globally optimal.")
+                                slotting_items_json = st.text_area("Items (JSON list: sku, picks_per_day, storage_units, compatibility_group, current_distance_m)", value='[{"sku":"SKU-A","picks_per_day":10,"storage_units":4,"compatibility_group":"food","current_distance_m":10},{"sku":"SKU-B","picks_per_day":4,"storage_units":9,"compatibility_group":"chemical","current_distance_m":20}]', key="tool059_items")
+                                slotting_slots_json = st.text_area("Slots (JSON list: slot_id, distance_m, capacity_units, compatibility_group)", value='[{"slot_id":"near-food","distance_m":2,"capacity_units":5,"compatibility_group":"food"},{"slot_id":"near-chemical","distance_m":3,"capacity_units":10,"compatibility_group":"chemical"},{"slot_id":"far-general","distance_m":8,"capacity_units":10,"compatibility_group":"*"}]', key="tool059_slots")
+                                run_method = st.form_submit_button("Assign nearest compatible slots", type="primary", use_container_width=True, key="tool059_run")
+                            elif selected_tool["tool_id"] == "T063":
+                                st.caption("One-to-one minimum-cost assignment only; no calendars, precedence, multi-period or skill constraints.")
+                                assignment_tasks_json = st.text_area("Task names (JSON list)", '["Task A","Task B","Task C"]', key="tool063_tasks")
+                                assignment_resources_json = st.text_area("Resource names (JSON list)", '["Worker 1","Worker 2","Worker 3"]', key="tool063_resources")
+                                assignment_costs_json = st.text_area("Cost matrix (JSON list of rows; task rows × resource columns)", '[[9,2,7],[6,4,3],[5,8,1]]', key="tool063_costs")
+                                run_method = st.form_submit_button("Solve assignment", type="primary", use_container_width=True, key="tool063_run")
+                            elif selected_tool["tool_id"] == "T066":
+                                st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
+                                stock_len = st.number_input(
+                                    "Stock length (consistent length unit)", min_value=0.001,
+                                    value=12.0, step=0.5, key="tool066_stock_len"
+                                )
+                                kerf = st.number_input(
+                                    "Kerf allowance per produced piece", min_value=0.0,
+                                    value=0.0, step=0.1, key="tool066_kerf"
+                                )
+                                parts_json = st.text_area(
+                                    "Parts as JSON", value='[{"name":"A","length":6,"quantity":4}]',
+                                    help='Each item needs a unique name, positive length and positive integer quantity.',
+                                    key="tool066_parts_json"
+                                )
+                                run_method = st.form_submit_button("Solve cutting plan", type="primary", use_container_width=True, key="tool066_run")
+                            elif selected_tool["tool_id"] == "T075":
+                                st.caption("Checks aligned forecast/actual observations against an absolute mean-absolute-error threshold.")
+                                predictions_text = st.text_input(
+                                    "Predictions (comma-separated)", "10, 20, 30", key="tool075_predictions"
+                                )
+                                actuals_text = st.text_input(
+                                    "Later actuals (same order)", "12, 18, 33", key="tool075_actuals"
+                                )
+                                max_mae = st.number_input(
+                                    "Maximum acceptable MAE", min_value=0.0, value=2.0, step=0.5,
+                                    key="tool075_mae_limit"
+                                )
+                                window = st.number_input(
+                                    "Trailing window (0 = all observations)", min_value=0, max_value=10000,
+                                    value=0, step=1, key="tool075_window"
+                                )
+                                run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True, key="tool075_run")
+                            elif selected_tool["tool_id"] == "T026":
+                                st.caption("OEE uses aligned planned time, downtime, ideal cycle, total and good output. Values above 100% are flagged for review, not capped.")
+                                oee_planned = st.number_input("Planned production time", min_value=0.001, value=480.0, step=30.0, key="tool026_planned")
+                                oee_downtime = st.number_input("Recorded downtime", min_value=0.0, value=60.0, step=5.0, key="tool026_downtime")
+                                oee_cycle = st.number_input("Ideal cycle time per unit", min_value=0.001, value=2.0, step=0.25, key="tool026_cycle")
+                                oee_total = st.number_input("Total output (whole units)", min_value=1, value=200, step=10, key="tool026_total")
+                                oee_good = st.number_input("Good output (whole units)", min_value=0, value=190, step=10, key="tool026_good")
+                                oee_unit = st.selectbox("Time unit shared by times", ["seconds", "minutes", "hours"], index=1, key="tool026_unit")
+                                run_method = st.form_submit_button("Calculate OEE and losses", type="primary", use_container_width=True, key="tool026_run")
+                            elif selected_tool["tool_id"] == "T032":
+                                st.caption("Enter measurements in chronological order, grouped into equal-size consecutive subgroups. Normality/control are not assumed.")
+                                capability_measurements = st.text_input("Measurements (comma-separated)", "9, 10, 11, 9, 10, 11", key="tool032_measurements")
+                                capability_lsl = st.number_input("Lower specification limit (LSL)", value=8.0, step=0.1, key="tool032_lsl")
+                                capability_usl = st.number_input("Upper specification limit (USL)", value=12.0, step=0.1, key="tool032_usl")
+                                capability_subgroup = st.number_input("Consecutive subgroup size", min_value=2, max_value=100, value=3, step=1, key="tool032_subgroup")
+                                capability_unit = st.text_input("Measurement unit", "units", key="tool032_unit")
+                                run_method = st.form_submit_button("Calculate capability indices", type="primary", use_container_width=True, key="tool032_run")
+                            elif selected_tool["tool_id"] == "T055":
+                                st.caption("Classical EOQ assumes stable independent daily demand and deterministic lead time.")
+                                inv_demand = st.number_input("Mean daily demand (units/day)", min_value=0.001, value=10.0, step=1.0, key="tool055_demand")
+                                inv_sd = st.number_input("Daily demand standard deviation", min_value=0.0, value=2.0, step=0.5, key="tool055_sd")
+                                inv_lead = st.number_input("Lead time (days)", min_value=0.0, value=4.0, step=1.0, key="tool055_lead")
+                                inv_order_cost = st.number_input("Ordering cost per order", min_value=0.001, value=50.0, step=5.0, key="tool055_order_cost")
+                                inv_holding_cost = st.number_input("Annual holding cost per unit", min_value=0.001, value=2.0, step=0.5, key="tool055_holding")
+                                inv_days = st.number_input("Operating days per year", min_value=1, max_value=366, value=250, step=1, key="tool055_days")
+                                service_options = {"90%": 1.2815515655, "95%": 1.6448536270, "97.5%": 1.9599639845, "99%": 2.3263478740}
+                                inv_service = st.selectbox("Target cycle service level (normal z factor)", list(service_options), index=1, key="tool055_service")
+                                run_method = st.form_submit_button("Calculate inventory policy", type="primary", use_container_width=True, key="tool055_run")
+                            elif selected_tool["tool_id"] == "T078":
+                                st.caption("Use a dated, sourced emission factor in kg CO2e per activity unit. Factor validity is not independently verified.")
+                                carbon_amount = st.number_input("Activity amount", min_value=0.0, value=250.0, step=25.0, key="tool078_amount")
+                                carbon_unit = st.text_input("Activity unit", "kWh", key="tool078_unit")
+                                carbon_factor = st.number_input("Emission factor (kg CO2e per activity unit)", min_value=0.0, value=0.4, step=0.05, key="tool078_factor")
+                                carbon_factor_unit = st.text_input("Factor unit label", "kg CO2e/kWh", key="tool078_factor_unit")
+                                carbon_source = st.text_input("Emission factor source", "User supplied factor", key="tool078_source")
+                                carbon_date = st.text_input("Factor date (YYYY-MM-DD)", "2026-01-01", key="tool078_date")
+                                carbon_boundary = st.text_input("Accounting boundary / scope", "Scope 2 location-based electricity", key="tool078_boundary")
+                                run_method = st.form_submit_button("Calculate carbon emissions", type="primary", use_container_width=True, key="tool078_run")
+                            elif selected_tool["tool_id"] == "T081":
+                                st.caption("Cash flows must be equally spaced; CF0 occurs at time zero. IRR is omitted when a supported conventional root cannot be established.")
+                                economics_cash_flows = st.text_input("Cash flows by period (comma-separated; CF0 first)", "-1000, 600, 600", key="tool081_cashflows")
+                                economics_rate = st.number_input("Discount rate (%)", min_value=-99.0, value=10.0, step=1.0, key="tool081_rate")
+                                economics_currency = st.text_input("Currency code", "SAR", key="tool081_currency")
+                                economics_period = st.selectbox("Cash-flow period unit", ["years", "months", "quarters", "weeks", "days"], index=0, key="tool081_period")
+                                run_method = st.form_submit_button("Calculate project economics", type="primary", use_container_width=True, key="tool081_run")
+                            elif selected_tool["tool_id"] == "T024":
+                                st.caption("Greedy precedence-feasible heuristic, not a global optimum proof. JSON task rows are illustrative only.")
+                                line_tasks_json = st.text_area(
+                                    "Tasks (JSON list: task_id, duration, optional predecessors)",
+                                    value='[{"task_id":"A","duration":2,"predecessors":[]},{"task_id":"B","duration":3,"predecessors":[]},{"task_id":"C","duration":2,"predecessors":["A"]},{"task_id":"D","duration":1,"predecessors":["B","C"]}]',
+                                    key="tool024_tasks",
+                                )
+                                line_cycle_time = st.number_input("Station cycle-time limit", min_value=0.001, value=5.0, step=0.5, key="tool024_cycle")
+                                line_time_unit = st.selectbox("Task time unit", ["seconds", "minutes", "hours"], index=1, key="tool024_unit")
+                                run_method = st.form_submit_button("Balance production line", type="primary", use_container_width=True, key="tool024_run")
+                            elif selected_tool["tool_id"] == "T025":
+                                st.caption("Capacity comparison only; capacities must share the same period, product mix and units. Example data are synthetic.")
+                                bottleneck_processes_json = st.text_area(
+                                    "Process capacity data (JSON list: process and capacity)",
+                                    value='[{"process":"Cutting","capacity":110},{"process":"Welding","capacity":80},{"process":"Packing","capacity":95}]',
+                                    key="tool025_processes",
+                                )
+                                bottleneck_demand = st.number_input("Required demand per period", min_value=0.001, value=90.0, step=5.0, key="tool025_demand")
+                                bottleneck_period = st.text_input("Capacity period / unit label", "units/shift", key="tool025_period")
+                                run_method = st.form_submit_button("Identify capacity constraint", type="primary", use_container_width=True, key="tool025_run")
+                            elif selected_tool["tool_id"] == "T027":
+                                st.caption("First-pass VSM estimate using WIP / required flow rate plus availability-adjusted process time. Validate the process sequence and data boundaries.")
+                                vsm_steps_json = st.text_area(
+                                    "Process steps (JSON list: step, cycle_time, changeover_time, batch_size, uptime_pct, wip_units, value_added)",
+                                    value='[{"step":"Machine","cycle_time":1,"changeover_time":20,"batch_size":10,"uptime_pct":95,"wip_units":25,"value_added":true},{"step":"Inspect","cycle_time":2,"changeover_time":0,"batch_size":1,"uptime_pct":98,"wip_units":10,"value_added":false}]',
+                                    key="tool027_steps",
+                                )
+                                vsm_demand = st.number_input("Demand per production period (whole units)", min_value=1, value=100, step=10, key="tool027_demand")
+                                vsm_available_time = st.number_input("Available time in same period", min_value=0.001, value=480.0, step=30.0, key="tool027_available")
+                                vsm_time_unit = st.selectbox("Time unit", ["seconds", "minutes", "hours"], index=1, key="tool027_unit")
+                                run_method = st.form_submit_button("Calculate value-stream lead time", type="primary", use_container_width=True, key="tool027_run")
+                            elif selected_tool["tool_id"] == "T038":
+                                st.caption("RPN bands are screening conventions, not a universal standard. High severity is flagged separately even when RPN is low.")
+                                fmea_json = st.text_area(
+                                    "Failure modes (JSON list: failure_mode, severity, occurrence, detection, effect, cause, controls, action, owner, due_date)",
+                                    value='[{"failure_mode":"Bearing failure","effect":"Unplanned line stop","cause":"Lubrication loss","existing_controls":"Preventive inspection","severity":8,"occurrence":4,"detection":5,"action":"Review lubrication interval","owner":"","due_date":""}]',
+                                    key="tool038_fmea",
+                                )
+                                run_method = st.form_submit_button("Rank FMEA risks", type="primary", use_container_width=True, key="tool038_run")
+                            elif selected_tool["tool_id"] == "T070":
+                                st.caption("Analytical M/M/1 model only; arrivals and service are assumed Poisson/exponential with one stable server.")
+                                queue_arrival_rate = st.number_input("Arrival rate (entities per time unit)", min_value=0.0, value=4.0, step=0.5, key="tool070_arrival")
+                                queue_service_rate = st.number_input("Service rate (entities per time unit)", min_value=0.001, value=6.0, step=0.5, key="tool070_service")
+                                queue_time_unit = st.selectbox("Rate time unit", ["hours", "minutes", "days"], index=0, key="tool070_unit")
+                                run_method = st.form_submit_button("Analyze M/M/1 queue", type="primary", use_container_width=True, key="tool070_run")
+                            elif selected_tool["tool_id"] == "T082":
+                                st.caption("Direct-material variance only. Positive variance is adverse; negative is favorable. Replace all defaults with one comparable measured period.")
+                                cost_standard_qty_per_unit = st.number_input("Standard input quantity per output unit", min_value=0.001, value=2.0, step=0.1, key="tool082_std_qty")
+                                cost_actual_output = st.number_input("Actual output quantity (whole units)", min_value=1, value=100, step=10, key="tool082_output")
+                                cost_actual_input = st.number_input("Actual input quantity", min_value=0.0, value=210.0, step=5.0, key="tool082_actual_qty")
+                                cost_standard_price = st.number_input("Standard unit cost", min_value=0.0, value=5.0, step=0.25, key="tool082_std_price")
+                                cost_actual_price = st.number_input("Actual unit cost", min_value=0.0, value=6.0, step=0.25, key="tool082_actual_price")
+                                cost_currency = st.text_input("Currency code", "SAR", key="tool082_currency")
+                                cost_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool082_period")
+                                run_method = st.form_submit_button("Reconcile cost variance", type="primary", use_container_width=True, key="tool082_run")
+                            elif selected_tool["tool_id"] == "T083":
+                                st.caption("The arithmetic is computed from user-entered costs. Evidence references and a verifier are not treated as proof that savings were realized.")
+                                roi_baseline = st.number_input("Comparable baseline cost", min_value=0.0, value=1000.0, step=50.0, key="tool083_baseline")
+                                roi_post = st.number_input("Comparable post-change cost", min_value=0.0, value=700.0, step=50.0, key="tool083_post")
+                                roi_implementation = st.number_input("Implementation cost", min_value=0.0, value=100.0, step=25.0, key="tool083_implementation")
+                                roi_currency = st.text_input("Currency code", "SAR", key="tool083_currency")
+                                roi_window = st.text_input("Measurement window", key="tool083_window")
+                                roi_baseline_evidence = st.text_input("Baseline evidence reference", key="tool083_baseline_evidence")
+                                roi_outcome_evidence = st.text_input("Post-change evidence reference", key="tool083_outcome_evidence")
+                                roi_verifier = st.text_input("Independent verifier / reviewer", key="tool083_verifier")
+                                run_method = st.form_submit_button("Calculate ROI (verification remains required)", type="primary", use_container_width=True, key="tool083_run")
+                            elif selected_tool["tool_id"] == "T017":
+                                st.caption("Join keys must be validated. Many-to-many matches may multiply rows; use duplicate rejection for keys expected to be unique.")
+                                join_left_json = st.text_area(
+                                    "Left table (JSON list of records)",
+                                    value='[{"id":1,"part":"A"},{"id":2,"part":"B"},{"id":3,"part":"C"}]',
+                                    key="tool017_left",
+                                )
+                                join_right_json = st.text_area(
+                                    "Right table (JSON list of records)",
+                                    value='[{"component_id":1,"cost":10},{"component_id":3,"cost":30},{"component_id":4,"cost":40}]',
+                                    key="tool017_right",
+                                )
+                                join_left_key = st.text_input("Left join key", "id", key="tool017_left_key")
+                                join_right_key = st.text_input("Right join key", "component_id", key="tool017_right_key")
+                                join_type = st.selectbox("Join type", ["left", "inner", "outer", "right"], key="tool017_type")
+                                duplicate_policy = st.selectbox("Duplicate key handling", ["allow", "reject"], key="tool017_duplicates")
+                                run_method = st.form_submit_button("Preview and reconcile join", type="primary", use_container_width=True, key="tool017_run")
+                            elif selected_tool["tool_id"] == "T018":
+                                st.caption("Timestamps are normalized to UTC. Gaps and duplicates are reported; invalid timestamps are rejected rather than silently dropped.")
+                                time_series_json = st.text_area(
+                                    "Timestamped records (JSON list)",
+                                    value='[{"timestamp":"2026-01-01 00:00:00","count":1,"energy":2.0},{"timestamp":"2026-01-01 02:00:00","count":3,"energy":6.0}]',
+                                    key="tool018_records",
+                                )
+                                ts_column = st.text_input("Timestamp column", "timestamp", key="tool018_ts_column")
+                                ts_timezone = st.selectbox("Timezone for naive timestamps", ["UTC", "Asia/Riyadh", "Europe/London", "America/New_York"], index=1, key="tool018_timezone")
+                                ts_expected_interval = st.text_input("Expected sample interval (optional)", "1h", key="tool018_expected_interval")
+                                ts_resample_frequency = st.text_input("Resample frequency (optional, e.g. 15min)", "1h", key="tool018_resample")
+                                ts_aggregation = st.selectbox("Resampling aggregation", ["mean", "sum", "min", "max", "first", "last"], key="tool018_agg")
+                                run_method = st.form_submit_button("Process timestamps and gaps", type="primary", use_container_width=True, key="tool018_run")
+                            elif selected_tool["tool_id"] == "T019":
+                                st.caption("Generated rows are explicitly labelled SYNTHETIC and are intended for teaching/testing, not claims about a live plant.")
+                                synthetic_rows = st.number_input("Rows to generate", min_value=1, max_value=100000, value=100, step=25, key="tool019_rows")
+                                synthetic_seed = st.number_input("Random seed", min_value=0, value=42, step=1, key="tool019_seed")
+                                synthetic_start = st.text_input("Start timestamp (ISO datetime)", "2026-01-01T00:00:00Z", key="tool019_start")
+                                synthetic_interval = st.number_input("Interval (minutes)", min_value=1, value=60, step=15, key="tool019_interval")
+                                synthetic_defect_rate = st.number_input("Defect rate (%)", min_value=0.0, max_value=100.0, value=2.0, step=0.5, key="tool019_defect")
+                                synthetic_downtime = st.number_input("Mean downtime per record (minutes)", min_value=0.0, value=5.0, step=1.0, key="tool019_downtime")
+                                synthetic_energy = st.number_input("Energy per good-scale output unit (kWh)", min_value=0.0, value=0.5, step=0.1, key="tool019_energy")
+                                run_method = st.form_submit_button("Generate synthetic dataset", type="primary", use_container_width=True, key="tool019_run")
+                            elif selected_tool["tool_id"] == "T034":
+                                st.caption("Single-sample binomial plan. Confirm any contractual sampling standard and finite-lot conditions before use.")
+                                sampling_aql = st.number_input("AQL defect fraction (%)", min_value=0.0, max_value=99.0, value=1.0, step=0.5, key="tool034_aql")
+                                sampling_ltpd = st.number_input("LTPD defect fraction (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="tool034_ltpd")
+                                sampling_alpha = st.number_input("Producer risk (%)", min_value=0.1, max_value=99.0, value=5.0, step=1.0, key="tool034_alpha")
+                                sampling_beta = st.number_input("Consumer risk (%)", min_value=0.1, max_value=99.0, value=10.0, step=1.0, key="tool034_beta")
+                                sampling_max_n = st.number_input("Maximum sample size to search", min_value=1, max_value=5000, value=500, step=50, key="tool034_max_n")
+                                run_method = st.form_submit_button("Find attributes sampling plan", type="primary", use_container_width=True, key="tool034_run")
+                            elif selected_tool["tool_id"] == "T041":
+                                st.caption("Two-parameter Weibull maximum-likelihood fit for positive uncensored failure times only. Censored observations and confidence intervals are not supported.")
+                                weibull_times_json = st.text_area("Uncensored failure times (JSON list, consistent time unit)", value='[120,220,300,410,520,680,800,950,1120,1390]', key="tool041_times")
+                                run_method = st.form_submit_button("Fit Weibull reliability model", type="primary", use_container_width=True, key="tool041_run")
+                            elif selected_tool["tool_id"] == "T043":
+                                st.caption("Interval-based due-date planner. It does not optimize labor, parts or downtime windows.")
+                                pm_tasks_json = st.text_area(
+                                    "Maintenance tasks (JSON list: asset, task, last_completed_date, interval_days, estimated_duration_hours, required_skill, owner)",
+                                    value='[{"asset":"CNC-01","task":"Lubrication","last_completed_date":"2026-10-01","interval_days":20,"estimated_duration_hours":1.5,"required_skill":"Mechanical","owner":""},{"asset":"CNC-01","task":"Inspection","last_completed_date":"2026-10-20","interval_days":7,"estimated_duration_hours":1,"required_skill":"Technician","owner":""}]',
+                                    key="tool043_tasks",
+                                )
+                                pm_as_of_date = st.text_input("Plan as-of date (YYYY-MM-DD)", "2026-10-24", key="tool043_as_of")
+                                run_method = st.form_submit_button("Calculate maintenance due list", type="primary", use_container_width=True, key="tool043_run")
+                            elif selected_tool["tool_id"] == "T045":
+                                st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
+                                spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
+                                run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
+                            elif selected_tool["tool_id"] == "T044":
+                                st.caption(
+                                    "RCM first-pass task screening. Safety/environmental/high-severity and hidden protective-function cases are escalated; all outputs require a competent reliability review."
+                                )
+                                rcm_records_json = st.text_area(
+                                    "Failure-mode records (JSON list)",
+                                    value='[{"asset":"P-101","failure_mode":"Bearing wear","consequence":"operational","severity":5,"detectable":true,"on_condition_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"PSV-1","failure_mode":"Pressure trip fails","consequence":"hidden","severity":8,"hidden_protective_function":true,"failure_finding_applicable":true,"evidence_reference":"synthetic-example"},{"asset":"ESD-1","failure_mode":"Emergency shutdown fails on demand","consequence":"safety","severity":9,"evidence_reference":"synthetic-example"}]',
+                                    key="tool044_records",
+                                )
+                                run_method = st.form_submit_button("Build RCM task candidates", type="primary", use_container_width=True, key="tool044_run")
+                            elif selected_tool["tool_id"] == "T046":
+                                st.caption(
+                                    "Single-task, two-handed NIOSH Revised Lifting Equation screen. "
+                                    "Measure H and A at both the origin and destination. Enter FM and "
+                                    "CM from the applicable official NIOSH tables; the app does not guess them."
+                                )
+                                st.markdown(
+                                    "[NIOSH RNLE Applications Manual (DHHS/NIOSH 94-110, revised 2021)]"
+                                    "(https://www.cdc.gov/niosh/publications/numbered/94-110.html)"
+                                )
+                                rnle_units = st.selectbox(
+                                    "Measurement units",
+                                    ["metric", "imperial"],
+                                    key="tool046_units",
+                                )
+                                distance_unit = "cm" if rnle_units == "metric" else "in"
+                                load_unit = "kg" if rnle_units == "metric" else "lb"
+                                default_h = 25.0 if rnle_units == "metric" else 10.0
+                                default_v = 75.0 if rnle_units == "metric" else 30.0
+                                default_d = 25.0 if rnle_units == "metric" else 10.0
+                                h_limit = 63.0 if rnle_units == "metric" else 25.0
+                                v_limit = 175.0 if rnle_units == "metric" else 70.0
+                                rnle_task = st.text_input("Task description", key="tool046_task")
+                                rnle_load = st.number_input(
+                                    f"Object weight ({load_unit})",
+                                    min_value=0.01,
+                                    value=10.0 if rnle_units == "metric" else 22.0,
+                                    step=0.5,
+                                    key="tool046_load",
+                                )
+                                rnle_h_origin = st.number_input(
+                                    f"Horizontal hand location at origin ({distance_unit})",
+                                    min_value=0.01,
+                                    max_value=h_limit,
+                                    value=default_h,
+                                    step=1.0,
+                                    key="tool046_h_origin",
+                                )
+                                rnle_h_destination = st.number_input(
+                                    f"Horizontal hand location at destination ({distance_unit})",
+                                    min_value=0.01,
+                                    max_value=h_limit,
+                                    value=default_h,
+                                    step=1.0,
+                                    key="tool046_h_destination",
+                                )
+                                rnle_v_start = st.number_input(
+                                    f"Vertical hand location at origin ({distance_unit})",
+                                    min_value=0.0,
+                                    max_value=v_limit,
+                                    value=default_v,
+                                    step=1.0,
+                                    key="tool046_v_start",
+                                )
+                                rnle_distance = st.number_input(
+                                    f"Vertical travel distance ({distance_unit})",
+                                    min_value=0.01,
+                                    max_value=v_limit,
+                                    value=default_d,
+                                    step=1.0,
+                                    key="tool046_distance",
+                                )
+                                rnle_a_origin = st.number_input(
+                                    "Asymmetry angle at origin (degrees)",
+                                    min_value=0.0,
+                                    max_value=135.0,
+                                    value=0.0,
+                                    step=5.0,
+                                    key="tool046_a_origin",
+                                )
+                                rnle_a_destination = st.number_input(
+                                    "Asymmetry angle at destination (degrees)",
+                                    min_value=0.0,
+                                    max_value=135.0,
+                                    value=0.0,
+                                    step=5.0,
+                                    key="tool046_a_destination",
+                                )
+                                rnle_frequency = st.number_input(
+                                    "Average lifting frequency (lifts/minute)",
+                                    min_value=0.01,
+                                    max_value=15.0,
+                                    value=1.0,
+                                    step=0.25,
+                                    key="tool046_frequency",
+                                )
+                                rnle_duration = st.selectbox(
+                                    "Task duration (with required recovery)",
+                                    [
+                                        "Select duration",
+                                        "Short (≤ 1 hour)",
+                                        "Moderate (> 1 to 2 hours)",
+                                        "Long (> 2 to 8 hours)",
+                                    ],
+                                    key="tool046_duration",
+                                )
+                                rnle_fm = st.number_input(
+                                    "Frequency multiplier (FM) from NIOSH table",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    value=0.0,
+                                    step=0.01,
+                                    key="tool046_fm",
+                                )
+                                rnle_fm_source = st.text_input(
+                                    "Frequency multiplier table reference (required)",
+                                    key="tool046_fm_source",
+                                )
+                                rnle_coupling = st.selectbox(
+                                    "Observed hand-to-load coupling",
+                                    ["Select coupling", "Good", "Fair", "Poor"],
+                                    key="tool046_coupling",
+                                )
+                                rnle_cm = st.number_input(
+                                    "Coupling multiplier (CM) from NIOSH table",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    value=0.0,
+                                    step=0.01,
+                                    key="tool046_cm",
+                                )
+                                rnle_cm_source = st.text_input(
+                                    "Coupling multiplier table reference (required)",
+                                    key="tool046_cm_source",
+                                )
+                                run_method = st.form_submit_button(
+                                    "Calculate RNLE screening estimate",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool046_run",
+                                )
+                            elif selected_tool["tool_id"] == "T060":
+                                st.caption(
+                                    "Single-period capacitated transportation optimization. Unmet demand remains visible; this is not a multi-period network design model."
+                                )
+                                supply_network_suppliers_json = st.text_area(
+                                    "Suppliers (JSON list)",
+                                    value='[{"supplier":"Supplier A","supply_capacity":100},{"supplier":"Supplier B","supply_capacity":60}]',
+                                    key="tool060_suppliers",
+                                )
+                                supply_network_sites_json = st.text_area(
+                                    "Demand sites (JSON list)",
+                                    value='[{"site":"Plant 1","demand":80},{"site":"Plant 2","demand":70}]',
+                                    key="tool060_sites",
+                                )
+                                supply_network_routes_json = st.text_area(
+                                    "Available and disrupted routes (JSON list)",
+                                    value='[{"supplier":"Supplier A","site":"Plant 1","unit_cost":2,"capacity":80,"available":true},{"supplier":"Supplier A","site":"Plant 2","unit_cost":3,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 1","unit_cost":4,"capacity":50,"available":true},{"supplier":"Supplier B","site":"Plant 2","unit_cost":1,"capacity":60,"available":true}]',
+                                    key="tool060_routes",
+                                )
+                                supply_network_penalty = st.number_input(
+                                    "Unmet-demand penalty per unit", min_value=0.01, value=1000.0, step=50.0, key="tool060_penalty"
+                                )
+                                supply_network_time_limit = st.number_input(
+                                    "Solver time limit (seconds)", min_value=0.1, max_value=120.0, value=10.0, step=1.0, key="tool060_time_limit"
+                                )
+                                run_method = st.form_submit_button("Optimize supply chain network", type="primary", use_container_width=True, key="tool060_run")
+                            elif selected_tool["tool_id"] == "T074":
+                                st.caption(
+                                    "Affine simulation-output calibration with a chronological holdout. It does not tune simulator physics or connect to live equipment."
+                                )
+                                calibration_simulated_text = st.text_input(
+                                    "Simulated outputs (chronological, comma-separated)",
+                                    "10, 20, 30, 40, 50, 60",
+                                    key="tool074_simulated",
+                                )
+                                calibration_measured_text = st.text_input(
+                                    "Measured outputs (same order and unit)",
+                                    "21, 41, 61, 81, 101, 121",
+                                    key="tool074_measured",
+                                )
+                                calibration_training_fraction = st.slider(
+                                    "Training fraction", min_value=0.5, max_value=0.9, value=0.67, step=0.01, key="tool074_fraction"
+                                )
+                                run_method = st.form_submit_button("Fit and validate calibration", type="primary", use_container_width=True, key="tool074_run")
+                            elif selected_tool["tool_id"] == "T080":
+                                st.caption(
+                                    "Synthetic Monte Carlo stress test with supplier outages, demand variation and capacity shocks. Outputs are scenario estimates, not live supply availability or a forecast."
+                                )
+                                disruption_suppliers_json = st.text_area(
+                                    "Supplier baseline (JSON list)",
+                                    value='[{"Supplier":"Supplier A","Capacity":100,"Unit Cost":2,"Lead Days":2,"Risk %":5,"Carbon kg/unit":0.5,"Local Share %":70},{"Supplier":"Supplier B","Capacity":70,"Unit Cost":3,"Lead Days":4,"Risk %":10,"Carbon kg/unit":0.7,"Local Share %":30}]',
+                                    key="tool080_suppliers",
+                                )
+                                disruption_demands_json = st.text_area(
+                                    "Demand baseline (JSON list)",
+                                    value='[{"Destination":"Plant 1","Demand":80,"Priority":5,"Due Days":2},{"Destination":"Plant 2","Demand":70,"Priority":3,"Due Days":5}]',
+                                    key="tool080_demands",
+                                )
+                                disruption_iterations = st.number_input(
+                                    "Monte Carlo iterations", min_value=10, max_value=250, value=10, step=10, key="tool080_iterations"
+                                )
+                                disruption_seed = st.number_input(
+                                    "Random seed", min_value=0, max_value=2147483647, value=17, step=1, key="tool080_seed"
+                                )
+                                disruption_outage_probability = st.slider(
+                                    "Supplier outage probability", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_outage"
+                                )
+                                disruption_demand_cv = st.slider(
+                                    "Demand coefficient of variation", min_value=0.0, max_value=1.0, value=0.12, step=0.01, key="tool080_demand_cv"
+                                )
+                                run_method = st.form_submit_button("Run disruption stress test", type="primary", use_container_width=True, key="tool080_run")
+                            elif selected_tool["tool_id"] == "T096":
+                                st.caption(
+                                    "Inspect server-side connector configuration without making network requests. "
+                                    "Live verification is a separate, explicitly confirmed, staging-only HTTPS read; "
+                                    "provider credentials must remain in server-side secrets."
+                                )
+                                integration_action = st.selectbox(
+                                    "Integration action",
+                                    [
+                                        "Inspect configured connector settings",
+                                        "Verify approved REST connector (staging only)",
+                                    ],
+                                    key="tool096_action",
+                                )
+                                integration_profiles_json = st.text_area(
+                                    "Connector profiles (JSON object with a profiles list)",
+                                    value=get_tool_example_json("T096"),
+                                    key="tool096_profiles",
+                                )
+                                integration_live_profile_json = st.text_area(
+                                    "Single approved REST profile for a live staging read (JSON object)",
+                                    value='{"name":"Plant REST API","protocol":"REST","endpoint_env":"SHOIR_CONNECTOR_PLANT_ENDPOINT","credential_env":"SHOIR_CONNECTOR_PLANT_TOKEN"}',
+                                    key="tool096_live_profile",
+                                    disabled=integration_action != "Verify approved REST connector (staging only)",
+                                )
+                                integration_confirm_live = st.checkbox(
+                                    "I confirm this sends a read-only HTTPS request to the server-configured staging connector.",
+                                    value=False,
+                                    key="tool096_confirm_live",
+                                    disabled=integration_action != "Verify approved REST connector (staging only)",
+                                )
+                                run_method = st.form_submit_button(
+                                    "Run Integration Management check",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool096_run",
+                                )
+                            elif selected_tool["tool_id"] == "T098":
+                                st.caption(
+                                    "Configuration inspection only. This does not start an OIDC login, activate MFA, "
+                                    "or prove that an identity provider is connected."
+                                )
+                                st.info(
+                                    "Provider-backed SSO/MFA remains unavailable until the staging identity provider, "
+                                    "verified claims, secure session handling and audit acceptance are configured."
+                                )
+                                run_method = st.form_submit_button(
+                                    "Check identity and audit configuration",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="tool098_run",
+                                )
+                            elif selected_tool["tool_id"] == "T097":
+                                from plugin_registry import plugin_manifest
+                                plugin_options = [item["name"] for item in plugin_manifest()]
+                                st.caption(
+                                    "Inspect the local v1 plugin contract. Execution is available only for explicitly registered server-side handlers; external API hosting and credentials are separate configuration."
+                                )
+                                plugin_name = st.selectbox(
+                                    "Registered plugin",
+                                    plugin_options,
+                                    key="tool097_plugin",
+                                )
+                                plugin_payload_json = st.text_area(
+                                    "Optional JSON payload to validate against the plugin input schema",
+                                    "{}",
+                                    key="tool097_payload",
+                                )
+                                run_method = st.form_submit_button("Inspect plugin contract", type="primary", use_container_width=True, key="tool097_run")
                             elif selected_tool["tool_id"] == "T099":
-                                from workspace_persistence import (
-                                    export_user_workspace_backup,
-                                    restore_user_workspace_backup,
-                                    save_user_workspace,
+                                st.caption(
+                                    "Export or restore a same-account personal workspace backup. Checksum and size are verified before restore. This does not replace Supabase point-in-time recovery or an organisation-level restore rehearsal."
                                 )
-                                if governance_action == "Export personal workspace backup":
-                                    backup = export_user_workspace_backup(USER, st.session_state)
-                                    st.session_state["shoir_tool_bundle_bytes_T099"] = backup.pop("backup_bytes")
-                                    result = {
-                                        "status": "PERSONAL_WORKSPACE_BACKUP_CREATED",
-                                        "backup_manifest": backup,
-                                        "warning": "Portable user data backup only. Store the file securely; the SHA-256 digest is not an authenticity signature or encryption.",
-                                    }
-                                else:
-                                    if governance_backup_upload is None:
-                                        raise ValueError("Select a workspace backup JSON file before restoring.")
-                                    before = export_user_workspace_backup(USER, st.session_state)["backup_bytes"]
-                                    try:
-                                        result = restore_user_workspace_backup(
-                                            governance_backup_upload.getvalue(),
-                                            USER,
-                                            st.session_state,
-                                        )
-                                        if not save_user_workspace(USER, st.session_state):
-                                            raise RuntimeError("Restored state could not be saved to the configured persistence backend.")
-                                    except Exception:
-                                        restore_user_workspace_backup(before, USER, st.session_state)
-                                        raise
-                                    result["status"] = "PERSONAL_WORKSPACE_BACKUP_RESTORED_AND_SAVED"
-                                    result["warning"] = "The backup was restored only into the currently signed-in account. Infrastructure/PITR recovery remains a separate procedure."
-                                    st.session_state.pop("shoir_tool_bundle_bytes_T099", None)
-                                result["data_provenance"] = "USER_OWNED_BACKUP"
-                            else:
-                                from shoir_target_engines import (
-                                    analyze_work_sampling, analyze_pareto_root_cause,
-                                    assess_5s_audit, build_kaizen_a3_record,
-                                    calculate_time_study, calculate_takt_capacity,
-                                    solve_cutting_stock, monitor_forecast_drift,
-                                    plan_two_sample_t_sample_size, calculate_oee,
-                                    analyze_process_capability, plan_inventory_policy,
-                                    calculate_carbon_emissions, analyze_engineering_economics,
-                                    convert_units_or_currency, analyze_spc_individuals,
-                                    analyze_quality_cost_defects, analyze_mtbf_mttr,
-                                    analyze_abc_xyz_inventory,
-                                    balance_production_line, analyze_bottleneck_capacity,
-                                    build_value_stream_map, analyze_fmea, analyze_mm1_queue,
-                                    analyze_industrial_cost_variance, calculate_roi_evidence,
-                                    plan_preventive_maintenance, assess_job_hazards,
-                                    plan_material_requirements, score_project_portfolio,
-                                    merge_data_tables, process_time_series,
-                                    generate_synthetic_industrial_data, plan_acceptance_sampling,
-                                    analyze_process_mining, analyze_water_waste_efficiency,
-                                    analyze_weibull_reliability, analyze_spare_parts_criticality,
-                                    analyze_safety_incident_trends, optimize_warehouse_slotting,
-                                    optimize_task_resource_assignment, compare_energy_performance_scenarios,
-                                    fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
-                                    forecast_demand_baselines, simulate_monte_carlo_net_value,
-                                    map_industrial_fields, prioritize_maintenance_backlog,
-                                    reconcile_sop_plan, score_supplier_performance,
-                                    analyze_crossed_gage_rr, analyze_full_factorial_2level,
-                                    simulate_discrete_event_process,
-                                    run_solver_diagnostics,
-                                    build_reproducibility_pack,
-                                    optimize_facility_location_flow,
-                                    get_student_practice_problem,
-                                    evaluate_student_practice_answer,
-                                    build_guided_study_plan,
-                                    monitor_equipment_anomalies,
-                                    assess_capa_8d_records,
-                                    calculate_niosh_revised_lifting_equation,
-                                    build_rcm_decision_support,
-                                    optimize_supply_chain_network,
-                                    calibrate_simulation_outputs,
-                                    evaluate_kpi_alerts,
+                                governance_action = st.radio(
+                                    "Workspace recovery action",
+                                    ["Export personal workspace backup", "Restore uploaded personal backup"],
+                                    key="tool099_action",
                                 )
-                                from shoir_resilience_suite import simulate_disruption_scenarios
-                                from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
-                                if selected_tool["tool_id"] == "T007":
-                                    result = classify_diagnostic(diagnostic_inspector_text)
-                                    result["reported_subsystem"] = diagnostic_category
-                                    result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
-                                elif selected_tool["tool_id"] == "T009":
-                                    result = summarize_capability_registry(
-                                        TOOL_TARGETS,
-                                        status_filter=capability_status_filter,
-                                        limit=int(capability_status_limit),
-                                    )
-                                elif selected_tool["tool_id"] == "T010":
-                                    result = search_tool_help(
-                                        TOOL_TARGETS,
-                                        help_query,
-                                        workbench_filter=help_workbench,
-                                        limit=20,
-                                    )
-                                elif selected_tool["tool_id"] == "T100":
-                                    result = build_redacted_support_bundle(
-                                        TOOL_TARGETS,
-                                        diagnostic_text=support_diagnostic_text,
-                                        component=support_component,
-                                        severity=support_severity,
-                                    )
-                                elif selected_tool["tool_id"] == "T015":
-                                    headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
-                                    manual_mapping = json.loads(field_manual_mapping_json)
-                                    if not isinstance(manual_mapping, dict):
-                                        raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
-                                    result = map_industrial_fields(headers, manual_mapping=manual_mapping, minimum_confidence=field_min_confidence)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if field_headers_text.strip() == "Timestamp,Qty,Defects,Machine ID" and field_manual_mapping_json.strip() == "{}" else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T049":
-                                    parsed_backlog = json.loads(backlog_orders_json)
-                                    if not isinstance(parsed_backlog, list):
-                                        raise ValueError("Maintenance work orders must be a JSON list.")
-                                    skill_list = [item.strip() for item in backlog_skills_text.split(",") if item.strip()]
-                                    result = prioritize_maintenance_backlog(parsed_backlog, backlog_hours, available_skills=skill_list)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"WO-101"' in backlog_orders_json and '"WO-102"' in backlog_orders_json and '"WO-103"' in backlog_orders_json else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T052":
-                                    parsed_periods = json.loads(sop_periods_json)
-                                    if not isinstance(parsed_periods, list):
-                                        raise ValueError("S&OP periods must be a JSON list of period objects.")
-                                    result = reconcile_sop_plan(parsed_periods, starting_inventory=sop_starting_inventory)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if sop_periods_json.strip().startswith('[{"period":"Jan"') else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T058":
-                                    parsed_suppliers = json.loads(supplier_scores_json)
-                                    parsed_weights = json.loads(supplier_weights_json)
-                                    if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
-                                        raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
-                                    result = score_supplier_performance(parsed_suppliers, parsed_weights)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"supplier":"Acme"' in supplier_scores_json and '"supplier":"Gamma"' in supplier_scores_json else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T021":
+                                governance_backup_upload = st.file_uploader(
+                                    "Select a Shoir-IE workspace backup JSON file",
+                                    type=["json"],
+                                    accept_multiple_files=False,
+                                    key="tool099_backup_upload",
+                                )
+                                run_method = st.form_submit_button("Run workspace recovery action", type="primary", use_container_width=True, key="tool099_run")
+                            elif selected_tool["tool_id"] == "T094":
+                                st.caption(
+                                    "Freshness-aware KPI threshold evaluation. Use gt/gte/lt/lte or >, >=, <, <= operators; each KPI reading must have one unique name, and each rule must reference that name. No email, SMS or external notification is sent."
+                                )
+                                kpi_records_json = st.text_area(
+                                    "KPI readings (JSON list: kpi, value, unit, observed_at, source)",
+                                    value="[]",
+                                    key="tool094_records",
+                                )
+                                kpi_rules_json = st.text_area(
+                                    "Alert rules (JSON list: rule_id, kpi, operator, threshold, severity)",
+                                    value="[]",
+                                    key="tool094_rules",
+                                )
+                                kpi_as_of = st.text_input(
+                                    "Evaluation timestamp (ISO 8601 UTC; blank uses current time)",
+                                    "",
+                                    key="tool094_as_of",
+                                )
+                                kpi_stale_hours = st.number_input(
+                                    "Stale-data threshold (hours)", min_value=0.1, max_value=8760.0, value=24.0, step=1.0, key="tool094_stale"
+                                )
+                                run_method = st.form_submit_button("Evaluate KPI alerts", type="primary", use_container_width=True, key="tool094_run")
+                            elif selected_tool["tool_id"] == "T047":
+                                st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
+                                hazard_json = st.text_area(
+                                    "Hazards (JSON list with hazard, severity 1–5, likelihood 1–5 and optional controls/action/residual ratings)",
+                                    value='[{"hazard":"Moving conveyor","activity":"Clearing jam","consequence":"Entanglement injury","severity":5,"likelihood":3,"controls":"Lockout/tagout procedure; verify isolation","residual_severity":5,"residual_likelihood":1,"required_action":"Confirm isolation procedure and training","owner":"Safety lead","review_date":"2026-11-01"}]',
+                                    key="tool047_hazards",
+                                )
+                                run_method = st.form_submit_button("Screen and review hazards", type="primary", use_container_width=True, key="tool047_run")
+                            elif selected_tool["tool_id"] == "T050":
+                                st.caption("Rates use the entered period-specific work-hour denominator; trends do not establish causation.")
+                                safety_periods_json = st.text_area("Safety periods (JSON list: period, incidents_by_category, work_hours, lost_workdays)", value='[{"period":"2026-Q1","incidents_by_category":{"Slip":2,"Cut":1},"work_hours":20000,"lost_workdays":4},{"period":"2026-Q2","incidents_by_category":{"Slip":1,"Fatigue":1},"work_hours":40000,"lost_workdays":2}]', key="tool050_periods")
+                                safety_rate_base = st.number_input("Rate base work hours", min_value=1.0, value=200000.0, step=25000.0, key="tool050_base")
+                                run_method = st.form_submit_button("Calculate incident trend and rates", type="primary", use_container_width=True, key="tool050_run")
+                            elif selected_tool["tool_id"] == "T054":
+                                st.caption("One-level BOM explosion only. Provide the current validated BOM; this does not recursively explode subassemblies.")
+                                mrp_bom_json = st.text_area(
+                                    "Bill of materials (JSON list: component, qty_per_parent, lead_time_periods, lot_size_multiple)",
+                                    value='[{"component":"Screw","qty_per_parent":4,"lead_time_periods":2,"lot_size_multiple":10},{"component":"Bolt","qty_per_parent":2,"lead_time_periods":1,"lot_size_multiple":1}]',
+                                    key="tool054_bom",
+                                )
+                                mrp_inventory_json = st.text_area(
+                                    "Component inventory (JSON object keyed by component)",
+                                    value='{"Screw":{"on_hand":20,"scheduled_receipts":0,"safety_stock":5},"Bolt":{"on_hand":30,"scheduled_receipts":0,"safety_stock":0}}',
+                                    key="tool054_inventory",
+                                )
+                                mrp_parent_demand = st.number_input("Parent-assembly demand (whole units)", min_value=1, value=10, step=1, key="tool054_demand")
+                                mrp_due_period = st.number_input("Demand due period index (0 = current period)", min_value=-120, max_value=120, value=0, step=1, key="tool054_due")
+                                run_method = st.form_submit_button("Calculate component requirements", type="primary", use_container_width=True, key="tool054_run")
+                            elif selected_tool["tool_id"] == "T076":
+                                st.caption("This reconstructs event-log variants and directly-follows transitions. It is not full conformance checking or causal analysis.")
+                                process_event_log_json = st.text_area(
+                                    "Event log (JSON list: case_id, activity, timestamp)",
+                                    value='[{"case_id":"1","activity":"Receive","timestamp":"2026-01-01T00:00:00Z"},{"case_id":"1","activity":"Inspect","timestamp":"2026-01-01T01:00:00Z"},{"case_id":"2","activity":"Receive","timestamp":"2026-01-01T00:00:00Z"},{"case_id":"2","activity":"Pack","timestamp":"2026-01-01T02:00:00Z"}]',
+                                    key="tool076_event_log",
+                                )
+                                run_method = st.form_submit_button("Analyze event-log flow", type="primary", use_container_width=True, key="tool076_run")
+                            elif selected_tool["tool_id"] == "T077":
+                                st.caption("Scenario comparison only; this does not control industrial equipment or guarantee savings.")
+                                energy_baseline_json = st.text_area("Baseline (JSON object: name, energy_kwh, output_units, cost_per_kwh, emission_factor_kg_per_kwh)", value='{"name":"Baseline","energy_kwh":1000,"output_units":100,"cost_per_kwh":0.2,"emission_factor_kg_per_kwh":0.5}', key="tool077_baseline")
+                                energy_alternatives_json = st.text_area("Alternatives (JSON list with the same metric fields)", value='[{"name":"Improved","energy_kwh":800,"output_units":100,"cost_per_kwh":0.2,"emission_factor_kg_per_kwh":0.5},{"name":"Lower volume","energy_kwh":700,"output_units":70,"cost_per_kwh":0.2,"emission_factor_kg_per_kwh":0.5}]', key="tool077_alternatives")
+                                run_method = st.form_submit_button("Compare energy scenarios", type="primary", use_container_width=True, key="tool077_run")
+                            elif selected_tool["tool_id"] == "T079":
+                                st.caption("Flow balance requires same-unit quantities and comparable measurement boundaries. Unreconciled balance is reported, not silently allocated.")
+                                water_flows_json = st.text_area(
+                                    "Process flows (JSON list: process, input_quantity, product_output_quantity, waste_quantity, unit, period)",
+                                    value='[{"process":"Wash","input_quantity":100,"product_output_quantity":85,"waste_quantity":15,"unit":"L","period":"2026-09"},{"process":"Rinse","input_quantity":50,"product_output_quantity":45,"waste_quantity":5,"unit":"L","period":"2026-09"}]',
+                                    key="tool079_flows",
+                                )
+                                run_method = st.form_submit_button("Balance water and waste flows", type="primary", use_container_width=True, key="tool079_run")
+                            elif selected_tool["tool_id"] == "T084":
+                                st.caption("Criterion weights are subjective inputs. Scores are normalized direction-aware; sensitivity analysis is not yet included.")
+                                portfolio_criteria_json = st.text_area(
+                                    "Criteria (JSON list: name, weight, direction maximize/minimize)",
+                                    value='[{"name":"Cost","weight":2,"direction":"minimize"},{"name":"Quality","weight":1,"direction":"maximize"}]',
+                                    key="tool084_criteria",
+                                )
+                                portfolio_alternatives_json = st.text_area(
+                                    "Project alternatives (JSON list: name and scores object keyed by criterion)",
+                                    value='[{"name":"Project A","scores":{"Cost":100,"Quality":70}},{"name":"Project B","scores":{"Cost":200,"Quality":90}}]',
+                                    key="tool084_alternatives",
+                                )
+                                run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
+                            elif selected_tool["tool_id"] == "T033":
+                                st.caption("Balanced crossed design: every part must be measured by every operator on each repeated trial. Review the organization's MSA standard and acceptance criteria before decisions.")
+                                msa_observations_json = st.text_area(
+                                    "Measurements (JSON list with part, operator, trial, measurement)",
+                                    value='[{"part":"P1","operator":"A","trial":1,"measurement":9.8},{"part":"P1","operator":"A","trial":2,"measurement":9.9},{"part":"P1","operator":"B","trial":1,"measurement":10.0},{"part":"P1","operator":"B","trial":2,"measurement":10.1},{"part":"P2","operator":"A","trial":1,"measurement":11.8},{"part":"P2","operator":"A","trial":2,"measurement":11.9},{"part":"P2","operator":"B","trial":1,"measurement":12.0},{"part":"P2","operator":"B","trial":2,"measurement":12.1}]',
+                                    key="tool033_observations",
+                                )
+                                msa_tolerance = st.number_input("Tolerance width (0 = not supplied)", min_value=0.0, value=6.0, step=0.1, key="tool033_tolerance")
+                                run_method = st.form_submit_button("Analyze crossed Gage R&R", type="primary", use_container_width=True, key="tool033_run")
+                            elif selected_tool["tool_id"] == "T035":
+                                st.caption("Complete 2-level factorial only, factors coded -1/+1, main effects plus pairwise interactions. Plan randomized run order separately; results are not causal proof.")
+                                doe_observations_json = st.text_area(
+                                    "Factorial run data (JSON list)",
+                                    value='[{"A":-1,"B":-1,"response":6.4},{"A":-1,"B":-1,"response":6.6},{"A":-1,"B":1,"response":9.4},{"A":-1,"B":1,"response":9.6},{"A":1,"B":-1,"response":7.4},{"A":1,"B":-1,"response":7.6},{"A":1,"B":1,"response":16.4},{"A":1,"B":1,"response":16.6}]',
+                                    key="tool035_observations",
+                                )
+                                doe_response_field = st.text_input("Response column", "response", key="tool035_response")
+                                doe_factor_fields_text = st.text_input("Factor columns (comma-separated)", "A,B", key="tool035_factors")
+                                doe_alpha = st.number_input("Significance level (alpha)", min_value=0.001, max_value=0.5, value=0.05, step=0.01, key="tool035_alpha")
+                                run_method = st.form_submit_button("Analyze factorial DOE", type="primary", use_container_width=True, key="tool035_run")
+                            elif selected_tool["tool_id"] == "T036":
+                                regression_mode = st.selectbox(
+                                    "Analysis method", ["Linear regression", "One-way ANOVA"],
+                                    key="tool036_mode",
+                                )
+                                st.caption("Regression fits one numeric predictor. ANOVA compares independent groups. Example values are synthetic and do not establish causality.")
+                                regression_observations_json = st.text_area(
+                                    "Regression observations (JSON list of x/y objects)",
+                                    value='[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]',
+                                    key="tool036_observations",
+                                )
+                                anova_groups_json = st.text_area(
+                                    "ANOVA groups (JSON object mapping names to numeric lists)",
+                                    value='{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}',
+                                    key="tool036_groups",
+                                )
+                                regression_alpha = st.number_input(
+                                    "Significance level (alpha)", min_value=0.001, max_value=0.5,
+                                    value=0.05, step=0.01, key="tool036_alpha",
+                                )
+                                run_method = st.form_submit_button("Run regression / ANOVA", type="primary", use_container_width=True, key="tool036_run")
+                            elif selected_tool["tool_id"] == "T037":
+                                st.caption("Research Pack method: Welch's two-sided t-test for two independent samples. The method does not assume equal population variances.")
+                                hypothesis_sample_a = st.text_input("Sample A (comma-separated numeric observations)", "2, 3, 4, 5", key="tool037_sample_a")
+                                hypothesis_sample_b = st.text_input("Sample B (comma-separated numeric observations)", "8, 9, 10, 11", key="tool037_sample_b")
+                                hypothesis_alpha = st.number_input(
+                                    "Significance level (alpha)", min_value=0.001, max_value=0.5,
+                                    value=0.05, step=0.01, key="tool037_alpha",
+                                )
+                                run_method = st.form_submit_button("Run Welch t-test", type="primary", use_container_width=True, key="tool037_run")
+                            elif selected_tool["tool_id"] == "T051":
+                                st.caption("Chronological holdout comparison of naïve, training-mean and trailing moving-average baselines. Forecast intervals and seasonal models are not included.")
+                                demand_history_text = st.text_area("Demand history in chronological order (comma-separated)", "10, 12, 13, 15, 17, 20, 23, 25, 26, 28", key="tool051_history")
+                                demand_holdout = st.number_input("Holdout periods", min_value=2, max_value=100, value=3, step=1, key="tool051_holdout")
+                                demand_horizon = st.number_input("Forecast horizon", min_value=1, max_value=100, value=3, step=1, key="tool051_horizon")
+                                demand_ma_window = st.number_input("Moving-average window", min_value=1, max_value=100, value=3, step=1, key="tool051_window")
+                                run_method = st.form_submit_button("Compare demand baselines", type="primary", use_container_width=True, key="tool051_run")
+                            elif selected_tool["tool_id"] == "T072":
+                                st.caption("Independent-input Monte Carlo screening. Declare each benefit/cost distribution; correlations are not inferred, and outputs are simulations, not verified ROI.")
+                                monte_carlo_components_json = st.text_area(
+                                    "Components (JSON list: name, role benefit/cost, distribution and parameters)",
+                                    value='[{"name":"Output benefit","role":"benefit","distribution":"triangular","low":70,"mode":90,"high":110},{"name":"Implementation cost","role":"cost","distribution":"normal","mean":50,"sd":5}]',
+                                    key="tool072_components",
+                                )
+                                monte_carlo_iterations = st.number_input("Simulation trials", min_value=1000, max_value=100000, value=10000, step=1000, key="tool072_iterations")
+                                monte_carlo_seed = st.number_input("Random seed", min_value=0, max_value=4294967295, value=42, step=1, key="tool072_seed")
+                                monte_carlo_unit = st.text_input("Net outcome unit / currency label", "SAR (illustrative)", key="tool072_unit")
+                                run_method = st.form_submit_button("Run Monte Carlo simulation", type="primary", use_container_width=True, key="tool072_run")
+                            elif selected_tool["tool_id"] == "T061":
+                                st.caption("LP/MILP execution with explicit variable domains, linear constraints and independent post-solve feasibility diagnostics. A solver error or time limit is not an optimal solution.")
+                                tool061_payload_json = st.text_area(
+                                    "Optimization model (JSON object: variable_spec, objective_coefficients, constraints)",
+                                    value=get_tool_example_json("T061"),
+                                    key="tool061_payload",
+                                )
+                                run_method = st.form_submit_button("Solve LP / MILP model", type="primary", use_container_width=True, key="tool061_run")
+                            elif selected_tool["tool_id"] == "T067":
+                                st.caption("Weighted trade-off ranking and Pareto candidates across explicit numeric objectives. The ranking is not a universal optimum.")
+                                tool067_payload_json = st.text_area(
+                                    "Alternatives and objective definitions (JSON object)",
+                                    value=get_tool_example_json("T067"),
+                                    key="tool067_payload",
+                                )
+                                run_method = st.form_submit_button("Calculate Pareto trade-offs", type="primary", use_container_width=True, key="tool067_run")
+                            elif selected_tool["tool_id"] == "T068":
+                                st.caption("Worst-case linear objective over explicit scenario coefficient vectors and a shared feasible region. Scenario coverage and units must be reviewed.")
+                                tool068_payload_json = st.text_area(
+                                    "Robust LP scenarios and constraints (JSON object)",
+                                    value=get_tool_example_json("T068"),
+                                    key="tool068_payload",
+                                )
+                                run_method = st.form_submit_button("Solve robust linear model", type="primary", use_container_width=True, key="tool068_run")
+                            elif selected_tool["tool_id"] == "T085":
+                                st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
+                                effect_size = st.number_input(
+                                    "Standardized effect size (Cohen's d)", min_value=0.001,
+                                    value=0.5, step=0.1, key="tool085_effect_size"
+                                )
+                                alpha = st.number_input(
+                                    "Significance level (alpha)", min_value=0.001, max_value=0.5,
+                                    value=0.05, step=0.01, key="tool085_alpha"
+                                )
+                                target_power = st.number_input(
+                                    "Target statistical power", min_value=0.01, max_value=0.999,
+                                    value=0.80, step=0.05, key="tool085_target_power"
+                                )
+                                search_limit = st.number_input(
+                                    "Maximum sample size per group to search", min_value=2, max_value=100000,
+                                    value=10000, step=100, key="tool085_search_limit"
+                                )
+                                run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
+    
+                        if selected_tool["tool_id"] == "T007":
+                            safe_diagnostic = classify_diagnostic(diagnostic_inspector_text)
+                            current_tool_inputs = {
+                                "reported_subsystem": diagnostic_category,
+                                "safe_summary": safe_diagnostic["safe_summary"],
+                                "redactions_applied": safe_diagnostic["redactions_applied"],
+                                "raw_input_stored": False,
+                            }
+                        elif selected_tool["tool_id"] == "T009":
+                            current_tool_inputs = {"status_filter": capability_status_filter, "row_limit": int(capability_status_limit)}
+                        elif selected_tool["tool_id"] == "T010":
+                            current_tool_inputs = {"query_length": len(help_query), "workbench_filter": help_workbench}
+                        elif selected_tool["tool_id"] == "T100":
+                            safe_diagnostic = redact_diagnostic_text(support_diagnostic_text)
+                            current_tool_inputs = {
+                                "component": support_component,
+                                "severity": support_severity,
+                                "redacted_summary": safe_diagnostic["safe_summary"],
+                                "redactions_applied": safe_diagnostic["redactions_applied"],
+                                "raw_input_stored": False,
+                            }
+                        elif selected_tool["tool_id"] == "T015":
+                            current_tool_inputs = {"source_headers": field_headers_text, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_min_confidence}
+                        elif selected_tool["tool_id"] == "T049":
+                            current_tool_inputs = {"work_orders_json": backlog_orders_json, "available_hours": backlog_hours, "available_skills": backlog_skills_text}
+                        elif selected_tool["tool_id"] == "T052":
+                            current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
+                        elif selected_tool["tool_id"] == "T058":
+                            current_tool_inputs = {"suppliers_json": supplier_scores_json, "weights_json": supplier_weights_json}
+                        elif selected_tool["tool_id"] == "T021":
+                            current_tool_inputs = {
+                                "observation_times_text": observation_text,
+                                "performance_rating_pct": rating,
+                                "allowance_pct_of_standard_time": allowance,
+                                "time_unit": unit,
+                            }
+                        elif selected_tool["tool_id"] == "T022":
+                            current_tool_inputs = {
+                                "activity_counts_json": work_sampling_counts_json,
+                                "confidence_level": confidence_option,
+                                "target_margin_of_error_pct": margin_pct,
+                            }
+                        elif selected_tool["tool_id"] == "T023":
+                            current_tool_inputs = {
+                                "available_time_per_period": available_time,
+                                "demand_units_per_period": demand_units,
+                                "cycle_time_per_unit": cycle_time,
+                                "time_unit": unit,
+                            }
+                        elif selected_tool["tool_id"] == "T028":
+                            current_tool_inputs = {
+                                "category_counts_json": pareto_counts_json,
+                                "problem_statement": problem_statement,
+                                "why_chain_text": why_chain_text,
+                                "countermeasure": countermeasure_text,
+                                "owner": action_owner,
+                                "due_date": action_due_date,
+                            }
+                        elif selected_tool["tool_id"] == "T029":
+                            current_tool_inputs = {"checklist_json": audit_items_json}
+                        elif selected_tool["tool_id"] == "T030":
+                            current_tool_inputs = {
+                                "record_id": record_id_input,
+                                "title": a3_title,
+                                "problem_statement": a3_problem,
+                                "metric_name": a3_metric,
+                                "unit": a3_unit,
+                                "baseline_value": a3_baseline,
+                                "target_value": a3_target,
+                                "actual_after_value": a3_actual,
+                                "root_cause_hypothesis": a3_root_cause,
+                                "countermeasure": a3_countermeasure,
+                                "owner": a3_owner,
+                                "due_date": a3_due_date,
+                                "baseline_evidence": a3_baseline_evidence,
+                                "post_change_evidence": a3_post_evidence,
+                                "implementation_status": a3_status,
+                                "review_date": a3_review_date,
+                            }
+                        elif selected_tool["tool_id"] == "T066":
+                            current_tool_inputs = {
+                                "stock_length": stock_len, "kerf_allowance": kerf,
+                                "parts_json": parts_json,
+                            }
+                        elif selected_tool["tool_id"] == "T075":
+                            current_tool_inputs = {
+                                "predictions_text": predictions_text, "actuals_text": actuals_text,
+                                "maximum_mae": max_mae, "trailing_window": int(window),
+                            }
+                        elif selected_tool["tool_id"] == "T026":
+                            current_tool_inputs = {"planned_time": oee_planned, "downtime": oee_downtime, "ideal_cycle_time": oee_cycle, "total_count": oee_total, "good_count": oee_good, "time_unit": oee_unit}
+                        elif selected_tool["tool_id"] == "T032":
+                            current_tool_inputs = {"measurements_text": capability_measurements, "lsl": capability_lsl, "usl": capability_usl, "subgroup_size": int(capability_subgroup), "unit": capability_unit}
+                        elif selected_tool["tool_id"] == "T055":
+                            current_tool_inputs = {"mean_daily_demand": inv_demand, "daily_demand_stddev": inv_sd, "lead_time_days": inv_lead, "order_cost_per_order": inv_order_cost, "annual_holding_cost_per_unit": inv_holding_cost, "operating_days_per_year": int(inv_days), "service_level": inv_service}
+                        elif selected_tool["tool_id"] == "T078":
+                            current_tool_inputs = {"activity_amount": carbon_amount, "activity_unit": carbon_unit, "emission_factor": carbon_factor, "factor_unit": carbon_factor_unit, "factor_source": carbon_source, "factor_date": carbon_date, "boundary": carbon_boundary}
+                        elif selected_tool["tool_id"] == "T081":
+                            current_tool_inputs = {"cash_flows_text": economics_cash_flows, "discount_rate_pct": economics_rate, "currency": economics_currency, "period_unit": economics_period}
+                        elif selected_tool["tool_id"] == "T024":
+                            current_tool_inputs = {"tasks_json": line_tasks_json, "cycle_time": line_cycle_time, "time_unit": line_time_unit}
+                        elif selected_tool["tool_id"] == "T025":
+                            current_tool_inputs = {"processes_json": bottleneck_processes_json, "demand_units_per_period": bottleneck_demand, "period_label": bottleneck_period}
+                        elif selected_tool["tool_id"] == "T027":
+                            current_tool_inputs = {"steps_json": vsm_steps_json, "demand_units_per_period": vsm_demand, "available_time_per_period": vsm_available_time, "time_unit": vsm_time_unit}
+                        elif selected_tool["tool_id"] == "T038":
+                            current_tool_inputs = {"failure_modes_json": fmea_json}
+                        elif selected_tool["tool_id"] == "T070":
+                            current_tool_inputs = {"arrival_rate_per_time": queue_arrival_rate, "service_rate_per_time": queue_service_rate, "time_unit": queue_time_unit}
+                        elif selected_tool["tool_id"] == "T082":
+                            current_tool_inputs = {"standard_quantity_per_unit": cost_standard_qty_per_unit, "actual_output_units": cost_actual_output, "actual_input_quantity": cost_actual_input, "standard_unit_cost": cost_standard_price, "actual_unit_cost": cost_actual_price, "currency": cost_currency, "period": cost_period}
+                        elif selected_tool["tool_id"] == "T083":
+                            current_tool_inputs = {"baseline_cost": roi_baseline, "post_change_cost": roi_post, "implementation_cost": roi_implementation, "currency": roi_currency, "measurement_window": roi_window, "baseline_evidence": roi_baseline_evidence, "outcome_evidence": roi_outcome_evidence, "verifier": roi_verifier}
+                        elif selected_tool["tool_id"] == "T017":
+                            current_tool_inputs = {"left_records_json": join_left_json, "right_records_json": join_right_json, "left_key": join_left_key, "right_key": join_right_key, "join_type": join_type, "duplicate_policy": duplicate_policy}
+                        elif selected_tool["tool_id"] == "T018":
+                            current_tool_inputs = {"records_json": time_series_json, "timestamp_column": ts_column, "timezone_name": ts_timezone, "expected_interval": ts_expected_interval, "resample_frequency": ts_resample_frequency, "aggregation": ts_aggregation}
+                        elif selected_tool["tool_id"] == "T019":
+                            current_tool_inputs = {"row_count": int(synthetic_rows), "seed": int(synthetic_seed), "start_timestamp": synthetic_start, "interval_minutes": int(synthetic_interval), "defect_rate_pct": synthetic_defect_rate, "mean_downtime_minutes": synthetic_downtime, "energy_kwh_per_unit": synthetic_energy}
+                        elif selected_tool["tool_id"] == "T034":
+                            current_tool_inputs = {"aql_pct": sampling_aql, "ltpd_pct": sampling_ltpd, "producer_risk_pct": sampling_alpha, "consumer_risk_pct": sampling_beta, "max_sample_size": int(sampling_max_n)}
+                        elif selected_tool["tool_id"] == "T041":
+                            current_tool_inputs = {"failure_times_json": weibull_times_json}
+                        elif selected_tool["tool_id"] == "T043":
+                            current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
+                        elif selected_tool["tool_id"] == "T045":
+                            current_tool_inputs = {"parts_json": spare_parts_json}
+                        elif selected_tool["tool_id"] == "T044":
+                            current_tool_inputs = {"failure_modes_json": rcm_records_json}
+                        elif selected_tool["tool_id"] == "T046":
+                            current_tool_inputs = {
+                                "units": rnle_units,
+                                "task_description": rnle_task,
+                                "load_weight": rnle_load,
+                                "horizontal_origin": rnle_h_origin,
+                                "horizontal_destination": rnle_h_destination,
+                                "vertical_hand_start": rnle_v_start,
+                                "vertical_travel_distance": rnle_distance,
+                                "asymmetry_origin": rnle_a_origin,
+                                "asymmetry_destination": rnle_a_destination,
+                                "frequency_lifts_per_minute": rnle_frequency,
+                                "frequency_duration_category": rnle_duration,
+                                "frequency_multiplier": rnle_fm,
+                                "frequency_multiplier_source": rnle_fm_source,
+                                "coupling_quality": rnle_coupling,
+                                "coupling_multiplier": rnle_cm,
+                                "coupling_multiplier_source": rnle_cm_source,
+                            }
+                        elif selected_tool["tool_id"] == "T047":
+                            current_tool_inputs = {"hazards_json": hazard_json}
+                        elif selected_tool["tool_id"] == "T060":
+                            current_tool_inputs = {"suppliers_json": supply_network_suppliers_json, "sites_json": supply_network_sites_json, "routes_json": supply_network_routes_json, "unmet_demand_penalty": supply_network_penalty, "time_limit_seconds": supply_network_time_limit}
+                        elif selected_tool["tool_id"] == "T074":
+                            current_tool_inputs = {"simulated_values": calibration_simulated_text, "measured_values": calibration_measured_text, "training_fraction": calibration_training_fraction}
+                        elif selected_tool["tool_id"] == "T080":
+                            current_tool_inputs = {"suppliers_json": disruption_suppliers_json, "demands_json": disruption_demands_json, "iterations": int(disruption_iterations), "seed": int(disruption_seed), "outage_probability": disruption_outage_probability, "demand_cv": disruption_demand_cv}
+                        elif selected_tool["tool_id"] == "T094":
+                            current_tool_inputs = {"kpi_records_json": kpi_records_json, "alert_rules_json": kpi_rules_json, "as_of": kpi_as_of, "stale_after_hours": kpi_stale_hours}
+                        elif selected_tool["tool_id"] == "T096":
+                            current_tool_inputs = {
+                                "action": integration_action,
+                                "profiles_json": integration_profiles_json,
+                                "live_profile_json": integration_live_profile_json,
+                                "confirm_live": integration_confirm_live,
+                            }
+                        elif selected_tool["tool_id"] == "T097":
+                            current_tool_inputs = {"plugin_name": plugin_name, "payload_json": plugin_payload_json}
+                        elif selected_tool["tool_id"] == "T098":
+                            current_tool_inputs = {"configuration_check": True}
+                        elif selected_tool["tool_id"] == "T099":
+                            current_tool_inputs = {"action": governance_action, "backup_filename": governance_backup_upload.name if governance_backup_upload is not None else ""}
+                        elif selected_tool["tool_id"] == "T050":
+                            current_tool_inputs = {"periods_json": safety_periods_json, "rate_base_hours": safety_rate_base}
+                        elif selected_tool["tool_id"] == "T054":
+                            current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
+                        elif selected_tool["tool_id"] == "T059":
+                            current_tool_inputs = {"items_json": slotting_items_json, "slots_json": slotting_slots_json}
+                        elif selected_tool["tool_id"] == "T063":
+                            current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "costs_json": assignment_costs_json}
+                        elif selected_tool["tool_id"] == "T077":
+                            current_tool_inputs = {"baseline_json": energy_baseline_json, "alternatives_json": energy_alternatives_json}
+                        elif selected_tool["tool_id"] == "T084":
+                            current_tool_inputs = {"criteria_json": portfolio_criteria_json, "alternatives_json": portfolio_alternatives_json}
+                        elif selected_tool["tool_id"] == "T076":
+                            current_tool_inputs = {"event_log_json": process_event_log_json}
+                        elif selected_tool["tool_id"] == "T079":
+                            current_tool_inputs = {"flows_json": water_flows_json}
+                        elif selected_tool["tool_id"] == "T016":
+                            current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
+                        elif selected_tool["tool_id"] == "T031":
+                            current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
+                        elif selected_tool["tool_id"] == "T006":
+                            current_tool_inputs = {"payload_json": tool006_payload_json}
+                        elif selected_tool["tool_id"] == "T039":
+                            current_tool_inputs = {"records_json": capa_records_json, "transitions_json": capa_transitions_json, "as_of_date": capa_as_of_date}
+    
+                        elif selected_tool["tool_id"] == "T040":
+                            current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
+                        elif selected_tool["tool_id"] == "T042":
+                            current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
+                        elif selected_tool["tool_id"] == "T056":
+                            current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
+                        elif selected_tool["tool_id"] == "T033":
+                            current_tool_inputs = {"observations_json": msa_observations_json, "tolerance": msa_tolerance}
+                        elif selected_tool["tool_id"] == "T035":
+                            current_tool_inputs = {"observations_json": doe_observations_json, "response_field": doe_response_field, "factor_fields": doe_factor_fields_text, "alpha": doe_alpha}
+                        elif selected_tool["tool_id"] == "T036":
+                            current_tool_inputs = {"mode": regression_mode, "observations_json": regression_observations_json, "groups_json": anova_groups_json, "alpha": regression_alpha}
+                        elif selected_tool["tool_id"] == "T037":
+                            current_tool_inputs = {"sample_a": hypothesis_sample_a, "sample_b": hypothesis_sample_b, "alpha": hypothesis_alpha}
+                        elif selected_tool["tool_id"] == "T051":
+                            current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
+                        elif selected_tool["tool_id"] == "T072":
+                            current_tool_inputs = {"components_json": monte_carlo_components_json, "iterations": int(monte_carlo_iterations), "seed": int(monte_carlo_seed), "unit": monte_carlo_unit}
+                        elif selected_tool["tool_id"] == "T002":
+                            current_tool_inputs = {"goal": guided_goal, "available_data_fields": guided_fields_text}
+    
+                        elif selected_tool["tool_id"] == "T089":
+                            current_tool_inputs = {"topic_id": practice_topic, "submitted_answer": practice_answer}
+    
+                        elif selected_tool["tool_id"] == "T048":
+                            current_tool_inputs = {"observations_json": anomaly_observations_json, "timestamp_field": anomaly_timestamp_field, "value_field": anomaly_value_field, "modified_z_threshold": anomaly_threshold, "max_age_hours": anomaly_max_age, "evaluation_time_utc": anomaly_eval_time}
+    
+                        elif selected_tool["tool_id"] == "T069":
+                            current_tool_inputs = {"facilities_json": facility_location_facilities_json, "customers_json": facility_location_customers_json, "routes_json": facility_location_routes_json, "time_limit_seconds": facility_location_time_limit}
+                        elif selected_tool["tool_id"] == "T071":
+                            current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
+                        elif selected_tool["tool_id"] == "T062":
+                            current_tool_inputs = {"variables_json": solver_variables_json, "objective_json": solver_objective_json, "constraints_json": solver_constraints_json, "direction": solver_direction, "time_limit_seconds": solver_time_limit, "feasibility_tolerance": solver_tolerance}
+                        elif selected_tool["tool_id"] == "T061":
+                            current_tool_inputs = {"payload_json": tool061_payload_json}
+                        elif selected_tool["tool_id"] == "T067":
+                            current_tool_inputs = {"payload_json": tool067_payload_json}
+                        elif selected_tool["tool_id"] == "T068":
+                            current_tool_inputs = {"payload_json": tool068_payload_json}
+                        elif selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
+                            current_tool_inputs = {"payload_json": canonical_payload_json}
+                        elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014", "T020"}:
+                            current_tool_inputs = {
+                                "filename": canonical_excel_upload.name if canonical_excel_upload is not None else "",
+                                "file_size_bytes": len(canonical_excel_upload.getvalue()) if canonical_excel_upload is not None else 0,
+                                "confirm_cleaning": confirm_cleaning,
+                                "dataset_name": dataset_name_input,
+                                "sheet_name": dataset_sheet_input,
+                                "dataset_id": existing_dataset_id_input,
+                            }
+                        elif selected_tool["tool_id"] == "T095":
+                            current_tool_inputs = {"source_tool_id": source_result_tool_id, "format": report_format}
+                        elif selected_tool["tool_id"] == "T087":
+                            current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
+    
+                        else:
+                            current_tool_inputs = {
+                                "cohen_d": effect_size, "alpha": alpha,
+                                "target_power": target_power, "maximum_n_per_group": int(search_limit),
+                            }
+    
+                        if run_method:
+                            # Remove only the in-session output before a new run. The last
+                            # successful saved workspace snapshot remains intact if this run fails.
+                            st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
+                            st.session_state.pop("shoir_tool_inputs_" + selected_tool["tool_id"], None)
+                            st.session_state.pop("shoir_tool_save_status_" + selected_tool["tool_id"], None)
+                            t095_artifact_bytes = None
+                            if selected_tool["tool_id"] == "T095":
+                                # Remove an older in-session file before a new report attempt.
+                                st.session_state.pop("shoir_tool_bundle_bytes_T095", None)
+                                st.session_state.pop("shoir_tool_bundle_filename_T095", None)
+                                st.session_state.pop("shoir_tool_bundle_mime_T095", None)
+                            try:
+                                _require_focused_tool_actor()
+                                require_tool_access(RAW_TIER, selected_tool["tool_id"])
+                                if selected_tool["tool_id"] in {"T004", "T005", "T073", "T086", "T092"}:
                                     try:
-                                        observation_times = [float(item.strip()) for item in observation_text.split(",") if item.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Observed times must be comma-separated numbers.") from exc
-                                    result = calculate_time_study(
-                                        observation_times, rating, allowance, time_unit=unit,
-                                    )
-                                elif selected_tool["tool_id"] == "T022":
-                                    parsed_counts = json.loads(work_sampling_counts_json)
-                                    if not isinstance(parsed_counts, dict):
-                                        raise ValueError("Activity counts must be a JSON object mapping category names to counts.")
-                                    result = analyze_work_sampling(
-                                        parsed_counts,
-                                        confidence_level=float(confidence_option.rstrip("%")) / 100.0,
-                                        target_margin_pct=margin_pct,
-                                    )
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if work_sampling_counts_json.strip() == _TOOL022_EXAMPLE_COUNTS
-                                        else "USER_ENTERED_UNVERIFIED"
-                                    )
-                                    result["provenance_warning"] = (
-                                        "The example counts are synthetic teaching data; replace them and verify the sampling frame before using the output operationally."
-                                        if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-                                        else
-                                        "Entered counts were not independently validated against a sampling log or plant system."
-                                    )
-                                elif selected_tool["tool_id"] == "T023":
-                                    result = calculate_takt_capacity(
-                                        available_time, demand_units, cycle_time, time_unit=unit,
-                                    )
-                                elif selected_tool["tool_id"] == "T028":
-                                    parsed_counts = json.loads(pareto_counts_json)
-                                    if not isinstance(parsed_counts, dict):
-                                        raise ValueError("Pareto counts must be a JSON object mapping category names to counts.")
-                                    whys = [line.strip() for line in why_chain_text.splitlines() if line.strip()]
-                                    result = analyze_pareto_root_cause(
-                                        parsed_counts,
-                                        problem_statement=problem_statement,
-                                        why_chain=whys,
-                                        countermeasure=countermeasure_text,
-                                        owner=action_owner,
-                                        due_date=action_due_date,
-                                    )
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if pareto_counts_json.strip() == _TOOL028_EXAMPLE_COUNTS
-                                        else "USER_ENTERED_UNVERIFIED"
-                                    )
-                                    result["provenance_warning"] = (
-                                        "The example counts are synthetic teaching data; replace them and verify the source before operational use."
-                                        if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-                                        else
-                                        "Entered counts were not independently validated against a source log."
-                                    )
-                                elif selected_tool["tool_id"] == "T029":
-                                    parsed_items = json.loads(audit_items_json)
-                                    if not isinstance(parsed_items, list):
-                                        raise ValueError("5S checklist must be a JSON list of item objects.")
-                                    result = assess_5s_audit(parsed_items)
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if audit_items_json.strip() == _TOOL029_EXAMPLE_ITEMS
-                                        else "USER_ENTERED_UNVERIFIED"
-                                    )
-                                    result["provenance_warning"] = (
-                                        "The displayed checklist is illustrative self-assessment data, not a completed plant audit."
-                                        if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
-                                        else "Checklist evidence was not independently validated against a signed audit."
-                                    )
-                                elif selected_tool["tool_id"] == "T030":
-                                    result = build_kaizen_a3_record(
-                                        title=a3_title,
-                                        problem_statement=a3_problem,
-                                        metric_name=a3_metric,
-                                        unit=a3_unit,
-                                        baseline_value=a3_baseline,
-                                        target_value=a3_target,
-                                        actual_after_value=a3_actual,
-                                        root_cause_hypothesis=a3_root_cause,
-                                        countermeasure=a3_countermeasure,
-                                        owner=a3_owner,
-                                        due_date=a3_due_date,
-                                        baseline_evidence=a3_baseline_evidence,
-                                        post_change_evidence=a3_post_evidence,
-                                        implementation_status=a3_status,
-                                        review_date=a3_review_date,
-                                    )
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                    records = st.session_state.get("shoir_kaizen_a3_records", [])
-                                    if not isinstance(records, list):
-                                        raise ValueError("The saved A3 register is invalid; existing workspace data was preserved.")
-                                    record_id = str(record_id_input or "").strip()
-                                    now = datetime.now().astimezone().isoformat(timespec="seconds")
-                                    known_index = next((i for i, item in enumerate(records) if str(item.get("record_id", "")) == record_id), None) if record_id else None
-                                    if record_id and known_index is None:
-                                        raise ValueError("A3 record ID was not found in this user's workspace. Leave it blank to create a new record.")
-                                    if known_index is None:
-                                        if len(records) >= 500:
-                                            raise ValueError("The A3 register reached 500 records; archive records before adding more.")
-                                        record_id = "A3-" + uuid4().hex[:10].upper()
-                                        result["record_id"] = record_id
-                                        result["created_at"] = now
-                                        result["updated_at"] = now
-                                        result["revision_number"] = 1
-                                        result["revision_history"] = []
-                                        records.append(dict(result))
+                                        parsed_payload = json.loads(canonical_payload_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError(f"{selected_tool['tool_id']} input must be valid JSON.") from exc
+                                    if not isinstance(parsed_payload, dict):
+                                        raise ValueError(f"{selected_tool['tool_id']} input must be a JSON object.")
+                                    # Do not trust any owner field supplied in the JSON editor.
+                                    parsed_payload["owner"] = USER
+                                    result = run_additional_tool(selected_tool["tool_id"], parsed_payload)
+                                elif selected_tool["tool_id"] in {"T011", "T012", "T013", "T014"}:
+                                    if canonical_excel_upload is None:
+                                        raise ValueError("Upload a supported workbook before running this tool.")
+                                    raw_workbook = canonical_excel_upload.getvalue()
+                                    result = run_additional_tool(selected_tool["tool_id"], {
+                                        "filename": canonical_excel_upload.name,
+                                        "raw_bytes": raw_workbook,
+                                        "confirm_cleaning": confirm_cleaning,
+                                    })
+                                    workbook_result = result.pop("excel_workbook_result")
+                                    st.session_state["excel_studio_result"] = workbook_result
+                                    from shoir_excel_studio import _excel_persist_result
+                                    workspace_saved = bool(_excel_persist_result(USER, workbook_result))
+                                    result["workspace_save_succeeded"] = workspace_saved
+                                    result["original_workbook_bytes_retained"] = bool(workbook_result.get("_raw_bytes") == raw_workbook)
+                                    st.session_state["excel_studio_signature"] = result["source_sha256"]
+                                elif selected_tool["tool_id"] == "T020":
+                                    if canonical_excel_upload is None:
+                                        raise ValueError("Upload a supported workbook before registering a dataset version.")
+                                    dataset_token = str(st.session_state.get("remote_session_token") or st.session_state.get("access_token") or "").strip()
+                                    if not dataset_token:
+                                        raise PermissionError("An authenticated managed-session token is required for immutable staging dataset registration.")
+                                    if not dataset_name_input.strip():
+                                        raise ValueError("Enter a logical dataset name before registering a version.")
+                                    raw_dataset_workbook = canonical_excel_upload.getvalue()
+                                    result = run_additional_tool("T020", {
+                                        "filename": canonical_excel_upload.name,
+                                        "raw_bytes": raw_dataset_workbook,
+                                        "dataset_name": dataset_name_input.strip(),
+                                        "sheet_name": dataset_sheet_input.strip(),
+                                        "dataset_id": existing_dataset_id_input.strip() or None,
+                                        "username": USER,
+                                        "token": dataset_token,
+                                        "workspace": str(st.session_state.get("workspace") or "default"),
+                                    })
+                                    workbook_result = result.pop("excel_workbook_result")
+                                    st.session_state["excel_studio_result"] = workbook_result
+                                    from shoir_excel_studio import _excel_persist_result
+                                    result["original_workbook_workspace_save_succeeded"] = bool(_excel_persist_result(USER, workbook_result))
+                                    result["original_workbook_bytes_retained_in_session"] = bool(workbook_result.get("_raw_bytes") == raw_dataset_workbook)
+                                    st.session_state["excel_studio_signature"] = result["data_hash"]
+                                elif selected_tool["tool_id"] in {"T061", "T067", "T068"}:
+                                    if selected_tool["tool_id"] == "T061":
+                                        payload_json = tool061_payload_json
+                                    elif selected_tool["tool_id"] == "T067":
+                                        payload_json = tool067_payload_json
                                     else:
-                                        previous = dict(records[known_index])
-                                        history = list(previous.get("revision_history", []))
-                                        snapshot_keys = (
-                                            "title", "problem_statement", "metric_name", "unit",
-                                            "baseline_value", "target_value", "actual_after_value",
-                                            "root_cause_hypothesis", "countermeasure", "owner", "due_date",
-                                            "baseline_evidence", "post_change_evidence", "review_date",
-                                            "status", "outcome_status",
-                                        )
-                                        history.append({
-                                            "revision_number": int(previous.get("revision_number", 1)),
-                                            "updated_at": previous.get("updated_at", previous.get("created_at", "")),
-                                            "snapshot": {key: previous.get(key) for key in snapshot_keys},
-                                        })
-                                        result["record_id"] = record_id
-                                        result["created_at"] = previous.get("created_at", now)
-                                        result["updated_at"] = now
-                                        result["revision_number"] = int(previous.get("revision_number", 1)) + 1
-                                        result["revision_history"] = history
-                                        records[known_index] = dict(result)
-                                    st.session_state["shoir_kaizen_a3_records"] = records
-                                elif selected_tool["tool_id"] == "T059":
-                                    parsed_slot_items = json.loads(slotting_items_json)
-                                    parsed_slots = json.loads(slotting_slots_json)
-                                    if not isinstance(parsed_slot_items, list) or not isinstance(parsed_slots, list):
-                                        raise ValueError("Slotting items and slots must each be JSON lists.")
-                                    result = optimize_warehouse_slotting(parsed_slot_items, parsed_slots)
-                                elif selected_tool["tool_id"] == "T063":
-                                    parsed_assignment_tasks = json.loads(assignment_tasks_json)
-                                    parsed_assignment_resources = json.loads(assignment_resources_json)
-                                    parsed_assignment_costs = json.loads(assignment_costs_json)
-                                    if not isinstance(parsed_assignment_tasks, list) or not isinstance(parsed_assignment_resources, list) or not isinstance(parsed_assignment_costs, list):
-                                        raise ValueError("Task names, resource names and cost matrix must each be JSON lists.")
-                                    result = optimize_task_resource_assignment(parsed_assignment_tasks, parsed_assignment_resources, parsed_assignment_costs)
-                                elif selected_tool["tool_id"] == "T066":
-                                    parsed_parts = json.loads(parts_json)
-                                    if not isinstance(parsed_parts, list):
-                                        raise ValueError("Parts input must be a JSON list of part definitions.")
-                                    result = solve_cutting_stock(stock_len, parsed_parts, kerf)
-                                elif selected_tool["tool_id"] == "T075":
+                                        payload_json = tool068_payload_json
                                     try:
-                                        predictions = [float(x.strip()) for x in predictions_text.split(",") if x.strip()]
-                                        actuals = [float(x.strip()) for x in actuals_text.split(",") if x.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Predictions and actuals must be comma-separated numbers.") from exc
-                                    result = monitor_forecast_drift(
-                                        predictions, actuals, max_mae,
-                                        window=int(window) if int(window) > 0 else None,
+                                        parsed_payload = json.loads(payload_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError(f"{selected_tool['tool_id']} input must be valid JSON.") from exc
+                                    if not isinstance(parsed_payload, dict):
+                                        raise ValueError(f"{selected_tool['tool_id']} input must be a JSON object.")
+                                    result = run_additional_tool(selected_tool["tool_id"], parsed_payload)
+                                    result["data_provenance"] = (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if parsed_payload.get("data_provenance") == "SYNTHETIC_EXAMPLE"
+                                        else "USER_ENTERED_UNVERIFIED"
                                     )
-                                elif selected_tool["tool_id"] == "T026":
-                                    result = calculate_oee(oee_planned, oee_downtime, oee_cycle, oee_total, oee_good, time_unit=oee_unit)
-                                elif selected_tool["tool_id"] == "T032":
+                                elif selected_tool["tool_id"] == "T006":
                                     try:
-                                        measured_values = [float(x.strip()) for x in capability_measurements.split(",") if x.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Measurements must be comma-separated numbers.") from exc
-                                    result = analyze_process_capability(measured_values, capability_lsl, capability_usl, subgroup_size=int(capability_subgroup), unit=capability_unit)
-                                elif selected_tool["tool_id"] == "T055":
-                                    result = plan_inventory_policy(inv_demand, inv_sd, inv_lead, inv_order_cost, inv_holding_cost, operating_days_per_year=int(inv_days), service_factor_z=service_options[inv_service])
-                                elif selected_tool["tool_id"] == "T078":
-                                    result = calculate_carbon_emissions(carbon_amount, carbon_factor, activity_unit=carbon_unit, factor_unit=carbon_factor_unit, factor_source=carbon_source, factor_date=carbon_date, boundary=carbon_boundary)
-                                elif selected_tool["tool_id"] == "T081":
-                                    try:
-                                        cash_flows = [float(x.strip()) for x in economics_cash_flows.split(",") if x.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Cash flows must be comma-separated numbers.") from exc
-                                    result = analyze_engineering_economics(cash_flows, economics_rate, currency=economics_currency, period_unit=economics_period)
-                                elif selected_tool["tool_id"] == "T016":
-                                    result = convert_units_or_currency(amount_to_convert, source_unit, target_unit, exchange_rate=exchange_rate_value, exchange_rate_date=exchange_rate_date_value, exchange_rate_source=exchange_rate_source_value)
-                                elif selected_tool["tool_id"] == "T031":
-                                    try:
-                                        values = [float(item.strip()) for item in spc_measurements_text.split(",") if item.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("SPC measurements must be comma-separated numbers.") from exc
-                                    result = analyze_spc_individuals(values, unit=spc_unit)
+                                        additional_payload = json.loads(tool006_payload_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Revision-history input must be valid JSON.") from exc
+                                    if not isinstance(additional_payload, dict):
+                                        raise ValueError("Revision-history input must be a JSON object.")
+                                    result = run_additional_tool("T006", additional_payload)
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if "SYNTHETIC" in tool006_payload_json else "USER_ENTERED_UNVERIFIED"
                                 elif selected_tool["tool_id"] == "T039":
                                     try:
                                         parsed_capa_records = json.loads(capa_records_json)
+                                        parsed_capa_transitions = json.loads(capa_transitions_json or "[]")
                                     except json.JSONDecodeError as exc:
-                                        raise ValueError("CAPA/8D records must be valid JSON.") from exc
-                                    if not isinstance(parsed_capa_records, list):
-                                        raise ValueError("CAPA/8D records must be a JSON list of objects.")
-                                    result = assess_capa_8d_records(
-                                        parsed_capa_records,
-                                        as_of_date=capa_as_of_date.strip() or None,
-                                    )
+                                        raise ValueError("CAPA/8D records and transitions must be valid JSON.") from exc
+                                    if not isinstance(parsed_capa_records, list) or not isinstance(parsed_capa_transitions, list):
+                                        raise ValueError("CAPA/8D records and transitions must each be JSON lists.")
+                                    result = run_additional_tool("T039", {
+                                        "records": parsed_capa_records,
+                                        "transitions": parsed_capa_transitions,
+                                        "as_of_date": capa_as_of_date.strip() or None,
+                                    })
                                     result["data_provenance"] = (
                                         "SYNTHETIC_EXAMPLE"
                                         if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
                                         else "USER_ENTERED_UNVERIFIED"
                                     )
-                                elif selected_tool["tool_id"] == "T040":
-                                    result = analyze_quality_cost_defects(quality_total_units, quality_defects, quality_scrap_units, quality_rework_units, quality_scrap_cost, quality_rework_cost, quality_inspection_cost, currency=quality_currency, period=quality_period)
-                                elif selected_tool["tool_id"] == "T042":
-                                    try:
-                                        durations = [float(item.strip()) for item in repair_durations_text.split(",") if item.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Repair durations must be comma-separated numbers.") from exc
-                                    result = analyze_mtbf_mttr(mtbf_operating_hours, durations)
-                                elif selected_tool["tool_id"] == "T056":
-                                    inventory_items = json.loads(inventory_items_json)
-                                    if not isinstance(inventory_items, list):
-                                        raise ValueError("SKU data must be a JSON list of objects.")
-                                    result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
-                                elif selected_tool["tool_id"] == "T024":
-                                    parsed_tasks = json.loads(line_tasks_json)
-                                    if not isinstance(parsed_tasks, list):
-                                        raise ValueError("Tasks input must be a JSON list of task objects.")
-                                    result = balance_production_line(parsed_tasks, line_cycle_time, time_unit=line_time_unit)
-                                elif selected_tool["tool_id"] == "T025":
-                                    parsed_processes = json.loads(bottleneck_processes_json)
-                                    if not isinstance(parsed_processes, list):
-                                        raise ValueError("Process capacities must be a JSON list of process objects.")
-                                    result = analyze_bottleneck_capacity(parsed_processes, bottleneck_demand, period_label=bottleneck_period)
-                                elif selected_tool["tool_id"] == "T027":
-                                    parsed_steps = json.loads(vsm_steps_json)
-                                    if not isinstance(parsed_steps, list):
-                                        raise ValueError("Value-stream steps must be a JSON list of step objects.")
-                                    result = build_value_stream_map(parsed_steps, vsm_demand, vsm_available_time, time_unit=vsm_time_unit)
-                                elif selected_tool["tool_id"] == "T038":
-                                    parsed_fmea = json.loads(fmea_json)
-                                    if not isinstance(parsed_fmea, list):
-                                        raise ValueError("FMEA input must be a JSON list of failure-mode objects.")
-                                    result = analyze_fmea(parsed_fmea)
-                                elif selected_tool["tool_id"] == "T070":
-                                    result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, time_unit=queue_time_unit)
-                                elif selected_tool["tool_id"] == "T082":
-                                    result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
-                                elif selected_tool["tool_id"] == "T083":
-                                    result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
-                                elif selected_tool["tool_id"] == "T017":
-                                    parsed_left = json.loads(join_left_json)
-                                    parsed_right = json.loads(join_right_json)
-                                    if not isinstance(parsed_left, list) or not isinstance(parsed_right, list):
-                                        raise ValueError("Both join inputs must be JSON lists of records.")
-                                    result = merge_data_tables(parsed_left, parsed_right, join_left_key, join_right_key, join_type=join_type, duplicate_policy=duplicate_policy)
-                                elif selected_tool["tool_id"] == "T018":
-                                    parsed_series = json.loads(time_series_json)
-                                    if not isinstance(parsed_series, list):
-                                        raise ValueError("Time-series input must be a JSON list of records.")
-                                    result = process_time_series(parsed_series, ts_column, timezone_name=ts_timezone, expected_interval=ts_expected_interval, resample_frequency=ts_resample_frequency, aggregation=ts_aggregation)
-                                elif selected_tool["tool_id"] == "T019":
-                                    result = generate_synthetic_industrial_data(int(synthetic_rows), seed=int(synthetic_seed), start_timestamp=synthetic_start, interval_minutes=int(synthetic_interval), defect_rate_pct=synthetic_defect_rate, mean_downtime_minutes=synthetic_downtime, energy_kwh_per_unit=synthetic_energy)
-                                elif selected_tool["tool_id"] == "T034":
-                                    result = plan_acceptance_sampling(sampling_aql / 100.0, sampling_ltpd / 100.0, producer_risk=sampling_alpha / 100.0, consumer_risk=sampling_beta / 100.0, max_sample_size=int(sampling_max_n))
-                                elif selected_tool["tool_id"] == "T041":
-                                    parsed_failure_times = json.loads(weibull_times_json)
-                                    if not isinstance(parsed_failure_times, list):
-                                        raise ValueError("Failure-time observations must be a JSON list.")
-                                    result = analyze_weibull_reliability(parsed_failure_times)
-                                elif selected_tool["tool_id"] == "T043":
-                                    parsed_pm_tasks = json.loads(pm_tasks_json)
-                                    if not isinstance(parsed_pm_tasks, list):
-                                        raise ValueError("Maintenance tasks must be a JSON list of task objects.")
-                                    result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
-                                elif selected_tool["tool_id"] == "T045":
-                                    parsed_parts = json.loads(spare_parts_json)
-                                    if not isinstance(parsed_parts, list):
-                                        raise ValueError("Spare parts must be a JSON list of part objects.")
-                                    result = analyze_spare_parts_criticality(parsed_parts)
-                                elif selected_tool["tool_id"] == "T044":
-                                    parsed_rcm = json.loads(rcm_records_json)
-                                    if not isinstance(parsed_rcm, list):
-                                        raise ValueError("RCM failure modes must be a JSON list.")
-                                    result = build_rcm_decision_support(parsed_rcm)
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T046":
-                                    if rnle_duration == "Select duration":
-                                        raise ValueError("Select the lifting-task duration from the NIOSH definitions.")
-                                    if rnle_coupling == "Select coupling":
-                                        raise ValueError("Select the observed hand-to-load coupling quality.")
-                                    result = calculate_niosh_revised_lifting_equation(
-                                        load_weight=rnle_load,
-                                        horizontal_origin=rnle_h_origin,
-                                        horizontal_destination=rnle_h_destination,
-                                        vertical_hand_start=rnle_v_start,
-                                        vertical_travel_distance=rnle_distance,
-                                        asymmetry_origin=rnle_a_origin,
-                                        asymmetry_destination=rnle_a_destination,
-                                        frequency_lifts_per_minute=rnle_frequency,
-                                        frequency_multiplier=rnle_fm,
-                                        coupling_multiplier=rnle_cm,
-                                        units=rnle_units,
-                                        frequency_duration_category=rnle_duration,
-                                        coupling_quality=rnle_coupling,
-                                        frequency_multiplier_source=rnle_fm_source,
-                                        coupling_multiplier_source=rnle_cm_source,
-                                        task_description=rnle_task,
-                                    )
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T060":
-                                    parsed_suppliers = json.loads(supply_network_suppliers_json)
-                                    parsed_sites = json.loads(supply_network_sites_json)
-                                    parsed_routes = json.loads(supply_network_routes_json)
-                                    if not isinstance(parsed_suppliers, list) or not isinstance(parsed_sites, list) or not isinstance(parsed_routes, list):
-                                        raise ValueError("Suppliers, sites and routes must each be JSON lists.")
-                                    result = optimize_supply_chain_network(
-                                        parsed_suppliers,
-                                        parsed_sites,
-                                        parsed_routes,
-                                        unmet_demand_penalty_per_unit=supply_network_penalty,
-                                        time_limit_seconds=supply_network_time_limit,
-                                    )
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T074":
-                                    try:
-                                        simulated_values = [float(x.strip()) for x in calibration_simulated_text.split(",") if x.strip()]
-                                        measured_values = [float(x.strip()) for x in calibration_measured_text.split(",") if x.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Simulated and measured outputs must be comma-separated numbers.") from exc
-                                    result = calibrate_simulation_outputs(
-                                        simulated_values,
-                                        measured_values,
-                                        training_fraction=calibration_training_fraction,
-                                    )
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T080":
-                                    parsed_disruption_suppliers = json.loads(disruption_suppliers_json)
-                                    parsed_disruption_demands = json.loads(disruption_demands_json)
-                                    if not isinstance(parsed_disruption_suppliers, list) or not isinstance(parsed_disruption_demands, list):
-                                        raise ValueError("Disruption suppliers and demands must each be JSON lists.")
-                                    supplier_frame = pd.DataFrame(parsed_disruption_suppliers)
-                                    demand_frame = pd.DataFrame(parsed_disruption_demands)
-                                    if supplier_frame.empty or demand_frame.empty:
-                                        raise ValueError("At least one supplier and one demand destination are required.")
-                                    simulation_rows = simulate_disruption_scenarios(
-                                        supplier_frame,
-                                        demand_frame,
-                                        iterations=int(disruption_iterations),
-                                        seed=int(disruption_seed),
-                                        outage_probability=disruption_outage_probability,
-                                        demand_cv=disruption_demand_cv,
-                                    )
-                                    result = {
-                                        "status": "SYNTHETIC_DISRUPTION_STRESS_TEST",
-                                        "data_provenance": "USER_ENTERED_UNVERIFIED",
-                                        "iterations": len(simulation_rows),
-                                        "service_level_mean_pct": float(simulation_rows["Service %"].mean()),
-                                        "service_level_p05_pct": float(simulation_rows["Service %"].quantile(0.05)),
-                                        "service_level_p95_pct": float(simulation_rows["Service %"].quantile(0.95)),
-                                        "shortage_mean_units": float(simulation_rows["Shortage units"].mean()),
-                                        "simulation_results": simulation_rows,
-                                        "warning": "This is a stochastic supply-shock sensitivity run, not a calibrated forecast or live supplier availability signal.",
-                                    }
-                                elif selected_tool["tool_id"] == "T094":
-                                    parsed_kpis = json.loads(kpi_records_json)
-                                    parsed_rules = json.loads(kpi_rules_json)
-                                    if not isinstance(parsed_kpis, list) or not isinstance(parsed_rules, list):
-                                        raise ValueError("KPI readings and alert rules must each be JSON lists.")
-                                    if not parsed_kpis:
-                                        raise ValueError("Add at least one KPI reading.")
-                                    if not parsed_rules:
-                                        raise ValueError("Add at least one KPI alert rule.")
-
-                                    readings_by_name = {}
-                                    for reading in parsed_kpis:
-                                        if not isinstance(reading, dict):
-                                            raise ValueError("Each KPI reading must be a JSON object.")
-                                        reading_name = str(reading.get("kpi") or "").strip()
-                                        if not reading_name:
-                                            raise ValueError("Every KPI reading must include a non-empty kpi name.")
-                                        reading_key = reading_name.casefold()
-                                        if reading_key in readings_by_name:
-                                            raise ValueError(f"More than one KPI reading matches '{reading_name}'. Use one reading per KPI name.")
-                                        readings_by_name[reading_key] = reading
-
-                                    evaluator_records = []
-                                    seen_rule_ids = set()
-                                    for index, rule in enumerate(parsed_rules, start=1):
-                                        if not isinstance(rule, dict):
-                                            raise ValueError("Each KPI alert rule must be a JSON object.")
-                                        rule_id = str(rule.get("rule_id") or "").strip()
-                                        rule_kpi = str(rule.get("kpi") or "").strip()
-                                        severity = str(rule.get("severity") or "").strip()
-                                        if not rule_id or not rule_kpi or not severity:
-                                            raise ValueError("Every alert rule must include rule_id, kpi and severity.")
-                                        if rule_id.casefold() in seen_rule_ids:
-                                            raise ValueError(f"Duplicate KPI rule_id: {rule_id}.")
-                                        seen_rule_ids.add(rule_id.casefold())
-                                        reading = readings_by_name.get(rule_kpi.casefold())
-                                        if reading is None:
-                                            raise ValueError(f"No KPI reading was supplied for alert rule '{rule_id}' ({rule_kpi}).")
-                                        evaluator_records.append({
-                                            "name": rule_kpi,
-                                            "value": reading.get("value"),
-                                            "unit": reading.get("unit") or "",
-                                            "measured_at": reading.get("observed_at"),
-                                            "source": reading.get("source") or "",
-                                            "threshold": rule.get("threshold"),
-                                            "operator": rule.get("operator"),
-                                            "rule_id": rule_id,
-                                            "severity": severity,
-                                            "max_age_minutes": float(kpi_stale_hours) * 60.0,
-                                        })
-
-                                    existing_open_alerts = st.session_state.get("shoir_kpi_open_alert_records", [])
-                                    if not isinstance(existing_open_alerts, list) or any(
-                                        not isinstance(item, dict) for item in existing_open_alerts
-                                    ):
-                                        raise ValueError("Saved KPI alert state is invalid; clear the existing alert state and rerun.")
-                                    result = evaluate_kpi_alerts_with_dedup({
-                                        "kpis": evaluator_records,
-                                        "as_of": kpi_as_of.strip() or None,
-                                        "existing_alerts": existing_open_alerts,
-                                    })
-                                    next_open_alerts = []
-                                    for alert in result["alert_records"]:
-                                        alert["state"] = "OPEN"
-                                        next_open_alerts.append({
-                                            "fingerprint": alert["fingerprint"],
-                                            "alert_id": alert["alert_id"],
-                                            "rule_id": alert.get("rule_id"),
-                                            "state": "OPEN",
-                                        })
-                                    st.session_state["shoir_kpi_open_alert_records"] = next_open_alerts
-                                    # Keep the older ID-only view available for any pre-existing
-                                    # UI/session consumers; the evaluator itself uses fingerprints.
-                                    st.session_state["shoir_kpi_open_alert_ids"] = [
-                                        item["alert_id"] for item in next_open_alerts
-                                    ]
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T047":
-                                    parsed_hazards = json.loads(hazard_json)
-                                    if not isinstance(parsed_hazards, list):
-                                        raise ValueError("Hazards must be a JSON list of hazard objects.")
-                                    result = assess_job_hazards(parsed_hazards)
-                                elif selected_tool["tool_id"] == "T050":
-                                    parsed_safety_periods = json.loads(safety_periods_json)
-                                    if not isinstance(parsed_safety_periods, list):
-                                        raise ValueError("Safety periods must be a JSON list of period objects.")
-                                    result = analyze_safety_incident_trends(parsed_safety_periods, rate_base_hours=safety_rate_base)
-                                elif selected_tool["tool_id"] == "T054":
-                                    parsed_bom = json.loads(mrp_bom_json)
-                                    parsed_inventory = json.loads(mrp_inventory_json)
-                                    if not isinstance(parsed_bom, list):
-                                        raise ValueError("BOM must be a JSON list of component objects.")
-                                    if not isinstance(parsed_inventory, dict):
-                                        raise ValueError("Inventory must be a JSON object keyed by component.")
-                                    result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
-                                elif selected_tool["tool_id"] == "T076":
-                                    parsed_events = json.loads(process_event_log_json)
-                                    if not isinstance(parsed_events, list):
-                                        raise ValueError("Event log must be a JSON list of event records.")
-                                    result = analyze_process_mining(parsed_events)
-                                elif selected_tool["tool_id"] == "T077":
-                                    parsed_energy_baseline = json.loads(energy_baseline_json)
-                                    parsed_energy_alternatives = json.loads(energy_alternatives_json)
-                                    if not isinstance(parsed_energy_baseline, dict) or not isinstance(parsed_energy_alternatives, list):
-                                        raise ValueError("Energy baseline must be a JSON object and alternatives must be a JSON list.")
-                                    result = compare_energy_performance_scenarios(parsed_energy_baseline, parsed_energy_alternatives)
-                                elif selected_tool["tool_id"] == "T079":
-                                    parsed_flows = json.loads(water_flows_json)
-                                    if not isinstance(parsed_flows, list):
-                                        raise ValueError("Process flows must be a JSON list of flow records.")
-                                    result = analyze_water_waste_efficiency(parsed_flows)
-                                elif selected_tool["tool_id"] == "T084":
-                                    parsed_criteria = json.loads(portfolio_criteria_json)
-                                    parsed_alternatives = json.loads(portfolio_alternatives_json)
-                                    if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
-                                        raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
-                                    result = score_project_portfolio(parsed_criteria, parsed_alternatives)
-                                elif selected_tool["tool_id"] == "T033":
-                                    parsed_msa = json.loads(msa_observations_json)
-                                    if not isinstance(parsed_msa, list):
-                                        raise ValueError("Gage R&R observations must be a JSON list.")
-                                    result = analyze_crossed_gage_rr(parsed_msa, tolerance=msa_tolerance if msa_tolerance > 0 else None)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if msa_observations_json.strip().startswith('[{"part":"P1"') else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T035":
-                                    parsed_doe = json.loads(doe_observations_json)
-                                    factors = [item.strip() for item in doe_factor_fields_text.split(",") if item.strip()]
-                                    if not isinstance(parsed_doe, list):
-                                        raise ValueError("Factorial DOE observations must be a JSON list of run objects.")
-                                    result = analyze_full_factorial_2level(parsed_doe, response_field=doe_response_field.strip(), factor_fields=factors, alpha=doe_alpha)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if doe_observations_json.strip().startswith('[{"A":-1,"B":-1,"response":6.4') else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T036":
-                                    if regression_mode == "Linear regression":
-                                        parsed_observations = json.loads(regression_observations_json)
-                                        if not isinstance(parsed_observations, list):
-                                            raise ValueError("Regression observations must be a JSON list.")
-                                        result = fit_simple_linear_regression(parsed_observations, alpha=regression_alpha)
+                                elif selected_tool["tool_id"] == "T096":
+                                    if integration_action == "Inspect configured connector settings":
+                                        try:
+                                            integration_payload = json.loads(integration_profiles_json)
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("Connector profiles must be valid JSON.") from exc
+                                        if not isinstance(integration_payload, dict):
+                                            raise ValueError("Connector profiles input must be a JSON object.")
+                                        if not isinstance(integration_payload.get("profiles"), list):
+                                            raise ValueError("Connector profiles input must contain a profiles JSON list.")
+                                        result = run_additional_tool("T096", integration_payload)
+                                        result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
                                     else:
-                                        parsed_groups = json.loads(anova_groups_json)
-                                        if not isinstance(parsed_groups, dict):
-                                            raise ValueError("ANOVA groups must be a JSON object mapping group names to numeric lists.")
-                                        result = run_one_way_anova(parsed_groups, alpha=regression_alpha)
-                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE" if (
-                                        (regression_mode == "Linear regression" and regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]')
-                                        or (regression_mode == "One-way ANOVA" and anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}')
-                                    ) else "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T037":
+                                        if not integration_confirm_live:
+                                            raise PermissionError("Confirm the staging-only read-only connector request before running it.")
+                                        try:
+                                            live_profile = json.loads(integration_live_profile_json)
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("The approved REST connector profile must be valid JSON.") from exc
+                                        if not isinstance(live_profile, dict):
+                                            raise ValueError("The approved REST connector profile must be a JSON object.")
+                                        result = run_additional_tool("T096", {
+                                            "action": "verify_rest_read",
+                                            "profile": live_profile,
+                                            "include_sample_data": False,
+                                        })
+                                        result["data_provenance"] = "EXPLICIT_STAGING_READ_ONLY_CONNECTOR_TEST"
+                                        result["warning"] = (
+                                            str(result.get("warning") or "")
+                                            + " Sample payload preview is disabled in the Workbench; "
+                                            "only redacted connection/data-retrieval metadata is retained."
+                                        )
+                                elif selected_tool["tool_id"] == "T098":
+                                    result = run_additional_tool("T098", {})
+                                    result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
+                                elif selected_tool["tool_id"] == "T097":
+                                    import json as _plugin_json
+                                    from plugin_registry import plugin_manifest, get_plugin, validate_plugin_payload
+                                    selected_plugin = get_plugin(plugin_name)
+                                    if selected_plugin is None:
+                                        raise ValueError("Selected plugin is no longer registered.")
                                     try:
-                                        sample_a_values = [float(item.strip()) for item in hypothesis_sample_a.split(",") if item.strip()]
-                                        sample_b_values = [float(item.strip()) for item in hypothesis_sample_b.split(",") if item.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Both samples must be comma-separated numeric observations.") from exc
-                                    result = run_welch_t_test(sample_a_values, sample_b_values, alpha=hypothesis_alpha)
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T051":
-                                    try:
-                                        demand_values = [float(item.strip()) for item in demand_history_text.split(",") if item.strip()]
-                                    except ValueError as exc:
-                                        raise ValueError("Demand history must be comma-separated numeric observations in chronological order.") from exc
-                                    result = forecast_demand_baselines(
-                                        demand_values, holdout_periods=int(demand_holdout),
-                                        horizon=int(demand_horizon), moving_average_window=int(demand_ma_window),
-                                    )
-                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
-                                elif selected_tool["tool_id"] == "T072":
-                                    parsed_components = json.loads(monte_carlo_components_json)
-                                    if not isinstance(parsed_components, list):
-                                        raise ValueError("Monte Carlo components must be a JSON list.")
-                                    result = simulate_monte_carlo_net_value(
-                                        parsed_components, iterations=int(monte_carlo_iterations),
-                                        seed=int(monte_carlo_seed), output_unit=monte_carlo_unit,
-                                    )
-                                    result["data_provenance"] = "SIMULATION — USER-DECLARED DISTRIBUTIONS"
-                                elif selected_tool["tool_id"] == "T085":
-                                    result = plan_two_sample_t_sample_size(
-                                        effect_size, alpha, target_power,
-                                        max_n_per_group=int(search_limit),
-                                    )
-                                elif selected_tool["tool_id"] == "T002":
-                                    completed_ids = [
-                                        key.replace("shoir_tool_result_", "")
-                                        for key in st.session_state.keys()
-                                        if key.startswith("shoir_tool_result_T")
-                                        and isinstance(st.session_state.get(key), dict)
-                                        and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
-                                    ]
-                                    result = build_guided_study_plan(
-                                        guided_goal,
-                                        available_data_fields=guided_fields_text,
-                                        completed_tool_ids=completed_ids,
-                                        tier=RAW_TIER,
-                                    )
-
-                                elif selected_tool["tool_id"] == "T089":
-                                    get_student_practice_problem(practice_topic)
-                                    result = evaluate_student_practice_answer(practice_topic, practice_answer)
-
-                                elif selected_tool["tool_id"] == "T048":
-                                    try:
-                                        parsed_anomaly_observations = json.loads(anomaly_observations_json)
-                                    except json.JSONDecodeError as exc:
-                                        raise ValueError("Time-series observations must be valid JSON.") from exc
-                                    if not isinstance(parsed_anomaly_observations, list):
-                                        raise ValueError("Time-series observations must be a JSON list of objects.")
-                                    result = monitor_equipment_anomalies(
-                                        parsed_anomaly_observations,
-                                        value_field=anomaly_value_field.strip(),
-                                        timestamp_field=anomaly_timestamp_field.strip(),
-                                        modified_z_threshold=anomaly_threshold,
-                                        max_age_hours=anomaly_max_age,
-                                        evaluation_time_utc=anomaly_eval_time.strip() or None,
-                                    )
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if anomaly_observations_json.strip() == _TOOL048_EXAMPLE_OBSERVATIONS
-                                        else "USER_ENTERED_UNVERIFIED"
-                                    )
-                                elif selected_tool["tool_id"] == "T069":
-                                    try:
-                                        parsed_facilities = json.loads(facility_location_facilities_json)
-                                        parsed_customers = json.loads(facility_location_customers_json)
-                                        parsed_routes = json.loads(facility_location_routes_json)
-                                    except json.JSONDecodeError as exc:
-                                        raise ValueError("Facilities, customers and routes must each be valid JSON.") from exc
-                                    if not isinstance(parsed_facilities, list) or not isinstance(parsed_customers, list) or not isinstance(parsed_routes, list):
-                                        raise ValueError("Facilities, customers and routes must each be JSON lists.")
-                                    result = optimize_facility_location_flow(
-                                        parsed_facilities, parsed_customers, parsed_routes,
-                                        time_limit_seconds=facility_location_time_limit,
-                                    )
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if facility_location_facilities_json.strip() == _TOOL069_EXAMPLE_FACILITIES
-                                        and facility_location_customers_json.strip() == _TOOL069_EXAMPLE_CUSTOMERS
-                                        and facility_location_routes_json.strip() == _TOOL069_EXAMPLE_ROUTES
-                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
-                                    )
-                                elif selected_tool["tool_id"] == "T071":
-                                    parsed_des_steps = json.loads(des_steps_json)
-                                    if not isinstance(parsed_des_steps, list):
-                                        raise ValueError("DES station setup must be a JSON list of station records.")
-                                    result = simulate_discrete_event_process(
-                                        parsed_des_steps,
-                                        job_count=int(des_job_count),
-                                        mean_interarrival_time=des_interarrival,
-                                        arrival_distribution=des_arrival_distribution,
-                                        warmup_jobs=int(des_warmup_jobs),
-                                        replications=int(des_replications),
-                                        random_seed=int(des_seed),
-                                        time_unit=des_time_unit,
-                                    )
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if des_steps_json.strip() == _TOOL071_EXAMPLE_STATIONS
-                                        and int(des_job_count) == 50
-                                        and float(des_interarrival) == 1.0
-                                        and des_arrival_distribution == "deterministic"
-                                        and int(des_warmup_jobs) == 5
-                                        and int(des_replications) == 10
-                                        and int(des_seed) == 42
-                                        and des_time_unit == "minutes"
-                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
-                                    )
-                                elif selected_tool["tool_id"] == "T062":
-                                    parsed_solver_variables = json.loads(solver_variables_json)
-                                    parsed_solver_objective = json.loads(solver_objective_json)
-                                    parsed_solver_constraints = json.loads(solver_constraints_json)
-                                    if not isinstance(parsed_solver_variables, dict) or not isinstance(parsed_solver_objective, dict) or not isinstance(parsed_solver_constraints, list):
-                                        raise ValueError("Variables and objective must be JSON objects, and constraints must be a JSON list.")
-                                    result = run_solver_diagnostics(
-                                        parsed_solver_variables,
-                                        parsed_solver_objective,
-                                        parsed_solver_constraints,
-                                        direction=solver_direction,
-                                        time_limit_seconds=solver_time_limit,
-                                        feasibility_tolerance=solver_tolerance,
-                                    )
-                                    result["data_provenance"] = (
-                                        "SYNTHETIC_EXAMPLE"
-                                        if solver_variables_json.strip() == _TOOL062_EXAMPLE_VARIABLES
-                                        and solver_objective_json.strip() == _TOOL062_EXAMPLE_OBJECTIVE
-                                        and solver_constraints_json.strip() == _TOOL062_EXAMPLE_CONSTRAINTS
-                                        and solver_direction == "minimize"
-                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
-                                    )
-                                elif selected_tool["tool_id"] == "T095":
-                                    if source_result_tool_id == "NONE":
-                                        raise ValueError("Run an entitled source tool first; no completed result is available to export.")
-                                    source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
-                                    source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
-                                    if not isinstance(source_result, dict):
-                                        raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
-                                    tables, table_stats = _t095_extract_report_tables(source_result)
-                                    source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
-                                    inputs_hash = hashlib.sha256(
-                                        json.dumps(_t095_safe_metadata(source_inputs), sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
-                                    ).hexdigest() if isinstance(source_inputs, dict) else ""
-                                    source_name = str(source_tool.get("canonical_name") or source_result_tool_id)
-                                    report_title = f"Shoir-IE · {source_name} · Result Export"
-                                    export_audit = [{
-                                        "Source Tool ID": source_result_tool_id,
-                                        "Source Tool": source_name,
-                                        "Result Status": str(source_result.get("status") or "UNSPECIFIED"),
-                                        "Data Provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
-                                        "Input Snapshot SHA-256": inputs_hash or "NOT_AVAILABLE",
-                                        "Exported By": USER,
-                                        "Generated At UTC": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                        "Redacted Columns": table_stats["redacted_column_count"],
-                                    }]
-                                    fmt = str(report_format).upper()
-                                    if fmt in {"PDF", "PPTX"} and not tier_allows(RAW_TIER, "Enterprise"):
-                                        raise PermissionError(f"{fmt} export requires Enterprise. Choose XLSX or ZIP.")
-                                    from shoir_upgrade import build_excel_report, build_workbook_bundle
-                                    if fmt == "XLSX":
-                                        artifact_bytes = build_excel_report(report_title, tables, figures=(), audit=export_audit)
-                                        mime, extension = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
-                                    elif fmt == "ZIP":
-                                        artifact_bytes = build_workbook_bundle(report_title, tables, figures=(), audit=export_audit)
-                                        mime, extension = "application/zip", "zip"
-                                    elif fmt == "PDF":
-                                        from industrial_platform import export_pdf
-                                        artifact_bytes = export_pdf(report_title, tables)
-                                        mime, extension = "application/pdf", "pdf"
-                                    elif fmt == "PPTX":
-                                        from industrial_platform import export_pptx
-                                        artifact_bytes = export_pptx(report_title, tables)
-                                        mime, extension = "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"
-                                    else:
-                                        raise ValueError("Unsupported report format.")
-                                    if not isinstance(artifact_bytes, bytes) or not artifact_bytes:
-                                        raise ValueError("The report builder did not return a valid non-empty file.")
+                                        parsed_plugin_payload = _plugin_json.loads(plugin_payload_json or "{}")
+                                    except _plugin_json.JSONDecodeError as exc:
+                                        raise ValueError("Plugin payload must be valid JSON.") from exc
+                                    if not isinstance(parsed_plugin_payload, dict):
+                                        raise ValueError("Plugin payload must be a JSON object.")
+                                    validated_payload = validate_plugin_payload(selected_plugin, parsed_plugin_payload)
+                                    plugin_row = next(item for item in plugin_manifest() if item["name"] == plugin_name)
                                     result = {
-                                        "tool_id": "T095",
-                                        "status": "REPORT_ARTIFACT_BUILT",
-                                        "source_tool_id": source_result_tool_id,
-                                        "source_tool_name": source_name,
-                                        "format": fmt,
-                                        "filename": f"shoir_ie_{source_result_tool_id.lower()}_report.{extension}",
-                                        "mime_type": mime,
-                                        "artifact_bytes": len(artifact_bytes),
-                                        "artifact_sha256": hashlib.sha256(artifact_bytes).hexdigest(),
-                                        "table_count": table_stats["table_count"],
-                                        "exported_rows": table_stats["total_rows"],
-                                        "redacted_column_count": table_stats["redacted_column_count"],
-                                        "source_input_snapshot_sha256": inputs_hash or None,
-                                        "artifact_storage": "SESSION_ONLY_DOWNLOAD",
-                                        "data_provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
-                                        "warning": "This is a formatted export of the selected result. It does not independently verify source data or engineering correctness; inspect assumptions and provenance before distribution. The artifact is a session download, not a managed document repository.",
+                                        "status": "PLUGIN_CONTRACT_VALIDATED",
+                                        "plugin": plugin_row,
+                                        "payload_valid": True,
+                                        "payload_keys": sorted(validated_payload.keys()),
+                                        "execution_status": plugin_row["execution_status"],
+                                        "warning": "No external endpoint was called. Metadata-only adapters remain non-executable until a reviewed server-side handler and external credentials are configured.",
                                     }
-                                    t095_artifact_bytes = artifact_bytes
-                                elif selected_tool["tool_id"] == "T087":
-                                    if source_result_tool_id == "NONE":
-                                        raise ValueError("Run an entitled source tool first; no completed result is available to package.")
-                                    source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
-                                    source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
-                                    if not isinstance(source_result, dict):
-                                        raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
-                                    try:
-                                        parsed_repro_metadata = json.loads(reproducibility_metadata_json or "{}")
-                                    except json.JSONDecodeError as exc:
-                                        raise ValueError("Run metadata must be valid JSON.") from exc
-                                    if not isinstance(parsed_repro_metadata, dict):
-                                        raise ValueError("Run metadata must be a JSON object.")
-                                    source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
-                                    pack_result = build_reproducibility_pack(
-                                        source_result_tool_id,
-                                        source_tool["canonical_name"],
-                                        source_result,
-                                        inputs=source_inputs if isinstance(source_inputs, dict) else {},
-                                        metadata=parsed_repro_metadata,
-                                        include_input_snapshot=include_input_snapshot,
-                                        include_result_tables=include_result_tables,
+                                    result["data_provenance"] = "LOCAL_PLUGIN_REGISTRY"
+                                elif selected_tool["tool_id"] == "T099":
+                                    from workspace_persistence import (
+                                        export_user_workspace_backup,
+                                        restore_user_workspace_backup,
+                                        save_user_workspace,
                                     )
-                                    st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
-                                    result = pack_result
-
-                            if selected_tool["tool_id"] == "T086" and isinstance(result, dict) and isinstance(result.get("bundle_bytes"), bytes):
-                                st.session_state["shoir_tool_bundle_bytes_T086"] = result.pop("bundle_bytes")
-                            _persist_focused_tool_result(
-                                selected_tool["tool_id"], result, current_tool_inputs
-                            )
-                            if t095_artifact_bytes is not None:
-                                # Keep the binary file in the browser session only;
-                                # persist only its manifest/result metadata.
-                                st.session_state["shoir_tool_bundle_bytes_T095"] = t095_artifact_bytes
-                                st.session_state["shoir_tool_bundle_filename_T095"] = result["filename"]
-                                st.session_state["shoir_tool_bundle_mime_T095"] = result["mime_type"]
-                        except Exception as exc:
-                            st.error(f"Tool run could not be completed safely: {exc}")
-
-                    if selected_tool["tool_id"] in {"T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T017", "T020", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T073", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T086", "T092", "T094", "T095", "T096", "T097", "T098", "T099", "T100"}:
-                        result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
-                        if result:
-                            _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
-                            render_engineering_result(
-                                result,
-                                title=selected_tool["canonical_name"],
-                                key_prefix="target_" + selected_tool["tool_id"].lower(),
-                            )
-                            if selected_tool["tool_id"] == "T095":
-                                report_bytes = st.session_state.get("shoir_tool_bundle_bytes_T095")
-                                if isinstance(report_bytes, bytes) and report_bytes:
-                                    st.download_button(
-                                        "Download verified report artifact",
-                                        data=report_bytes,
-                                        file_name=st.session_state.get("shoir_tool_bundle_filename_T095", result.get("filename", "shoir_ie_report.xlsx")),
-                                        mime=st.session_state.get("shoir_tool_bundle_mime_T095", "application/octet-stream"),
-                                        key="tool095_download_report",
-                                        use_container_width=True,
+                                    if governance_action == "Export personal workspace backup":
+                                        backup = export_user_workspace_backup(USER, st.session_state)
+                                        st.session_state["shoir_tool_bundle_bytes_T099"] = backup.pop("backup_bytes")
+                                        result = {
+                                            "status": "PERSONAL_WORKSPACE_BACKUP_CREATED",
+                                            "backup_manifest": backup,
+                                            "warning": "Portable user data backup only. Store the file securely; the SHA-256 digest is not an authenticity signature or encryption.",
+                                        }
+                                    else:
+                                        if governance_backup_upload is None:
+                                            raise ValueError("Select a workspace backup JSON file before restoring.")
+                                        before = export_user_workspace_backup(USER, st.session_state)["backup_bytes"]
+                                        try:
+                                            result = restore_user_workspace_backup(
+                                                governance_backup_upload.getvalue(),
+                                                USER,
+                                                st.session_state,
+                                            )
+                                            if not save_user_workspace(USER, st.session_state):
+                                                raise RuntimeError("Restored state could not be saved to the configured persistence backend.")
+                                        except Exception:
+                                            restore_user_workspace_backup(before, USER, st.session_state)
+                                            raise
+                                        result["status"] = "PERSONAL_WORKSPACE_BACKUP_RESTORED_AND_SAVED"
+                                        result["warning"] = "The backup was restored only into the currently signed-in account. Infrastructure/PITR recovery remains a separate procedure."
+                                        st.session_state.pop("shoir_tool_bundle_bytes_T099", None)
+                                    result["data_provenance"] = "USER_OWNED_BACKUP"
+                                else:
+                                    from shoir_target_engines import (
+                                        analyze_work_sampling, analyze_pareto_root_cause,
+                                        assess_5s_audit, build_kaizen_a3_record,
+                                        calculate_time_study, calculate_takt_capacity,
+                                        solve_cutting_stock, monitor_forecast_drift,
+                                        plan_two_sample_t_sample_size, calculate_oee,
+                                        analyze_process_capability, plan_inventory_policy,
+                                        calculate_carbon_emissions, analyze_engineering_economics,
+                                        convert_units_or_currency, analyze_spc_individuals,
+                                        analyze_quality_cost_defects, analyze_mtbf_mttr,
+                                        analyze_abc_xyz_inventory,
+                                        balance_production_line, analyze_bottleneck_capacity,
+                                        build_value_stream_map, analyze_fmea, analyze_mm1_queue,
+                                        analyze_industrial_cost_variance, calculate_roi_evidence,
+                                        plan_preventive_maintenance, assess_job_hazards,
+                                        plan_material_requirements, score_project_portfolio,
+                                        merge_data_tables, process_time_series,
+                                        generate_synthetic_industrial_data, plan_acceptance_sampling,
+                                        analyze_process_mining, analyze_water_waste_efficiency,
+                                        analyze_weibull_reliability, analyze_spare_parts_criticality,
+                                        analyze_safety_incident_trends, optimize_warehouse_slotting,
+                                        optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                        fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
+                                        forecast_demand_baselines, simulate_monte_carlo_net_value,
+                                        map_industrial_fields, prioritize_maintenance_backlog,
+                                        reconcile_sop_plan, score_supplier_performance,
+                                        analyze_crossed_gage_rr, analyze_full_factorial_2level,
+                                        simulate_discrete_event_process,
+                                        run_solver_diagnostics,
+                                        build_reproducibility_pack,
+                                        optimize_facility_location_flow,
+                                        get_student_practice_problem,
+                                        evaluate_student_practice_answer,
+                                        build_guided_study_plan,
+                                        monitor_equipment_anomalies,
+                                        assess_capa_8d_records,
+                                        calculate_niosh_revised_lifting_equation,
+                                        build_rcm_decision_support,
+                                        optimize_supply_chain_network,
+                                        calibrate_simulation_outputs,
+                                        evaluate_kpi_alerts,
                                     )
-                            if selected_tool["tool_id"] == "T086":
-                                bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T086")
-                                if bundle_bytes:
+                                    from shoir_resilience_suite import simulate_disruption_scenarios
+                                    from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
+                                    if selected_tool["tool_id"] == "T007":
+                                        result = classify_diagnostic(diagnostic_inspector_text)
+                                        result["reported_subsystem"] = diagnostic_category
+                                        result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
+                                    elif selected_tool["tool_id"] == "T009":
+                                        result = summarize_capability_registry(
+                                            TOOL_TARGETS,
+                                            status_filter=capability_status_filter,
+                                            limit=int(capability_status_limit),
+                                        )
+                                    elif selected_tool["tool_id"] == "T010":
+                                        result = search_tool_help(
+                                            TOOL_TARGETS,
+                                            help_query,
+                                            workbench_filter=help_workbench,
+                                            limit=20,
+                                        )
+                                    elif selected_tool["tool_id"] == "T100":
+                                        result = build_redacted_support_bundle(
+                                            TOOL_TARGETS,
+                                            diagnostic_text=support_diagnostic_text,
+                                            component=support_component,
+                                            severity=support_severity,
+                                        )
+                                    elif selected_tool["tool_id"] == "T015":
+                                        headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
+                                        manual_mapping = json.loads(field_manual_mapping_json)
+                                        if not isinstance(manual_mapping, dict):
+                                            raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
+                                        result = map_industrial_fields(headers, manual_mapping=manual_mapping, minimum_confidence=field_min_confidence)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if field_headers_text.strip() == "Timestamp,Qty,Defects,Machine ID" and field_manual_mapping_json.strip() == "{}" else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T049":
+                                        parsed_backlog = json.loads(backlog_orders_json)
+                                        if not isinstance(parsed_backlog, list):
+                                            raise ValueError("Maintenance work orders must be a JSON list.")
+                                        skill_list = [item.strip() for item in backlog_skills_text.split(",") if item.strip()]
+                                        result = prioritize_maintenance_backlog(parsed_backlog, backlog_hours, available_skills=skill_list)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"WO-101"' in backlog_orders_json and '"WO-102"' in backlog_orders_json and '"WO-103"' in backlog_orders_json else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T052":
+                                        parsed_periods = json.loads(sop_periods_json)
+                                        if not isinstance(parsed_periods, list):
+                                            raise ValueError("S&OP periods must be a JSON list of period objects.")
+                                        result = reconcile_sop_plan(parsed_periods, starting_inventory=sop_starting_inventory)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if sop_periods_json.strip().startswith('[{"period":"Jan"') else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T058":
+                                        parsed_suppliers = json.loads(supplier_scores_json)
+                                        parsed_weights = json.loads(supplier_weights_json)
+                                        if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
+                                            raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
+                                        result = score_supplier_performance(parsed_suppliers, parsed_weights)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"supplier":"Acme"' in supplier_scores_json and '"supplier":"Gamma"' in supplier_scores_json else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T021":
+                                        try:
+                                            observation_times = [float(item.strip()) for item in observation_text.split(",") if item.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Observed times must be comma-separated numbers.") from exc
+                                        result = calculate_time_study(
+                                            observation_times, rating, allowance, time_unit=unit,
+                                        )
+                                    elif selected_tool["tool_id"] == "T022":
+                                        parsed_counts = json.loads(work_sampling_counts_json)
+                                        if not isinstance(parsed_counts, dict):
+                                            raise ValueError("Activity counts must be a JSON object mapping category names to counts.")
+                                        result = analyze_work_sampling(
+                                            parsed_counts,
+                                            confidence_level=float(confidence_option.rstrip("%")) / 100.0,
+                                            target_margin_pct=margin_pct,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if work_sampling_counts_json.strip() == _TOOL022_EXAMPLE_COUNTS
+                                            else "USER_ENTERED_UNVERIFIED"
+                                        )
+                                        result["provenance_warning"] = (
+                                            "The example counts are synthetic teaching data; replace them and verify the sampling frame before using the output operationally."
+                                            if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                            else
+                                            "Entered counts were not independently validated against a sampling log or plant system."
+                                        )
+                                    elif selected_tool["tool_id"] == "T023":
+                                        result = calculate_takt_capacity(
+                                            available_time, demand_units, cycle_time, time_unit=unit,
+                                        )
+                                    elif selected_tool["tool_id"] == "T028":
+                                        parsed_counts = json.loads(pareto_counts_json)
+                                        if not isinstance(parsed_counts, dict):
+                                            raise ValueError("Pareto counts must be a JSON object mapping category names to counts.")
+                                        whys = [line.strip() for line in why_chain_text.splitlines() if line.strip()]
+                                        result = analyze_pareto_root_cause(
+                                            parsed_counts,
+                                            problem_statement=problem_statement,
+                                            why_chain=whys,
+                                            countermeasure=countermeasure_text,
+                                            owner=action_owner,
+                                            due_date=action_due_date,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if pareto_counts_json.strip() == _TOOL028_EXAMPLE_COUNTS
+                                            else "USER_ENTERED_UNVERIFIED"
+                                        )
+                                        result["provenance_warning"] = (
+                                            "The example counts are synthetic teaching data; replace them and verify the source before operational use."
+                                            if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                            else
+                                            "Entered counts were not independently validated against a source log."
+                                        )
+                                    elif selected_tool["tool_id"] == "T029":
+                                        parsed_items = json.loads(audit_items_json)
+                                        if not isinstance(parsed_items, list):
+                                            raise ValueError("5S checklist must be a JSON list of item objects.")
+                                        result = assess_5s_audit(parsed_items)
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if audit_items_json.strip() == _TOOL029_EXAMPLE_ITEMS
+                                            else "USER_ENTERED_UNVERIFIED"
+                                        )
+                                        result["provenance_warning"] = (
+                                            "The displayed checklist is illustrative self-assessment data, not a completed plant audit."
+                                            if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                            else "Checklist evidence was not independently validated against a signed audit."
+                                        )
+                                    elif selected_tool["tool_id"] == "T030":
+                                        result = build_kaizen_a3_record(
+                                            title=a3_title,
+                                            problem_statement=a3_problem,
+                                            metric_name=a3_metric,
+                                            unit=a3_unit,
+                                            baseline_value=a3_baseline,
+                                            target_value=a3_target,
+                                            actual_after_value=a3_actual,
+                                            root_cause_hypothesis=a3_root_cause,
+                                            countermeasure=a3_countermeasure,
+                                            owner=a3_owner,
+                                            due_date=a3_due_date,
+                                            baseline_evidence=a3_baseline_evidence,
+                                            post_change_evidence=a3_post_evidence,
+                                            implementation_status=a3_status,
+                                            review_date=a3_review_date,
+                                        )
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                        records = st.session_state.get("shoir_kaizen_a3_records", [])
+                                        if not isinstance(records, list):
+                                            raise ValueError("The saved A3 register is invalid; existing workspace data was preserved.")
+                                        record_id = str(record_id_input or "").strip()
+                                        now = datetime.now().astimezone().isoformat(timespec="seconds")
+                                        known_index = next((i for i, item in enumerate(records) if str(item.get("record_id", "")) == record_id), None) if record_id else None
+                                        if record_id and known_index is None:
+                                            raise ValueError("A3 record ID was not found in this user's workspace. Leave it blank to create a new record.")
+                                        if known_index is None:
+                                            if len(records) >= 500:
+                                                raise ValueError("The A3 register reached 500 records; archive records before adding more.")
+                                            record_id = "A3-" + uuid4().hex[:10].upper()
+                                            result["record_id"] = record_id
+                                            result["created_at"] = now
+                                            result["updated_at"] = now
+                                            result["revision_number"] = 1
+                                            result["revision_history"] = []
+                                            records.append(dict(result))
+                                        else:
+                                            previous = dict(records[known_index])
+                                            history = list(previous.get("revision_history", []))
+                                            snapshot_keys = (
+                                                "title", "problem_statement", "metric_name", "unit",
+                                                "baseline_value", "target_value", "actual_after_value",
+                                                "root_cause_hypothesis", "countermeasure", "owner", "due_date",
+                                                "baseline_evidence", "post_change_evidence", "review_date",
+                                                "status", "outcome_status",
+                                            )
+                                            history.append({
+                                                "revision_number": int(previous.get("revision_number", 1)),
+                                                "updated_at": previous.get("updated_at", previous.get("created_at", "")),
+                                                "snapshot": {key: previous.get(key) for key in snapshot_keys},
+                                            })
+                                            result["record_id"] = record_id
+                                            result["created_at"] = previous.get("created_at", now)
+                                            result["updated_at"] = now
+                                            result["revision_number"] = int(previous.get("revision_number", 1)) + 1
+                                            result["revision_history"] = history
+                                            records[known_index] = dict(result)
+                                        st.session_state["shoir_kaizen_a3_records"] = records
+                                    elif selected_tool["tool_id"] == "T059":
+                                        parsed_slot_items = json.loads(slotting_items_json)
+                                        parsed_slots = json.loads(slotting_slots_json)
+                                        if not isinstance(parsed_slot_items, list) or not isinstance(parsed_slots, list):
+                                            raise ValueError("Slotting items and slots must each be JSON lists.")
+                                        result = optimize_warehouse_slotting(parsed_slot_items, parsed_slots)
+                                    elif selected_tool["tool_id"] == "T063":
+                                        parsed_assignment_tasks = json.loads(assignment_tasks_json)
+                                        parsed_assignment_resources = json.loads(assignment_resources_json)
+                                        parsed_assignment_costs = json.loads(assignment_costs_json)
+                                        if not isinstance(parsed_assignment_tasks, list) or not isinstance(parsed_assignment_resources, list) or not isinstance(parsed_assignment_costs, list):
+                                            raise ValueError("Task names, resource names and cost matrix must each be JSON lists.")
+                                        result = optimize_task_resource_assignment(parsed_assignment_tasks, parsed_assignment_resources, parsed_assignment_costs)
+                                    elif selected_tool["tool_id"] == "T066":
+                                        parsed_parts = json.loads(parts_json)
+                                        if not isinstance(parsed_parts, list):
+                                            raise ValueError("Parts input must be a JSON list of part definitions.")
+                                        result = solve_cutting_stock(stock_len, parsed_parts, kerf)
+                                    elif selected_tool["tool_id"] == "T075":
+                                        try:
+                                            predictions = [float(x.strip()) for x in predictions_text.split(",") if x.strip()]
+                                            actuals = [float(x.strip()) for x in actuals_text.split(",") if x.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Predictions and actuals must be comma-separated numbers.") from exc
+                                        result = monitor_forecast_drift(
+                                            predictions, actuals, max_mae,
+                                            window=int(window) if int(window) > 0 else None,
+                                        )
+                                    elif selected_tool["tool_id"] == "T026":
+                                        result = calculate_oee(oee_planned, oee_downtime, oee_cycle, oee_total, oee_good, time_unit=oee_unit)
+                                    elif selected_tool["tool_id"] == "T032":
+                                        try:
+                                            measured_values = [float(x.strip()) for x in capability_measurements.split(",") if x.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Measurements must be comma-separated numbers.") from exc
+                                        result = analyze_process_capability(measured_values, capability_lsl, capability_usl, subgroup_size=int(capability_subgroup), unit=capability_unit)
+                                    elif selected_tool["tool_id"] == "T055":
+                                        result = plan_inventory_policy(inv_demand, inv_sd, inv_lead, inv_order_cost, inv_holding_cost, operating_days_per_year=int(inv_days), service_factor_z=service_options[inv_service])
+                                    elif selected_tool["tool_id"] == "T078":
+                                        result = calculate_carbon_emissions(carbon_amount, carbon_factor, activity_unit=carbon_unit, factor_unit=carbon_factor_unit, factor_source=carbon_source, factor_date=carbon_date, boundary=carbon_boundary)
+                                    elif selected_tool["tool_id"] == "T081":
+                                        try:
+                                            cash_flows = [float(x.strip()) for x in economics_cash_flows.split(",") if x.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Cash flows must be comma-separated numbers.") from exc
+                                        result = analyze_engineering_economics(cash_flows, economics_rate, currency=economics_currency, period_unit=economics_period)
+                                    elif selected_tool["tool_id"] == "T016":
+                                        result = convert_units_or_currency(amount_to_convert, source_unit, target_unit, exchange_rate=exchange_rate_value, exchange_rate_date=exchange_rate_date_value, exchange_rate_source=exchange_rate_source_value)
+                                    elif selected_tool["tool_id"] == "T031":
+                                        try:
+                                            values = [float(item.strip()) for item in spc_measurements_text.split(",") if item.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("SPC measurements must be comma-separated numbers.") from exc
+                                        result = analyze_spc_individuals(values, unit=spc_unit)
+                                    elif selected_tool["tool_id"] == "T039":
+                                        try:
+                                            parsed_capa_records = json.loads(capa_records_json)
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("CAPA/8D records must be valid JSON.") from exc
+                                        if not isinstance(parsed_capa_records, list):
+                                            raise ValueError("CAPA/8D records must be a JSON list of objects.")
+                                        result = assess_capa_8d_records(
+                                            parsed_capa_records,
+                                            as_of_date=capa_as_of_date.strip() or None,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
+                                            else "USER_ENTERED_UNVERIFIED"
+                                        )
+                                    elif selected_tool["tool_id"] == "T040":
+                                        result = analyze_quality_cost_defects(quality_total_units, quality_defects, quality_scrap_units, quality_rework_units, quality_scrap_cost, quality_rework_cost, quality_inspection_cost, currency=quality_currency, period=quality_period)
+                                    elif selected_tool["tool_id"] == "T042":
+                                        try:
+                                            durations = [float(item.strip()) for item in repair_durations_text.split(",") if item.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Repair durations must be comma-separated numbers.") from exc
+                                        result = analyze_mtbf_mttr(mtbf_operating_hours, durations)
+                                    elif selected_tool["tool_id"] == "T056":
+                                        inventory_items = json.loads(inventory_items_json)
+                                        if not isinstance(inventory_items, list):
+                                            raise ValueError("SKU data must be a JSON list of objects.")
+                                        result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
+                                    elif selected_tool["tool_id"] == "T024":
+                                        parsed_tasks = json.loads(line_tasks_json)
+                                        if not isinstance(parsed_tasks, list):
+                                            raise ValueError("Tasks input must be a JSON list of task objects.")
+                                        result = balance_production_line(parsed_tasks, line_cycle_time, time_unit=line_time_unit)
+                                    elif selected_tool["tool_id"] == "T025":
+                                        parsed_processes = json.loads(bottleneck_processes_json)
+                                        if not isinstance(parsed_processes, list):
+                                            raise ValueError("Process capacities must be a JSON list of process objects.")
+                                        result = analyze_bottleneck_capacity(parsed_processes, bottleneck_demand, period_label=bottleneck_period)
+                                    elif selected_tool["tool_id"] == "T027":
+                                        parsed_steps = json.loads(vsm_steps_json)
+                                        if not isinstance(parsed_steps, list):
+                                            raise ValueError("Value-stream steps must be a JSON list of step objects.")
+                                        result = build_value_stream_map(parsed_steps, vsm_demand, vsm_available_time, time_unit=vsm_time_unit)
+                                    elif selected_tool["tool_id"] == "T038":
+                                        parsed_fmea = json.loads(fmea_json)
+                                        if not isinstance(parsed_fmea, list):
+                                            raise ValueError("FMEA input must be a JSON list of failure-mode objects.")
+                                        result = analyze_fmea(parsed_fmea)
+                                    elif selected_tool["tool_id"] == "T070":
+                                        result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, time_unit=queue_time_unit)
+                                    elif selected_tool["tool_id"] == "T082":
+                                        result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
+                                    elif selected_tool["tool_id"] == "T083":
+                                        result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
+                                    elif selected_tool["tool_id"] == "T017":
+                                        parsed_left = json.loads(join_left_json)
+                                        parsed_right = json.loads(join_right_json)
+                                        if not isinstance(parsed_left, list) or not isinstance(parsed_right, list):
+                                            raise ValueError("Both join inputs must be JSON lists of records.")
+                                        result = merge_data_tables(parsed_left, parsed_right, join_left_key, join_right_key, join_type=join_type, duplicate_policy=duplicate_policy)
+                                    elif selected_tool["tool_id"] == "T018":
+                                        parsed_series = json.loads(time_series_json)
+                                        if not isinstance(parsed_series, list):
+                                            raise ValueError("Time-series input must be a JSON list of records.")
+                                        result = process_time_series(parsed_series, ts_column, timezone_name=ts_timezone, expected_interval=ts_expected_interval, resample_frequency=ts_resample_frequency, aggregation=ts_aggregation)
+                                    elif selected_tool["tool_id"] == "T019":
+                                        result = generate_synthetic_industrial_data(int(synthetic_rows), seed=int(synthetic_seed), start_timestamp=synthetic_start, interval_minutes=int(synthetic_interval), defect_rate_pct=synthetic_defect_rate, mean_downtime_minutes=synthetic_downtime, energy_kwh_per_unit=synthetic_energy)
+                                    elif selected_tool["tool_id"] == "T034":
+                                        result = plan_acceptance_sampling(sampling_aql / 100.0, sampling_ltpd / 100.0, producer_risk=sampling_alpha / 100.0, consumer_risk=sampling_beta / 100.0, max_sample_size=int(sampling_max_n))
+                                    elif selected_tool["tool_id"] == "T041":
+                                        parsed_failure_times = json.loads(weibull_times_json)
+                                        if not isinstance(parsed_failure_times, list):
+                                            raise ValueError("Failure-time observations must be a JSON list.")
+                                        result = analyze_weibull_reliability(parsed_failure_times)
+                                    elif selected_tool["tool_id"] == "T043":
+                                        parsed_pm_tasks = json.loads(pm_tasks_json)
+                                        if not isinstance(parsed_pm_tasks, list):
+                                            raise ValueError("Maintenance tasks must be a JSON list of task objects.")
+                                        result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
+                                    elif selected_tool["tool_id"] == "T045":
+                                        parsed_parts = json.loads(spare_parts_json)
+                                        if not isinstance(parsed_parts, list):
+                                            raise ValueError("Spare parts must be a JSON list of part objects.")
+                                        result = analyze_spare_parts_criticality(parsed_parts)
+                                    elif selected_tool["tool_id"] == "T044":
+                                        parsed_rcm = json.loads(rcm_records_json)
+                                        if not isinstance(parsed_rcm, list):
+                                            raise ValueError("RCM failure modes must be a JSON list.")
+                                        result = build_rcm_decision_support(parsed_rcm)
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T046":
+                                        if rnle_duration == "Select duration":
+                                            raise ValueError("Select the lifting-task duration from the NIOSH definitions.")
+                                        if rnle_coupling == "Select coupling":
+                                            raise ValueError("Select the observed hand-to-load coupling quality.")
+                                        result = calculate_niosh_revised_lifting_equation(
+                                            load_weight=rnle_load,
+                                            horizontal_origin=rnle_h_origin,
+                                            horizontal_destination=rnle_h_destination,
+                                            vertical_hand_start=rnle_v_start,
+                                            vertical_travel_distance=rnle_distance,
+                                            asymmetry_origin=rnle_a_origin,
+                                            asymmetry_destination=rnle_a_destination,
+                                            frequency_lifts_per_minute=rnle_frequency,
+                                            frequency_multiplier=rnle_fm,
+                                            coupling_multiplier=rnle_cm,
+                                            units=rnle_units,
+                                            frequency_duration_category=rnle_duration,
+                                            coupling_quality=rnle_coupling,
+                                            frequency_multiplier_source=rnle_fm_source,
+                                            coupling_multiplier_source=rnle_cm_source,
+                                            task_description=rnle_task,
+                                        )
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T060":
+                                        parsed_suppliers = json.loads(supply_network_suppliers_json)
+                                        parsed_sites = json.loads(supply_network_sites_json)
+                                        parsed_routes = json.loads(supply_network_routes_json)
+                                        if not isinstance(parsed_suppliers, list) or not isinstance(parsed_sites, list) or not isinstance(parsed_routes, list):
+                                            raise ValueError("Suppliers, sites and routes must each be JSON lists.")
+                                        result = optimize_supply_chain_network(
+                                            parsed_suppliers,
+                                            parsed_sites,
+                                            parsed_routes,
+                                            unmet_demand_penalty_per_unit=supply_network_penalty,
+                                            time_limit_seconds=supply_network_time_limit,
+                                        )
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T074":
+                                        try:
+                                            simulated_values = [float(x.strip()) for x in calibration_simulated_text.split(",") if x.strip()]
+                                            measured_values = [float(x.strip()) for x in calibration_measured_text.split(",") if x.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Simulated and measured outputs must be comma-separated numbers.") from exc
+                                        result = calibrate_simulation_outputs(
+                                            simulated_values,
+                                            measured_values,
+                                            training_fraction=calibration_training_fraction,
+                                        )
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T080":
+                                        parsed_disruption_suppliers = json.loads(disruption_suppliers_json)
+                                        parsed_disruption_demands = json.loads(disruption_demands_json)
+                                        if not isinstance(parsed_disruption_suppliers, list) or not isinstance(parsed_disruption_demands, list):
+                                            raise ValueError("Disruption suppliers and demands must each be JSON lists.")
+                                        supplier_frame = pd.DataFrame(parsed_disruption_suppliers)
+                                        demand_frame = pd.DataFrame(parsed_disruption_demands)
+                                        if supplier_frame.empty or demand_frame.empty:
+                                            raise ValueError("At least one supplier and one demand destination are required.")
+                                        simulation_rows = simulate_disruption_scenarios(
+                                            supplier_frame,
+                                            demand_frame,
+                                            iterations=int(disruption_iterations),
+                                            seed=int(disruption_seed),
+                                            outage_probability=disruption_outage_probability,
+                                            demand_cv=disruption_demand_cv,
+                                        )
+                                        result = {
+                                            "status": "SYNTHETIC_DISRUPTION_STRESS_TEST",
+                                            "data_provenance": "USER_ENTERED_UNVERIFIED",
+                                            "iterations": len(simulation_rows),
+                                            "service_level_mean_pct": float(simulation_rows["Service %"].mean()),
+                                            "service_level_p05_pct": float(simulation_rows["Service %"].quantile(0.05)),
+                                            "service_level_p95_pct": float(simulation_rows["Service %"].quantile(0.95)),
+                                            "shortage_mean_units": float(simulation_rows["Shortage units"].mean()),
+                                            "simulation_results": simulation_rows,
+                                            "warning": "This is a stochastic supply-shock sensitivity run, not a calibrated forecast or live supplier availability signal.",
+                                        }
+                                    elif selected_tool["tool_id"] == "T094":
+                                        parsed_kpis = json.loads(kpi_records_json)
+                                        parsed_rules = json.loads(kpi_rules_json)
+                                        if not isinstance(parsed_kpis, list) or not isinstance(parsed_rules, list):
+                                            raise ValueError("KPI readings and alert rules must each be JSON lists.")
+                                        if not parsed_kpis:
+                                            raise ValueError("Add at least one KPI reading.")
+                                        if not parsed_rules:
+                                            raise ValueError("Add at least one KPI alert rule.")
+    
+                                        readings_by_name = {}
+                                        for reading in parsed_kpis:
+                                            if not isinstance(reading, dict):
+                                                raise ValueError("Each KPI reading must be a JSON object.")
+                                            reading_name = str(reading.get("kpi") or "").strip()
+                                            if not reading_name:
+                                                raise ValueError("Every KPI reading must include a non-empty kpi name.")
+                                            reading_key = reading_name.casefold()
+                                            if reading_key in readings_by_name:
+                                                raise ValueError(f"More than one KPI reading matches '{reading_name}'. Use one reading per KPI name.")
+                                            readings_by_name[reading_key] = reading
+    
+                                        evaluator_records = []
+                                        seen_rule_ids = set()
+                                        for index, rule in enumerate(parsed_rules, start=1):
+                                            if not isinstance(rule, dict):
+                                                raise ValueError("Each KPI alert rule must be a JSON object.")
+                                            rule_id = str(rule.get("rule_id") or "").strip()
+                                            rule_kpi = str(rule.get("kpi") or "").strip()
+                                            severity = str(rule.get("severity") or "").strip()
+                                            if not rule_id or not rule_kpi or not severity:
+                                                raise ValueError("Every alert rule must include rule_id, kpi and severity.")
+                                            if rule_id.casefold() in seen_rule_ids:
+                                                raise ValueError(f"Duplicate KPI rule_id: {rule_id}.")
+                                            seen_rule_ids.add(rule_id.casefold())
+                                            reading = readings_by_name.get(rule_kpi.casefold())
+                                            if reading is None:
+                                                raise ValueError(f"No KPI reading was supplied for alert rule '{rule_id}' ({rule_kpi}).")
+                                            evaluator_records.append({
+                                                "name": rule_kpi,
+                                                "value": reading.get("value"),
+                                                "unit": reading.get("unit") or "",
+                                                "measured_at": reading.get("observed_at"),
+                                                "source": reading.get("source") or "",
+                                                "threshold": rule.get("threshold"),
+                                                "operator": rule.get("operator"),
+                                                "rule_id": rule_id,
+                                                "severity": severity,
+                                                "max_age_minutes": float(kpi_stale_hours) * 60.0,
+                                            })
+    
+                                        existing_open_alerts = st.session_state.get("shoir_kpi_open_alert_records", [])
+                                        if not isinstance(existing_open_alerts, list) or any(
+                                            not isinstance(item, dict) for item in existing_open_alerts
+                                        ):
+                                            raise ValueError("Saved KPI alert state is invalid; clear the existing alert state and rerun.")
+                                        result = evaluate_kpi_alerts_with_dedup({
+                                            "kpis": evaluator_records,
+                                            "as_of": kpi_as_of.strip() or None,
+                                            "existing_alerts": existing_open_alerts,
+                                        })
+                                        next_open_alerts = []
+                                        for alert in result["alert_records"]:
+                                            alert["state"] = "OPEN"
+                                            next_open_alerts.append({
+                                                "fingerprint": alert["fingerprint"],
+                                                "alert_id": alert["alert_id"],
+                                                "rule_id": alert.get("rule_id"),
+                                                "state": "OPEN",
+                                            })
+                                        st.session_state["shoir_kpi_open_alert_records"] = next_open_alerts
+                                        # Keep the older ID-only view available for any pre-existing
+                                        # UI/session consumers; the evaluator itself uses fingerprints.
+                                        st.session_state["shoir_kpi_open_alert_ids"] = [
+                                            item["alert_id"] for item in next_open_alerts
+                                        ]
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T047":
+                                        parsed_hazards = json.loads(hazard_json)
+                                        if not isinstance(parsed_hazards, list):
+                                            raise ValueError("Hazards must be a JSON list of hazard objects.")
+                                        result = assess_job_hazards(parsed_hazards)
+                                    elif selected_tool["tool_id"] == "T050":
+                                        parsed_safety_periods = json.loads(safety_periods_json)
+                                        if not isinstance(parsed_safety_periods, list):
+                                            raise ValueError("Safety periods must be a JSON list of period objects.")
+                                        result = analyze_safety_incident_trends(parsed_safety_periods, rate_base_hours=safety_rate_base)
+                                    elif selected_tool["tool_id"] == "T054":
+                                        parsed_bom = json.loads(mrp_bom_json)
+                                        parsed_inventory = json.loads(mrp_inventory_json)
+                                        if not isinstance(parsed_bom, list):
+                                            raise ValueError("BOM must be a JSON list of component objects.")
+                                        if not isinstance(parsed_inventory, dict):
+                                            raise ValueError("Inventory must be a JSON object keyed by component.")
+                                        result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
+                                    elif selected_tool["tool_id"] == "T076":
+                                        parsed_events = json.loads(process_event_log_json)
+                                        if not isinstance(parsed_events, list):
+                                            raise ValueError("Event log must be a JSON list of event records.")
+                                        result = analyze_process_mining(parsed_events)
+                                    elif selected_tool["tool_id"] == "T077":
+                                        parsed_energy_baseline = json.loads(energy_baseline_json)
+                                        parsed_energy_alternatives = json.loads(energy_alternatives_json)
+                                        if not isinstance(parsed_energy_baseline, dict) or not isinstance(parsed_energy_alternatives, list):
+                                            raise ValueError("Energy baseline must be a JSON object and alternatives must be a JSON list.")
+                                        result = compare_energy_performance_scenarios(parsed_energy_baseline, parsed_energy_alternatives)
+                                    elif selected_tool["tool_id"] == "T079":
+                                        parsed_flows = json.loads(water_flows_json)
+                                        if not isinstance(parsed_flows, list):
+                                            raise ValueError("Process flows must be a JSON list of flow records.")
+                                        result = analyze_water_waste_efficiency(parsed_flows)
+                                    elif selected_tool["tool_id"] == "T084":
+                                        parsed_criteria = json.loads(portfolio_criteria_json)
+                                        parsed_alternatives = json.loads(portfolio_alternatives_json)
+                                        if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
+                                            raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
+                                        result = score_project_portfolio(parsed_criteria, parsed_alternatives)
+                                    elif selected_tool["tool_id"] == "T033":
+                                        parsed_msa = json.loads(msa_observations_json)
+                                        if not isinstance(parsed_msa, list):
+                                            raise ValueError("Gage R&R observations must be a JSON list.")
+                                        result = analyze_crossed_gage_rr(parsed_msa, tolerance=msa_tolerance if msa_tolerance > 0 else None)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if msa_observations_json.strip().startswith('[{"part":"P1"') else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T035":
+                                        parsed_doe = json.loads(doe_observations_json)
+                                        factors = [item.strip() for item in doe_factor_fields_text.split(",") if item.strip()]
+                                        if not isinstance(parsed_doe, list):
+                                            raise ValueError("Factorial DOE observations must be a JSON list of run objects.")
+                                        result = analyze_full_factorial_2level(parsed_doe, response_field=doe_response_field.strip(), factor_fields=factors, alpha=doe_alpha)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if doe_observations_json.strip().startswith('[{"A":-1,"B":-1,"response":6.4') else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T036":
+                                        if regression_mode == "Linear regression":
+                                            parsed_observations = json.loads(regression_observations_json)
+                                            if not isinstance(parsed_observations, list):
+                                                raise ValueError("Regression observations must be a JSON list.")
+                                            result = fit_simple_linear_regression(parsed_observations, alpha=regression_alpha)
+                                        else:
+                                            parsed_groups = json.loads(anova_groups_json)
+                                            if not isinstance(parsed_groups, dict):
+                                                raise ValueError("ANOVA groups must be a JSON object mapping group names to numeric lists.")
+                                            result = run_one_way_anova(parsed_groups, alpha=regression_alpha)
+                                        result["data_provenance"] = "SYNTHETIC_EXAMPLE" if (
+                                            (regression_mode == "Linear regression" and regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]')
+                                            or (regression_mode == "One-way ANOVA" and anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}')
+                                        ) else "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T037":
+                                        try:
+                                            sample_a_values = [float(item.strip()) for item in hypothesis_sample_a.split(",") if item.strip()]
+                                            sample_b_values = [float(item.strip()) for item in hypothesis_sample_b.split(",") if item.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Both samples must be comma-separated numeric observations.") from exc
+                                        result = run_welch_t_test(sample_a_values, sample_b_values, alpha=hypothesis_alpha)
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T051":
+                                        try:
+                                            demand_values = [float(item.strip()) for item in demand_history_text.split(",") if item.strip()]
+                                        except ValueError as exc:
+                                            raise ValueError("Demand history must be comma-separated numeric observations in chronological order.") from exc
+                                        result = forecast_demand_baselines(
+                                            demand_values, holdout_periods=int(demand_holdout),
+                                            horizon=int(demand_horizon), moving_average_window=int(demand_ma_window),
+                                        )
+                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    elif selected_tool["tool_id"] == "T072":
+                                        parsed_components = json.loads(monte_carlo_components_json)
+                                        if not isinstance(parsed_components, list):
+                                            raise ValueError("Monte Carlo components must be a JSON list.")
+                                        result = simulate_monte_carlo_net_value(
+                                            parsed_components, iterations=int(monte_carlo_iterations),
+                                            seed=int(monte_carlo_seed), output_unit=monte_carlo_unit,
+                                        )
+                                        result["data_provenance"] = "SIMULATION — USER-DECLARED DISTRIBUTIONS"
+                                    elif selected_tool["tool_id"] == "T085":
+                                        result = plan_two_sample_t_sample_size(
+                                            effect_size, alpha, target_power,
+                                            max_n_per_group=int(search_limit),
+                                        )
+                                    elif selected_tool["tool_id"] == "T002":
+                                        completed_ids = [
+                                            key.replace("shoir_tool_result_", "")
+                                            for key in st.session_state.keys()
+                                            if key.startswith("shoir_tool_result_T")
+                                            and isinstance(st.session_state.get(key), dict)
+                                            and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                                        ]
+                                        result = build_guided_study_plan(
+                                            guided_goal,
+                                            available_data_fields=guided_fields_text,
+                                            completed_tool_ids=completed_ids,
+                                            tier=RAW_TIER,
+                                        )
+    
+                                    elif selected_tool["tool_id"] == "T089":
+                                        get_student_practice_problem(practice_topic)
+                                        result = evaluate_student_practice_answer(practice_topic, practice_answer)
+    
+                                    elif selected_tool["tool_id"] == "T048":
+                                        try:
+                                            parsed_anomaly_observations = json.loads(anomaly_observations_json)
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("Time-series observations must be valid JSON.") from exc
+                                        if not isinstance(parsed_anomaly_observations, list):
+                                            raise ValueError("Time-series observations must be a JSON list of objects.")
+                                        result = monitor_equipment_anomalies(
+                                            parsed_anomaly_observations,
+                                            value_field=anomaly_value_field.strip(),
+                                            timestamp_field=anomaly_timestamp_field.strip(),
+                                            modified_z_threshold=anomaly_threshold,
+                                            max_age_hours=anomaly_max_age,
+                                            evaluation_time_utc=anomaly_eval_time.strip() or None,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if anomaly_observations_json.strip() == _TOOL048_EXAMPLE_OBSERVATIONS
+                                            else "USER_ENTERED_UNVERIFIED"
+                                        )
+                                    elif selected_tool["tool_id"] == "T069":
+                                        try:
+                                            parsed_facilities = json.loads(facility_location_facilities_json)
+                                            parsed_customers = json.loads(facility_location_customers_json)
+                                            parsed_routes = json.loads(facility_location_routes_json)
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("Facilities, customers and routes must each be valid JSON.") from exc
+                                        if not isinstance(parsed_facilities, list) or not isinstance(parsed_customers, list) or not isinstance(parsed_routes, list):
+                                            raise ValueError("Facilities, customers and routes must each be JSON lists.")
+                                        result = optimize_facility_location_flow(
+                                            parsed_facilities, parsed_customers, parsed_routes,
+                                            time_limit_seconds=facility_location_time_limit,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if facility_location_facilities_json.strip() == _TOOL069_EXAMPLE_FACILITIES
+                                            and facility_location_customers_json.strip() == _TOOL069_EXAMPLE_CUSTOMERS
+                                            and facility_location_routes_json.strip() == _TOOL069_EXAMPLE_ROUTES
+                                            else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                        )
+                                    elif selected_tool["tool_id"] == "T071":
+                                        parsed_des_steps = json.loads(des_steps_json)
+                                        if not isinstance(parsed_des_steps, list):
+                                            raise ValueError("DES station setup must be a JSON list of station records.")
+                                        result = simulate_discrete_event_process(
+                                            parsed_des_steps,
+                                            job_count=int(des_job_count),
+                                            mean_interarrival_time=des_interarrival,
+                                            arrival_distribution=des_arrival_distribution,
+                                            warmup_jobs=int(des_warmup_jobs),
+                                            replications=int(des_replications),
+                                            random_seed=int(des_seed),
+                                            time_unit=des_time_unit,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if des_steps_json.strip() == _TOOL071_EXAMPLE_STATIONS
+                                            and int(des_job_count) == 50
+                                            and float(des_interarrival) == 1.0
+                                            and des_arrival_distribution == "deterministic"
+                                            and int(des_warmup_jobs) == 5
+                                            and int(des_replications) == 10
+                                            and int(des_seed) == 42
+                                            and des_time_unit == "minutes"
+                                            else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                        )
+                                    elif selected_tool["tool_id"] == "T062":
+                                        parsed_solver_variables = json.loads(solver_variables_json)
+                                        parsed_solver_objective = json.loads(solver_objective_json)
+                                        parsed_solver_constraints = json.loads(solver_constraints_json)
+                                        if not isinstance(parsed_solver_variables, dict) or not isinstance(parsed_solver_objective, dict) or not isinstance(parsed_solver_constraints, list):
+                                            raise ValueError("Variables and objective must be JSON objects, and constraints must be a JSON list.")
+                                        result = run_solver_diagnostics(
+                                            parsed_solver_variables,
+                                            parsed_solver_objective,
+                                            parsed_solver_constraints,
+                                            direction=solver_direction,
+                                            time_limit_seconds=solver_time_limit,
+                                            feasibility_tolerance=solver_tolerance,
+                                        )
+                                        result["data_provenance"] = (
+                                            "SYNTHETIC_EXAMPLE"
+                                            if solver_variables_json.strip() == _TOOL062_EXAMPLE_VARIABLES
+                                            and solver_objective_json.strip() == _TOOL062_EXAMPLE_OBJECTIVE
+                                            and solver_constraints_json.strip() == _TOOL062_EXAMPLE_CONSTRAINTS
+                                            and solver_direction == "minimize"
+                                            else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                        )
+                                    elif selected_tool["tool_id"] == "T095":
+                                        if source_result_tool_id == "NONE":
+                                            raise ValueError("Run an entitled source tool first; no completed result is available to export.")
+                                        source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
+                                        source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
+                                        if not isinstance(source_result, dict):
+                                            raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
+                                        tables, table_stats = _t095_extract_report_tables(source_result)
+                                        source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                        inputs_hash = hashlib.sha256(
+                                            json.dumps(_t095_safe_metadata(source_inputs), sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+                                        ).hexdigest() if isinstance(source_inputs, dict) else ""
+                                        source_name = str(source_tool.get("canonical_name") or source_result_tool_id)
+                                        report_title = f"Shoir-IE · {source_name} · Result Export"
+                                        export_audit = [{
+                                            "Source Tool ID": source_result_tool_id,
+                                            "Source Tool": source_name,
+                                            "Result Status": str(source_result.get("status") or "UNSPECIFIED"),
+                                            "Data Provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
+                                            "Input Snapshot SHA-256": inputs_hash or "NOT_AVAILABLE",
+                                            "Exported By": USER,
+                                            "Generated At UTC": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                            "Redacted Columns": table_stats["redacted_column_count"],
+                                        }]
+                                        fmt = str(report_format).upper()
+                                        if fmt in {"PDF", "PPTX"} and not tier_allows(RAW_TIER, "Enterprise"):
+                                            raise PermissionError(f"{fmt} export requires Enterprise. Choose XLSX or ZIP.")
+                                        from shoir_upgrade import build_excel_report, build_workbook_bundle
+                                        if fmt == "XLSX":
+                                            artifact_bytes = build_excel_report(report_title, tables, figures=(), audit=export_audit)
+                                            mime, extension = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
+                                        elif fmt == "ZIP":
+                                            artifact_bytes = build_workbook_bundle(report_title, tables, figures=(), audit=export_audit)
+                                            mime, extension = "application/zip", "zip"
+                                        elif fmt == "PDF":
+                                            from industrial_platform import export_pdf
+                                            artifact_bytes = export_pdf(report_title, tables)
+                                            mime, extension = "application/pdf", "pdf"
+                                        elif fmt == "PPTX":
+                                            from industrial_platform import export_pptx
+                                            artifact_bytes = export_pptx(report_title, tables)
+                                            mime, extension = "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"
+                                        else:
+                                            raise ValueError("Unsupported report format.")
+                                        if not isinstance(artifact_bytes, bytes) or not artifact_bytes:
+                                            raise ValueError("The report builder did not return a valid non-empty file.")
+                                        result = {
+                                            "tool_id": "T095",
+                                            "status": "REPORT_ARTIFACT_BUILT",
+                                            "source_tool_id": source_result_tool_id,
+                                            "source_tool_name": source_name,
+                                            "format": fmt,
+                                            "filename": f"shoir_ie_{source_result_tool_id.lower()}_report.{extension}",
+                                            "mime_type": mime,
+                                            "artifact_bytes": len(artifact_bytes),
+                                            "artifact_sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                                            "table_count": table_stats["table_count"],
+                                            "exported_rows": table_stats["total_rows"],
+                                            "redacted_column_count": table_stats["redacted_column_count"],
+                                            "source_input_snapshot_sha256": inputs_hash or None,
+                                            "artifact_storage": "SESSION_ONLY_DOWNLOAD",
+                                            "data_provenance": str(source_result.get("data_provenance") or "NOT_DECLARED"),
+                                            "warning": "This is a formatted export of the selected result. It does not independently verify source data or engineering correctness; inspect assumptions and provenance before distribution. The artifact is a session download, not a managed document repository.",
+                                        }
+                                        t095_artifact_bytes = artifact_bytes
+                                    elif selected_tool["tool_id"] == "T087":
+                                        if source_result_tool_id == "NONE":
+                                            raise ValueError("Run an entitled source tool first; no completed result is available to package.")
+                                        source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
+                                        source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
+                                        if not isinstance(source_result, dict):
+                                            raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
+                                        try:
+                                            parsed_repro_metadata = json.loads(reproducibility_metadata_json or "{}")
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("Run metadata must be valid JSON.") from exc
+                                        if not isinstance(parsed_repro_metadata, dict):
+                                            raise ValueError("Run metadata must be a JSON object.")
+                                        source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                        pack_result = build_reproducibility_pack(
+                                            source_result_tool_id,
+                                            source_tool["canonical_name"],
+                                            source_result,
+                                            inputs=source_inputs if isinstance(source_inputs, dict) else {},
+                                            metadata=parsed_repro_metadata,
+                                            include_input_snapshot=include_input_snapshot,
+                                            include_result_tables=include_result_tables,
+                                        )
+                                        st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
+                                        result = pack_result
+    
+                                if selected_tool["tool_id"] == "T086" and isinstance(result, dict) and isinstance(result.get("bundle_bytes"), bytes):
+                                    st.session_state["shoir_tool_bundle_bytes_T086"] = result.pop("bundle_bytes")
+                                _persist_focused_tool_result(
+                                    selected_tool["tool_id"], result, current_tool_inputs
+                                )
+                                if t095_artifact_bytes is not None:
+                                    # Keep the binary file in the browser session only;
+                                    # persist only its manifest/result metadata.
+                                    st.session_state["shoir_tool_bundle_bytes_T095"] = t095_artifact_bytes
+                                    st.session_state["shoir_tool_bundle_filename_T095"] = result["filename"]
+                                    st.session_state["shoir_tool_bundle_mime_T095"] = result["mime_type"]
+                            except Exception as exc:
+                                st.error(f"Tool run could not be completed safely: {exc}")
+    
+                        if selected_tool["tool_id"] in {"T004", "T005", "T006", "T007", "T009", "T010", "T011", "T012", "T013", "T014", "T017", "T020", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T061", "T062", "T063", "T067", "T068", "T069", "T070", "T071", "T073", "T074", "T076", "T077", "T079", "T080", "T082", "T083", "T084", "T086", "T092", "T094", "T095", "T096", "T097", "T098", "T099", "T100"}:
+                            result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
+                            if result:
+                                _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
+                                render_engineering_result(
+                                    result,
+                                    title=selected_tool["canonical_name"],
+                                    key_prefix="target_" + selected_tool["tool_id"].lower(),
+                                )
+                                if selected_tool["tool_id"] == "T095":
+                                    report_bytes = st.session_state.get("shoir_tool_bundle_bytes_T095")
+                                    if isinstance(report_bytes, bytes) and report_bytes:
+                                        st.download_button(
+                                            "Download verified report artifact",
+                                            data=report_bytes,
+                                            file_name=st.session_state.get("shoir_tool_bundle_filename_T095", result.get("filename", "shoir_ie_report.xlsx")),
+                                            mime=st.session_state.get("shoir_tool_bundle_mime_T095", "application/octet-stream"),
+                                            key="tool095_download_report",
+                                            use_container_width=True,
+                                        )
+                                if selected_tool["tool_id"] == "T086":
+                                    bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T086")
+                                    if bundle_bytes:
+                                        st.download_button(
+                                            "Download research evidence bundle (ZIP)",
+                                            data=bundle_bytes,
+                                            file_name=f"{result.get('research_id', 'research')}_evidence.zip",
+                                            mime="application/zip",
+                                            key="tool086_download_bundle",
+                                            use_container_width=True,
+                                        )
+                                if selected_tool["tool_id"] == "T099":
+                                    backup_bytes = st.session_state.get("shoir_tool_bundle_bytes_T099")
+                                    if backup_bytes:
+                                        st.download_button(
+                                            "Download verified personal workspace backup",
+                                            data=backup_bytes,
+                                            file_name=f"shoir_ie_workspace_backup_{USER}.json",
+                                            mime="application/json",
+                                            key="tool099_download_backup",
+                                            use_container_width=True,
+                                        )
+                                if selected_tool["tool_id"] == "T100":
                                     st.download_button(
-                                        "Download research evidence bundle (ZIP)",
-                                        data=bundle_bytes,
-                                        file_name=f"{result.get('research_id', 'research')}_evidence.zip",
-                                        mime="application/zip",
-                                        key="tool086_download_bundle",
-                                        use_container_width=True,
-                                    )
-                            if selected_tool["tool_id"] == "T099":
-                                backup_bytes = st.session_state.get("shoir_tool_bundle_bytes_T099")
-                                if backup_bytes:
-                                    st.download_button(
-                                        "Download verified personal workspace backup",
-                                        data=backup_bytes,
-                                        file_name=f"shoir_ie_workspace_backup_{USER}.json",
+                                        "Download redacted support bundle (JSON)",
+                                        data=json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
+                                        file_name=f"{result['support_reference']}.json",
                                         mime="application/json",
-                                        key="tool099_download_backup",
+                                        key="tool100_download_bundle",
                                         use_container_width=True,
                                     )
-                            if selected_tool["tool_id"] == "T100":
-                                st.download_button(
-                                    "Download redacted support bundle (JSON)",
-                                    data=json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
-                                    file_name=f"{result['support_reference']}.json",
-                                    mime="application/json",
-                                    key="tool100_download_bundle",
-                                    use_container_width=True,
-                                )
-                                st.info("Prepared locally only. Review the contents before sharing; no ticket was opened and no data was sent.")
-                    elif selected_tool["tool_id"] == "T016":
-                        result = st.session_state.get("shoir_tool_result_T016")
-                        if result:
-                            _show_focused_tool_persistence("T016", result, current_tool_inputs)
-                            st.metric(f"Converted value ({result['target_unit']})", f"{result['converted_value']:,.8g}")
-                            st.markdown(f"**Source value:** {result['input_value']:,.8g} {result['source_unit']}")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            if result.get("exchange_rate_date"):
-                                st.caption(f"Rate source: {result['exchange_rate_source']} · rate date: {result['exchange_rate_date']} · rate direction: target per source")
-                    elif selected_tool["tool_id"] == "T031":
-                        result = st.session_state.get("shoir_tool_result_T031")
-                        if result:
-                            _show_focused_tool_persistence("T031", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Process mean", f"{result['mean']:,.5g} {result['unit']}")
-                            c2.metric("Moving-range average", f"{result['moving_range_average']:,.5g}")
-                            c3.metric("I-chart UCL / LCL", f"{result['individuals_ucl']:,.5g} / {result['individuals_lcl']:,.5g}")
-                            st.markdown(f"**Signal status:** {result['status']}")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["chart_data"], use_container_width=True, hide_index=True)
-                            chart = result["chart_data"]
-                            st.plotly_chart(px.line(chart, x="Observation", y=[f"Measurement ({result['unit']})", f"I center ({result['unit']})", f"I UCL ({result['unit']})", f"I LCL ({result['unit']})"], markers=True, title="Individuals control chart"), use_container_width=True)
-                            st.plotly_chart(px.line(chart, x="Observation", y=["Moving range", "MR center", "MR UCL", "MR LCL"], markers=True, title="Moving-range control chart"), use_container_width=True)
-                    elif selected_tool["tool_id"] == "T039":
-                        result = st.session_state.get("shoir_tool_result_T039")
-                        if result:
-                            _show_focused_tool_persistence("T039", result, current_tool_inputs)
-                            c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("CAPA / 8D records", result["record_count"])
-                            c2.metric("Overdue actions", result["overdue_count"])
-                            c3.metric("Records missing evidence", result["records_with_missing_evidence"])
-                            c4.metric("Complete closure records", result["complete_closure_count"])
-                            st.caption(f"Review as of {result['as_of_date']} · provenance: {result.get('data_provenance', 'USER_ENTERED_UNVERIFIED')}")
-                            st.dataframe(result["records"], use_container_width=True, hide_index=True)
-                            st.dataframe(result["workflow_summary"], use_container_width=True, hide_index=True)
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T040":
-                        result = st.session_state.get("shoir_tool_result_T040")
-                        if result:
-                            _show_focused_tool_persistence("T040", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric(f"Scoped COPQ ({result['currency']})", f"{result['cost_of_poor_quality']:,.2f}")
-                            c2.metric("Defective-unit rate", f"{result['defective_rate_pct']:.2f}%")
-                            c3.metric(f"COPQ per unit ({result['currency']})", f"{result['copq_per_produced_unit']:,.3f}")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["cost_breakdown"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.bar(result["cost_breakdown"], x="Cost component", y=f"Cost ({result['currency']})", title="Scoped quality-cost components"), use_container_width=True)
-                    elif selected_tool["tool_id"] == "T042":
-                        result = st.session_state.get("shoir_tool_result_T042")
-                        if result:
-                            _show_focused_tool_persistence("T042", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("MTBF", f"{result['mtbf_hours']:,.3f} h")
-                            c2.metric("MTTR", f"{result['mttr_hours']:,.3f} h")
-                            c3.metric("Availability estimate", f"{result['steady_state_availability_estimate_pct']:.3f}%")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["repair_summary"], use_container_width=True, hide_index=True)
-                    elif selected_tool["tool_id"] == "T056":
-                        result = st.session_state.get("shoir_tool_result_T056")
-                        if result:
-                            _show_focused_tool_persistence("T056", result, current_tool_inputs)
-                            c1, c2 = st.columns(2)
-                            c1.metric("SKUs classified", str(result["sku_count"]))
-                            c2.metric(f"Total annual usage value ({result['currency']})", f"{result['annual_usage_value_total']:,.2f}")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["classification"], use_container_width=True, hide_index=True)
-                            value_column = f"Annual usage value ({result['currency']})"
-                            st.plotly_chart(px.bar(result["classification"], x="SKU", y=value_column, color="ABC", title="ABC value segmentation"), use_container_width=True)
-                    elif selected_tool["tool_id"] == "T002":
-                        result = st.session_state.get("shoir_tool_result_T002")
-                        if result:
-                            _show_focused_tool_persistence("T002", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Workflow steps", result["step_count"])
-                            c2.metric("Steps with missing inputs", result["missing_input_step_count"])
-                            c3.metric("Tier-restricted steps", result["tier_restricted_step_count"])
-                            next_step = result.get("next_recommended_step")
-                            if next_step:
-                                st.info(f"Next ready step: {next_step['tool_id']} · {next_step['canonical_name']}. Select that target in the Workbench to run it.")
-                            else:
-                                st.info("No step is immediately ready. Review the missing inputs, tier restrictions and foundation-only statuses below.")
-                            st.dataframe(result["steps"], use_container_width=True, hide_index=True)
-                            st.warning(result["warning"])
-                            st.caption("The guided wizard orders work only; it does not run downstream methods or fabricate results.")
-                    elif selected_tool["tool_id"] == "T089":
-                        result = st.session_state.get("shoir_tool_result_T089")
-                        if result:
-                            _show_focused_tool_persistence("T089", result, current_tool_inputs)
-                            if result.get("is_correct"):
-                                st.success(result.get("message", "Correct."))
-                            else:
-                                st.warning(result.get("message", "Review the worked solution and try again."))
-                            st.metric("Reference answer", f"{result['expected_answer']:,.4g} {result['unit']}")
-                            st.caption("Formula: " + result["formula"])
-                            st.write(result["worked_solution"])
-                            st.write(result["explanation"])
-                            st.caption("Example provenance: SYNTHETIC_EXERCISE")
-                    elif selected_tool["tool_id"] == "T087":
-                        result = st.session_state.get("shoir_tool_result_T087")
-                        bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T087")
-                        if result:
-                            _show_focused_tool_persistence("T087", result, current_tool_inputs)
-                            st.metric("ZIP bundle size", f"{int(result.get('bundle_byte_count', 0)):,} bytes")
-                            st.code(result.get("bundle_sha256", ""))
-                            st.caption("Verify SHA-256 checksums in SHA256SUMS.txt. Review contents before sharing; tables and input snapshots are opt-in.")
-                            if isinstance(bundle_bytes, bytes) and bundle_bytes:
-                                st.download_button(
-                                    "Download reproducibility ZIP",
-                                    data=bundle_bytes,
-                                    file_name=result.get("filename", "shoir_ie_reproducibility_pack.zip"),
-                                    mime="application/zip",
-                                    key="tool087_download",
-                                    use_container_width=True,
-                                )
-                            inventory = result.get("artifact_inventory")
-                            if isinstance(inventory, pd.DataFrame):
-                                st.dataframe(inventory, use_container_width=True, hide_index=True)
-                            st.json(result.get("manifest", {}))
-
-                    elif selected_tool["tool_id"] == "T021":
-                        result = st.session_state.get("shoir_tool_result_T021")
-                        if result:
-                            _show_focused_tool_persistence("T021", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric(f"Mean observed time ({result['time_unit']})", f"{result['mean_observed_time']:,.4g}")
-                            c2.metric(f"Normal time ({result['time_unit']})", f"{result['normal_time']:,.4g}")
-                            c3.metric(f"Standard time ({result['time_unit']})", f"{result['standard_time']:,.4g}")
-                            st.caption(result["formula"])
-                            st.caption(result["warning"])
-                            st.dataframe(result["observations"], use_container_width=True, hide_index=True)
-                            fig = px.line(
-                                result["observations"],
-                                x="Observation", y=f"Observed time ({result['time_unit']})",
-                                markers=True, title="Observed cycle times",
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                    elif selected_tool["tool_id"] == "T022":
-                        result = st.session_state.get("shoir_tool_result_T022")
-                        if result:
-                            _show_focused_tool_persistence("T022", result, current_tool_inputs)
-                            total_obs = result["total_observations"]
-                            required_obs = result["minimum_observations_for_target_margin"]
-                            confidence_pct = result["confidence_level"] * 100
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Observed samples", f"{total_obs:,}")
-                            c2.metric("Conservative target", f"{required_obs:,}")
-                            c3.metric("Confidence", f"{confidence_pct:.0f}%")
-                            st.markdown(f"**Sampling status:** {result['status']}")
-                            st.caption(result["formula"])
-                            st.caption(result["assumptions"])
-                            st.caption(result["warning"])
-                            st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
-                            df = result["activity_summary"]
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                            low_col = f"{confidence_pct:.1f}% Wilson lower (%)"
-                            high_col = f"{confidence_pct:.1f}% Wilson upper (%)"
-                            df = df.copy()
-                            df["Error above (%)"] = df[high_col] - df["Observed proportion (%)"]
-                            df["Error below (%)"] = df["Observed proportion (%)"] - df[low_col]
-                            fig = px.bar(
-                                df, x="Activity", y="Observed proportion (%)",
-                                error_y="Error above (%)", error_y_minus="Error below (%)",
-                                title="Observed activity proportions with Wilson intervals",
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                    elif selected_tool["tool_id"] == "T023":
-                        result = st.session_state.get("shoir_tool_result_T023")
-                        if result:
-                            _show_focused_tool_persistence("T023", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric(f"Takt time ({result['time_unit']}/unit)", f"{result['takt_time_per_unit']:,.4g}")
-                            c2.metric("Implied capacity (units/period)", f"{result['implied_capacity_units_per_period']:,.4g}")
-                            c3.metric("Capacity gap (units/period)", f"{result['capacity_gap_units_per_period']:+,.4g}")
-                            st.markdown(f"**Capacity status:** {result['status']}")
-                            st.caption(result["formula"])
-                            st.caption(result["assumptions"])
-                            comparison = pd.DataFrame({
-                                "Measure": ["Demand", "Implied capacity"],
-                                "Units per period": [result["demand_units_per_period"], result["implied_capacity_units_per_period"]],
-                            })
-                            st.dataframe(comparison, use_container_width=True, hide_index=True)
-                            st.plotly_chart(
-                                px.bar(comparison, x="Measure", y="Units per period", title="Demand versus implied capacity"),
-                                use_container_width=True,
-                            )
-                    elif selected_tool["tool_id"] == "T028":
-                        result = st.session_state.get("shoir_tool_result_T028")
-                        if result:
-                            _show_focused_tool_persistence("T028", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Total recorded occurrences", f"{result['total_count']:,}")
-                            c2.metric("Recorded categories", str(result["category_count"]))
-                            c3.metric("Categories reaching 80%", str(result["categories_to_reach_80_percent"]))
-                            st.markdown(f"**Analysis status:** {result['status']}")
-                            st.caption(result["formula"])
-                            st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
-                            st.warning(result["warning"])
-                            pareto = result["pareto_summary"]
-                            st.dataframe(pareto, use_container_width=True, hide_index=True)
-                            st.plotly_chart(
-                                px.bar(pareto, x="Category", y="Count", title="Pareto category counts"),
-                                use_container_width=True,
-                            )
-                            if result["why_chain"]:
-                                st.markdown("**Recorded 5-Why chain (requires evidence review)**")
-                                st.dataframe(pd.DataFrame(result["why_chain"]), use_container_width=True, hide_index=True)
-                                st.markdown(f"**Problem:** {result['problem_statement']}")
-                                st.markdown(f"**Countermeasure:** {result['countermeasure'] or 'Not yet recorded'}")
-                                st.markdown(f"**Owner:** {result['owner'] or 'Not yet assigned'}")
-                                st.markdown(f"**Due date:** {result['due_date'] or 'Not yet set'}")
-                    elif selected_tool["tool_id"] == "T029":
-                        result = st.session_state.get("shoir_tool_result_T029")
-                        if result:
-                            _show_focused_tool_persistence("T029", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Overall 5S score (equal pillar weight)", f"{result['overall_5s_score_pct_equal_pillar_weight']:.1f}%")
-                            c2.metric("Checklist criteria", str(result["criteria_count"]))
-                            c3.metric("Priority actions", str(result["priority_action_count"]))
-                            st.markdown(f"**Audit status:** {result['status']}")
-                            st.caption(result["rubric"])
-                            st.caption(result["formula"])
-                            st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["pillar_summary"], use_container_width=True, hide_index=True)
-                            st.markdown("**Checklist**")
-                            st.dataframe(result["checklist"], use_container_width=True, hide_index=True)
-                            if len(result["priority_actions"]):
-                                st.markdown("**Items requiring follow-up**")
-                                st.dataframe(result["priority_actions"], use_container_width=True, hide_index=True)
-                    elif selected_tool["tool_id"] == "T030":
-                        result = st.session_state.get("shoir_tool_result_T030")
-                        if result:
-                            _show_focused_tool_persistence("T030", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("A3 record", result.get("record_id", "Pending"))
-                            c2.metric("Revision", str(result.get("revision_number", 1)))
-                            c3.metric("Status", result["status"])
-                            st.markdown(f"**Problem:** {result['problem_statement']}")
-                            st.markdown(f"**Countermeasure:** {result['countermeasure']}")
-                            st.markdown(f"**Owner / due date:** {result['owner']} / {result['due_date']}")
-                            st.markdown(f"**Baseline → target:** {result['baseline_value']} → {result['target_value']} {result['unit']}")
-                            if result["actual_after_value"] is not None:
-                                st.markdown(f"**Actual after change:** {result['actual_after_value']} {result['unit']}")
-                                st.metric("Algebraic progress to target", f"{result['target_progress_pct']:.1f}%")
-                                st.caption(f"Signed remaining difference (target − actual): {result['remaining_difference_to_target']:,.4g} {result['unit']}")
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
-                            records = st.session_state.get("shoir_kaizen_a3_records", [])
-                            if records:
-                                st.markdown("**Saved A3 register (current workspace)**")
-                                overview = [{
-                                    "Record ID": item.get("record_id"),
-                                    "Title": item.get("title"),
-                                    "Status": item.get("status"),
-                                    "Owner": item.get("owner"),
-                                    "Due date": item.get("due_date"),
-                                    "Revision": item.get("revision_number", 1),
-                                    "Updated at": item.get("updated_at", item.get("created_at", "")),
-                                } for item in records]
-                                st.dataframe(pd.DataFrame(overview), use_container_width=True, hide_index=True)
-                                if result.get("revision_history"):
-                                    st.markdown("**Prior revisions**")
-                                    st.dataframe(pd.DataFrame(result["revision_history"]), use_container_width=True, hide_index=True)
-                    elif selected_tool["tool_id"] == "T066":
-                        result = st.session_state.get("shoir_tool_result_T066")
-                        if result:
-                            _show_focused_tool_persistence("T066", result, current_tool_inputs)
-                            st.markdown(f"**Solver status:** {result['status']}")
-                            st.caption(result.get("message", ""))
-                            if result.get("status") == "OPTIMAL":
+                                    st.info("Prepared locally only. Review the contents before sharing; no ticket was opened and no data was sent.")
+                        elif selected_tool["tool_id"] == "T016":
+                            result = st.session_state.get("shoir_tool_result_T016")
+                            if result:
+                                _show_focused_tool_persistence("T016", result, current_tool_inputs)
+                                st.metric(f"Converted value ({result['target_unit']})", f"{result['converted_value']:,.8g}")
+                                st.markdown(f"**Source value:** {result['input_value']:,.8g} {result['source_unit']}")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                if result.get("exchange_rate_date"):
+                                    st.caption(f"Rate source: {result['exchange_rate_source']} · rate date: {result['exchange_rate_date']} · rate direction: target per source")
+                        elif selected_tool["tool_id"] == "T031":
+                            result = st.session_state.get("shoir_tool_result_T031")
+                            if result:
+                                _show_focused_tool_persistence("T031", result, current_tool_inputs)
                                 c1, c2, c3 = st.columns(3)
-                                c1.metric("Stock pieces", f"{result['stock_count']:,}")
-                                c2.metric("Physical utilization", f"{result['physical_utilization_pct']:.1f}%")
-                                c3.metric("Calculated waste", f"{result['waste_length']:,.3f}")
-                                st.dataframe(result["cut_plan"], use_container_width=True, hide_index=True)
-                                if not result["cut_plan"].empty:
-                                    fig = px.bar(
-                                        result["cut_plan"], x="Pattern", y="Stocks",
-                                        title="Optimal cutting-pattern allocation",
-                                        hover_data=["Part mix", "Pieces per stock", "Waste per stock"],
+                                c1.metric("Process mean", f"{result['mean']:,.5g} {result['unit']}")
+                                c2.metric("Moving-range average", f"{result['moving_range_average']:,.5g}")
+                                c3.metric("I-chart UCL / LCL", f"{result['individuals_ucl']:,.5g} / {result['individuals_lcl']:,.5g}")
+                                st.markdown(f"**Signal status:** {result['status']}")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["chart_data"], use_container_width=True, hide_index=True)
+                                chart = result["chart_data"]
+                                st.plotly_chart(px.line(chart, x="Observation", y=[f"Measurement ({result['unit']})", f"I center ({result['unit']})", f"I UCL ({result['unit']})", f"I LCL ({result['unit']})"], markers=True, title="Individuals control chart"), use_container_width=True)
+                                st.plotly_chart(px.line(chart, x="Observation", y=["Moving range", "MR center", "MR UCL", "MR LCL"], markers=True, title="Moving-range control chart"), use_container_width=True)
+                        elif selected_tool["tool_id"] == "T039":
+                            result = st.session_state.get("shoir_tool_result_T039")
+                            if result:
+                                _show_focused_tool_persistence("T039", result, current_tool_inputs)
+                                c1, c2, c3, c4 = st.columns(4)
+                                c1.metric("CAPA / 8D records", result["record_count"])
+                                c2.metric("Overdue actions", result["overdue_count"])
+                                c3.metric("Records missing evidence", result["records_with_missing_evidence"])
+                                c4.metric("Complete closure records", result["complete_closure_count"])
+                                st.caption(f"Review as of {result['as_of_date']} · provenance: {result.get('data_provenance', 'USER_ENTERED_UNVERIFIED')}")
+                                st.dataframe(result["records"], use_container_width=True, hide_index=True)
+                                st.dataframe(result["workflow_summary"], use_container_width=True, hide_index=True)
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T040":
+                            result = st.session_state.get("shoir_tool_result_T040")
+                            if result:
+                                _show_focused_tool_persistence("T040", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric(f"Scoped COPQ ({result['currency']})", f"{result['cost_of_poor_quality']:,.2f}")
+                                c2.metric("Defective-unit rate", f"{result['defective_rate_pct']:.2f}%")
+                                c3.metric(f"COPQ per unit ({result['currency']})", f"{result['copq_per_produced_unit']:,.3f}")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["cost_breakdown"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.bar(result["cost_breakdown"], x="Cost component", y=f"Cost ({result['currency']})", title="Scoped quality-cost components"), use_container_width=True)
+                        elif selected_tool["tool_id"] == "T042":
+                            result = st.session_state.get("shoir_tool_result_T042")
+                            if result:
+                                _show_focused_tool_persistence("T042", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("MTBF", f"{result['mtbf_hours']:,.3f} h")
+                                c2.metric("MTTR", f"{result['mttr_hours']:,.3f} h")
+                                c3.metric("Availability estimate", f"{result['steady_state_availability_estimate_pct']:.3f}%")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["repair_summary"], use_container_width=True, hide_index=True)
+                        elif selected_tool["tool_id"] == "T056":
+                            result = st.session_state.get("shoir_tool_result_T056")
+                            if result:
+                                _show_focused_tool_persistence("T056", result, current_tool_inputs)
+                                c1, c2 = st.columns(2)
+                                c1.metric("SKUs classified", str(result["sku_count"]))
+                                c2.metric(f"Total annual usage value ({result['currency']})", f"{result['annual_usage_value_total']:,.2f}")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["classification"], use_container_width=True, hide_index=True)
+                                value_column = f"Annual usage value ({result['currency']})"
+                                st.plotly_chart(px.bar(result["classification"], x="SKU", y=value_column, color="ABC", title="ABC value segmentation"), use_container_width=True)
+                        elif selected_tool["tool_id"] == "T002":
+                            result = st.session_state.get("shoir_tool_result_T002")
+                            if result:
+                                _show_focused_tool_persistence("T002", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Workflow steps", result["step_count"])
+                                c2.metric("Steps with missing inputs", result["missing_input_step_count"])
+                                c3.metric("Tier-restricted steps", result["tier_restricted_step_count"])
+                                next_step = result.get("next_recommended_step")
+                                if next_step:
+                                    st.info(f"Next ready step: {next_step['tool_id']} · {next_step['canonical_name']}. Select that target in the Workbench to run it.")
+                                else:
+                                    st.info("No step is immediately ready. Review the missing inputs, tier restrictions and foundation-only statuses below.")
+                                st.dataframe(result["steps"], use_container_width=True, hide_index=True)
+                                st.warning(result["warning"])
+                                st.caption("The guided wizard orders work only; it does not run downstream methods or fabricate results.")
+                        elif selected_tool["tool_id"] == "T089":
+                            result = st.session_state.get("shoir_tool_result_T089")
+                            if result:
+                                _show_focused_tool_persistence("T089", result, current_tool_inputs)
+                                if result.get("is_correct"):
+                                    st.success(result.get("message", "Correct."))
+                                else:
+                                    st.warning(result.get("message", "Review the worked solution and try again."))
+                                st.metric("Reference answer", f"{result['expected_answer']:,.4g} {result['unit']}")
+                                st.caption("Formula: " + result["formula"])
+                                st.write(result["worked_solution"])
+                                st.write(result["explanation"])
+                                st.caption("Example provenance: SYNTHETIC_EXERCISE")
+                        elif selected_tool["tool_id"] == "T087":
+                            result = st.session_state.get("shoir_tool_result_T087")
+                            bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T087")
+                            if result:
+                                _show_focused_tool_persistence("T087", result, current_tool_inputs)
+                                st.metric("ZIP bundle size", f"{int(result.get('bundle_byte_count', 0)):,} bytes")
+                                st.code(result.get("bundle_sha256", ""))
+                                st.caption("Verify SHA-256 checksums in SHA256SUMS.txt. Review contents before sharing; tables and input snapshots are opt-in.")
+                                if isinstance(bundle_bytes, bytes) and bundle_bytes:
+                                    st.download_button(
+                                        "Download reproducibility ZIP",
+                                        data=bundle_bytes,
+                                        file_name=result.get("filename", "shoir_ie_reproducibility_pack.zip"),
+                                        mime="application/zip",
+                                        key="tool087_download",
+                                        use_container_width=True,
                                     )
-                                    st.plotly_chart(fig, use_container_width=True)
-                            elif result.get("issues"):
-                                st.dataframe(pd.DataFrame(result["issues"]), use_container_width=True, hide_index=True)
-                            else:
-                                st.warning("The solver did not prove an optimal plan. Do not use this result as a production cut list.")
-                    elif selected_tool["tool_id"] == "T075":
-                        result = st.session_state.get("shoir_tool_result_T075")
-                        if result:
-                            _show_focused_tool_persistence("T075", result, current_tool_inputs)
-                            c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("Status", result["status"])
-                            c2.metric("MAE", f"{result['mae']:.4g}")
-                            c3.metric("RMSE", f"{result['rmse']:.4g}")
-                            c4.metric("Mean error", f"{result['bias_actual_minus_prediction']:.4g}")
-                            st.caption(result["warning"])
-                            st.dataframe(result["series"], use_container_width=True, hide_index=True)
-                            fig = px.line(
-                                result["series"], x="Observation", y=["Prediction", "Actual"],
-                                markers=True, title="Forecasts versus later actuals",
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                    elif selected_tool["tool_id"] == "T085":
-                        result = st.session_state.get("shoir_tool_result_T085")
-                        if result:
-                            _show_focused_tool_persistence("T085", result, current_tool_inputs)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Status", result["status"])
-                            c2.metric(
-                                "Samples per group",
-                                str(result["required_n_per_group"]) if result["required_n_per_group"] is not None else "Limit reached",
-                            )
-                            c3.metric("Achieved power", f"{result['achieved_power']:.3f}")
-                            st.caption(result["assumptions"])
-                            chart_df = pd.DataFrame({
-                                "Metric": ["Target power", "Achieved power"],
-                                "Power": [result["target_power"], result["achieved_power"]],
-                            })
-                            st.plotly_chart(
-                                px.bar(chart_df, x="Metric", y="Power", range_y=[0, 1],
-                                       title="Requested versus achieved power"),
-                                use_container_width=True,
-                            )
-                            if result["status"] == "LIMIT_REACHED":
-                                st.warning(result["message"])
-                            else:
-                                st.write(result["message"])
-                    elif selected_tool["tool_id"] == "T015":
-                        result = st.session_state.get("shoir_tool_result_T015")
-                        if result:
-                            _show_focused_tool_persistence("T015", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Source columns", result["source_column_count"])
-                            m2.metric("Mapped/suggested", result["mapped_or_suggested_count"])
-                            m3.metric("Needs review", result["needs_manual_review_count"])
-                            st.dataframe(result["mapping_table"], use_container_width=True, hide_index=True)
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T049":
-                        result = st.session_state.get("shoir_tool_result_T049")
-                        if result:
-                            _show_focused_tool_persistence("T049", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Selected work orders", result["selected_count"])
-                            m2.metric("Deferred work orders", result["deferred_count"])
-                            m3.metric("Labor hours selected", f"{result['selected_labor_hours']:.2f}")
-                            st.markdown(f"**Priority method:** {result['method']}")
-                            st.markdown("**Recommended queue**")
-                            st.dataframe(result["selected_work_orders"], use_container_width=True, hide_index=True)
-                            st.markdown("**Deferred / blocked**")
-                            st.dataframe(result["deferred_work_orders"], use_container_width=True, hide_index=True)
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T052":
-                        result = st.session_state.get("shoir_tool_result_T052")
-                        if result:
-                            _show_focused_tool_persistence("T052", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Total demand", f"{result['total_demand']:,.0f}")
-                            m2.metric("Ending inventory", f"{result['ending_inventory']:,.1f}")
-                            m3.metric("Ending backlog", f"{result['ending_backlog']:,.1f}")
-                            st.dataframe(result["period_plan"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.bar(result["period_plan"], x="Period", y=["Demand", "Capacity-constrained production", "Ending inventory", "Ending backlog"], barmode="group", title="S&OP supply, demand and remaining position"), use_container_width=True)
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T058":
-                        result = st.session_state.get("shoir_tool_result_T058")
-                        if result:
-                            _show_focused_tool_persistence("T058", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Suppliers", result["supplier_count"])
-                            m2.metric("Complete scorecards", result["complete_score_count"])
-                            m3.metric("Incomplete", result["incomplete_score_count"])
-                            st.dataframe(result["scorecard"], use_container_width=True, hide_index=True)
-                            st.caption(result["warning"])
-                    elif selected_tool["tool_id"] == "T033":
-                        result = st.session_state.get("shoir_tool_result_T033")
-                        if result:
-                            _show_focused_tool_persistence("T033", result, current_tool_inputs)
-                            m1, m2, m3, m4 = st.columns(4)
-                            m1.metric("Gage R&R", f"{result['gage_rr_percent_variance']:.2f}% of variance")
-                            m2.metric("Repeatability SD", f"{result['repeatability_sd']:.4g}")
-                            m3.metric("Reproducibility SD", f"{result['reproducibility_sd']:.4g}")
-                            m4.metric("Distinct categories", str(result["number_of_distinct_categories"] or "Not estimable"))
-                            if result["percent_tolerance"] is not None:
-                                st.metric("% of tolerance (6σ / tolerance)", f"{result['percent_tolerance']:.2f}%")
-                            st.dataframe(result["variance_components"], use_container_width=True, hide_index=True)
-                            st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
-                            for warning in result["warnings"]:
-                                st.warning(warning)
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T035":
-                        result = st.session_state.get("shoir_tool_result_T035")
-                        if result:
-                            _show_focused_tool_persistence("T035", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Full-factorial combinations", result["factorial_combinations"])
-                            m2.metric("Runs", result["run_count"])
-                            m3.metric("Model R²", "N/A" if result["r_squared"] is None else f"{result['r_squared']:.4f}")
-                            st.dataframe(result["effects"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.bar(result["effects"], x="Term", y="Estimated effect (high − low)", title="DOE estimated factor and pairwise effects"), use_container_width=True)
-                            st.dataframe(result["run_results"], use_container_width=True, hide_index=True)
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T036":
-                        result = st.session_state.get("shoir_tool_result_T036")
-                        if result:
-                            _show_focused_tool_persistence("T036", result, current_tool_inputs)
-                            st.markdown(f"**Method:** {result['method']}")
-                            if result["method"].startswith("Ordinary least squares"):
-                                m1, m2, m3, m4 = st.columns(4)
-                                m1.metric("Slope", f"{result['slope']:.5g}")
-                                m2.metric("Intercept", f"{result['intercept']:.5g}")
-                                m3.metric("R²", f"{result['r_squared']:.4f}")
-                                m4.metric("Slope p-value", f"{result['slope_p_value']:.4g}")
-                                st.caption(f"95% slope confidence interval: {result['slope_confidence_interval']}")
-                                st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
-                                st.plotly_chart(px.scatter(result["residuals"], x="X", y="Residual", title="Regression residuals by predictor"), use_container_width=True)
-                                st.dataframe(result["residuals"], use_container_width=True, hide_index=True)
-                            else:
+                                inventory = result.get("artifact_inventory")
+                                if isinstance(inventory, pd.DataFrame):
+                                    st.dataframe(inventory, use_container_width=True, hide_index=True)
+                                st.json(result.get("manifest", {}))
+    
+                        elif selected_tool["tool_id"] == "T021":
+                            result = st.session_state.get("shoir_tool_result_T021")
+                            if result:
+                                _show_focused_tool_persistence("T021", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric(f"Mean observed time ({result['time_unit']})", f"{result['mean_observed_time']:,.4g}")
+                                c2.metric(f"Normal time ({result['time_unit']})", f"{result['normal_time']:,.4g}")
+                                c3.metric(f"Standard time ({result['time_unit']})", f"{result['standard_time']:,.4g}")
+                                st.caption(result["formula"])
+                                st.caption(result["warning"])
+                                st.dataframe(result["observations"], use_container_width=True, hide_index=True)
+                                fig = px.line(
+                                    result["observations"],
+                                    x="Observation", y=f"Observed time ({result['time_unit']})",
+                                    markers=True, title="Observed cycle times",
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                        elif selected_tool["tool_id"] == "T022":
+                            result = st.session_state.get("shoir_tool_result_T022")
+                            if result:
+                                _show_focused_tool_persistence("T022", result, current_tool_inputs)
+                                total_obs = result["total_observations"]
+                                required_obs = result["minimum_observations_for_target_margin"]
+                                confidence_pct = result["confidence_level"] * 100
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Observed samples", f"{total_obs:,}")
+                                c2.metric("Conservative target", f"{required_obs:,}")
+                                c3.metric("Confidence", f"{confidence_pct:.0f}%")
+                                st.markdown(f"**Sampling status:** {result['status']}")
+                                st.caption(result["formula"])
+                                st.caption(result["assumptions"])
+                                st.caption(result["warning"])
+                                st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
+                                df = result["activity_summary"]
+                                st.dataframe(df, use_container_width=True, hide_index=True)
+                                low_col = f"{confidence_pct:.1f}% Wilson lower (%)"
+                                high_col = f"{confidence_pct:.1f}% Wilson upper (%)"
+                                df = df.copy()
+                                df["Error above (%)"] = df[high_col] - df["Observed proportion (%)"]
+                                df["Error below (%)"] = df["Observed proportion (%)"] - df[low_col]
+                                fig = px.bar(
+                                    df, x="Activity", y="Observed proportion (%)",
+                                    error_y="Error above (%)", error_y_minus="Error below (%)",
+                                    title="Observed activity proportions with Wilson intervals",
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                        elif selected_tool["tool_id"] == "T023":
+                            result = st.session_state.get("shoir_tool_result_T023")
+                            if result:
+                                _show_focused_tool_persistence("T023", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric(f"Takt time ({result['time_unit']}/unit)", f"{result['takt_time_per_unit']:,.4g}")
+                                c2.metric("Implied capacity (units/period)", f"{result['implied_capacity_units_per_period']:,.4g}")
+                                c3.metric("Capacity gap (units/period)", f"{result['capacity_gap_units_per_period']:+,.4g}")
+                                st.markdown(f"**Capacity status:** {result['status']}")
+                                st.caption(result["formula"])
+                                st.caption(result["assumptions"])
+                                comparison = pd.DataFrame({
+                                    "Measure": ["Demand", "Implied capacity"],
+                                    "Units per period": [result["demand_units_per_period"], result["implied_capacity_units_per_period"]],
+                                })
+                                st.dataframe(comparison, use_container_width=True, hide_index=True)
+                                st.plotly_chart(
+                                    px.bar(comparison, x="Measure", y="Units per period", title="Demand versus implied capacity"),
+                                    use_container_width=True,
+                                )
+                        elif selected_tool["tool_id"] == "T028":
+                            result = st.session_state.get("shoir_tool_result_T028")
+                            if result:
+                                _show_focused_tool_persistence("T028", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Total recorded occurrences", f"{result['total_count']:,}")
+                                c2.metric("Recorded categories", str(result["category_count"]))
+                                c3.metric("Categories reaching 80%", str(result["categories_to_reach_80_percent"]))
+                                st.markdown(f"**Analysis status:** {result['status']}")
+                                st.caption(result["formula"])
+                                st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
+                                st.warning(result["warning"])
+                                pareto = result["pareto_summary"]
+                                st.dataframe(pareto, use_container_width=True, hide_index=True)
+                                st.plotly_chart(
+                                    px.bar(pareto, x="Category", y="Count", title="Pareto category counts"),
+                                    use_container_width=True,
+                                )
+                                if result["why_chain"]:
+                                    st.markdown("**Recorded 5-Why chain (requires evidence review)**")
+                                    st.dataframe(pd.DataFrame(result["why_chain"]), use_container_width=True, hide_index=True)
+                                    st.markdown(f"**Problem:** {result['problem_statement']}")
+                                    st.markdown(f"**Countermeasure:** {result['countermeasure'] or 'Not yet recorded'}")
+                                    st.markdown(f"**Owner:** {result['owner'] or 'Not yet assigned'}")
+                                    st.markdown(f"**Due date:** {result['due_date'] or 'Not yet set'}")
+                        elif selected_tool["tool_id"] == "T029":
+                            result = st.session_state.get("shoir_tool_result_T029")
+                            if result:
+                                _show_focused_tool_persistence("T029", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Overall 5S score (equal pillar weight)", f"{result['overall_5s_score_pct_equal_pillar_weight']:.1f}%")
+                                c2.metric("Checklist criteria", str(result["criteria_count"]))
+                                c3.metric("Priority actions", str(result["priority_action_count"]))
+                                st.markdown(f"**Audit status:** {result['status']}")
+                                st.caption(result["rubric"])
+                                st.caption(result["formula"])
+                                st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["pillar_summary"], use_container_width=True, hide_index=True)
+                                st.markdown("**Checklist**")
+                                st.dataframe(result["checklist"], use_container_width=True, hide_index=True)
+                                if len(result["priority_actions"]):
+                                    st.markdown("**Items requiring follow-up**")
+                                    st.dataframe(result["priority_actions"], use_container_width=True, hide_index=True)
+                        elif selected_tool["tool_id"] == "T030":
+                            result = st.session_state.get("shoir_tool_result_T030")
+                            if result:
+                                _show_focused_tool_persistence("T030", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("A3 record", result.get("record_id", "Pending"))
+                                c2.metric("Revision", str(result.get("revision_number", 1)))
+                                c3.metric("Status", result["status"])
+                                st.markdown(f"**Problem:** {result['problem_statement']}")
+                                st.markdown(f"**Countermeasure:** {result['countermeasure']}")
+                                st.markdown(f"**Owner / due date:** {result['owner']} / {result['due_date']}")
+                                st.markdown(f"**Baseline → target:** {result['baseline_value']} → {result['target_value']} {result['unit']}")
+                                if result["actual_after_value"] is not None:
+                                    st.markdown(f"**Actual after change:** {result['actual_after_value']} {result['unit']}")
+                                    st.metric("Algebraic progress to target", f"{result['target_progress_pct']:.1f}%")
+                                    st.caption(f"Signed remaining difference (target − actual): {result['remaining_difference_to_target']:,.4g} {result['unit']}")
+                                st.caption(result["assumptions"])
+                                st.warning(result["warning"])
+                                records = st.session_state.get("shoir_kaizen_a3_records", [])
+                                if records:
+                                    st.markdown("**Saved A3 register (current workspace)**")
+                                    overview = [{
+                                        "Record ID": item.get("record_id"),
+                                        "Title": item.get("title"),
+                                        "Status": item.get("status"),
+                                        "Owner": item.get("owner"),
+                                        "Due date": item.get("due_date"),
+                                        "Revision": item.get("revision_number", 1),
+                                        "Updated at": item.get("updated_at", item.get("created_at", "")),
+                                    } for item in records]
+                                    st.dataframe(pd.DataFrame(overview), use_container_width=True, hide_index=True)
+                                    if result.get("revision_history"):
+                                        st.markdown("**Prior revisions**")
+                                        st.dataframe(pd.DataFrame(result["revision_history"]), use_container_width=True, hide_index=True)
+                        elif selected_tool["tool_id"] == "T066":
+                            result = st.session_state.get("shoir_tool_result_T066")
+                            if result:
+                                _show_focused_tool_persistence("T066", result, current_tool_inputs)
+                                st.markdown(f"**Solver status:** {result['status']}")
+                                st.caption(result.get("message", ""))
+                                if result.get("status") == "OPTIMAL":
+                                    c1, c2, c3 = st.columns(3)
+                                    c1.metric("Stock pieces", f"{result['stock_count']:,}")
+                                    c2.metric("Physical utilization", f"{result['physical_utilization_pct']:.1f}%")
+                                    c3.metric("Calculated waste", f"{result['waste_length']:,.3f}")
+                                    st.dataframe(result["cut_plan"], use_container_width=True, hide_index=True)
+                                    if not result["cut_plan"].empty:
+                                        fig = px.bar(
+                                            result["cut_plan"], x="Pattern", y="Stocks",
+                                            title="Optimal cutting-pattern allocation",
+                                            hover_data=["Part mix", "Pieces per stock", "Waste per stock"],
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                elif result.get("issues"):
+                                    st.dataframe(pd.DataFrame(result["issues"]), use_container_width=True, hide_index=True)
+                                else:
+                                    st.warning("The solver did not prove an optimal plan. Do not use this result as a production cut list.")
+                        elif selected_tool["tool_id"] == "T075":
+                            result = st.session_state.get("shoir_tool_result_T075")
+                            if result:
+                                _show_focused_tool_persistence("T075", result, current_tool_inputs)
+                                c1, c2, c3, c4 = st.columns(4)
+                                c1.metric("Status", result["status"])
+                                c2.metric("MAE", f"{result['mae']:.4g}")
+                                c3.metric("RMSE", f"{result['rmse']:.4g}")
+                                c4.metric("Mean error", f"{result['bias_actual_minus_prediction']:.4g}")
+                                st.caption(result["warning"])
+                                st.dataframe(result["series"], use_container_width=True, hide_index=True)
+                                fig = px.line(
+                                    result["series"], x="Observation", y=["Prediction", "Actual"],
+                                    markers=True, title="Forecasts versus later actuals",
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                        elif selected_tool["tool_id"] == "T085":
+                            result = st.session_state.get("shoir_tool_result_T085")
+                            if result:
+                                _show_focused_tool_persistence("T085", result, current_tool_inputs)
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Status", result["status"])
+                                c2.metric(
+                                    "Samples per group",
+                                    str(result["required_n_per_group"]) if result["required_n_per_group"] is not None else "Limit reached",
+                                )
+                                c3.metric("Achieved power", f"{result['achieved_power']:.3f}")
+                                st.caption(result["assumptions"])
+                                chart_df = pd.DataFrame({
+                                    "Metric": ["Target power", "Achieved power"],
+                                    "Power": [result["target_power"], result["achieved_power"]],
+                                })
+                                st.plotly_chart(
+                                    px.bar(chart_df, x="Metric", y="Power", range_y=[0, 1],
+                                           title="Requested versus achieved power"),
+                                    use_container_width=True,
+                                )
+                                if result["status"] == "LIMIT_REACHED":
+                                    st.warning(result["message"])
+                                else:
+                                    st.write(result["message"])
+                        elif selected_tool["tool_id"] == "T015":
+                            result = st.session_state.get("shoir_tool_result_T015")
+                            if result:
+                                _show_focused_tool_persistence("T015", result, current_tool_inputs)
                                 m1, m2, m3 = st.columns(3)
-                                m1.metric("F statistic", f"{result['f_statistic']:.4g}")
-                                m2.metric("p-value", f"{result['p_value']:.4g}")
-                                m3.metric("Eta squared", f"{result['eta_squared']:.4f}")
-                                st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
-                                st.dataframe(result["group_summary"], use_container_width=True, hide_index=True)
+                                m1.metric("Source columns", result["source_column_count"])
+                                m2.metric("Mapped/suggested", result["mapped_or_suggested_count"])
+                                m3.metric("Needs review", result["needs_manual_review_count"])
+                                st.dataframe(result["mapping_table"], use_container_width=True, hide_index=True)
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T049":
+                            result = st.session_state.get("shoir_tool_result_T049")
+                            if result:
+                                _show_focused_tool_persistence("T049", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Selected work orders", result["selected_count"])
+                                m2.metric("Deferred work orders", result["deferred_count"])
+                                m3.metric("Labor hours selected", f"{result['selected_labor_hours']:.2f}")
+                                st.markdown(f"**Priority method:** {result['method']}")
+                                st.markdown("**Recommended queue**")
+                                st.dataframe(result["selected_work_orders"], use_container_width=True, hide_index=True)
+                                st.markdown("**Deferred / blocked**")
+                                st.dataframe(result["deferred_work_orders"], use_container_width=True, hide_index=True)
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T052":
+                            result = st.session_state.get("shoir_tool_result_T052")
+                            if result:
+                                _show_focused_tool_persistence("T052", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Total demand", f"{result['total_demand']:,.0f}")
+                                m2.metric("Ending inventory", f"{result['ending_inventory']:,.1f}")
+                                m3.metric("Ending backlog", f"{result['ending_backlog']:,.1f}")
+                                st.dataframe(result["period_plan"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.bar(result["period_plan"], x="Period", y=["Demand", "Capacity-constrained production", "Ending inventory", "Ending backlog"], barmode="group", title="S&OP supply, demand and remaining position"), use_container_width=True)
+                                st.caption(result["assumptions"])
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T058":
+                            result = st.session_state.get("shoir_tool_result_T058")
+                            if result:
+                                _show_focused_tool_persistence("T058", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Suppliers", result["supplier_count"])
+                                m2.metric("Complete scorecards", result["complete_score_count"])
+                                m3.metric("Incomplete", result["incomplete_score_count"])
+                                st.dataframe(result["scorecard"], use_container_width=True, hide_index=True)
+                                st.caption(result["warning"])
+                        elif selected_tool["tool_id"] == "T033":
+                            result = st.session_state.get("shoir_tool_result_T033")
+                            if result:
+                                _show_focused_tool_persistence("T033", result, current_tool_inputs)
+                                m1, m2, m3, m4 = st.columns(4)
+                                m1.metric("Gage R&R", f"{result['gage_rr_percent_variance']:.2f}% of variance")
+                                m2.metric("Repeatability SD", f"{result['repeatability_sd']:.4g}")
+                                m3.metric("Reproducibility SD", f"{result['reproducibility_sd']:.4g}")
+                                m4.metric("Distinct categories", str(result["number_of_distinct_categories"] or "Not estimable"))
+                                if result["percent_tolerance"] is not None:
+                                    st.metric("% of tolerance (6σ / tolerance)", f"{result['percent_tolerance']:.2f}%")
+                                st.dataframe(result["variance_components"], use_container_width=True, hide_index=True)
                                 st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
-                            st.warning(result["warning"])
-                            st.caption(result["assumptions"])
-                    elif selected_tool["tool_id"] == "T037":
-                        result = st.session_state.get("shoir_tool_result_T037")
-                        if result:
-                            _show_focused_tool_persistence("T037", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Two-sided p-value", f"{result['p_value']:.4g}")
-                            m2.metric("t statistic", f"{result['t_statistic']:.4g}")
-                            m3.metric("Mean difference A − B", f"{result['mean_difference_a_minus_b']:.4g}")
-                            st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
-                            st.caption(f"95% confidence interval for mean difference: {result['mean_difference_confidence_interval']}")
-                            st.dataframe(pd.DataFrame([
-                                {"Measure": "Sample A mean", "Value": result["mean_a"]},
-                                {"Measure": "Sample B mean", "Value": result["mean_b"]},
-                                {"Measure": "Degrees of freedom", "Value": result["degrees_of_freedom"]},
-                                {"Measure": "Descriptive standardized difference", "Value": result["descriptive_standardized_difference"]},
-                            ]), use_container_width=True, hide_index=True)
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T051":
-                        result = st.session_state.get("shoir_tool_result_T051")
-                        if result:
-                            _show_focused_tool_persistence("T051", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Selected baseline", result["selected_model"])
-                            m2.metric("Holdout periods", str(result["holdout_count"]))
-                            m3.metric("Forecast horizon", str(len(result["forecast"])))
-                            st.dataframe(result["metrics"], use_container_width=True, hide_index=True)
-                            st.markdown("**Chronological holdout comparison**")
-                            st.dataframe(result["backtest"], use_container_width=True, hide_index=True)
-                            st.markdown("**Selected baseline forecast**")
-                            st.dataframe(result["forecast"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.line(
-                                result["backtest"], x="Holdout step",
-                                y=["Observed demand", "Naive last value", "Training mean", "Trailing moving average"],
-                                markers=True, title="Forecast baselines on holdout data",
-                            ), use_container_width=True)
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T072":
-                        result = st.session_state.get("shoir_tool_result_T072")
-                        if result:
-                            _show_focused_tool_persistence("T072", result, current_tool_inputs)
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric(f"Mean net outcome ({result['output_unit']})", f"{result['mean']:,.4g}")
-                            m2.metric("Outcome standard deviation", f"{result['standard_deviation']:,.4g}")
-                            m3.metric("Probability of negative outcome", f"{result['probability_negative_pct']:.2f}%")
-                            st.markdown(f"**Trials:** {result['iterations']:,} · **Seed:** {result['seed']}")
-                            percentile_frame = pd.DataFrame([{"Percentile": f"P{key}", "Outcome": value} for key, value in result["percentiles"].items()])
-                            st.dataframe(percentile_frame, use_container_width=True, hide_index=True)
-                            st.markdown("**Component distribution assumptions and sensitivity**")
-                            st.dataframe(result["component_summary"], use_container_width=True, hide_index=True)
-                            sample_col = result["sample_outcomes"].columns[-1]
-                            st.plotly_chart(px.histogram(result["sample_outcomes"], x=sample_col, nbins=40, title="Simulated net-outcome distribution (sample shown)"), use_container_width=True)
-                            st.plotly_chart(px.line(result["convergence"], x="Trials", y="Running mean", markers=True, title="Running mean diagnostic"), use_container_width=True)
-                            st.caption(result["assumptions"])
-                            st.warning(result["warning"])
-                    elif selected_tool["tool_id"] == "T026":
-                        result = st.session_state.get("shoir_tool_result_T026")
-                        if result:
-                            _show_focused_tool_persistence("T026", result, current_tool_inputs)
-                            k1, k2, k3, k4 = st.columns(4)
-                            k1.metric("Availability", f"{result['availability_pct']:.2f}%")
-                            k2.metric("Performance", f"{result['performance_pct']:.2f}%")
-                            k3.metric("Quality", f"{result['quality_pct']:.2f}%")
-                            k4.metric("OEE", f"{result['oee_pct']:.2f}%")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"]) if result["status"] != "CALCULATED" else st.caption(result["warning"])
-                            st.dataframe(result["losses"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.bar(result["losses"], x="Component", y=f"Time equivalent ({result['time_unit']})", title="OEE loss decomposition"), use_container_width=True)
-                    elif selected_tool["tool_id"] == "T032":
-                        result = st.session_state.get("shoir_tool_result_T032")
-                        if result:
-                            _show_focused_tool_persistence("T032", result, current_tool_inputs)
-                            cols = st.columns(4)
-                            for col, label, metric in zip(cols, ("Cp", "Cpk", "Pp", "Ppk"), ("cp", "cpk", "pp", "ppk")):
-                                col.metric(label, f"{result[metric]:.4f}")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["series"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.line(result["series"], x="Observation", y=f"Measurement ({result['unit']})", markers=True, title="Process measurements by observation"), use_container_width=True)
-                    elif selected_tool["tool_id"] == "T055":
-                        result = st.session_state.get("shoir_tool_result_T055")
-                        if result:
-                            _show_focused_tool_persistence("T055", result, current_tool_inputs)
-                            cols = st.columns(3)
-                            cols[0].metric("Economic order quantity", f"{result['economic_order_quantity_units']:,.2f}")
-                            cols[1].metric("Safety stock", f"{result['safety_stock_units']:,.2f}")
-                            cols[2].metric("Reorder point", f"{result['reorder_point_units']:,.2f}")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(pd.DataFrame([{"Measure": "Annual demand (units)", "Value": result["annual_demand_units"]}, {"Measure": "EOQ (units/order)", "Value": result["economic_order_quantity_units"]}, {"Measure": "Safety stock (units)", "Value": result["safety_stock_units"]}, {"Measure": "Reorder point (units)", "Value": result["reorder_point_units"]}]), use_container_width=True, hide_index=True)
-                    elif selected_tool["tool_id"] == "T078":
-                        result = st.session_state.get("shoir_tool_result_T078")
-                        if result:
-                            _show_focused_tool_persistence("T078", result, current_tool_inputs)
-                            cols = st.columns(2)
-                            cols[0].metric("Emissions", f"{result['emissions_kg_co2e']:,.4g} kg CO2e")
-                            cols[1].metric("Emissions", f"{result['emissions_tonnes_co2e']:,.6g} t CO2e")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.write(f"Factor source: {result['factor_source']} · date: {result['factor_date']} · boundary: {result['boundary']}")
-                    elif selected_tool["tool_id"] == "T081":
-                        result = st.session_state.get("shoir_tool_result_T081")
-                        if result:
-                            _show_focused_tool_persistence("T081", result, current_tool_inputs)
-                            cols = st.columns(3)
-                            cols[0].metric(f"NPV ({result['currency']})", f"{result['npv']:,.2f}")
-                            cols[1].metric("IRR", f"{result['irr_pct']:.3f}%" if result["irr_pct"] is not None else "Not established")
-                            cols[2].metric("Simple payback", f"{result['simple_payback_periods']:.3f} periods" if result["simple_payback_periods"] is not None else "Not reached")
-                            st.caption(result["formula"])
-                            st.warning(result["warning"])
-                            st.dataframe(result["cash_flow_schedule"], use_container_width=True, hide_index=True)
-                            st.plotly_chart(px.line(result["cash_flow_schedule"], x="Period", y=f"Cumulative cash flow ({result['currency']})", markers=True, title="Cumulative project cash flow"), use_container_width=True)
+                                for warning in result["warnings"]:
+                                    st.warning(warning)
+                                st.caption(result["assumptions"])
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T035":
+                            result = st.session_state.get("shoir_tool_result_T035")
+                            if result:
+                                _show_focused_tool_persistence("T035", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Full-factorial combinations", result["factorial_combinations"])
+                                m2.metric("Runs", result["run_count"])
+                                m3.metric("Model R²", "N/A" if result["r_squared"] is None else f"{result['r_squared']:.4f}")
+                                st.dataframe(result["effects"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.bar(result["effects"], x="Term", y="Estimated effect (high − low)", title="DOE estimated factor and pairwise effects"), use_container_width=True)
+                                st.dataframe(result["run_results"], use_container_width=True, hide_index=True)
+                                st.caption(result["assumptions"])
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T036":
+                            result = st.session_state.get("shoir_tool_result_T036")
+                            if result:
+                                _show_focused_tool_persistence("T036", result, current_tool_inputs)
+                                st.markdown(f"**Method:** {result['method']}")
+                                if result["method"].startswith("Ordinary least squares"):
+                                    m1, m2, m3, m4 = st.columns(4)
+                                    m1.metric("Slope", f"{result['slope']:.5g}")
+                                    m2.metric("Intercept", f"{result['intercept']:.5g}")
+                                    m3.metric("R²", f"{result['r_squared']:.4f}")
+                                    m4.metric("Slope p-value", f"{result['slope_p_value']:.4g}")
+                                    st.caption(f"95% slope confidence interval: {result['slope_confidence_interval']}")
+                                    st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
+                                    st.plotly_chart(px.scatter(result["residuals"], x="X", y="Residual", title="Regression residuals by predictor"), use_container_width=True)
+                                    st.dataframe(result["residuals"], use_container_width=True, hide_index=True)
+                                else:
+                                    m1, m2, m3 = st.columns(3)
+                                    m1.metric("F statistic", f"{result['f_statistic']:.4g}")
+                                    m2.metric("p-value", f"{result['p_value']:.4g}")
+                                    m3.metric("Eta squared", f"{result['eta_squared']:.4f}")
+                                    st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
+                                    st.dataframe(result["group_summary"], use_container_width=True, hide_index=True)
+                                    st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
+                                st.warning(result["warning"])
+                                st.caption(result["assumptions"])
+                        elif selected_tool["tool_id"] == "T037":
+                            result = st.session_state.get("shoir_tool_result_T037")
+                            if result:
+                                _show_focused_tool_persistence("T037", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Two-sided p-value", f"{result['p_value']:.4g}")
+                                m2.metric("t statistic", f"{result['t_statistic']:.4g}")
+                                m3.metric("Mean difference A − B", f"{result['mean_difference_a_minus_b']:.4g}")
+                                st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
+                                st.caption(f"95% confidence interval for mean difference: {result['mean_difference_confidence_interval']}")
+                                st.dataframe(pd.DataFrame([
+                                    {"Measure": "Sample A mean", "Value": result["mean_a"]},
+                                    {"Measure": "Sample B mean", "Value": result["mean_b"]},
+                                    {"Measure": "Degrees of freedom", "Value": result["degrees_of_freedom"]},
+                                    {"Measure": "Descriptive standardized difference", "Value": result["descriptive_standardized_difference"]},
+                                ]), use_container_width=True, hide_index=True)
+                                st.caption(result["assumptions"])
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T051":
+                            result = st.session_state.get("shoir_tool_result_T051")
+                            if result:
+                                _show_focused_tool_persistence("T051", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Selected baseline", result["selected_model"])
+                                m2.metric("Holdout periods", str(result["holdout_count"]))
+                                m3.metric("Forecast horizon", str(len(result["forecast"])))
+                                st.dataframe(result["metrics"], use_container_width=True, hide_index=True)
+                                st.markdown("**Chronological holdout comparison**")
+                                st.dataframe(result["backtest"], use_container_width=True, hide_index=True)
+                                st.markdown("**Selected baseline forecast**")
+                                st.dataframe(result["forecast"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.line(
+                                    result["backtest"], x="Holdout step",
+                                    y=["Observed demand", "Naive last value", "Training mean", "Trailing moving average"],
+                                    markers=True, title="Forecast baselines on holdout data",
+                                ), use_container_width=True)
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T072":
+                            result = st.session_state.get("shoir_tool_result_T072")
+                            if result:
+                                _show_focused_tool_persistence("T072", result, current_tool_inputs)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric(f"Mean net outcome ({result['output_unit']})", f"{result['mean']:,.4g}")
+                                m2.metric("Outcome standard deviation", f"{result['standard_deviation']:,.4g}")
+                                m3.metric("Probability of negative outcome", f"{result['probability_negative_pct']:.2f}%")
+                                st.markdown(f"**Trials:** {result['iterations']:,} · **Seed:** {result['seed']}")
+                                percentile_frame = pd.DataFrame([{"Percentile": f"P{key}", "Outcome": value} for key, value in result["percentiles"].items()])
+                                st.dataframe(percentile_frame, use_container_width=True, hide_index=True)
+                                st.markdown("**Component distribution assumptions and sensitivity**")
+                                st.dataframe(result["component_summary"], use_container_width=True, hide_index=True)
+                                sample_col = result["sample_outcomes"].columns[-1]
+                                st.plotly_chart(px.histogram(result["sample_outcomes"], x=sample_col, nbins=40, title="Simulated net-outcome distribution (sample shown)"), use_container_width=True)
+                                st.plotly_chart(px.line(result["convergence"], x="Trials", y="Running mean", markers=True, title="Running mean diagnostic"), use_container_width=True)
+                                st.caption(result["assumptions"])
+                                st.warning(result["warning"])
+                        elif selected_tool["tool_id"] == "T026":
+                            result = st.session_state.get("shoir_tool_result_T026")
+                            if result:
+                                _show_focused_tool_persistence("T026", result, current_tool_inputs)
+                                k1, k2, k3, k4 = st.columns(4)
+                                k1.metric("Availability", f"{result['availability_pct']:.2f}%")
+                                k2.metric("Performance", f"{result['performance_pct']:.2f}%")
+                                k3.metric("Quality", f"{result['quality_pct']:.2f}%")
+                                k4.metric("OEE", f"{result['oee_pct']:.2f}%")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"]) if result["status"] != "CALCULATED" else st.caption(result["warning"])
+                                st.dataframe(result["losses"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.bar(result["losses"], x="Component", y=f"Time equivalent ({result['time_unit']})", title="OEE loss decomposition"), use_container_width=True)
+                        elif selected_tool["tool_id"] == "T032":
+                            result = st.session_state.get("shoir_tool_result_T032")
+                            if result:
+                                _show_focused_tool_persistence("T032", result, current_tool_inputs)
+                                cols = st.columns(4)
+                                for col, label, metric in zip(cols, ("Cp", "Cpk", "Pp", "Ppk"), ("cp", "cpk", "pp", "ppk")):
+                                    col.metric(label, f"{result[metric]:.4f}")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["series"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.line(result["series"], x="Observation", y=f"Measurement ({result['unit']})", markers=True, title="Process measurements by observation"), use_container_width=True)
+                        elif selected_tool["tool_id"] == "T055":
+                            result = st.session_state.get("shoir_tool_result_T055")
+                            if result:
+                                _show_focused_tool_persistence("T055", result, current_tool_inputs)
+                                cols = st.columns(3)
+                                cols[0].metric("Economic order quantity", f"{result['economic_order_quantity_units']:,.2f}")
+                                cols[1].metric("Safety stock", f"{result['safety_stock_units']:,.2f}")
+                                cols[2].metric("Reorder point", f"{result['reorder_point_units']:,.2f}")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(pd.DataFrame([{"Measure": "Annual demand (units)", "Value": result["annual_demand_units"]}, {"Measure": "EOQ (units/order)", "Value": result["economic_order_quantity_units"]}, {"Measure": "Safety stock (units)", "Value": result["safety_stock_units"]}, {"Measure": "Reorder point (units)", "Value": result["reorder_point_units"]}]), use_container_width=True, hide_index=True)
+                        elif selected_tool["tool_id"] == "T078":
+                            result = st.session_state.get("shoir_tool_result_T078")
+                            if result:
+                                _show_focused_tool_persistence("T078", result, current_tool_inputs)
+                                cols = st.columns(2)
+                                cols[0].metric("Emissions", f"{result['emissions_kg_co2e']:,.4g} kg CO2e")
+                                cols[1].metric("Emissions", f"{result['emissions_tonnes_co2e']:,.6g} t CO2e")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.write(f"Factor source: {result['factor_source']} · date: {result['factor_date']} · boundary: {result['boundary']}")
+                        elif selected_tool["tool_id"] == "T081":
+                            result = st.session_state.get("shoir_tool_result_T081")
+                            if result:
+                                _show_focused_tool_persistence("T081", result, current_tool_inputs)
+                                cols = st.columns(3)
+                                cols[0].metric(f"NPV ({result['currency']})", f"{result['npv']:,.2f}")
+                                cols[1].metric("IRR", f"{result['irr_pct']:.3f}%" if result["irr_pct"] is not None else "Not established")
+                                cols[2].metric("Simple payback", f"{result['simple_payback_periods']:.3f} periods" if result["simple_payback_periods"] is not None else "Not reached")
+                                st.caption(result["formula"])
+                                st.warning(result["warning"])
+                                st.dataframe(result["cash_flow_schedule"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.line(result["cash_flow_schedule"], x="Period", y=f"Cumulative cash flow ({result['currency']})", markers=True, title="Cumulative project cash flow"), use_container_width=True)
     else:
         st.info("No target tools match these filters. Clear the search or select All workbenches / All statuses.")
 
