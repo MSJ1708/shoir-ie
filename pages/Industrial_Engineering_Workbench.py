@@ -427,6 +427,13 @@ else:
         unsafe_allow_html=True,
     )
 
+_previous_workbench_module = st.session_state.get("_shoir_previous_workbench_module")
+if _previous_workbench_module is not None and _previous_workbench_module != selected:
+    # Clear a stale inspector selection when the user navigates to another module.
+    # This ensures focused tool rendering never blocks the established module route.
+    st.session_state["shoir_100_tool_inspector"] = "— Select a tool to inspect —"
+st.session_state["_shoir_previous_workbench_module"] = selected
+
 _selected_requirement = available.loc[available["Module"] == selected, "Required Tier"]
 required = str(_selected_requirement.iloc[0]) if not _selected_requirement.empty else "Starter"
 _selected_module_allowed = tier_allows(RAW_TIER, required)
