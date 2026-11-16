@@ -106,6 +106,11 @@ def test_t064_routing_requires_complete_directed_matrix_and_reports_unserved_sto
     assert result["served_stop_count"] == 1
     assert result["unserved_stop_count"] == 1
     assert not result["feasible"]
+    payload["vehicles_json"] = '[{"id":"V1","capacity":1,"max_route_minutes":120}]'
+    no_assignment = _run("T064", payload)
+    assert no_assignment["served_stop_count"] == 0
+    assert no_assignment["unserved_stop_count"] == 2
+    payload["vehicles_json"] = '[{"id":"V1","capacity":4,"max_route_minutes":120}]'
     payload["travel_matrix_json"] = "[]"
     with pytest.raises(ValueError, match="Travel matrix"):
         _run("T064", payload)
