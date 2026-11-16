@@ -410,3 +410,40 @@ def test_digital_thread_rename_history_persists_but_rename_widget_state_does_not
     assert "global_thread_rename_name_AST-1001" not in restored
     assert "global_thread_rename_save" not in restored
     assert restored["shoir_digital_thread_rename_history"][0]["event_id"] == "DTR-TEST-1"
+
+def test_kpi_alert_dedup_state_round_trips_per_user_workspace(tmp_path: Path):
+    """T094 open-alert fingerprints must survive a new session without crossing users."""
+    db = str(tmp_path / "kpi-alert-workspace.db")
+    alert = {
+        "fingerprint": "sha256:synthetic-alert-fingerprint",
+        "alert_id": "ALT-SYN-001",
+        "rule_id": "scrap-high",
+        "state": "OPEN",
+    }
+    source = {
+        "current_user": "Alice",
+        "authenticated": True,
+        "shoir_kpi_open_alert_records": [alert],
+        "shoir_kpi_open_alert_ids": [alert["alert_id"]],
+        "shoir_tool_result_T094": {
+            "tool_id": "T094",
+            "status": "KPI_ALERTS_EVALUATED",
+            "new_alert_count": 1,
+            "alert_records": [alert],
+            "data_provenance": "SYNTHETIC",
+        },
+    }
+    assert save_user_workspace("Alice", source, db)
+
+    # A fresh session for the same account restores alert fingerprints and IDs.
+    restored_alice = {"current_user": "Alice", "authenticated": True}
+    assert load_user_workspace("Alice", restored_alice, db)
+    assert restored_alice["shoir_kpi_open_alert_records"] == [alert]
+    assert restored_alice["shoir_kpi_open_alert_ids"] == [alert["alert_id"]]
+    assert restored_alice["shoir_tool_result_T094"]["tool_id"] == "T094"
+
+    # A different account receives none of Alice's alert history.
+    restored_bob = {"current_user": "Bob", "authenticated": True}
+    assert not load_user_workspace("Bob", restored_bob, db)
+    assert "shoir_kpi_open_alert_records" not in restored_bob
+    assert "shoir_tool_result_T094" not in restored_bob
