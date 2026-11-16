@@ -250,3 +250,30 @@ The candidate contains local Office.js scaffolding; its manifest has not been ac
 7. Production migrations/deployment require a separate explicit authorization and a production backup/recovery plan. This runbook grants neither.
 
 **Stop condition:** Any unexpected migration, missing backup, wrong app banner/host, non-`shoir-e2e-` test identity, cross-tenant access, failed required check, unresolved review thread, skipped acceptance case, or mismatch in deployed function/source means STOP and keep BETA / NO-GO.
+
+---
+
+## Candidate update — 2026-11-16: remaining canonical Workbench routes
+
+The candidate now includes a dedicated source dispatch module for the nine IDs that were previously navigation-only: T001, T003, T008, T053, T057, T064, T088, T090 and T093.
+
+- Each target is routed by canonical ID in the existing Workbench inspector.
+- Each render and submit path calls the canonical tier gate. Execution also requires the existing authenticated actor callback.
+- Result/input saves use the existing per-user workspace persistence helper; no second persistence implementation was introduced.
+- The new focused test module covers all nine target engines plus guest denial, invalid DAGs, routing matrix completeness, scheduling material constraints and roster conflicts.
+- The static execution audit is updated to expect 100 dedicated dispatch IDs and zero mapped-only IDs. This measures source wiring only, not acceptance.
+
+Important boundaries:
+- T001 reads authenticated session metadata, not a live operational/tenant-wide dashboard.
+- T003 searches permitted canonical tool metadata and current-session result labels only.
+- T008 discloses missing formula/unit/assumption/limit metadata and redacts secret-like fields; it does not infer missing engineering assumptions.
+- T053 is a priority/earliest-due-date list heuristic, not a global job-shop optimizer.
+- T057 is a skill/availability roster heuristic, not legal or fatigue-rule certification.
+- T064 is a nearest-feasible-stop heuristic using a user-supplied matrix, not a live road/traffic route optimizer.
+- T088 checks DOI/URL syntax only; citations and claims remain unverified.
+- T090 formats supplied report content; it does not rerun or certify results.
+- T093 validates and orders a typed DAG plan only; it does not execute downstream tools.
+
+Required before any of these IDs may become VERIFIED_WORKING: exact-head CI on the latest candidate SHA; authenticated browser walkthrough; package/role denial tests; managed save, fresh-session reload and tenant isolation evidence; export inspection where applicable; and independent engineering/research review. Do not promote any matrix status based on authored tests or a source-route audit alone.
+
+No staging migration, Edge Function deployment, production write, account mutation, credential read or merge is authorized by this code change. Retain PR #232 as draft, keep BETA, and keep production NO-GO.
