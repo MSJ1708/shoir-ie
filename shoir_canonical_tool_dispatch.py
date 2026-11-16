@@ -275,7 +275,7 @@ def _t093(p,tier,actor):
         x=by[sid]; tool=TOOL_BY_ID[x["tool_id"]]; missing=[k for k in x["required"] if k not in x["inputs"]]; blocked=[d for d in x["deps"] if states.get(d)!="READY_FOR_APPROVAL_NOT_VALIDATED"]
         if not tier_allows_tool(tier,x["tool_id"]): current="BLOCKED_TIER"
         elif tool["implementation_status"]=="EXTERNAL_CONFIGURATION_REQUIRED": current="BLOCKED_EXTERNAL_CONFIGURATION"
-        elif tool["implementation_status"] in {"MISSING","BLOCKED","FOUNDATION_ONLY"}: current="BLOCKED_CAPABILITY"
+        elif tool["implementation_status"] not in {"VERIFIED_WORKING","IMPLEMENTED_NEEDS_VALIDATION"}: current="BLOCKED_CAPABILITY"
         elif missing: current="BLOCKED_INPUTS"
         elif blocked: current="BLOCKED_DEPENDENCY"
         else: current="READY_FOR_APPROVAL_NOT_VALIDATED"
