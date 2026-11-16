@@ -56,7 +56,7 @@ def _utc_series(values: Any, field: str, allow_blank: bool=False):
             normalized.append(pd.NaT)
         else:
             normalized.append(_utc(value,f"{field} row {index+1}"))
-    return pd.to_datetime(normalized,utc=True,errors="raise").dt.tz_convert(None)
+    return pd.to_datetime(pd.Series(normalized),utc=True,errors="raise").dt.tz_convert(None)
 
 
 def _safe(value: Any, depth: int=0):
