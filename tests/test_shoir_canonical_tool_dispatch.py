@@ -114,6 +114,14 @@ def test_t064_routing_requires_complete_directed_matrix_and_reports_unserved_sto
     payload["travel_matrix_json"] = "[]"
     with pytest.raises(ValueError, match="Travel matrix"):
         _run("T064", payload)
+    payload["travel_matrix_json"] = (
+        '[{"from":"D","to":"A","distance":2,"travel_minutes":2},{"from":"A","to":"D","distance":2,"travel_minutes":2},'
+        '{"from":"D","to":"B","distance":3,"travel_minutes":3},{"from":"B","to":"D","distance":3,"travel_minutes":3},'
+        '{"from":"A","to":"B","distance":1,"travel_minutes":1},{"from":"B","to":"A","distance":1,"travel_minutes":1},'
+        '{"from":"D","to":"A","distance":9,"travel_minutes":9}]'
+    )
+    with pytest.raises(ValueError, match="Duplicate travel-matrix arc"):
+        _run("T064", payload)
 
 
 def test_t088_citation_matrix_never_claims_source_verification():
@@ -161,6 +169,12 @@ def test_t093_rejects_cycles_and_incompatible_linked_types():
     incompatible = '[{"step_id":"A","tool_id":"T011","depends_on":[],"inputs":{},"outputs":{"table":"object"}},{"step_id":"B","tool_id":"T024","depends_on":["A"],"inputs":{"table":{"from_step":"A","output":"table","type":"string"}},"outputs":{}}]'
     with pytest.raises(ValueError, match="incompatible"):
         _run("T093", {"steps_json": incompatible})
+    duplicate_dependency = '[{"step_id":"A","tool_id":"T011","depends_on":[],"inputs":{},"outputs":{"table":"object"}},{"step_id":"B","tool_id":"T024","depends_on":["A","A"],"inputs":{},"outputs":{}}]'
+    with pytest.raises(ValueError, match="more than once"):
+        _run("T093", {"steps_json": duplicate_dependency})
+    invalid_output_type = '[{"step_id":"A","tool_id":"T011","depends_on":[],"inputs":{},"outputs":{"table":"arbitrary"}}]'
+    with pytest.raises(ValueError, match="invalid output"):
+        _run("T093", {"steps_json": invalid_output_type})
 
 
 def test_dispatch_rejects_guest_and_unimplemented_ids():
