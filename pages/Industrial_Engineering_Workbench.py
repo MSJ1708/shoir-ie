@@ -502,6 +502,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
             "Existing route": item["existing_module_or_route"],
         })
     st.caption(f"Showing {len(directory_rows)} of {len(TOOL_TARGETS)} target tools.")
+    _active_canonical_tool = False
     if directory_rows:
         st.dataframe(pd.DataFrame(directory_rows), use_container_width=True, hide_index=True)
         choices = ["— Select a tool to inspect —"] + [
@@ -512,6 +513,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
         chosen = st.selectbox("Inspect tool requirements", choices, key="shoir_100_tool_inspector")
         chosen_id = chosen.split(" · ", 1)[0]
         selected_tool = next((item for item in TOOL_TARGETS if item["tool_id"] == chosen_id), None)
+        _active_canonical_tool = bool(selected_tool and selected_tool["tool_id"] in {"T001", "T003", "T008", "T053", "T057", "T064", "T088", "T090", "T093"})
         if selected_tool:
             st.markdown(f"**{selected_tool['canonical_name']}** · {selected_tool['target_minimum_tier']} minimum")
             st.write(selected_tool["calculation_or_action"])
@@ -3675,6 +3677,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
 
 # A denied legacy module may not render, but users can still discover tools and see their tier requirements.
 if not _selected_module_allowed:
+    st.stop()
+if _active_canonical_tool:
+    # A focused canonical tool owns the main pane for this selection. The
+    # ordinary module shell remains available when the inspector placeholder
+    # is selected or a user opens a mapped module explicitly.
     st.stop()
 
 # Specialized upgraded surfaces
