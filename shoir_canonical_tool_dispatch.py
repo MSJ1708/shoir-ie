@@ -48,6 +48,17 @@ def _utc(value: Any, field: str) -> datetime:
     if stamp.tzinfo is None: raise ValueError(f"{field} must include a timezone offset or Z.")
     return stamp.tz_convert("UTC").tz_localize(None).to_pydatetime()
 
+def _utc_series(values: Any, field: str, allow_blank: bool=False):
+    """Normalize an ISO-8601 series to naive UTC only after validating every offset."""
+    normalized=[]
+    for index,value in enumerate(values):
+        if allow_blank and (value is None or (isinstance(value,float) and math.isnan(value)) or str(value).strip()==""):
+            normalized.append(pd.NaT)
+        else:
+            normalized.append(_utc(value,f"{field} row {index+1}"))
+    return pd.to_datetime(normalized,utc=True,errors="raise").dt.tz_convert(None)
+
+
 def _safe(value: Any, depth: int=0):
     if depth>8: return "[DEPTH_LIMIT]"
     if isinstance(value,Mapping):
@@ -107,15 +118,14 @@ def _t053(p,actor):
         orders[col]=pd.to_numeric(orders[col],errors="coerce")
         if orders[col].isna().any() or not all(math.isfinite(float(v)) for v in orders[col]): raise ValueError(f"{col} must be finite numeric values.")
     if (orders["Qty"]<=0).any() or (orders["ProcessingMin"]<=0).any() or (orders["SetupMin"]<0).any(): raise ValueError("Qty and ProcessingMin must be positive; SetupMin cannot be negative.")
-    for col in ("DueDate","MaterialReady"):
-        parsed=pd.to_datetime(orders[col].replace("",pd.NA),utc=True,errors="coerce")
-        if col=="DueDate" and parsed.isna().any(): raise ValueError("Every DueDate must be a timezone-aware ISO timestamp.")
-        orders[col]=parsed.dt.tz_convert(None)
+    orders["DueDate"]=_utc_series(orders["DueDate"],"DueDate")
+    orders["MaterialReady"]=_utc_series(orders["MaterialReady"],"MaterialReady",allow_blank=True)
+    if orders["DueDate"].isna().any(): raise ValueError("Every DueDate must be a timezone-aware ISO timestamp.")
     maint_raw=p.get("maintenance_json") or "[]"
     maint=pd.DataFrame(columns=["Machine","Start","End"]) if isinstance(maint_raw,str) and maint_raw.strip()=="[]" else pd.DataFrame(_rows(maint_raw,"Maintenance windows"))
     if not maint.empty:
         if not {"Machine","Start","End"}.issubset(maint.columns): raise ValueError("Maintenance windows require Machine, Start and End.")
-        for col in ("Start","End"): maint[col]=pd.to_datetime(maint[col],utc=True,errors="coerce").dt.tz_convert(None)
+        for col in ("Start","End"): maint[col]=_utc_series(maint[col],f"Maintenance {col}")
         if maint[["Start","End"]].isna().any().any() or (maint["End"]<=maint["Start"]).any(): raise ValueError("Maintenance windows must have valid timezone-aware start/end values.")
     materials={str(k):_num(v,f"Material {k}",0) for k,v in _obj(p.get("materials_json") or "{}","Materials").items()}
     start=_utc(p["start_time_utc"],"Start time") if p.get("start_time_utc") else datetime.now(timezone.utc).replace(tzinfo=None)
