@@ -1,6 +1,6 @@
 # Canonical T001–T100 execution-route audit
 
-**Revision:** 2026-11-15  
+**Revision:** 2026-11-16  
 **Scope:** Source-level route and evidence inventory for the canonical 100-tool registry.  
 **Important:** This is not a passing test report or hosted acceptance certificate.
 
@@ -9,17 +9,15 @@
 | Audit dimension | Count | Meaning |
 |---|---:|---|
 | Canonical registry entries | 100 | Stable T001–T100 metadata rows |
-| Dedicated focused Workbench method branches | 91 | The selected tool ID enters a dedicated method/form dispatch path |
-| Mapped legacy-module launch only | 9 | The directory can open the declared existing module/route, but the selected canonical ID has no dedicated focused method branch |
+| Dedicated focused Workbench method branches | 100 | All canonical IDs have a dedicated ID-bound Workbench dispatch path |
+| Mapped legacy-module launch only | 0 | No canonical ID relies only on a mapped legacy-module launch |
 | IDs with no declared mapped route | 0 | All current rows declare an existing module or route |
 | Verified working | 0 | No tool is promoted to verified by this static audit |
 | External configuration required | 4 | T096–T099 still depend on real service/configuration and acceptance |
 
-The 9 mapped-module-only IDs are:
+The nine formerly mapped-only IDs now enter dedicated canonical dispatch handlers: T001, T003, T008, T053, T057, T064, T088, T090 and T093. Each handler rechecks the canonical tier gate and uses the existing authenticated actor and per-user workspace persistence callbacks. T053, T057 and T064 disclose their bounded heuristic assumptions; T088 marks source syntax as unverified; T090 formats supplied content only; T093 validates a typed workflow plan without executing downstream tools.
 
-`T001, T003, T008, T053, T057, T064, T088, T090, T093`.
-
-The directory's **Open mapped Workbench module** action is a navigation route. It is not proof that the selected canonical ID is carried through the target module's calculation, permission check, persistence, export or audit path. The mapped legacy module must enforce its own native server-side entitlement and authorization rules. These 9 IDs therefore remain a concrete canonical-ID wiring/acceptance gap, even though the corresponding legacy module route is declared.
+This is a source-level route implementation result, not a claim that the tools are verified working. Browser acceptance, fresh-session managed persistence, role/tier matrices, export inspection and independent engineering review remain required. A dedicated route is not an acceptance certificate.
 
 ## What the audit checks
 
