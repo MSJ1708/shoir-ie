@@ -64,9 +64,9 @@ def _t001(p,state,actor):
     for key,val in state.items():
         m=re.fullmatch(r"shoir_tool_result_(T\d{3})",str(key))
         if m and isinstance(val,dict) and tier_allows_tool(p["tier"],m.group(1)):
-            tid=m.group(1); rows.append({"tool_id":tid,"tool_name":TOOL_BY_ID[tid]["canonical_name"],"status":str(val.get("status","RESULT_PRESENT"))[:80],"provenance":str(val.get("data_provenance","NOT_DECLARED"))[:80]})
-    rows.sort(key=lambda r:r["tool_id"],reverse=True)
-    return {**_base("T001",actor,"SESSION_METADATA_ONLY","Authenticated session summary only; not a live operations dashboard or cross-tenant search."),"workspace":str(state.get("shoir_workspace_name") or state.get("active_workspace_name") or state.get("workspace") or "default")[:120],"available_tool_count":sum(tier_allows_tool(p["tier"],t["tool_id"]) for t in TOOL_TARGETS),"recent_tool_count":len(rows),"recent_tools":pd.DataFrame(rows[:20],columns=["tool_id","tool_name","status","provenance"]),"next_action":"Select a tool whose required inputs and validation evidence are available."}
+            tid=m.group(1); rows.append({"tool_id":tid,"tool_name":TOOL_BY_ID[tid]["canonical_name"],"status":str(val.get("status","RESULT_PRESENT"))[:80],"provenance":str(val.get("data_provenance","NOT_DECLARED"))[:80],"saved_at":str(val.get("created_at") or val.get("timestamp") or "Not recorded")[:80]})
+    rows.sort(key=lambda r:r["saved_at"] if r["saved_at"]!="Not recorded" else "",reverse=True)
+    return {**_base("T001",actor,"SESSION_METADATA_ONLY","Authenticated session summary only; timestamps are shown only when recorded by the source result. Not a live operations dashboard or cross-tenant search."),"workspace":str(state.get("shoir_workspace_name") or state.get("active_workspace_name") or state.get("workspace") or "default")[:120],"available_tool_count":sum(tier_allows_tool(p["tier"],t["tool_id"]) for t in TOOL_TARGETS),"recent_tool_count":len(rows),"recent_tools":pd.DataFrame(rows[:20],columns=["tool_id","tool_name","status","provenance","saved_at"]),"next_action":"Select a tool whose required inputs and validation evidence are available."}
 
 def _t003(p,state,actor):
     q=str(p.get("query") or "").strip()
