@@ -174,6 +174,7 @@ def _t064(p,actor):
     for x in matrix:
         a,b=str(x.get("from") or "").strip(),str(x.get("to") or "").strip()
         if a not in nodes or b not in nodes or a==b: raise ValueError(f"Invalid travel arc {a}->{b}.")
+        if (a,b) in arcs: raise ValueError(f"Duplicate travel-matrix arc {a}->{b}.")
         arcs[(a,b)]=(_num(x.get("distance"),"Distance",0),_num(x.get("travel_minutes"),"Travel minutes",0))
     missing={(a,b) for a in nodes for b in nodes if a!=b}-set(arcs)
     if missing: raise ValueError(f"Travel matrix is missing {len(missing)} directed arcs.")
@@ -235,7 +236,11 @@ def _t093(p,tier,actor):
         if not sid or sid in by or tid not in TOOL_BY_ID: raise ValueError("Each step needs a unique ID and valid canonical tool ID.")
         deps,inputs,required,outputs=x.get("depends_on",[]),x.get("inputs",{}),x.get("required_inputs",[]),x.get("outputs",{})
         if not isinstance(deps,list) or not isinstance(inputs,dict) or not isinstance(required,list) or not isinstance(outputs,dict): raise ValueError(f"{sid} has an invalid workflow contract.")
-        by[sid]={"tool_id":tid,"deps":list(map(str,deps)),"inputs":inputs,"required":list(map(str,required)),"outputs":outputs}
+        normalized_deps=list(map(str,deps))
+        if len(normalized_deps)!=len(set(normalized_deps)): raise ValueError(f"{sid} declares the same dependency more than once.")
+        supported_types={"string","number","boolean","array","object"}
+        if any(not str(name).strip() or str(kind) not in supported_types for name,kind in outputs.items()): raise ValueError(f"{sid} declares an invalid output name or type.")
+        by[sid]={"tool_id":tid,"deps":normalized_deps,"inputs":inputs,"required":list(map(str,required)),"outputs":outputs}
     for sid,x in by.items():
         for dep in x["deps"]:
             if dep not in by: raise ValueError(f"{sid} dependency {dep} does not exist.")
@@ -260,7 +265,7 @@ def _t093(p,tier,actor):
         x=by[sid]; tool=TOOL_BY_ID[x["tool_id"]]; missing=[k for k in x["required"] if k not in x["inputs"]]; blocked=[d for d in x["deps"] if states.get(d)!="READY_FOR_APPROVAL_NOT_VALIDATED"]
         if not tier_allows_tool(tier,x["tool_id"]): current="BLOCKED_TIER"
         elif tool["implementation_status"]=="EXTERNAL_CONFIGURATION_REQUIRED": current="BLOCKED_EXTERNAL_CONFIGURATION"
-        elif tool["implementation_status"] in {"MISSING","BLOCKED"}: current="BLOCKED_CAPABILITY"
+        elif tool["implementation_status"] in {"MISSING","BLOCKED","FOUNDATION_ONLY"}: current="BLOCKED_CAPABILITY"
         elif missing: current="BLOCKED_INPUTS"
         elif blocked: current="BLOCKED_DEPENDENCY"
         else: current="READY_FOR_APPROVAL_NOT_VALIDATED"
@@ -289,6 +294,11 @@ def _render_result(tid,result):
         if key in {"tool_id","status","actor","created_at","method_version","data_provenance","warning","report_markdown","filename","sha256"}: continue
         if isinstance(value,pd.DataFrame):
             st.markdown("**"+key.replace("_"," ").title()+"**"); st.dataframe(value,use_container_width=True,hide_index=True)
+            csv_bytes=value.to_csv(index=False).encode("utf-8-sig")
+            export_name=re.sub(r"[^A-Za-z0-9_-]+","-",key).strip("-_")[:50] or "result"
+            export_sha=hashlib.sha256(csv_bytes).hexdigest()
+            st.download_button("Download "+key.replace("_"," ").title()+" (CSV)",csv_bytes,f"shoir_{tid.lower()}_{export_name}.csv","text/csv",key="canonical_export_"+tid+"_"+export_name)
+            st.caption("CSV SHA-256: "+export_sha)
         elif isinstance(value,(dict,list)):
             st.markdown("**"+key.replace("_"," ").title()+"**"); st.json(_safe(value))
         elif key not in {"report_bytes"}: st.write(key.replace("_"," ").title()+": "+str(value))
