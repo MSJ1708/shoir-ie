@@ -76,6 +76,14 @@ def test_t053_scheduler_applies_material_limit_and_maintenance_window():
     assert blocked["diagnostics"]["blocked_orders"] == 1
     assert blocked["schedule"].empty
 
+    payload["materials_json"] = '{"P1":4}'
+    payload["orders_json"] = (
+        '[{"Order":"O1","Product":"P1","Qty":4,"DueDate":"2026-11-20T10:00:00",'
+        '"ProcessingMin":60,"Machine":"M1","SetupMin":5,"Priority":2,"MaterialReady":"2026-11-16T08:00:00"}]'
+    )
+    with pytest.raises(ValueError, match="timezone offset or Z"):
+        _run("T053", payload)
+
 
 def test_t057_roster_prevents_overlap_and_reports_skill_coverage_gaps():
     result = _run("T057", {
