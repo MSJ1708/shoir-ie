@@ -17,7 +17,6 @@ import {
   escapePostgrestLikeLiteral,
   MAX_OIDC_ID_TOKEN_CHARS,
   readOidcVerifierConfig,
-  sha256Hex,
   verifyOidcIdToken,
 } from "./oidc.ts";
 
