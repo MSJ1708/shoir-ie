@@ -28,6 +28,7 @@ from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_d
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
 from shoir_remaining_tool_engines import get_tool_example_json, run_additional_tool
 from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
+from shoir_ergonomics import calculate_rnle_lifting_index
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -1303,17 +1304,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             elif selected_tool["tool_id"] == "T046":
                                 st.caption(
                                     "Single-task, two-handed NIOSH Revised Lifting Equation screen. "
-                                    "Measure H and A at both the origin and destination. Enter FM and "
-                                    "CM from the applicable official NIOSH tables; the app does not guess them."
+                                    "Automatic mode derives FM and CM from NIOSH Tables 5 and 7. "
+                                    "Manual mode is retained for values checked independently by a qualified reviewer."
                                 )
                                 st.markdown(
                                     "[NIOSH RNLE Applications Manual (DHHS/NIOSH 94-110, revised 2021)]"
-                                    "(https://www.cdc.gov/niosh/publications/numbered/94-110.html)"
+                                    "(https://www.cdc.gov/niosh/docs/94-110/)"
                                 )
                                 rnle_units = st.selectbox(
-                                    "Measurement units",
-                                    ["metric", "imperial"],
-                                    key="tool046_units",
+                                    "Measurement units", ["metric", "imperial"], key="tool046_units"
                                 )
                                 distance_unit = "cm" if rnle_units == "metric" else "in"
                                 load_unit = "kg" if rnle_units == "metric" else "lb"
@@ -1324,67 +1323,41 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 v_limit = 175.0 if rnle_units == "metric" else 70.0
                                 rnle_task = st.text_input("Task description", key="tool046_task")
                                 rnle_load = st.number_input(
-                                    f"Object weight ({load_unit})",
-                                    min_value=0.01,
+                                    f"Object weight ({load_unit})", min_value=0.01,
                                     value=10.0 if rnle_units == "metric" else 22.0,
-                                    step=0.5,
-                                    key="tool046_load",
+                                    step=0.5, key="tool046_load",
                                 )
                                 rnle_h_origin = st.number_input(
                                     f"Horizontal hand location at origin ({distance_unit})",
-                                    min_value=0.01,
-                                    max_value=h_limit,
-                                    value=default_h,
-                                    step=1.0,
-                                    key="tool046_h_origin",
+                                    min_value=0.01, max_value=h_limit, value=default_h,
+                                    step=1.0, key="tool046_h_origin",
                                 )
                                 rnle_h_destination = st.number_input(
                                     f"Horizontal hand location at destination ({distance_unit})",
-                                    min_value=0.01,
-                                    max_value=h_limit,
-                                    value=default_h,
-                                    step=1.0,
-                                    key="tool046_h_destination",
+                                    min_value=0.01, max_value=h_limit, value=default_h,
+                                    step=1.0, key="tool046_h_destination",
                                 )
                                 rnle_v_start = st.number_input(
                                     f"Vertical hand location at origin ({distance_unit})",
-                                    min_value=0.0,
-                                    max_value=v_limit,
-                                    value=default_v,
-                                    step=1.0,
-                                    key="tool046_v_start",
+                                    min_value=0.0, max_value=v_limit, value=default_v,
+                                    step=1.0, key="tool046_v_start",
                                 )
                                 rnle_distance = st.number_input(
                                     f"Vertical travel distance ({distance_unit})",
-                                    min_value=0.01,
-                                    max_value=v_limit,
-                                    value=default_d,
-                                    step=1.0,
-                                    key="tool046_distance",
+                                    min_value=0.01, max_value=v_limit, value=default_d,
+                                    step=1.0, key="tool046_distance",
                                 )
                                 rnle_a_origin = st.number_input(
-                                    "Asymmetry angle at origin (degrees)",
-                                    min_value=0.0,
-                                    max_value=135.0,
-                                    value=0.0,
-                                    step=5.0,
-                                    key="tool046_a_origin",
+                                    "Asymmetry angle at origin (degrees)", min_value=0.0,
+                                    max_value=135.0, value=0.0, step=5.0, key="tool046_a_origin",
                                 )
                                 rnle_a_destination = st.number_input(
-                                    "Asymmetry angle at destination (degrees)",
-                                    min_value=0.0,
-                                    max_value=135.0,
-                                    value=0.0,
-                                    step=5.0,
-                                    key="tool046_a_destination",
+                                    "Asymmetry angle at destination (degrees)", min_value=0.0,
+                                    max_value=135.0, value=0.0, step=5.0, key="tool046_a_destination",
                                 )
                                 rnle_frequency = st.number_input(
-                                    "Average lifting frequency (lifts/minute)",
-                                    min_value=0.01,
-                                    max_value=15.0,
-                                    value=1.0,
-                                    step=0.25,
-                                    key="tool046_frequency",
+                                    "Average lifting frequency (lifts/minute)", min_value=0.01,
+                                    max_value=15.0, value=1.0, step=0.25, key="tool046_frequency",
                                 )
                                 rnle_duration = st.selectbox(
                                     "Task duration (with required recovery)",
@@ -1396,40 +1369,75 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     ],
                                     key="tool046_duration",
                                 )
-                                rnle_fm = st.number_input(
-                                    "Frequency multiplier (FM) from NIOSH table",
-                                    min_value=0.0,
-                                    max_value=1.0,
-                                    value=0.0,
-                                    step=0.01,
-                                    key="tool046_fm",
+                                rnle_multiplier_mode = st.selectbox(
+                                    "Multiplier calculation",
+                                    [
+                                        "Calculate automatically from NIOSH Tables 5 and 7",
+                                        "Enter verified FM and CM manually",
+                                    ],
+                                    key="tool046_multiplier_mode",
                                 )
-                                rnle_fm_source = st.text_input(
-                                    "Frequency multiplier table reference (required)",
-                                    key="tool046_fm_source",
+                                rnle_scope_confirmed = st.checkbox(
+                                    "Confirm this is one two-handed standing lifting task within RNLE applicability "
+                                    "(not seated/kneeling, one-handed, carrying, pushing/pulling, or otherwise excluded).",
+                                    value=False, key="tool046_scope_confirmed",
                                 )
-                                rnle_coupling = st.selectbox(
-                                    "Observed hand-to-load coupling",
-                                    ["Select coupling", "Good", "Fair", "Poor"],
-                                    key="tool046_coupling",
-                                )
-                                rnle_cm = st.number_input(
-                                    "Coupling multiplier (CM) from NIOSH table",
-                                    min_value=0.0,
-                                    max_value=1.0,
-                                    value=0.0,
-                                    step=0.01,
-                                    key="tool046_cm",
-                                )
-                                rnle_cm_source = st.text_input(
-                                    "Coupling multiplier table reference (required)",
-                                    key="tool046_cm_source",
-                                )
+                                rnle_lift_direction = "Up"
+                                rnle_auto_coupling_origin = "Good"
+                                rnle_auto_coupling_destination = "Good"
+                                rnle_fm = 0.0
+                                rnle_fm_source = ""
+                                rnle_coupling = "Good"
+                                rnle_cm = 0.0
+                                rnle_cm_source = ""
+                                if rnle_multiplier_mode == "Calculate automatically from NIOSH Tables 5 and 7":
+                                    st.caption(
+                                        "FM uses frequency, duration and origin height. CM uses the observed "
+                                        "coupling quality at each endpoint."
+                                    )
+                                    rnle_lift_direction = st.selectbox(
+                                        "Vertical travel direction", ["Up", "Down"],
+                                        key="tool046_lift_direction",
+                                    )
+                                    rnle_auto_coupling_origin = st.selectbox(
+                                        "Coupling quality at origin", ["Good", "Fair", "Poor"],
+                                        key="tool046_coupling_origin_auto",
+                                    )
+                                    rnle_auto_coupling_destination = st.selectbox(
+                                        "Coupling quality at destination", ["Good", "Fair", "Poor"],
+                                        key="tool046_coupling_destination_auto",
+                                    )
+                                else:
+                                    st.caption(
+                                        "Manual values are not inferred. Check the applicable NIOSH tables "
+                                        "for the measured frequency, duration, height and coupling conditions."
+                                    )
+                                    rnle_fm = st.number_input(
+                                        "Frequency multiplier (FM) from NIOSH Table 5",
+                                        min_value=0.0, max_value=1.0, value=0.0,
+                                        step=0.01, key="tool046_fm",
+                                    )
+                                    rnle_fm_source = st.text_input(
+                                        "Frequency multiplier table reference (required)",
+                                        key="tool046_fm_source",
+                                    )
+                                    rnle_coupling = st.selectbox(
+                                        "Observed hand-to-load coupling",
+                                        ["Select coupling", "Good", "Fair", "Poor"],
+                                        key="tool046_coupling",
+                                    )
+                                    rnle_cm = st.number_input(
+                                        "Coupling multiplier (CM) from NIOSH Table 7",
+                                        min_value=0.0, max_value=1.0, value=0.0,
+                                        step=0.01, key="tool046_cm",
+                                    )
+                                    rnle_cm_source = st.text_input(
+                                        "Coupling multiplier table reference (required)",
+                                        key="tool046_cm_source",
+                                    )
                                 run_method = st.form_submit_button(
                                     "Calculate RNLE screening estimate",
-                                    type="primary",
-                                    use_container_width=True,
-                                    key="tool046_run",
+                                    type="primary", use_container_width=True, key="tool046_run",
                                 )
                             elif selected_tool["tool_id"] == "T060":
                                 st.caption(
@@ -1926,11 +1934,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "asymmetry_destination": rnle_a_destination,
                                 "frequency_lifts_per_minute": rnle_frequency,
                                 "frequency_duration_category": rnle_duration,
+                                "multiplier_mode": rnle_multiplier_mode,
+                                "lift_direction": rnle_lift_direction,
+                                "scope_confirmed": rnle_scope_confirmed,
                                 "frequency_multiplier": rnle_fm,
                                 "frequency_multiplier_source": rnle_fm_source,
                                 "coupling_quality": rnle_coupling,
                                 "coupling_multiplier": rnle_cm,
                                 "coupling_multiplier_source": rnle_cm_source,
+                                "coupling_quality_origin": rnle_auto_coupling_origin,
+                                "coupling_quality_destination": rnle_auto_coupling_destination,
                             }
                         elif selected_tool["tool_id"] == "T047":
                             current_tool_inputs = {"hazards_json": hazard_json}
@@ -2618,27 +2631,85 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     elif selected_tool["tool_id"] == "T046":
                                         if rnle_duration == "Select duration":
                                             raise ValueError("Select the lifting-task duration from the NIOSH definitions.")
-                                        if rnle_coupling == "Select coupling":
-                                            raise ValueError("Select the observed hand-to-load coupling quality.")
-                                        result = calculate_niosh_revised_lifting_equation(
-                                            load_weight=rnle_load,
-                                            horizontal_origin=rnle_h_origin,
-                                            horizontal_destination=rnle_h_destination,
-                                            vertical_hand_start=rnle_v_start,
-                                            vertical_travel_distance=rnle_distance,
-                                            asymmetry_origin=rnle_a_origin,
-                                            asymmetry_destination=rnle_a_destination,
-                                            frequency_lifts_per_minute=rnle_frequency,
-                                            frequency_multiplier=rnle_fm,
-                                            coupling_multiplier=rnle_cm,
-                                            units=rnle_units,
-                                            frequency_duration_category=rnle_duration,
-                                            coupling_quality=rnle_coupling,
-                                            frequency_multiplier_source=rnle_fm_source,
-                                            coupling_multiplier_source=rnle_cm_source,
-                                            task_description=rnle_task,
-                                        )
-                                        result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                        if rnle_scope_confirmed is not True:
+                                            raise ValueError("Confirm the supported single-task, two-handed standing-lift scope before calculating.")
+                                        duration_hours = {
+                                            "Short (≤ 1 hour)": 1.0,
+                                            "Moderate (> 1 to 2 hours)": 2.0,
+                                            "Long (> 2 to 8 hours)": 8.0,
+                                        }[rnle_duration]
+                                        if rnle_multiplier_mode == "Calculate automatically from NIOSH Tables 5 and 7":
+                                            distance_to_cm = 1.0 if rnle_units == "metric" else 2.54
+                                            load_to_kg = 1.0 if rnle_units == "metric" else 0.45359237
+                                            origin_vertical_cm = float(rnle_v_start) * distance_to_cm
+                                            travel_cm = float(rnle_distance) * distance_to_cm
+                                            destination_vertical_cm = (
+                                                origin_vertical_cm + travel_cm
+                                                if rnle_lift_direction == "Up"
+                                                else origin_vertical_cm - travel_cm
+                                            )
+                                            result = calculate_rnle_lifting_index(
+                                                load_kg=float(rnle_load) * load_to_kg,
+                                                horizontal_origin_cm=float(rnle_h_origin) * distance_to_cm,
+                                                horizontal_destination_cm=float(rnle_h_destination) * distance_to_cm,
+                                                vertical_origin_cm=origin_vertical_cm,
+                                                vertical_destination_cm=destination_vertical_cm,
+                                                asymmetry_origin_degrees=rnle_a_origin,
+                                                asymmetry_destination_degrees=rnle_a_destination,
+                                                frequency_lifts_per_minute=rnle_frequency,
+                                                duration_hours=duration_hours,
+                                                coupling_quality_origin=rnle_auto_coupling_origin,
+                                                coupling_quality_destination=rnle_auto_coupling_destination,
+                                                applicability_confirmed=True,
+                                            )
+                                            kg_to_display = 1.0 if rnle_units == "metric" else 2.20462262185
+                                            result["recommended_weight_limit"] = (
+                                                result["recommended_weight_limit_kg"] * kg_to_display
+                                            )
+                                            result["recommended_weight_limit_unit"] = load_unit
+                                            result["load_weight"] = rnle_load
+                                            result["load_unit"] = load_unit
+                                            result["input_units"] = rnle_units
+                                            result["task_description"] = rnle_task.strip() or "NOT PROVIDED"
+                                            result["frequency_multiplier_source"] = (
+                                                "NIOSH Applications Manual 94-110 (2021), Table 5 — "
+                                                "calculated from entered frequency, duration and origin height."
+                                            )
+                                            result["coupling_multiplier_source"] = (
+                                                "NIOSH Applications Manual 94-110 (2021), Table 7 — "
+                                                "calculated from origin/destination coupling and vertical height."
+                                            )
+                                            result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                            result["provenance_warning"] = (
+                                                "Measurements, lifting frequency, duration and coupling observations "
+                                                "are user-entered and have not been independently verified."
+                                            )
+                                        else:
+                                            if rnle_coupling == "Select coupling":
+                                                raise ValueError("Select the observed hand-to-load coupling quality.")
+                                            result = calculate_niosh_revised_lifting_equation(
+                                                load_weight=rnle_load,
+                                                horizontal_origin=rnle_h_origin,
+                                                horizontal_destination=rnle_h_destination,
+                                                vertical_hand_start=rnle_v_start,
+                                                vertical_travel_distance=rnle_distance,
+                                                asymmetry_origin=rnle_a_origin,
+                                                asymmetry_destination=rnle_a_destination,
+                                                frequency_lifts_per_minute=rnle_frequency,
+                                                frequency_multiplier=rnle_fm,
+                                                coupling_multiplier=rnle_cm,
+                                                units=rnle_units,
+                                                frequency_duration_category=rnle_duration,
+                                                coupling_quality=rnle_coupling,
+                                                frequency_multiplier_source=rnle_fm_source,
+                                                coupling_multiplier_source=rnle_cm_source,
+                                                task_description=rnle_task,
+                                            )
+                                            result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                            result["provenance_warning"] = (
+                                                "User-entered FM and CM values and their source references "
+                                                "have not been independently verified."
+                                            )
                                     elif selected_tool["tool_id"] == "T060":
                                         parsed_suppliers = json.loads(supply_network_suppliers_json)
                                         parsed_sites = json.loads(supply_network_sites_json)
@@ -3086,6 +3157,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                             if result:
                                 _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
+                                if selected_tool["tool_id"] == "T046":
+                                    display_limit = result.get("recommended_weight_limit")
+                                    display_unit = result.get("recommended_weight_limit_unit") or result.get("load_unit") or "kg"
+                                    if display_limit is not None and result.get("lifting_index") is not None:
+                                        c1, c2, c3 = st.columns(3)
+                                        c1.metric("Lifting index", f"{float(result['lifting_index']):.3f}")
+                                        c2.metric("Recommended weight limit", f"{float(display_limit):.2f} {display_unit}")
+                                        c3.metric(
+                                            "Multiplier mode",
+                                            "Automatic NIOSH tables"
+                                            if result.get("status") == "CALCULATED_SCREENING"
+                                            else "Manual FM / CM",
+                                        )
+                                    st.warning(
+                                        result.get("warning")
+                                        or "A lifting index at or below 1 is a screening goal, not proof that the task is safe."
+                                    )
+                                    if result.get("provenance_warning"):
+                                        st.caption(result["provenance_warning"])
+                                    for limitation in result.get("warnings", []):
+                                        st.caption("Limitation: " + str(limitation))
                                 render_engineering_result(
                                     result,
                                     title=selected_tool["canonical_name"],

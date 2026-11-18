@@ -1328,3 +1328,58 @@ def test_workbench_routes_and_executes_the_nine_previously_mapped_only_tools():
             "SESSION_ONLY", "SAVED_MANAGED_WORKSPACE", "SAVED_LOCAL_FALLBACK",
             "SAVE_FAILED", "SAVE_STATUS_NOT_CONFIRMED", "SAVE_PENDING",
         }
+
+
+def test_workbench_t046_automatically_calculates_niosh_table_multipliers():
+    """T046 defaults to Table 5/7 lookup and records user-entered provenance."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rnle-screening-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T046 · Ergonomics Assessment Toolkit")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="tool046_duration").select("Short (≤ 1 hour)")
+    at.checkbox(key="tool046_scope_confirmed").set_value(True)
+    at.button(key="tool046_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T046")
+    assert result is not None
+    assert result["status"] == "CALCULATED_SCREENING"
+    assert result["frequency_multiplier"] == pytest.approx(0.94)
+    assert result["endpoint_results"]["origin"]["coupling_multiplier"] == pytest.approx(1.0)
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert "not been independently verified" in result["provenance_warning"]
+    assert any("medical determination" in warning.casefold() for warning in result["warnings"])
+
+
+def test_workbench_t046_fails_closed_without_explicit_rnle_scope_confirmation():
+    """T046 cannot calculate until the operator confirms the supported task scope."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rnle-scope-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T046 · Ergonomics Assessment Toolkit")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="tool046_duration").select("Short (≤ 1 hour)")
+    at.button(key="tool046_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state.get("shoir_tool_result_T046") is None
+    assert any("Confirm the supported single-task" in str(item.value) for item in at.error)
+
