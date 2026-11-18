@@ -50,7 +50,7 @@ The Edge Function currently requires an HTTPS DNS issuer and JWKS URL on the sam
 
 1. Choose an identity provider (for example, an organization-managed OIDC issuer) and create a non-production client with exact callback URL, email scope and verified-email claim enabled.
 2. Configure only the staging Streamlit secrets and staging Edge Function secrets. Never copy provider credentials to the repo or production.
-3. Apply `20261028190000_shoir_oidc_audit_events.sql` to a disposable local Postgres instance and the approved staging project only after the migration-review gate passes.
+3. Apply `20261118170000_shoir_oidc_audit_events.sql` to a disposable local Postgres instance and the approved staging project only after the migration-review gate passes.
 4. Run the new Deno OIDC test suite and full migration history replay on the exact branch SHA.
 5. Register a **disposable existing Shoir-IE account** with a synthetic, provider-controlled email; do not use the protected administrator, a customer identity, or a real account.
 6. Verify valid login, wrong issuer/audience, tampered signature, expired token, unverified email, inactive/unmapped/duplicate-email account, MFA missing when required, throttling, duplicate token exchange, and audit-store outage. Confirm failure paths do not return an application token.
@@ -69,3 +69,8 @@ The Edge Function currently requires an HTTPS DNS issuer and JWKS URL on the sam
 - Independent security review.
 
 Until every item above is complete, T098 remains `EXTERNAL_CONFIGURATION_REQUIRED` / `IMPLEMENTED_NEEDS_VALIDATION` as appropriate. This branch is a draft candidate, not a verified integration.
+
+
+## Rate-limit abuse protection
+
+Before JWT verification, the Edge Function rate-limits OIDC requests only by the trusted Cloudflare client-IP header. It does not accept an email address or display hint from the browser as a rate-limit key. The per-identity throttle is added only after the Edge Function verifies the ID-token signature and standard claims, and it uses the verified JWT email. The display-only email hint is not sent to the Edge Function.
