@@ -408,7 +408,6 @@ async function loginIpThrottleBuckets(
   return keys;
 }
 
-
 type OidcAuditOutcome = "success" | "denied" | "expired" | "error";
 
 async function writeOidcAuditEvent(event: {
@@ -766,7 +765,10 @@ Deno.serve(async (req) => {
       }
       const idToken = typeof body.id_token === "string" ? body.id_token : "";
       if (!idToken || idToken.length > MAX_OIDC_ID_TOKEN_CHARS) {
-        return sendResponse({ error: "Invalid identity-provider response." }, 400);
+        return sendResponse(
+          { error: "Invalid identity-provider response." },
+          400,
+        );
       }
       // Before token verification, rate-limit only by the trusted edge IP.
       // Never use a caller-supplied email/display hint as an account throttle key:
