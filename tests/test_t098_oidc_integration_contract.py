@@ -7,7 +7,7 @@ STORE = ROOT / "durable_account_store.py"
 OIDC_HELPERS = ROOT / "shoir_oidc_auth.py"
 EDGE = ROOT / "supabase" / "functions" / "shoir-persistence" / "index.ts"
 OIDC = ROOT / "supabase" / "functions" / "shoir-persistence" / "oidc.ts"
-AUDIT_MIGRATION = ROOT / "supabase" / "migrations" / "20261028190000_shoir_oidc_audit_events.sql"
+AUDIT_MIGRATION = ROOT / "supabase" / "migrations" / "20261118170000_shoir_oidc_audit_events.sql"
 
 
 def test_optional_streamlit_oidc_is_config_gated_and_keeps_existing_password_login():
@@ -17,11 +17,11 @@ def test_optional_streamlit_oidc_is_config_gated_and_keeps_existing_password_log
     assert 'st.login("enterprise")' in app
     assert "oidc_configuration_status(st.secrets)" in app
     assert "get_verified_streamlit_id_token(st.user)" in app
-    assert "edge_oidc_login(_oidc_id_token, _oidc_display_hint)" in app
+    assert "edge_oidc_login(_oidc_id_token)" in app
     assert 'if not _oidc_status.get("ready")' in app
     assert 'action === "login"' in EDGE.read_text(encoding="utf-8")
-    assert 'return _edge_call("oidc_login", {"id_token": token, "email_hint": hint})' in store
-    assert 'hint = str(email_hint or "").strip().lower()[:320]' in store
+    assert 'return _edge_call("oidc_login", {"id_token": token})' in store
+    assert "email_hint" not in store
     assert '"id" not in exposed_tokens' in helpers
     assert "st.login(\"enterprise\")" in app
 
@@ -59,3 +59,15 @@ def test_audit_migration_is_server_only_and_append_only():
     assert "GRANT SELECT" not in migration
     assert "GRANT UPDATE" not in migration
     assert "GRANT DELETE" not in migration
+
+
+def test_oidc_throttle_never_uses_unverified_email_hint_for_account_lockout():
+    edge = EDGE.read_text(encoding="utf-8")
+    start = edge.index('if (action === "oidc_login")')
+    end = edge.index('if (action === "login")', start)
+    action = edge[start:end]
+    verify_at = action.index("verifyOidcIdToken(idToken, oidcConfig)")
+    assert "body.email_hint" not in action
+    assert "loginIpThrottleBuckets(req)" in action[:verify_at]
+    assert 'loginThrottleKey("user:" + identity.email)' in action[verify_at:]
+    assert "recordOidcDenial(" in action[verify_at:]
