@@ -9,6 +9,7 @@ REQUIRED_MODULES = (
     "industrial_platform_excellence.py",
     "industrial_operating_system.py",
     "shoir_upgrade.py",
+    "shoir_oidc_auth.py",
 )
 
 

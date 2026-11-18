@@ -168,6 +168,8 @@ jobs:
             supabase/functions/shoir-persistence/index.ts \
             supabase/functions/shoir-persistence/security.ts \
             supabase/functions/shoir-persistence/security_test.ts \
+            supabase/functions/shoir-persistence/oidc.ts \
+            supabase/functions/shoir-persistence/oidc_test.ts \
             supabase/production-backports/shoir-persistence-v9/index.ts \
             supabase/production-backports/shoir-persistence-v9/security.ts \
             supabase/production-backports/shoir-persistence-v9/security_test.ts
@@ -175,11 +177,13 @@ jobs:
         if: always() && steps.deno_setup.outcome == 'success'
         run: |
           deno check supabase/functions/shoir-persistence/index.ts
+          deno check supabase/functions/shoir-persistence/oidc_test.ts
           deno check supabase/production-backports/shoir-persistence-v9/index.ts
       - name: Run active and production-v9 Edge Function security tests
         if: always() && steps.deno_setup.outcome == 'success'
         run: |
           deno test supabase/functions/shoir-persistence/security_test.ts
+          deno test supabase/functions/shoir-persistence/oidc_test.ts
           deno test supabase/production-backports/shoir-persistence-v9/security_test.ts
       - name: Audit pinned and direct application dependencies
         if: always()
