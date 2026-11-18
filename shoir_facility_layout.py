@@ -119,7 +119,6 @@ def ensure_facility_schema() -> None:
         conn.commit()
 
 
-def _load_departments(owner: str, workspace: str) -> pd.DataFrame:
 def _get_data_origin(owner: str, workspace: str) -> str:
     ensure_facility_schema()
     with _db() as conn:
@@ -150,6 +149,8 @@ def _set_data_origin(owner: str, workspace: str, data_origin: str) -> None:
         )
         conn.commit()
 
+
+def _load_departments(owner: str, workspace: str) -> pd.DataFrame:
     ensure_facility_schema()
     with _db() as conn:
         df = pd.read_sql_query(
@@ -238,7 +239,12 @@ def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataF
             flows = _load_flows(owner, workspace)
     # Brand-new seeded examples are synthetic; pre-existing rows without a
     # provenance record are explicitly unverified, never relabelled as LIVE.
-    if _get_data_origin(owner, workspace) == "EXISTING_DATA_ORIGIN_UNVERIFIED":
+    with _db() as conn:
+        origin_row = conn.execute(
+            "SELECT data_origin FROM facility_workspace_metadata WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchone()
+    if origin_row is None:
         _set_data_origin(
             owner,
             workspace,
