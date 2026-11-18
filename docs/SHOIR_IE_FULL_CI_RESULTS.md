@@ -70,3 +70,28 @@ Workflows started for `e19550222e6175d1d454b1169dc3a009185d1eea`:
 | Engine Regression | 42408714750 | queued |
 
 GitHub also created duplicate validation and migration-replay runs `42408714711` and `42408714679` for the same head because of the workflow event triggers; these were queued as well. The validation workflow's `live-deployment-smoke` job was skipped. There is no exact-head pass or failure to report yet. These states are time-bounded and must be refreshed before deployment.
+
+
+## Exact-head technical recheck — 2026-11-18
+
+Candidate branch: feat/shoir-ie-release-hardening-20261105; previous exact head inspected: b43571cacdfa791d1417ca73ee10e572028f61f2; PR #232 remains draft and targets staging-e2e-20261019.
+
+### Completed component checks on that head
+
+- Engine Regression [#43929726907](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726907): **521 passed, 0 failed**.
+- Edge Function [#43929726898](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726898): **14 passed, 0 failed**.
+- Clean PostgreSQL migration replay [#43929726989](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726989): **2 passed** on a disposable local PostgreSQL 17 database; this is not a hosted Supabase replay.
+- PostgreSQL transaction contract [#43929726919](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726919): success.
+- Production-v9 security backport [#43929726914](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726914): **5 passed, 0 failed**.
+- Excel Intelligence [#43929726920](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726920): **38 Python tests and 9 Node planner tests passed**. The manifest check correctly warns that the Office add-in is an unhosted template, not an installable deployment.
+- Security/quality [#43929726900](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726900): dependency audit reported no known vulnerabilities.
+
+### Full validation did not pass
+
+The full workflow [#43929726913](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726913) was cancelled at the 120-minute job limit. Its pytest output reached about 40% and displayed three failure markers before cancellation; it produced no JUnit report or final traceback, so the failing test names and total failure/skip counts are **unknown**. Do not call this a passing or fully diagnosed run.
+
+After the regression process was cancelled, independent steps still completed successfully: active and production-v9 Deno format/type/security validation, dependency audit, hard-coded credential-pattern guard, synthetic PDF/PPTX render step, application import smoke (57 top-level statements), and local Playwright public-entry smoke at desktop/tablet/mobile sizes. The in-workflow PostgreSQL/Node steps were skipped by their default success condition; the separate PostgreSQL/Edge/Excel workflows listed above are separate evidence, not a substitute for the complete validation job.
+
+### CI corrections now added to the candidate
+
+The full-validation workflow now uses four-worker file-isolated pytest execution; a 10-minute per-test timeout with verbose names; serial execution of the two shared-PostgreSQL test modules to avoid role/database races; separate JUnit XML reports; independent PostgreSQL and Node/Excel checks that still run after regression failures; a 180-minute outer job limit; and Node 24 with actions/setup-node v7. These workflow changes are **not** a passing test result. The new exact-head run must complete and its JUnit reports must be inspected before this is marked green. The per-test timeout may expose further defects, which must be fixed rather than waived.

@@ -277,3 +277,8 @@ Important boundaries:
 Required before any of these IDs may become VERIFIED_WORKING: exact-head CI on the latest candidate SHA; authenticated browser walkthrough; package/role denial tests; managed save, fresh-session reload and tenant isolation evidence; export inspection where applicable; and independent engineering/research review. Do not promote any matrix status based on authored tests or a source-route audit alone.
 
 No staging migration, Edge Function deployment, production write, account mutation, credential read or merge is authorized by this code change. Retain PR #232 as draft, keep BETA, and keep production NO-GO.
+
+
+## CI execution update — 2026-11-18
+
+The previous exact-head full validation run was cancelled at the 120-minute job limit after reaching approximately 40% pytest progress; three failure markers appeared before cancellation, but no JUnit file or traceback was produced. The new PR candidate updates the workflow to use four pytest workers with file-level distribution, keeps the two PostgreSQL integration modules serial, adds a 10-minute per-test timeout and verbose output, emits separate JUnit reports, and runs independent PostgreSQL/Node checks even when the parallel test step fails. It also uses Node 24 and setup-node v7. Always inspect both JUnit artifacts and resolve all failures; a workflow change alone is not acceptance. See docs/SHOIR_IE_TECHNICAL_HANDOFF_20261118.md.

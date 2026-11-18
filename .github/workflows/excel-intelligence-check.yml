@@ -78,9 +78,10 @@ jobs:
             tests/test_excel_runtime.py \
             tests/test_excel_intelligence_navigation.py \
             tests/test_module_catalog_categories.py
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
+          package-manager-cache: false
       - name: Check Office.js task pane and run local planner tests
         run: |
           node --check excel_addin/planner.js

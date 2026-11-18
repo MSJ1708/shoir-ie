@@ -14,7 +14,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     services:
       postgres:
         image: postgres:17-alpine
@@ -41,27 +41,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m pip install "pytest-xdist>=3.8,<4" "pytest-timeout>=2.3,<3"
       - name: Compile all Python modules
         id: compile
         run: python -m compileall -q .
-      - name: Run regression tests
-        id: regression
+      - name: Run parallel regression suite
+        id: regression_parallel
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTHONTRACEMALLOC: "5"
         run: |
           mkdir -p artifacts/test-results
-          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -q tests -ra --junitxml=artifacts/test-results/junit.xml
-      - name: Upload regression test results and skip/warning detail
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: shoir-ie-regression-test-results
-          path: artifacts/test-results/junit.xml
-          if-no-files-found: warn
-          retention-days: 14
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -n 4 --dist=loadfile -ra --timeout=600 \
+            --ignore=tests/test_atomic_subscription_migration_postgres.py \
+            --ignore=tests/test_full_migration_history_postgres.py \
+            tests --junitxml=artifacts/test-results/junit-parallel.xml
       - name: Verify local PostgreSQL integration service
+        id: postgres_service
+        if: always() && steps.compile.outcome == 'success'
         run: |
           python - <<'PY'
           import os
@@ -77,16 +75,38 @@ jobs:
           assert database == "shoir_test" and user == "postgres"
           print("Disposable PostgreSQL integration service is ready.")
           PY
-      - name: Set up Node for Excel add-in validation
-        uses: actions/setup-node@v4
+      - name: Run serial PostgreSQL integration regression tests
+        id: regression_postgres
+        if: always() && steps.postgres_service.outcome == 'success'
+        env:
+          PYTHONTRACEMALLOC: "5"
+        run: |
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -ra --timeout=600 \
+            tests/test_atomic_subscription_migration_postgres.py \
+            tests/test_full_migration_history_postgres.py \
+            --junitxml=artifacts/test-results/junit-postgres.xml
+      - name: Upload regression test results and skip/warning detail
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
         with:
-          node-version: "20"
+          name: shoir-ie-regression-test-results
+          path: artifacts/test-results/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Set up Node for Excel add-in validation
+        if: always() && steps.compile.outcome == 'success'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
       - name: Validate Excel add-in JavaScript and planner tests
+        if: always() && steps.compile.outcome == 'success'
         run: |
           node --check excel_addin/planner.js
           node --check excel_addin/taskpane.js
           node --test tests/excel_addin_planner.test.cjs
       - name: Validate Excel add-in manifest XML
+        if: always() && steps.compile.outcome == 'success'
         run: |
           python - <<'PY'
           from pathlib import Path
