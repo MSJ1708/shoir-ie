@@ -1898,7 +1898,7 @@ if not st.session_state.get("current_user"):
                                 # Keep the existing SQLite cache in sync; it is not
                                 # authoritative for login or server-side authorization.
                                 try:
-                                    _oidc_local = sqlite3.connect("enterprise_full_workspace.db")
+                                    _oidc_local = sqlite_connect("enterprise_full_workspace.db")
                                     _oidc_row = _oidc_local.execute(
                                         "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
                                         (_oidc_username.lower(),),
