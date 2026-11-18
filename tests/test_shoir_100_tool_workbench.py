@@ -1262,6 +1262,7 @@ def test_workbench_t095_builds_sanitized_xlsx_from_entitled_source_result():
     finally:
         workbook.close()
 
+@pytest.mark.timeout(1800)
 def test_workbench_routes_and_executes_the_nine_previously_mapped_only_tools():
     """Exercise the new canonical IDs through the real Workbench renderer."""
     from streamlit.testing.v1 import AppTest

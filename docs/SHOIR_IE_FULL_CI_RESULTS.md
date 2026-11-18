@@ -95,3 +95,19 @@ After the regression process was cancelled, independent steps still completed su
 ### CI corrections now added to the candidate
 
 The full-validation workflow now uses four-worker file-isolated pytest execution; a 10-minute per-test timeout with verbose names; serial execution of the two shared-PostgreSQL test modules to avoid role/database races; separate JUnit XML reports; independent PostgreSQL and Node/Excel checks that still run after regression failures; a 180-minute outer job limit; and Node 24 with actions/setup-node v7. These workflow changes are **not** a passing test result. The new exact-head run must complete and its JUnit reports must be inspected before this is marked green. The per-test timeout may expose further defects, which must be fixed rather than waived.
+
+
+## Full-suite failure diagnosis and remediation — 2026-11-18
+
+The exact-head full run on `8f671ed83f4fc05dcae558b5a7d751b3b64db151` completed its 1,413-test report and found 14 failures, 0 errors and 0 skips in the parallel suite. The serial PostgreSQL suite passed 3/3. The failures were:
+
+- Ten Streamlit AppTest timeouts across `test_shoir_resource_intelligence.py`, `test_shoir_100_tool_workbench.py` and `test_shoir_tool_trust_center_workbench.py`. The tests launch full Workbench pages backed by the same local SQLite stores. Running those three modules concurrently on separate xdist workers caused contention and exceeded the AppTest's 45–60 second script-run limits; one long nine-tool end-to-end UI test also exceeded the global 600-second timeout.
+- Two stale error-message regex expectations in `test_final_integration.py`; the current implementation intentionally reports the more precise text “dataset lineage is stale or unverified” and “source dataset version is no longer current”. The assertions have been aligned to the implemented safety messages.
+- One SQLite ResourceWarning caused by the test itself using `with sqlite3.connect(...)`, whose context manager commits/rolls back but does not close the connection. The test now uses `contextlib.closing` for both connections.
+- One workflow-contract test expected the old literal `pytest -q tests` after the CI command had been deliberately replaced with xdist and separate serial suites. The contract now asserts the new parallel/serial workflow and report artifacts.
+
+### Remediation added
+
+The three Streamlit-heavy modules are removed from the parallel xdist suite and are now run in a dedicated serial AppTest step with a 30-minute per-test diagnostic ceiling. The nine-canonical-tool UI route test has the same explicit timeout marker so its full route/entitlement matrix is not killed at ten minutes. PostgreSQL integration remains its own serial step. Both parallel and serial reports remain uploaded as separate JUnit XML files. This preserves all test cases; none is skipped or weakened.
+
+The updated exact-head CI must still run and pass before this remediation is considered complete.

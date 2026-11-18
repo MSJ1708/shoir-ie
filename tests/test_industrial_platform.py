@@ -647,12 +647,13 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
 def test_platform_database_migrates_existing_dataset_and_artifact_tables_without_claiming_old_lineage(tmp_path):
     import sqlite3
     import re
+    from contextlib import closing
     from industrial_platform import init_platform_db
 
     db = str(tmp_path / "pre-lineage-schema.db")
     dataset_id = "DS-ABCDEF998877"
     old_hash = "a" * 64
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn:
         conn.execute(
             """CREATE TABLE platform_datasets(
                 dataset_id TEXT PRIMARY KEY,name TEXT,source_name TEXT,row_count INTEGER,
@@ -709,7 +710,7 @@ def test_platform_database_migrates_existing_dataset_and_artifact_tables_without
         conn.commit()
 
     assert init_platform_db(db) is True
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn:
         version = conn.execute(
             "SELECT version,data_hash,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
             (dataset_id,),

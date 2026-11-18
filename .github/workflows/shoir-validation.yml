@@ -56,7 +56,21 @@ jobs:
           python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -n 4 --dist=loadfile -ra --timeout=600 \
             --ignore=tests/test_atomic_subscription_migration_postgres.py \
             --ignore=tests/test_full_migration_history_postgres.py \
+            --ignore=tests/test_shoir_resource_intelligence.py \
+            --ignore=tests/test_shoir_100_tool_workbench.py \
+            --ignore=tests/test_shoir_tool_trust_center_workbench.py \
             tests --junitxml=artifacts/test-results/junit-parallel.xml
+      - name: Run serial Streamlit AppTest regression modules
+        id: regression_streamlit
+        if: always() && steps.compile.outcome == 'success'
+        env:
+          PYTHONTRACEMALLOC: "5"
+        run: |
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -ra --timeout=1800 \
+            tests/test_shoir_resource_intelligence.py \
+            tests/test_shoir_100_tool_workbench.py \
+            tests/test_shoir_tool_trust_center_workbench.py \
+            --junitxml=artifacts/test-results/junit-streamlit.xml
       - name: Verify local PostgreSQL integration service
         id: postgres_service
         if: always() && steps.compile.outcome == 'success'

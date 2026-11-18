@@ -19,10 +19,16 @@ def test_required_modules_parse():
         ast.parse(path.read_text(encoding="utf-8"), filename=filename)
 
 
-def test_validation_workflow_covers_compile_and_tests():
+def test_validation_workflow_covers_parallel_and_serial_test_suites():
     workflow = Path(".github/workflows/shoir-validation.yml").read_text(encoding="utf-8")
     assert "compileall" in workflow
-    assert "pytest -q tests" in workflow
+    assert "pytest -vv -n 4 --dist=loadfile" in workflow
+    assert "--ignore=tests/test_shoir_resource_intelligence.py" in workflow
+    assert "--ignore=tests/test_shoir_100_tool_workbench.py" in workflow
+    assert "--ignore=tests/test_shoir_tool_trust_center_workbench.py" in workflow
+    assert "Run serial Streamlit AppTest regression modules" in workflow
+    assert "junit-streamlit.xml" in workflow
+    assert "Run serial PostgreSQL integration regression tests" in workflow
 
 
 def test_platform_catalog_has_render_path():

@@ -115,7 +115,7 @@ def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(t
     assert len(json.loads(experience_decision[1])) == 1
     assert outcome[0] == "STALE"
     assert len(json.loads(outcome[1])) == 1
-    with pytest.raises(ValueError, match="source dataset version is stale"):
+    with pytest.raises(ValueError, match="source dataset version is no longer current"):
         exp.record_decision_outcome(
             decision_id, "alice", "Verified",
             {"Throughput": 105.0}, {"Throughput": 105.0},
@@ -210,7 +210,7 @@ def test_unverified_dataset_reference_cannot_approve_or_record_decision_outcome(
             (decision_id,),
         ).fetchone()
     assert row[0] == "UNVERIFIED_REFERENCE"
-    with pytest.raises(ValueError, match="stale or unverified dataset lineage"):
+    with pytest.raises(ValueError, match="dataset lineage is stale or unverified"):
         exp.transition_decision(decision_id, "alice", "Approved")
     with pytest.raises(ValueError, match="dataset lineage is stale or unverified"):
         exp.record_decision_outcome(
