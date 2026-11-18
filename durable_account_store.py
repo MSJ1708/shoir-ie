@@ -609,6 +609,15 @@ def remote_research_studies(owner: str) -> list[dict[str, Any]]:
 def edge_login(username: str, password: str) -> dict[str, Any]:
     return _edge_call("login", {"username": username, "password": password})
 
+ 
+def edge_oidc_login(id_token: str) -> dict[str, Any]:
+    """Exchange a bounded ID token for a Shoir-IE session after Edge verification."""
+    token = str(id_token or "").strip()
+    if len(token) < 32 or len(token) > 16_384:
+        raise ValueError("The identity-provider token is missing or outside the allowed size.")
+    return _edge_call("oidc_login", {"id_token": token})
+
+
 
 def edge_logout(username: str, token: str) -> dict[str, Any]:
     """Revoke only the current server session for this account."""
