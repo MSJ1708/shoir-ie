@@ -854,7 +854,7 @@ Deno.serve(async (req) => {
 
       try {
         const account = await findAccountByVerifiedOidcEmail(identity.email);
-        if (!account || account.active === false) {
+        if (!account || account.active !== true) {
           const recorded = await recordOidcDenial(
             identity.issuer,
             "account_not_found_or_inactive",

@@ -35,7 +35,7 @@ def test_edge_function_independently_verifies_provider_token_before_account_mapp
     assert "verifyOidcIdToken(idToken, oidcConfig)" in action
     assert "findAccountByVerifiedOidcEmail(identity.email)" in action
     assert "identity.email" in action
-    assert "account.active === false" in action
+    assert "account.active !== true" in action
     assert "writeOidcAuditEvent" in action
     assert "revokeJustCreatedSession(sessionToken, usernameLc)" in action
     assert "isUniqueConstraintError(auditError)" in action
