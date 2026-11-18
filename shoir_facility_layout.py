@@ -981,9 +981,9 @@ def _import_data(
             )
         conn.commit()
 
-    return len(department_rows), len(flow_rows)
     if department_rows or flow_rows:
         _set_data_origin(owner, workspace, "IMPORTED_OR_UPSERTED")
+    return len(department_rows), len(flow_rows)
 
 def _export_workbook(
     depts: pd.DataFrame,

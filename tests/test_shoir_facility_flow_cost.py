@@ -151,3 +151,26 @@ def test_facility_access_uses_canonical_stable_tool_id(monkeypatch):
 
     with pytest.raises(PermissionError, match="Unable to verify"):
         facility._require_facility_tool_access("Unknown package", "alice")
+
+def test_successful_import_sets_imported_provenance_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(facility, "DB_PATH", str(tmp_path / "facility-import-origin.db"))
+    frames = {
+        "Departments": pd.DataFrame([
+            {"ID": "D1", "Name": "Receiving", "X": 10, "Y": 20, "Area": 100},
+            {"ID": "D2", "Name": "Assembly", "X": 50, "Y": 60, "Area": 200},
+        ]),
+        "From_To_Flows": pd.DataFrame([
+            {
+                "Flow_ID": "F001",
+                "From_ID": "D1",
+                "To_ID": "D2",
+                "Loads_Day": 25,
+                "Distance_M": 12.5,
+                "Relationship": "A",
+            }
+        ]),
+    }
+
+    assert facility._import_data(frames, "alice", "line-a") == (2, 1)
+    assert facility._get_data_origin("alice", "line-a") == "IMPORTED_OR_UPSERTED"
+
