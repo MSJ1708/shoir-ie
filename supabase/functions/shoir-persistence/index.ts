@@ -295,16 +295,16 @@ async function checkLoginThrottle(
   const result = data as { blocked?: boolean } | null;
   return Boolean(result?.blocked);
 }
-async function loginThrottleBuckets(usernameLc: string, req: Request) {
-  const keys: Array<
-    { key_hash: string; max_attempts: number; reset_on_success: boolean }
-  > = [
-    {
-      key_hash: await loginThrottleKey("user:" + usernameLc),
-      max_attempts: 8,
-      reset_on_success: true,
-    },
-  ];
+type LoginThrottleBucket = {
+  key_hash: string;
+  max_attempts: number;
+  reset_on_success: boolean;
+};
+
+async function loginIpThrottleBuckets(
+  req: Request,
+): Promise<LoginThrottleBucket[]> {
+  const keys: LoginThrottleBucket[] = [];
   // Trust only the reverse-proxy-populated Cloudflare IP header; never accept a
   // client-controlled X-Forwarded-For value as the source of an IP limit.
   const clientIp = String(req.headers.get("cf-connecting-ip") || "").trim();
@@ -316,6 +316,18 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
     });
   }
   return keys;
+}
+
+async function loginThrottleBuckets(
+  usernameLc: string,
+  req: Request,
+): Promise<LoginThrottleBucket[]> {
+  const userBucket: LoginThrottleBucket = {
+    key_hash: await loginThrottleKey("user:" + usernameLc),
+    max_attempts: 8,
+    reset_on_success: true,
+  };
+  return [userBucket, ...await loginIpThrottleBuckets(req)];
 }
 
 type OidcAuditOutcome = "success" | "denied" | "expired" | "error";
@@ -412,14 +424,13 @@ Deno.serve(async (req) => {
       if (!idToken || idToken.length > MAX_OIDC_ID_TOKEN_CHARS) {
         return response({ error: "Invalid identity-provider response." }, 400);
       }
-      const emailHint = String(body.email_hint || "oidc-login").trim()
-        .toLowerCase().slice(0, 320);
-      let throttleBuckets: Array<
-        { key_hash: string; max_attempts: number; reset_on_success: boolean }
-      >;
+      // Before token verification, rate-limit only by the trusted edge IP.
+      // Never use a caller-supplied email/display hint as an account throttle key:
+      // an attacker could otherwise lock out another user's identity.
+      let ipThrottleBuckets: LoginThrottleBucket[] = [];
       try {
-        throttleBuckets = await loginThrottleBuckets(emailHint, req);
-        for (const bucket of throttleBuckets) {
+        ipThrottleBuckets = await loginIpThrottleBuckets(req);
+        for (const bucket of ipThrottleBuckets) {
           if (
             await checkLoginThrottle(
               bucket.key_hash,
@@ -459,6 +470,41 @@ Deno.serve(async (req) => {
         return response({
           error: "Unable to sign in with the configured identity provider.",
         }, 401);
+      }
+
+      // The per-identity throttle key is derived only after the JWT has been
+      // independently verified. An unverified browser hint cannot target it.
+      const oidcUserThrottleBucket: LoginThrottleBucket = {
+        key_hash: await loginThrottleKey("user:" + identity.email),
+        max_attempts: 8,
+        reset_on_success: true,
+      };
+      const oidcThrottleBuckets = [
+        ...ipThrottleBuckets,
+        oidcUserThrottleBucket,
+      ];
+      try {
+        if (
+          await checkLoginThrottle(
+            oidcUserThrottleBucket.key_hash,
+            oidcUserThrottleBucket.max_attempts,
+            "attempt",
+          )
+        ) {
+          const recorded = await recordOidcDenial(
+            identity.issuer,
+            "rate_limited",
+            identity.subject,
+          );
+          return response({
+            error: "Too many sign-in attempts. Please wait and try again.",
+          }, recorded ? 429 : 503);
+        }
+      } catch {
+        return response({
+          error:
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
+        }, 503);
       }
 
       try {
@@ -543,7 +589,7 @@ Deno.serve(async (req) => {
         }
 
         try {
-          for (const bucket of throttleBuckets) {
+          for (const bucket of oidcThrottleBuckets) {
             if (bucket.reset_on_success) {
               await checkLoginThrottle(
                 bucket.key_hash,
