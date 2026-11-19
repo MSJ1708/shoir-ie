@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.audit_shoir_100_tool_execution import build_execution_audit
+from shoir_tool_registry import get_tool, tier_allows_tool
 
 
 def test_execution_audit_accounts_for_all_100_tools_and_distinguishes_route_types():
@@ -40,3 +41,16 @@ def test_execution_audit_keeps_source_test_references_separate_from_acceptance()
         }
         assert isinstance(row["test_source_reference_count"], int)
         assert "remaining_gap" in row
+
+def test_t046_registry_maps_automatic_rnle_engine_and_professional_entitlement():
+    tool = get_tool("T046")
+    assert tool is not None
+    assert tool["canonical_name"] == "Ergonomics Assessment Toolkit"
+    assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
+    assert "shoir_ergonomics.py" in tool["source_files"]
+    assert "tests/test_shoir_ergonomics.py::" in tool["unit_test"]
+    assert "require_tool_access" in tool["entitlement_enforcement_points"]
+    assert not tier_allows_tool("Starter", "T046")
+    assert not tier_allows_tool("Mid-Tier Pro", "T046")
+    assert tier_allows_tool("Professional", "T046")
+    assert "UNVERIFIED" in tool["browser_test"]
