@@ -1341,7 +1341,6 @@ def render_facility_layout(tier: str, username: str) -> None:
             float(export_rate) if float(export_rate) > 0 else None,
         )
         st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="fl_export_workbook")
-        st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="fl_export_workbook")
         st.download_button("📄 Download From-To CSV",data=flows.to_csv(index=False).encode("utf-8"),file_name="facility_from_to.csv",mime="text/csv",use_container_width=True,key="fl_export_fromto")
         st.caption("The workbook contains Departments, From_To_Flows, SLP_Relationships, SLP_Matrix, Flow_Metrics and Provenance sheets.")
 
