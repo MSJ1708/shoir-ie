@@ -7,19 +7,19 @@ import re
 def safe_javascript_diagnostic(value: object, limit: int = 700) -> str:
     """Keep useful browser diagnostics without storing common secret formats."""
     text = str(value or "")
-    text = re.sub(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
+    text = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
     text = re.sub(
-        r"\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b",
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
         "[REDACTED_JWT]",
         text,
     )
     text = re.sub(
-        r"(?i)\\b(password|passwd|token|secret|api[_-]?key|authorization|cookie)\\b\\s*[:=]\\s*[^\\s,;]+",
-        r"\\1=[REDACTED]",
+        r"(?i)\b(password|passwd|token|secret|api[_-]?key|authorization|cookie)\b\s*[:=]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
         text,
     )
     # Keep host and script path, but not query-string values that may carry tokens.
-    text = re.sub(r"(https?://[^\\s?#]+)\\?[^\\s#]+", r"\\1?[REDACTED_QUERY]", text)
+    text = re.sub(r"(https?://[^\s?#]+)\?[^\s#]+", r"\1?[REDACTED_QUERY]", text)
     return text[:max(0, int(limit))]
 
 
@@ -36,5 +36,5 @@ def safe_javascript_error(error: object) -> dict[str, str]:
     return {
         "name": name or "Error",
         "message": message,
-        "stack_frames": "\\n".join(safe_frames),
+        "stack_frames": "\n".join(safe_frames),
     }
