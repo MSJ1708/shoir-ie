@@ -77,7 +77,7 @@ python scripts/provision_staging_e2e_accounts.py
 
 The helper is hard-pinned to the staging project, rejects production, asks for the staging publishable key, staging service-role/server secret, and staging administrator password through hidden prompts, and requires the exact confirmation phrase it prints. It uses normal registration and approval actions; the references are synthetic no-charge staging fixtures. It writes a private, git-ignored `.staging-e2e-credentials.json` file with restricted permissions and a secret-name mapping. Copy the generated username/password pairs into the corresponding GitHub Actions secrets below, keep the file private during the operation, and securely delete it once the secrets are confirmed.
 
-If the identities already exist, do not blindly provision again. Inspect the provisioner's state file and staging registration queue. If passwords do not match Actions secrets, use the documented recovery helper `scripts/recover_staging_e2e_credentials.py` (or the PowerShell wrapper on Windows) to reset only the seven disposable identities. It is pinned to staging and does not create/delete accounts or modify `sho`.
+If the identities already exist, do not blindly provision again. Inspect the provisioner's state file and staging registration queue. If passwords do not match Actions secrets, use the documented Python recovery helper `scripts/recover_staging_e2e_credentials.py` to reset only the seven disposable identities. Run it from PowerShell on Windows with Python and GitHub CLI installed; there is no separate `.ps1` wrapper. It is pinned to staging and does not create/delete accounts or modify `sho`.
 
 ## 4. Configure GitHub Actions secrets and variables
 
