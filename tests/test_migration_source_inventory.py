@@ -35,6 +35,7 @@ EXPECTED_VERSIONS = [
     "20261107153000",
     "20261107160000",
     "20261118170000",
+    "20261120115000",
 ]
 
 
@@ -528,3 +529,35 @@ def test_protected_administrator_is_immutable_on_login_and_existing_sessions():
             source,
             flags=re.IGNORECASE,
         ), path
+
+
+def test_dataset_storage_lifecycle_lease_migration_is_private_and_token_fenced():
+    source = (
+        MIGRATIONS
+        / "20261120115000_shoir_dataset_storage_lifecycle_leases.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+
+    assert "create table public.shoir_dataset_storage_lifecycle_leases" in normalized
+    assert "primary key (workspace_key, dataset_id)" in normalized
+    assert "enable row level security" in normalized
+    assert (
+        "revoke all on table public.shoir_dataset_storage_lifecycle_leases "
+        "from public, anon, authenticated, service_role"
+    ) in normalized
+    assert "security definer" in normalized
+    assert "set search_path = pg_catalog, public" in normalized
+    assert "where current_lease.expires_at <= clock_timestamp()" in normalized
+    assert "p_lease_seconds not between 30 and 600" in normalized
+    assert "lease_token = p_lease_token" in normalized
+    assert (
+        "grant execute on function public.shoir_dataset_storage_lease_acquire"
+        in normalized
+    )
+    assert (
+        "grant execute on function public.shoir_dataset_storage_lease_release"
+        in normalized
+    )
