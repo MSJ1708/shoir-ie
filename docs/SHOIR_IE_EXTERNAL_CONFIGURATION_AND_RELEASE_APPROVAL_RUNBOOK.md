@@ -224,7 +224,7 @@ Never test recovery by deleting, pausing, resetting or overwriting production.
 Only after sections 1–8 prerequisites that apply to the selected features have independent review and staging recovery readiness:
 1. confirm exact candidate SHA, eight CI checks green and PR #232 independent approval/thread resolution;
 2. confirm the actual staging migration ledger and pending migrations with the authorized DB operator (the connected database-history query can fail independently of project health);
-3. apply the approved staging migrations in timestamp order, including `20261120115000` and the OIDC audit migration only if OIDC is being accepted;
+3. apply the approved staging migrations in timestamp order, including `20261120115000` and `20261120130000` plus the OIDC audit migration only if OIDC is being accepted;
 4. deploy the matching persistence Edge source to staging and record function version/hash;
 5. recheck RLS, table grants, RPC grants, Security/Health/Performance Advisors and Storage bucket policy;
 6. confirm staging banner, candidate build marker and E2E secrets;
