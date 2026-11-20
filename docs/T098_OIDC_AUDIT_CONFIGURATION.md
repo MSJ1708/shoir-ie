@@ -74,3 +74,21 @@ Until every item above is complete, T098 remains `EXTERNAL_CONFIGURATION_REQUIRE
 ## Rate-limit abuse protection
 
 Before JWT verification, the Edge Function rate-limits OIDC requests only by the trusted Cloudflare client-IP header. It does not accept an email address or display hint from the browser as a rate-limit key. The per-identity throttle is added only after the Edge Function verifies the ID-token signature and standard claims, and it uses the verified JWT email. The display-only email hint is not sent to the Edge Function.
+
+
+## Workbench readiness inspector semantics
+
+The T098 Workbench inspector reads the nested Streamlit configuration contract only:
+
+- `[auth].redirect_uri`
+- `[auth].cookie_secret`
+- `[auth].expose_tokens` including `id`
+- `[auth.enterprise].client_id`
+- `[auth.enterprise].client_secret`
+- `[auth.enterprise].server_metadata_url`
+
+It reports whether those values are present and whether the visible URLs/cookie secret meet basic syntax/strength requirements. Secret values are never returned. Legacy flat names such as `SHOIR_OIDC_ISSUER_URL`, `SHOIR_OIDC_REDIRECT_URI`, `SHOIR_MFA_ENFORCED` or `SHOIR_AUDIT_LOG_ENABLED` are not the Streamlit app contract and must not be configured as substitutes.
+
+The Edge verifier's issuer, client ID/audience, JWKS and MFA claim values live in the separate Supabase Edge Function secret manager. A Streamlit process cannot inspect those remote secrets or the deployed Edge version. The readiness result therefore reports Edge configuration visibility as `NOT_INSPECTABLE_FROM_STREAMLIT`, with issuer/MFA/audit flags as unknown rather than treating remote configuration as false or true. It continues to report `sso_active=false`, `mfa_active=false`, provider authentication untested and audit persistence unverified until actual authorized staging evidence is attached.
+
+A syntactically ready Streamlit configuration is **not** an operational OIDC pass and does not close T098.
