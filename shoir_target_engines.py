@@ -2521,6 +2521,9 @@ def plan_recursive_material_requirements(
         "level_count": total_levels,
         "total_gross_component_requirement": float(frame["Gross requirement"].sum()) if not frame.empty else 0.0,
         "total_planned_order_receipts": float(frame["Planned order receipt"].sum()) if not frame.empty else 0.0,
+        "total_planned_order_receipt_units_note": (
+            "This is a descriptive arithmetic sum across component rows. Components may use different units of measure, so the total is not a physically additive inventory quantity; inspect each component row separately."
+        ),
         "components": frame,
         "assumptions": "Nested BOM quantities are exploded level by level. Yield/scrap is applied to each component gross requirement; on-hand and scheduled receipts are consumed once per component; lot multiples round planned receipts upward; child requirements are generated from planned receipts and due at the parent's release period.",
         "warning": "First-pass deterministic multi-level MRP. It records one declared BOM revision per item but does not select effectivity-dated revisions, alternatives, supplier pegging, capacity, order calendars, time-phased scheduled receipts or substitute items. Confirm UOM, BOM ownership/revision, safety stock policy and period definitions before operational use.",
