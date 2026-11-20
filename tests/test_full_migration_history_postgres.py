@@ -679,10 +679,6 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "p_workspace_key text, p_dataset_id text, p_lease_token uuid",
                 ),
                 (
-                    "shoir_dataset_storage_lease_renew",
-                    "p_workspace_key text, p_dataset_id text, p_lease_token uuid, p_lease_operation text, p_actor_username_lc text, p_lease_seconds integer",
-                ),
-                (
                     "shoir_platform_register_dataset_version_with_storage_and_lease",
                     "p_workspace_key text, p_dataset_id text, p_name text, p_source_name text, p_data_hash text, p_version_fingerprint text, p_row_count bigint, p_column_count integer, p_schema_json jsonb, p_transformations_json jsonb, p_actor text, p_version_record_id text, p_head_record_id text, p_event_id text, p_storage_key text, p_lease_token uuid",
                 ),
