@@ -317,43 +317,61 @@ def test_plugin_manifest_validated_but_never_enabled():
     assert out["plugin_records"][1]["validation_status"] == "BLOCKED_INVALID_MANIFEST"
 
 
-def test_identity_config_reports_readiness_without_claiming_sso_active(monkeypatch):
-    values = {
-        "SHOIR_OIDC_ISSUER_URL": "https://idp.example.test",
-        "SHOIR_OIDC_CLIENT_ID": "shoir-staging",
-        "SHOIR_OIDC_CLIENT_SECRET": "do-not-return",
-        "SHOIR_OIDC_REDIRECT_URI": "https://staging.example.test/auth/callback",
-        "SHOIR_OIDC_SCOPES": "openid profile email",
-        "SHOIR_MFA_ENFORCED": "true",
-        "SHOIR_AUDIT_LOG_ENABLED": "true",
+def test_identity_config_inspects_nested_streamlit_auth_without_claiming_sso_active():
+    auth = {
+        "redirect_uri": "https://staging.example.test/oauth2callback",
+        "cookie_secret": "x" * 48,
+        "expose_tokens": "id",
+        "enterprise": {
+            "client_id": "shoir-staging",
+            "client_secret": "do-not-return",
+            "server_metadata_url": "https://idp.example.test/.well-known/openid-configuration",
+        },
     }
-    for key, value in values.items():
-        monkeypatch.setenv(key, value)
-    out = identity_audit_configuration_status()
-    assert out["status"] == "READY_FOR_AUTHORIZED_IDP_TEST"
+    out = identity_audit_configuration_status({"auth": auth})
+    assert out["status"] == "STREAMLIT_CONFIGURATION_READY_EDGE_SETTINGS_UNVERIFIED"
+    assert out["streamlit_configuration_ready"] is True
+    assert out["edge_configuration_visibility"] == "NOT_INSPECTABLE_FROM_STREAMLIT"
+    assert out["oidc_login_flow_implemented"] is True
     assert out["sso_active"] is False
     assert out["mfa_active"] is False
-    assert out["oidc_login_flow_implemented"] is True
     assert out["provider_authentication_tested"] is False
     assert out["provider_mfa_evidence_verified"] is False
     assert out["audit_sink_configured"] is False
     assert out["audit_persistence_verified"] is False
     assert out["verified_at"] is None
-    assert len(out["required_external_actions"]) >= 6
+    assert "SHOIR_OIDC_ISSUER" in out["expected_edge_secret_names"]
+    assert all(row["value_exposed"] is False for row in out["environment_variables"].to_dict("records"))
     assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
 
-def test_identity_config_fails_closed_when_provider_is_missing(monkeypatch):
-    for key in (
-        "SHOIR_OIDC_ISSUER_URL", "SHOIR_OIDC_CLIENT_ID", "SHOIR_OIDC_CLIENT_SECRET",
-        "SHOIR_OIDC_REDIRECT_URI", "SHOIR_OIDC_SCOPES", "SHOIR_MFA_ENFORCED",
-        "SHOIR_AUDIT_LOG_ENABLED",
-    ):
-        monkeypatch.delenv(key, raising=False)
-    out = identity_audit_configuration_status()
+def test_identity_config_fails_closed_when_provider_is_missing():
+    out = identity_audit_configuration_status({"auth": {}})
     assert out["status"] == "NOT_CONFIGURED"
     assert out["sso_active"] is False
-    assert len(out["missing_variables"]) >= 7
+    assert len(out["missing_settings"]) >= 6
+    assert out["edge_configuration_visibility"] == "NOT_INSPECTABLE_FROM_STREAMLIT"
+
+
+def test_identity_config_rejects_invalid_nested_streamlit_auth_settings():
+    out = identity_audit_configuration_status({
+        "auth": {
+            "redirect_uri": "http://staging.example.test/oauth2callback",
+            "cookie_secret": "too-short",
+            "expose_tokens": "access",
+            "enterprise": {
+                "client_id": "shoir-staging",
+                "client_secret": "do-not-return",
+                "server_metadata_url": "http://idp.example.test/.well-known/openid-configuration",
+            },
+        }
+    })
+    assert out["status"] == "CONFIGURATION_INVALID"
+    assert out["streamlit_configuration_ready"] is False
+    assert not out["redirect_uri_syntax_valid"]
+    assert not out["oidc_issuer_syntax_valid"]
+    assert len(out["configuration_problems"]) >= 3
+    assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
 
 def test_governance_snapshot_checksum_verify_and_tamper_detection():
