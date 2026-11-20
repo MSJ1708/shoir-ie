@@ -2318,14 +2318,15 @@ Deno.serve(async (req) => {
         } finally {
           if (leaseAcquired) {
             try {
-              const { data: released, error: releaseError } = await supabase.rpc(
-                "shoir_dataset_storage_lease_release",
-                {
-                  p_workspace_key: workspaceKey,
-                  p_dataset_id: candidate.dataset_id,
-                  p_lease_token: leaseToken,
-                },
-              );
+              const { data: released, error: releaseError } = await supabase
+                .rpc(
+                  "shoir_dataset_storage_lease_release",
+                  {
+                    p_workspace_key: workspaceKey,
+                    p_dataset_id: candidate.dataset_id,
+                    p_lease_token: leaseToken,
+                  },
+                );
               if (releaseError || released !== true) {
                 leaseReleaseFailures += 1;
               }
@@ -2570,7 +2571,10 @@ Deno.serve(async (req) => {
       const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
       if (lease?.acquired !== true) {
         return sendResponse(
-          { error: "This dataset is busy with another storage operation. Retry shortly." },
+          {
+            error:
+              "This dataset is busy with another storage operation. Retry shortly.",
+          },
           409,
         );
       }
@@ -2580,14 +2584,17 @@ Deno.serve(async (req) => {
         const name = String(body.name || "").trim();
         const sourceName = String(body.source_name || "").trim();
         const dataHash = String(body.data_hash || "").toLowerCase();
-        const fingerprint = String(body.version_fingerprint || "").toLowerCase();
+        const fingerprint = String(body.version_fingerprint || "")
+          .toLowerCase();
         const rowCount = Number(body.row_count);
         const columnCount = Number(body.column_count);
         const schema = body.schema;
         const transformations = body.transformations || [];
         if (
           !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
-          !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
+          !uploadPath.startsWith(
+            "tmp/" + workspaceKey + "/" + datasetId + "/",
+          ) ||
           uploadPath.includes("..") ||
           uploadPath.length > 240 ||
           !name ||
@@ -2802,7 +2809,9 @@ Deno.serve(async (req) => {
             }
           }
           try {
-            const { error: tempRemoveError } = await bucket.remove([uploadPath]);
+            const { error: tempRemoveError } = await bucket.remove([
+              uploadPath,
+            ]);
             if (tempRemoveError) {
               console.warn(
                 "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
