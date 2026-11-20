@@ -1877,6 +1877,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "category_counts_json": pareto_counts_json,
                                 "problem_statement": problem_statement,
                                 "why_chain_text": why_chain_text,
+                                "fishbone_causes_json": fishbone_causes_json,
                                 "countermeasure": countermeasure_text,
                                 "owner": action_owner,
                                 "due_date": action_due_date,
