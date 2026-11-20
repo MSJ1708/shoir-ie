@@ -640,14 +640,200 @@ def _require_connector_operator() -> None:
         raise PermissionError("Connector access could not be verified; the operation was denied.") from exc
 
 
+
+def _verify_provider_erp_read(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Run a server-configured, staging-only SAP/Oracle read and return metadata only."""
+    profile = payload.get("profile")
+    if not isinstance(profile, Mapping):
+        raise ValueError("profile must be a JSON object containing connection_id and resource_key.")
+    connection_id = _nonempty_text(profile.get("connection_id"), "connection_id", 120)
+    resource_key = _nonempty_text(profile.get("resource_key"), "resource_key", 80)
+
+    _require_connector_operator()
+    try:
+        import durable_account_store
+        environment = str(durable_account_store.APP_ENVIRONMENT or "").strip().casefold()
+    except Exception as exc:
+        raise PermissionError("The application environment could not be verified; provider reads are denied.") from exc
+    if environment != "staging":
+        raise PermissionError("SAP/Oracle provider reads are available only in the authorized staging environment.")
+
+    try:
+        import streamlit as st
+        state = st.session_state
+        actor = str(state.get("current_user") or "").strip()
+        active_workspace_id = str(
+            state.get("shoir_active_organization_workspace_id")
+            or state.get("shoir_active_workspace_id")
+            or state.get("active_workspace_id")
+            or state.get("workspace_id")
+            or "default"
+        ).strip()
+    except Exception as exc:
+        raise PermissionError("The active user and workspace could not be verified; no provider request was sent.") from exc
+    if not actor or not active_workspace_id:
+        raise PermissionError("An authenticated actor and active workspace are required for provider reads.")
+
+    def load_server_json(setting: str) -> dict[str, Any]:
+        raw = _configuration_value(setting)
+        if not raw:
+            raise PermissionError(f"Required server-side setting {setting} is not configured.")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Server-side setting {setting} must contain valid JSON.") from exc
+        if not isinstance(value, dict):
+            raise ValueError(f"Server-side setting {setting} must be a JSON object.")
+        return value
+
+    connection_catalog = load_server_json("SHOIR_ERP_CONNECTIONS_JSON")
+    credential_catalog = load_server_json("SHOIR_ERP_CREDENTIALS_JSON")
+    entry = connection_catalog.get(connection_id)
+    if not isinstance(entry, Mapping):
+        raise PermissionError("The selected ERP connection is not present in the server-side allowlist.")
+    connection_data = entry.get("connection", entry)
+    bindings = entry.get("bindings")
+    if not isinstance(connection_data, Mapping) or not isinstance(bindings, Mapping):
+        raise ValueError("The server-side ERP connection must define connection metadata and resource bindings.")
+    binding_data = bindings.get(resource_key)
+    if not isinstance(binding_data, Mapping):
+        raise PermissionError("The selected ERP resource is not configured for this connection.")
+
+    product_id = _nonempty_text(connection_data.get("product_id"), "connection.product_id", 80).upper()
+    if product_id not in {
+        "SAP_S4HANA_CLOUD_PUBLIC",
+        "SAP_S4HANA_CLOUD_PRIVATE",
+        "ORACLE_FUSION_ERP",
+        "ORACLE_FUSION_SCM",
+    }:
+        raise PermissionError("Only the supported SAP S/4HANA Cloud and Oracle Fusion product profiles have a provider transport.")
+    configured_workspace = _nonempty_text(connection_data.get("workspace_id"), "connection.workspace_id", 120)
+    if configured_workspace != active_workspace_id:
+        raise PermissionError("The ERP connection is not scoped to the currently active workspace.")
+    if connection_data.get("enabled") is not True or connection_data.get("read_only") is not True:
+        raise PermissionError("The server-side ERP connection must be explicitly enabled and read-only.")
+
+    from shoir_erp_connectors import (
+        ERPConnectionProfile,
+        ERPResourceBinding,
+        _host_port_from_allowlist,
+    )
+    from shoir_erp_provider_transport import read_provider_resource
+    from shoir_rest_connector import _parse_approved_private_cidrs
+
+    allowed_hosts_raw = _configuration_value("SHOIR_ERP_ALLOWED_HOSTS")
+    if not allowed_hosts_raw:
+        raise PermissionError("The server-side ERP hostname allowlist is not configured.")
+    allowed_hosts = {
+        _host_port_from_allowlist(item.strip())
+        for item in re.split(r"[;,]", allowed_hosts_raw)
+        if item.strip()
+    }
+    if not allowed_hosts:
+        raise PermissionError("The server-side ERP hostname allowlist is empty.")
+    approved_private_networks = _parse_approved_private_cidrs(
+        _configuration_value("SHOIR_ERP_APPROVED_PRIVATE_CIDRS")
+    )
+    timeout_raw = _configuration_value("SHOIR_ERP_TIMEOUT_SECONDS") or "8"
+    try:
+        timeout_seconds = float(timeout_raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("SHOIR_ERP_TIMEOUT_SECONDS must be a finite number between 0.5 and 10.") from exc
+    if not math.isfinite(timeout_seconds) or not 0.5 <= timeout_seconds <= 10:
+        raise ValueError("SHOIR_ERP_TIMEOUT_SECONDS must be a finite number between 0.5 and 10.")
+
+    credential_ref = _nonempty_text(connection_data.get("credential_ref"), "connection.credential_ref", 400)
+
+    def resolve_credential(reference: str) -> Mapping[str, Any]:
+        value = credential_catalog.get(reference)
+        if not isinstance(value, Mapping):
+            raise PermissionError("The server-side OAuth credential reference is not configured.")
+        return value
+
+    connection = ERPConnectionProfile(
+        product_id=product_id,
+        workspace_id=configured_workspace,
+        connection_id=connection_id,
+        tenant_ref=_nonempty_text(connection_data.get("tenant_ref"), "connection.tenant_ref", 100),
+        base_url=_nonempty_text(connection_data.get("base_url"), "connection.base_url", 2048),
+        credential_ref=credential_ref,
+        enabled=True,
+        read_only=True,
+    )
+    binding = ERPResourceBinding(
+        resource_key=resource_key,
+        source_path=_nonempty_text(binding_data.get("source_path"), "binding.source_path", 512),
+        records_path=str(binding_data.get("records_path") or ""),
+        entity_type=_nonempty_text(binding_data.get("entity_type"), "binding.entity_type", 40),
+        id_path=_nonempty_text(binding_data.get("id_path"), "binding.id_path", 256),
+        field_map=binding_data.get("field_map") if isinstance(binding_data.get("field_map"), Mapping) else {},
+        required_fields=tuple(binding_data.get("required_fields") or ()),
+        units=binding_data.get("units") if isinstance(binding_data.get("units"), Mapping) else {},
+        currency_path=str(binding_data.get("currency_path") or ""),
+        source_timestamp_path=str(binding_data.get("source_timestamp_path") or ""),
+        source_timezone=str(binding_data.get("source_timezone") or ""),
+        mapping_version=str(binding_data.get("mapping_version") or "1"),
+        max_records=int(binding_data.get("max_records") or 5000),
+        max_pages=int(binding_data.get("max_pages") or 20),
+    )
+
+    def authorize(request_actor: str, request_workspace: str, request_connection: str, request_resource: str) -> bool:
+        return (
+            request_actor == actor
+            and request_workspace == active_workspace_id
+            and request_connection == connection_id
+            and request_resource == resource_key
+        )
+
+    result = read_provider_resource(
+        connection,
+        binding,
+        actor_id=actor,
+        active_workspace_id=active_workspace_id,
+        allowed_hosts=allowed_hosts,
+        authorize=authorize,
+        credential_resolver=resolve_credential,
+        approved_private_networks=approved_private_networks,
+        timeout_seconds=timeout_seconds,
+    )
+    # Do not hydrate or persist provider records from this verification action.
+    # Return only bounded status, counts and a content digest to the Workbench.
+    return {
+        "tool_id": "T096",
+        "status": result["status"],
+        "product_id": result["product_id"],
+        "connection_ref": connection_id,
+        "resource_key": result["resource_key"],
+        "read_only": True,
+        "pages_read": int(result["pages_read"]),
+        "record_count": int(result["record_count"]),
+        "rejected_record_count": int(result["rejected_record_count"]),
+        "duplicate_record_count": int(result["duplicate_record_count"]),
+        "conflicting_duplicate_count": int(result["conflicting_duplicate_count"]),
+        "truncated": bool(result["truncated"]),
+        "mapping_version": result["mapping_version"],
+        "records_sha256": result["records_sha256"],
+        "read_at_utc": result["read_at_utc"],
+        "data_provenance": "EXTERNAL_PROVIDER_READ_UNVERIFIED",
+        "warning": (
+            "A staging provider read completed. No provider records were persisted or synchronized. "
+            "This does not establish ongoing connectivity, production readiness or independent vendor acceptance."
+        ),
+    }
+
+
+
 def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Inspect configuration or explicitly test a server-configured read-only REST connector.
 
     Configuration inspection is the default and never performs network access.
-    A live request requires action='verify_rest_read', a server-configured
-    allowlisted profile, and an authenticated entitled administrator.
+    Live REST reads and provider-aware SAP/Oracle reads are separate, explicit,
+    staging-only actions. Credentials, connection metadata and host allowlists
+    are resolved from server-side configuration, not from Workbench payloads.
     """
     action = str(payload.get("action") or "inspect").strip().lower()
+    if action == "verify_provider_read":
+        return _verify_provider_erp_read(payload)
     if action == "verify_rest_read":
         profile = payload.get("profile")
         if not isinstance(profile, dict):
@@ -677,7 +863,7 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
             include_sample_data=include_sample_data,
         )
     if action not in {"inspect", "check_configuration"}:
-        raise ValueError("action must be inspect or verify_rest_read.")
+        raise ValueError("action must be inspect, verify_rest_read or verify_provider_read.")
     profiles = _records(payload.get("profiles"), "profiles", maximum=500)
     output = []
     for profile in profiles:

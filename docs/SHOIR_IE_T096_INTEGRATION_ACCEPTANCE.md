@@ -42,3 +42,18 @@ The candidate now includes `shoir_erp_provider_transport.py` with a server-side 
 A server-side credential resolver is injected by the deployment. It receives only the opaque `credential_ref` and must return the provider's token URL, client ID, client secret and scope from the approved secret manager. No client secret or access token belongs in a Workbench payload, repository file or browser. The common connector adapter still performs authenticated actor, workspace and resource authorization before any transport call.
 
 Automated transport-contract tests cover token exchange/cache, SAP OData and Oracle Fusion pagination, redirect rejection and cross-origin pagination rejection. These are synthetic HTTP-contract tests; they do **not** prove a live provider endpoint, real account scopes, tenant-specific schemas, pagination variants or provider rate-limit behavior. The existing Workbench T096 form has not yet been wired to create/manage these provider credentials and run the provider-aware resource flow. Live provider acceptance remains blocked on an owner-selected sandbox, approved host and credential reference, secret-manager configuration, end-to-end UI integration and independent security review. Keep T096 `EXTERNAL_CONFIGURATION_REQUIRED` until that evidence exists.
+
+
+## Workbench integration update — 2026-11-20
+
+The provider-aware SAP/Oracle read path is now wired into the existing T096 Workbench form. Operators select a server-configured connection reference and resource key; the browser does not submit a base URL, tenant credential, client secret, OAuth token or host allowlist. The action requires an explicit confirmation, an authenticated Enterprise workspace owner/admin, matching active workspace scope, an enabled read-only server connection, a server-side resource mapping, an approved HTTPS host and the staging application environment.
+
+Server-side settings consumed by the provider action:
+
+- `SHOIR_ERP_CONNECTIONS_JSON`: connection IDs mapped to product/workspace/tenant/base URL/opaque credential reference and approved resource bindings.
+- `SHOIR_ERP_CREDENTIALS_JSON`: opaque credential-reference map to provider token URL, client ID, client secret and read scope.
+- `SHOIR_ERP_ALLOWED_HOSTS`: semicolon- or comma-separated exact host[:port] allowlist.
+- `SHOIR_ERP_APPROVED_PRIVATE_CIDRS`: optional narrow private CIDRs, subject to the existing network-policy checks.
+- `SHOIR_ERP_TIMEOUT_SECONDS`: bounded 0.5–10 second request timeout.
+
+The Workbench displays only read status, row/page counts, mapping version and a SHA-256 digest. It does not persist or display fetched provider records. Tests use synthetic server-side settings and a mocked provider result to prove authorization, workspace scoping, secret redaction and metadata-only output. This is not a live SAP/Oracle tenant connection or a durable import/sync feature; real provider configuration and acceptance remain required.

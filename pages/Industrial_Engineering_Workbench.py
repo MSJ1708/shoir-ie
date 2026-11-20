@@ -1546,11 +1546,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     "Live verification is a separate, explicitly confirmed, staging-only HTTPS read; "
                                     "provider credentials must remain in server-side secrets."
                                 )
+                                st.caption(
+                                    "The provider-aware path supports SAP S/4HANA Cloud Public/Private and Oracle Fusion ERP/SCM. "
+                                    "SAP ECC and Oracle EBS require separately reviewed legacy adapters. Connection profiles, "
+                                    "resource mappings, credentials and approved hosts remain server-side."
+                                )
                                 integration_action = st.selectbox(
                                     "Integration action",
                                     [
                                         "Inspect configured connector settings",
                                         "Verify approved REST connector (staging only)",
+                                        "Verify approved SAP/Oracle resource (staging only)",
                                     ],
                                     key="tool096_action",
                                 )
@@ -1565,11 +1571,20 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     key="tool096_live_profile",
                                     disabled=integration_action != "Verify approved REST connector (staging only)",
                                 )
+                                integration_provider_profile_json = st.text_area(
+                                    "Approved SAP/Oracle connection reference (JSON object)",
+                                    value='{"connection_id":"sap-s4hana-public-plant","resource_key":"production_orders"}',
+                                    key="tool096_provider_profile",
+                                    disabled=integration_action != "Verify approved SAP/Oracle resource (staging only)",
+                                )
                                 integration_confirm_live = st.checkbox(
                                     "I confirm this sends a read-only HTTPS request to the server-configured staging connector.",
                                     value=False,
                                     key="tool096_confirm_live",
-                                    disabled=integration_action != "Verify approved REST connector (staging only)",
+                                    disabled=integration_action not in {
+                                        "Verify approved REST connector (staging only)",
+                                        "Verify approved SAP/Oracle resource (staging only)",
+                                    },
                                 )
                                 run_method = st.form_submit_button(
                                     "Run Integration Management check",
@@ -2017,6 +2032,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "action": integration_action,
                                 "profiles_json": integration_profiles_json,
                                 "live_profile_json": integration_live_profile_json,
+                                "provider_profile_json": integration_provider_profile_json,
                                 "confirm_live": integration_confirm_live,
                             }
                         elif selected_tool["tool_id"] == "T097":
@@ -2302,7 +2318,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             raise ValueError("Connector profiles input must contain a profiles JSON list.")
                                         result = run_additional_tool("T096", integration_payload)
                                         result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"
-                                    else:
+                                    elif integration_action == "Verify approved REST connector (staging only)":
                                         if not integration_confirm_live:
                                             raise PermissionError("Confirm the staging-only read-only connector request before running it.")
                                         try:
@@ -2322,6 +2338,19 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             + " Sample payload preview is disabled in the Workbench; "
                                             "only redacted connection/data-retrieval metadata is retained."
                                         )
+                                    else:
+                                        if not integration_confirm_live:
+                                            raise PermissionError("Confirm the staging-only SAP/Oracle read-only request before running it.")
+                                        try:
+                                            provider_profile = json.loads(integration_provider_profile_json)
+                                        except json.JSONDecodeError as exc:
+                                            raise ValueError("The SAP/Oracle connection reference must be valid JSON.") from exc
+                                        if not isinstance(provider_profile, dict):
+                                            raise ValueError("The SAP/Oracle connection reference must be a JSON object.")
+                                        result = run_additional_tool("T096", {
+                                            "action": "verify_provider_read",
+                                            "profile": provider_profile,
+                                        })
                                 elif selected_tool["tool_id"] == "T098":
                                     result = run_additional_tool("T098", {})
                                     result["data_provenance"] = "SERVER_CONFIGURATION_INSPECTION"

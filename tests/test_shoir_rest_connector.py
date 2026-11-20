@@ -398,3 +398,130 @@ def test_sample_preview_redacts_common_personal_and_location_fields():
         assert preview[key] == "[REDACTED]"
     assert preview["station"] == "S1"
     assert preview["count"] == 7
+
+def test_provider_erp_read_uses_server_configuration_and_returns_metadata_only(monkeypatch):
+    import durable_account_store
+    import shoir_remaining_tool_engines as engines
+    import streamlit as st
+    import shoir_erp_provider_transport as provider_transport
+
+    state = {
+        "authenticated": True,
+        "current_user": "provider-admin",
+        "user_role": "Enterprise Admin",
+        "user_tier": "Enterprise Plus Tier",
+        "shoir_active_organization_workspace_id": "workspace-a",
+    }
+    monkeypatch.setattr(st, "session_state", state, raising=True)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    connection_catalog = {
+        "sap-plant": {
+            "connection": {
+                "product_id": "SAP_S4HANA_CLOUD_PUBLIC",
+                "workspace_id": "workspace-a",
+                "tenant_ref": "synthetic-tenant",
+                "base_url": "https://erp.example.test/odata",
+                "credential_ref": "vault://shoir/sap-plant",
+                "enabled": True,
+                "read_only": True,
+            },
+            "bindings": {
+                "production_orders": {
+                    "source_path": "API_PRODUCTION_ORDER_2_SRV/A_ProductionOrder_2",
+                    "records_path": "value",
+                    "entity_type": "Order",
+                    "id_path": "ProductionOrder",
+                    "field_map": {"order_number": "ProductionOrder"},
+                    "required_fields": ["order_number"],
+                    "mapping_version": "1",
+                    "max_records": 100,
+                    "max_pages": 5,
+                },
+            },
+        },
+    }
+    credential_catalog = {
+        "vault://shoir/sap-plant": {
+            "token_url": "https://identity.example.test/oauth2/token",
+            "client_id": "synthetic-client",
+            "client_secret": "synthetic-provider-secret",
+            "scope": "erp.read",
+        },
+    }
+    values = {
+        "SHOIR_ERP_CONNECTIONS_JSON": json.dumps(connection_catalog),
+        "SHOIR_ERP_CREDENTIALS_JSON": json.dumps(credential_catalog),
+        "SHOIR_ERP_ALLOWED_HOSTS": "erp.example.test;identity.example.test",
+        "SHOIR_ERP_APPROVED_PRIVATE_CIDRS": "",
+        "SHOIR_ERP_TIMEOUT_SECONDS": "5",
+    }
+    monkeypatch.setattr(engines, "_configuration_value", lambda key: values.get(key, ""))
+    captured = {}
+
+    def fake_read(connection, binding, **kwargs):
+        captured["connection"] = connection
+        captured["binding"] = binding
+        captured["kwargs"] = kwargs
+        credential = kwargs["credential_resolver"](connection.credential_ref)
+        captured["credential"] = credential
+        assert kwargs["authorize"](
+            "provider-admin", "workspace-a", "sap-plant", "production_orders"
+        ) is True
+        return {
+            "tool_id": "T096",
+            "product_id": connection.product_id,
+            "resource_key": binding.resource_key,
+            "status": "READ_COMPLETED",
+            "read_only": True,
+            "pages_read": 1,
+            "record_count": 2,
+            "rejected_record_count": 0,
+            "duplicate_record_count": 0,
+            "conflicting_duplicate_count": 0,
+            "truncated": False,
+            "mapping_version": "1",
+            "records_sha256": "a" * 64,
+            "read_at_utc": "2026-11-20T18:00:00+00:00",
+            "records": [{"entity_type": "Order", "fields": {"order_number": "1000"}}],
+            "warning": "Synthetic test only.",
+        }
+
+    monkeypatch.setattr(provider_transport, "read_provider_resource", fake_read)
+    out = engines.integration_configuration_status({
+        "action": "verify_provider_read",
+        "profile": {"connection_id": "sap-plant", "resource_key": "production_orders"},
+    })
+    assert out["status"] == "READ_COMPLETED"
+    assert out["record_count"] == 2
+    assert out["records_sha256"] == "a" * 64
+    assert out["data_provenance"] == "EXTERNAL_PROVIDER_READ_UNVERIFIED"
+    assert "records" not in out
+    assert "synthetic-provider-secret" not in json.dumps(out)
+    assert captured["connection"].read_only is True
+    assert captured["binding"].resource_key == "production_orders"
+    assert captured["credential"]["client_secret"] == "synthetic-provider-secret"
+
+
+def test_provider_erp_read_fails_closed_without_server_allowlist(monkeypatch):
+    import durable_account_store
+    import shoir_remaining_tool_engines as engines
+    import streamlit as st
+
+    state = {
+        "authenticated": True,
+        "current_user": "provider-admin",
+        "user_role": "Enterprise Admin",
+        "user_tier": "Enterprise Plus Tier",
+        "shoir_active_organization_workspace_id": "workspace-a",
+    }
+    monkeypatch.setattr(st, "session_state", state, raising=True)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(engines, "_configuration_value", lambda key: "")
+    with pytest.raises(PermissionError, match="SHOIR_ERP_CONNECTIONS_JSON"):
+        engines.integration_configuration_status({
+            "action": "verify_provider_read",
+            "profile": {"connection_id": "missing", "resource_key": "production_orders"},
+        })
+
