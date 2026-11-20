@@ -1304,6 +1304,79 @@ def test_recursive_mrp_rejects_conflicting_revisions_and_invalid_yield():
         )
 
 
+def test_constrained_task_schedule_enforces_skills_precedence_and_resource_capacity():
+    from shoir_target_engines import optimize_task_resource_schedule
+
+    result = optimize_task_resource_schedule(
+        [
+            {"task_id": "Cut", "duration_hours": 2, "required_skills": ["Cutting"],
+             "predecessors": [], "earliest_start_hour": 0, "latest_finish_hour": 8,
+             "due_hour": 3, "priority_weight": 2},
+            {"task_id": "Inspect", "duration_hours": 1, "required_skills": ["Quality"],
+             "predecessors": ["Cut"], "earliest_start_hour": 0, "latest_finish_hour": 8,
+             "due_hour": 4, "priority_weight": 1},
+            {"task_id": "Pack", "duration_hours": 1, "required_skills": ["Packing"],
+             "predecessors": [], "earliest_start_hour": 0, "latest_finish_hour": 8,
+             "due_hour": 4, "priority_weight": 1},
+        ],
+        [
+            {"resource": "Cutting operator", "skills": ["Cutting"], "shift_start_hour": 0, "shift_end_hour": 8, "hourly_cost": 50},
+            {"resource": "Quality inspector", "skills": ["Quality"], "shift_start_hour": 0, "shift_end_hour": 8, "hourly_cost": 40},
+            {"resource": "Packer", "skills": ["Packing"], "shift_start_hour": 0, "shift_end_hour": 8, "hourly_cost": 35},
+        ],
+    )
+    assert result["status"] == "OPTIMAL_CONSTRAINED_SCHEDULE"
+    assert result["assigned_count"] == 3
+    assert result["total_assignment_cost"] == pytest.approx(175.0)
+    plan = result["schedule"].set_index("Task")
+    assert plan.loc["Inspect", "Start hour"] >= plan.loc["Cut", "Finish hour"]
+    assert plan.loc["Cut", "Resource"] == "Cutting operator"
+    assert plan.loc["Inspect", "Resource"] == "Quality inspector"
+    assert plan.loc["Pack", "Resource"] == "Packer"
+    assert result["slot_minutes"] == 30
+
+
+def test_constrained_task_schedule_serializes_resource_and_reports_skill_infeasibility():
+    from shoir_target_engines import optimize_task_resource_schedule
+
+    result = optimize_task_resource_schedule(
+        [
+            {"task_id": "Task A", "duration_hours": 2, "required_skills": ["Welding"]},
+            {"task_id": "Task B", "duration_hours": 2, "required_skills": ["Welding"]},
+        ],
+        [{"resource": "Welder", "skills": ["Welding"], "shift_start_hour": 0, "shift_end_hour": 4}],
+    )
+    plan = result["schedule"].sort_values("Start hour")
+    assert result["status"] == "OPTIMAL_CONSTRAINED_SCHEDULE"
+    assert plan.iloc[1]["Start hour"] >= plan.iloc[0]["Finish hour"]
+
+    infeasible = optimize_task_resource_schedule(
+        [{"task_id": "Weld", "duration_hours": 1, "required_skills": ["Welding"]}],
+        [{"resource": "Packer", "skills": ["Packing"], "shift_start_hour": 0, "shift_end_hour": 8}],
+    )
+    assert infeasible["status"] == "INFEASIBLE_NO_ELIGIBLE_RESOURCE_SLOT"
+    assert infeasible["unassigned_tasks"] == ["Weld"]
+
+
+def test_constrained_task_schedule_rejects_cyclic_precedence_and_bad_shift():
+    from shoir_target_engines import optimize_task_resource_schedule
+
+    resources = [{"resource": "Tech", "skills": [], "shift_start_hour": 0, "shift_end_hour": 8}]
+    with pytest.raises(ValueError, match="cycle"):
+        optimize_task_resource_schedule(
+            [
+                {"task_id": "A", "duration_hours": 1, "predecessors": ["B"]},
+                {"task_id": "B", "duration_hours": 1, "predecessors": ["A"]},
+            ],
+            resources,
+        )
+    with pytest.raises(ValueError, match="Shift window"):
+        optimize_task_resource_schedule(
+            [{"task_id": "A", "duration_hours": 1}],
+            [{"resource": "Tech", "skills": [], "shift_start_hour": 9, "shift_end_hour": 8}],
+        )
+
+
 def test_spare_parts_criticality_reorder_screen_reconciles_stock_and_lead_time():
     from shoir_target_engines import analyze_spare_parts_criticality
 
