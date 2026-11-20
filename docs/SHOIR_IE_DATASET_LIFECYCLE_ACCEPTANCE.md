@@ -57,3 +57,18 @@ The shared lifecycle protocol is split across two ordered migrations:
 Each lease grant is 30–600 seconds. The finalizer and sweeper renew only the exact still-live token; an expired or reclaimed token cannot renew. Before any metadata write commits, the SQL wrapper locks and rechecks the matching lease row in the same transaction. The early finalizer cleanup paths for oversized uploads, hash mismatch, malformed CSV, schema mismatch and metadata-RPC failure all route through the helper that renews the lease before removing the temporary object. If renewal or Storage removal cannot be confirmed, the object is retained and left for the later bounded sweep.
 
 The exact-head PostgreSQL replay on candidate `d4955d165b0f59b5c160971f53cd6236bc65f140` passed, covering both migrations and lease/fencing contracts. Edge Function verification also passed on that head. Full Python/AppTest regression and independent review were not complete at this refresh. Neither migration nor the matching Edge Function has been deployed to staging or production.
+
+
+## Superseding status — 2026-11-20
+
+The opening status and early gaps above are a historical 2026-11-06 snapshot. The current candidate on PR #232 includes:
+- resumable Supabase Storage TUS upload for normalized CSV (6 MiB chunks, bounded retries and HEAD-based offset recovery; resume capability remains in the active server-side session, not across process restart/fresh login);
+- lease/fencing migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`, with 30–600-second renewable per-workspace/dataset lease;
+- finalization and generic T020 Storage-reference writes fenced by the exact live token in the same metadata transaction;
+- manual, preview-first sweep for 48-hour-old temporary and immutable orphans, with dual-ledger checks under the shared lease, kind-specific audit events and 50-delete cap;
+- downstream Industrial Intelligence dependency invalidation, stale Digital Thread node state, decision/review guards and local SQLite compatibility invalidation;
+- legacy metadata-only `dataset_version_register` retired with HTTP 410; TUS upload plus lease-fenced finalization is the only supported registration flow.
+
+These are repository-source and automated-test capabilities only. The two new migrations and matching Edge source remain candidate-only and have not been deployed. The connected staging migration-history query failed authentication; the authorized operator must reconcile the live ledger before any staging migration. Hosted TUS/fresh-login/cross-tenant/decision-export acceptance, raw XLSX retention for the dataset registry and independent domain review remain open.
+
+At this point Edge verification and production-v9 compatibility passed on head `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`; Engine Regression and other required workflows were not all complete. Keep BETA / production NO-GO.

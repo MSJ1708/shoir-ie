@@ -249,3 +249,34 @@ Neither project received a migration or Edge Function deployment during this pas
 The five method changes and other tool foundations remain `IMPLEMENTED_NEEDS_VALIDATION`; exact-head tests and independent domain review are still required. T096–T099 still require external provider/infrastructure setup and evidence. The consolidated owner instructions are in `docs/SHOIR_IE_EXTERNAL_CONFIGURATION_AND_RELEASE_APPROVAL_RUNBOOK.md`.
 
 **Release decision remains BETA / NO-GO.** Do not deploy staging or production, merge PR #232, or enable the destructive cleanup action until the exact-head CI, independent approval, staging backup/rollback readiness, authorized migration reconciliation and authenticated disposable-account acceptance have passed. Production requires its own separate approval and release PR.
+
+
+---
+
+## Superseding handoff — 2026-11-20 14:40 UTC
+
+Current source head: `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6` on PR #232, branch `feat/shoir-ie-release-hardening-20261105`, targeting `staging-e2e-20261019`. PR remains open and draft.
+
+### Source reconciliation
+
+- T020 is implemented in candidate source using migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`. The lease is renewable within 30–600 seconds; finalization, generic Storage-reference writes and the manual orphan sweep share it. Metadata writes are fenced by token/operation/actor and row-locked in the same transaction.
+- The legacy metadata-only `dataset_version_register` Edge action now returns 410 after session/entitlement checks; its Python helper raises a clear migration error and the action is removed from the staging shared-action scope. TUS upload plus `dataset_version_finalize` is the only supported version registration flow.
+- T028/T041/T054/T063/T075/T085 engineering changes are present; all remain `IMPLEMENTED_NEEDS_VALIDATION`.
+- Canonical matrix: 96 `IMPLEMENTED_NEEDS_VALIDATION`, 4 `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), 0 `VERIFIED_WORKING`.
+
+### Exact-head CI status
+
+At this refresh:
+- Edge verification [44755607682](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607682) passed.
+- Production v9 compatibility [44755607850](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607850) passed.
+- Engine Regression [44755607917](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607917) was in progress.
+- Full validation [44755607737](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607737) was pending.
+- Migration replay, transaction, security/quality and Excel checks had not all completed at this snapshot.
+
+An earlier candidate regression found four failures: two T063 unit cases and its Workbench test failed because `PULP_CBC_CMD` is deprecated; one T028 Workbench test lacked a `json` import. The T063 engine now uses `pulp.COIN_CMD`, and the AppTest module imports `json`. These fixes require the exact final-head regression to pass before closure.
+
+### Deployment state and boundary
+
+Read-only Edge inventory still reports staging v14 and production v10. The connected migration-history read could not authenticate, so live applied migration versions must be checked with the authorized operator. Neither lifecycle migration nor the candidate Edge source has been deployed; no secrets, accounts, databases, Streamlit app or production setting were modified.
+
+Keep BETA / production NO-GO. The owner runbook is `docs/SHOIR_IE_EXTERNAL_CONFIGURATION_AND_RELEASE_APPROVAL_RUNBOOK.md`. Complete exact-head CI and independent review first; then the owner configures staging, and authenticated operational acceptance occurs before any separate production PR or release approval.

@@ -42,17 +42,19 @@ Aggregate-only administrator checks returned exactly one matching reserved Enter
 
 ## 100-tool matrix
 
-The current CSV contains 100 targets: **0 VERIFIED_WORKING, 88 IMPLEMENTED_NEEDS_VALIDATION, 10 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED**. Foundation-only: T006, T039, T044, T046, T060, T074, T080, T094, T097, T099. External: T096 and T098.
+The current canonical CSV contains 100 targets: **96 IMPLEMENTED_NEEDS_VALIDATION, 4 EXTERNAL_CONFIGURATION_REQUIRED (T096–T099), and 0 VERIFIED_WORKING**. No target is promoted to verified from source presence, a synthetic fixture or local AppTest alone.
 
 ## Main incomplete areas
 
-- Organisation migration is source-only; staging has zero org tables and deployed v13 Edge Function has no org/membership/invitation actions.
-- Dataset versioning is partially present but raw XLSX retention, resumable uploads, orphan cleanup, downstream stale invalidation and hosted lifecycle acceptance remain open.
-- Digital Thread needs managed save/reload/lineage and organisation-scope acceptance.
-- T096 is a mapping adapter with injected transport, not a live SAP/Oracle connection.
-- T098 is a draft OIDC/audit implementation with no configured identity provider/MFA tenant.
-- Visual, RTL and authenticated browser acceptance is incomplete.
-- Qualified engineering review, PDPL/legal review, SBOM/licence clearance, backup restore rehearsal and production rollout approval are open.
+- Organization/shared workspace schema, membership lifecycle and authenticated Owner/Admin/Engineer/Approver/Viewer acceptance still require a reviewed staging deployment and disposable multi-user tests.
+- Dataset versioning now has resumable TUS upload, lease/fencing-protected finalization, a manual reference-aware orphan sweep, and Industrial Intelligence stale-dependency invalidation in source. The two lifecycle/fencing migrations remain candidate-only; hosted TUS/fresh-session/tenant/export acceptance and raw-workbook preservation remain open.
+- Digital Thread has version-aware dependency/stale-node foundations; managed save/reload/re-login, rename preservation, organization-scope and exact-version browser acceptance remain open.
+- T096 requires a selected real ERP/provider, vendor-specific adapter work, authorized sandbox and read-only credential.
+- T097 requires an approved hosted API domain/gateway and an externally consumed, versioned SDK; it is not configuration-only.
+- T098 requires a real non-production OIDC/MFA provider, deployed staging audit store and positive/negative hosted tests.
+- T099 requires database and Storage-byte backup/restore evidence, an isolated restore rehearsal and measured RPO/RTO.
+- Visual/RTL and authenticated browser acceptance, qualified Industrial Engineering/security/infrastructure reviews, Saudi privacy/legal review, SBOM/licence/asset clearance and production approval remain open.
+
 
 Detailed evidence is in the acceptance reports in this directory. This report records the observed state; it does not claim completion from source code alone.
 
@@ -86,3 +88,12 @@ The full validation run [#43929726913](https://github.com/MSJ1708/shoir-ie/actio
 The canonical 100-tool source matrix remains 96 IMPLEMENTED_NEEDS_VALIDATION, 4 EXTERNAL_CONFIGURATION_REQUIRED (T096–T099) and 0 VERIFIED_WORKING. Staging has 24 applied migration versions through 20261107120637 and persistence v14; production has 14 versions through 20261019140600 and persistence v10. Five organization tables and six legal-acceptance columns exist in staging but not production; internal-schema RLS is enabled in staging and disabled in production. No migration/function/app deployment was performed. Production cutover remains blocked pending a safe tested migration-history reconciliation (the historical legal/referral migration rewrites account affiliate codes and updated_at), recovery evidence, exact-head CI, independent review and authenticated staging acceptance.
 
 Detailed technical evidence and the next hand-off steps are in docs/SHOIR_IE_TECHNICAL_HANDOFF_20261118.md. Keep BETA / NO-GO.
+
+
+## Repository engineering refresh — 2026-11-20
+
+PR #232 now contains the two dataset lifecycle lease/fencing migrations, the matching Edge Function, the T020 operator sweep, retirement of metadata-only dataset registration, and the T028/T041/T054/T063/T075/T085 Workbench changes. The T063 solver now uses PuLP `COIN_CMD`; the T028 AppTest imports `json` for its saved fishbone-input assertion.
+
+The current candidate has not yet completed all exact-head CI. One earlier Engine Regression run found four failures (two T063 tests and two related T028/T063 Workbench tests); those known causes were corrected and the exact-head replacement must pass. Another candidate's Edge format-only failure was corrected and the new Edge check passed. Do not treat those prior passes as current-head acceptance.
+
+Read-only Supabase inventory still reports staging Edge v14 and production Edge v10. The connected migration-history query could not authenticate, so the live migration ledger requires authorized operator verification. No staging/production migration, Edge deployment, secret change or PR merge has been performed.

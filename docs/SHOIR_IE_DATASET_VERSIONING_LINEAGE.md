@@ -2,7 +2,7 @@
 
 ## Status
 
-`IMPLEMENTED_NEEDS_VALIDATION` on branch `feat/managed-platform-record-api-20261104`. This is not a claim of hosted staging acceptance.
+`IMPLEMENTED_NEEDS_VALIDATION` on PR #232, branch `feat/shoir-ie-release-hardening-20261105`, targeting `staging-e2e-20261019`. This is not a claim of hosted staging acceptance. The opening sections below are retained as historical design notes; the November 20 superseding addendum at the end is authoritative for current implementation.
 
 ## Implemented in this branch
 
@@ -10,9 +10,9 @@
 - Deterministic CSV content hash.
 - Schema metadata with column dtype and nullable signal.
 - Version fingerprint covering dataset ID, content hash, schema and transformation log.
-- Authenticated Edge action `dataset_version_register`.
-- Session validation before registration.
-- Atomic PostgreSQL function `shoir_platform_register_dataset_version`.
+- Historical metadata-only Edge action `dataset_version_register` (now retired with HTTP 410; do not use).
+- Current registration path: authenticated resumable upload through `dataset_upload_create`, followed by lease-fenced `dataset_version_finalize`.
+- Session validation and Enterprise entitlement checks before registration; server-side hash/CSV validation before the fenced metadata transaction.
 - Immutable version records in `shoir_platform_records` with record type `dataset_version`.
 - Current dataset pointer in `shoir_platform_records` with record type `dataset`.
 - Dataset version registration event in `shoir_platform_events`.
@@ -33,14 +33,15 @@
 
 The migration `20261104192112_shoir_atomic_dataset_version_registry.sql` was applied to staging project `hfhrosthswcybccepmak` through the authorised staging database tool. The source migration is tracked in this branch.
 
-## Important limits
+## Current implementation limits (supersedes the historical limits above)
 
-- The staging upload path now stores the normalized CSV artifact in the private `shoir-industrial-datasets` bucket, using a signed upload URL, a temporary object path, server-side SHA-256 verification, and a content-addressed final object key.
-- The raw original XLSX workbook is not preserved by this particular dataset registry path; the normalized tabular CSV representation is stored. Excel Intelligence separately preserves source workbooks through its own workflow.
-- Uploads currently use a bounded single-request signed upload (50 MiB maximum); resumable/TUS upload and progress recovery are not yet implemented.
-- A verified content-addressed object can be left orphaned if the subsequent metadata transaction fails. A scheduled, reference-aware orphan cleanup process is not yet implemented; do not delete objects by age alone.
-- Downstream model and run records are not yet automatically invalidated or linked to every dataset version.
-- This migration has not yet passed the full clean-database replay workflow and hosted authenticated staging acceptance.
+- The managed normalized-CSV upload uses Supabase Storage TUS with 6 MiB chunks, bounded retries and HEAD-based offset recovery. The resume capability is kept in the current server-side Streamlit session for up to 23 hours; it is not guaranteed across process restarts, fresh login or devices. The 50 MiB cap remains.
+- The T020 Storage object is private and content-addressed after server-side hash/CSV verification. The original XLSX workbook is not stored by this normalized-CSV dataset route; Excel Intelligence separately preserves original workbooks.
+- A private per-workspace/dataset lifecycle lease and transaction-fencing wrappers serialize finalization, generic Storage-reference writes and orphan cleanup. Two candidate migrations implement this: `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`.
+- The authenticated T020 operator sweep is manual and preview-first, not scheduled. Temporary and immutable orphans can be deleted only after the 48-hour newest-timestamp rule and successful no-reference checks against both record and event ledgers while the same live lease is held. It writes kind-specific intent/completion events and is capped at 50 deletions per run.
+- Industrial Intelligence dataset dependencies are invalidated on version advance; historical payloads are preserved, Digital Thread nodes are marked stale and stale model/action/decision review paths are blocked. The local SQLite compatibility path also invalidates legacy model/scenario/experiment/decision/outcome rows. These are source/test capabilities, not proof that every legacy or external artifact is covered.
+- The two lease migrations and matching Edge source remain candidate-only in PR #232 and have not been deployed. The connected migration-history read could not authenticate, so an authorized operator must verify the live staging ledger before a staging change.
+- Hosted TUS interruption/resume, fresh-login historical download, multi-user/cross-workspace denial, raw-workbook round-trip, full dataset-to-decision/export continuity and independent engineering review remain unaccepted.
 - No production schema, Edge Function, secrets, or customer data were changed.
 
 ## Required acceptance
@@ -151,3 +152,26 @@ The current release-hardening candidate adds migrations `20261120115000_shoir_da
 The exact-head CI must verify clean PostgreSQL replay, server-only grants, lease exclusivity, token fencing, expiry reclamation, Edge type/security tests and the complete Python regression suite. This is source implementation only: the new migration and matching Edge Function have not been deployed to staging. Do not run the delete operation until exact-head CI, staging backup/rollback readiness, an independent review and authenticated disposable-workspace rehearsal are accepted.
 
 Original workbook bytes remain an Excel Intelligence responsibility. Hosted fresh-login, organization isolation, signed-object, end-to-end decision/export and independent engineering acceptance remain separate gates.
+
+
+---
+
+## Superseding repository status — 2026-11-20
+
+The current implementation status is the state on PR #232, not the older branch snapshot above.
+
+### Supported registration flow
+
+The metadata-only `dataset_version_register` API is retired and returns HTTP 410 after session and entitlement validation. Its Python helper raises a migration error and the action is removed from the staging shared-action scope. The supported path is only `dataset_upload_create` → resumable TUS upload → `dataset_version_finalize`, which verifies uploaded content, takes/renews a finalization lease and invokes the transaction-fenced registration RPC.
+
+### Concurrency and cleanup safety
+
+The lifecycle lease table is private and RLS-enabled, with server-only acquire/renew/release RPCs and a 30–600-second bound. The fencing migration adds a `FOR UPDATE` lease check in the same transaction as dataset-version registration and generic platform-record writes that introduce a T020 Storage reference. Finalizer early-cleanup paths renew the exact still-live token before removing a temporary object; uncertainty retains the object. The T020 sweep shares the same lease for both temporary and immutable orphan checks/deletion.
+
+### Downstream lineage
+
+On a dataset version advance, Industrial Intelligence dependents are marked stale in the active workspace while historical payloads are preserved; Digital Thread dataset nodes are transitioned to stale; a lineage event records affected IDs; and stale model validation, action approval and downstream decision/review paths are blocked. A failed managed-workspace save fails closed and restores in-memory graph state. The local SQLite compatibility layer invalidates legacy model/experiment/scenario/decision/outcome records. Fresh-login, tenant-isolation and comprehensive legacy-artifact coverage still require hosted acceptance.
+
+### Exact-head boundary
+
+At this addendum, PR #232 head is `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`. Edge formatting/type/security, migration replay, transaction, engine, Excel, security and full validation must be inspected on the final exact head. Staging and production Edge versions observed by read-only inventory remain v14 and v10 respectively; no migration or function deployment was performed. Keep `IMPLEMENTED_NEEDS_VALIDATION` until hosted acceptance and independent domain review pass.

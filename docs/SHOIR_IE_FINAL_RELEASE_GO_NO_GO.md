@@ -164,3 +164,44 @@ These source changes require all applicable workflows to pass on the exact final
 Still externally controlled: real T096 provider sandbox/credential and provider-specific SAP/Oracle implementation; T097 public API host/gateway/OpenAPI/SDK/external client; T098 real OIDC provider/secrets/MFA policy/hosted tests; T099 backup/PITR/off-project Storage-object backups and isolated restore with measured RPO/RTO. Also outstanding: apply reviewed staging-only migrations and deploy matching Edge Function after staging backup/rollback proof; disposable authenticated Owner/Admin/Engineer/Approver/Viewer and cross-org acceptance; complete workbook/data/model/simulation/optimization/decision/export browser journeys; Office-hosted add-in/Microsoft tenant validation; independent engineering/security review; Saudi PDPL/e-commerce/privacy/refund/legal identity review; written release approval and eventual production parity/cutover.
 
 No staging or production database mutation, secret change, Edge deploy, Streamlit deployment, merge, branch-ruleset change or production cutover is authorized or claimed by this repository work. Do not promote any tool to `VERIFIED_WORKING` on source/route/test presence alone.
+
+
+---
+
+## Superseding release assessment — 2026-11-20
+
+**Decision remains BETA / NO-GO. PR #232 remains open and draft.** The opening table and checklist above are a historical 2026-11-06 baseline and must not be read as current environment evidence.
+
+### Current candidate and exact-head checks
+
+- PR #232 head at this assessment: `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`.
+- Staging target: `staging-e2e-20261019`.
+- Latest Edge verification: [#44755607682](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607682) — passed Deno formatting, TypeScript, bounded request/security and OIDC tests.
+- Production-v9 compatibility: [#44755607850](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607850) — completed successfully.
+- Engine Regression: [#44755607917](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607917) — in progress at this snapshot.
+- Full validation: [#44755607737](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607737) — pending at this snapshot.
+- Migration replay, transaction integration, security/quality and Excel checks were also running at this snapshot; inspect their exact-head results before approval.
+
+A preceding Engine Regression on SHA `d9eae17a21673e0b49b53a9c27faa668a2dee587` reported 4 failed / 537 passed. Two T063 tests and its Workbench test failed because PuLP `PULP_CBC_CMD` is deprecated in the pinned PuLP 3.3.2; one T028 Workbench test failed because the test module did not import `json`. The fixes were committed on subsequent candidate heads: T063 now uses `COIN_CMD`, and the Workbench test imports `json`. Exact-head regression retest is mandatory; do not close this item from the earlier result.
+
+The metadata-only `dataset_version_register` route is retired (HTTP 410) because it could create a metadata head without downloadable bytes. The supported T020 registration flow is TUS upload plus lease-fenced finalization.
+
+### Dataset and Digital Thread
+
+The candidate now has TUS upload, private per-dataset renewable lifecycle leases, transaction-fenced metadata registration/reference writes, a manual preview-first orphan sweep for temporary and immutable objects, and source-level downstream lineage invalidation. The two lifecycle/fencing migrations and matching Edge Function remain candidate-only. Hosted TUS/fresh-session/tenant/decision/export acceptance, raw XLSX retention in the dataset registry and independent method review remain open.
+
+### Environment and deployment
+
+Read-only Supabase Edge inventory reports staging `shoir-persistence` v14 ACTIVE and production v10 ACTIVE. The connected database migration-history read rejected authentication; the applied live migration ledger is not verified by this connection. No staging or production migration/Edge deployment was performed.
+
+### Remaining mandatory release gates
+
+1. All eight required CI contexts pass on the same final HEAD; inspect JUnit, skip/warning details, migration replay, Deno, Excel, export-render and viewport artifacts.
+2. One independent reviewer approves the latest push and all review threads are resolved.
+3. An authorized operator reconciles the staging migration ledger and documents a recoverable database **and Storage-byte** backup/rollback point.
+4. Staging migrations are applied in a reviewed window and the exact matching Edge source is deployed only after the above gates; record deployed hashes/versions and recheck RLS/grants/RPCs/advisors/bucket policy.
+5. Authenticated disposable-account staging acceptance proves tenant roles, TUS resume/download, T020 lease conflict/renewal/expiry/fencing/audit, Digital Thread continuity, calculation/simulation/optimization/decision/export and fresh-login behavior.
+6. Qualified Industrial Engineering, security, infrastructure/recovery and Saudi privacy/legal reviewers sign their scopes.
+7. Main ruleset is strengthened by a repository administrator to require migration replay, PostgreSQL transaction integration, production-v9 compatibility and Excel Intelligence checks; then a separate production release PR, reviewed migration plan, tested rollback and explicit owner authorization are required.
+
+No production deployment, merge or customer rollout is authorized by this assessment.
