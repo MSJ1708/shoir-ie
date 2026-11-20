@@ -576,6 +576,8 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
             previous_open_ids.add(mapped_id)
         elif prior_id.startswith("ALT-"):
             previous_open_ids.add(prior_id)
+        elif fingerprint.startswith("ALT-"):
+            previous_open_ids.add(fingerprint)
 
     as_of = payload.get("as_of")
     try:
