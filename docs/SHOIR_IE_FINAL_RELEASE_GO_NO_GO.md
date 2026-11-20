@@ -150,8 +150,8 @@ Repository-side follow-up now includes:
 ### Repository engineering update — 2026-11-20: dataset Storage lifecycle coordination
 
 The release-hardening candidate now includes:
-- A server-only PostgreSQL lease table and SECURITY DEFINER acquire/release RPCs with pinned search paths, RLS, no direct browser/service-role table grants, bounded 30–600 second lease duration and matching-token release.
-- Dataset finalization holds a 300-second workspace/dataset lease across temporary object download, content verification, immutable object creation/reuse, atomic metadata registration and temporary cleanup.
+- A server-only PostgreSQL lease table and SECURITY DEFINER acquire/renew/release RPCs with pinned search paths, RLS, no direct browser/service-role table grants, bounded 30–600 second lease duration and matching-token/operation/actor fencing.
+- Dataset finalization renews its workspace/dataset lease through Storage verification and immutable object creation; its final metadata RPC locks and verifies the live `finalize` token inside the same database transaction before writing dataset version/head/event rows.
 - T020 cleanup acquires the same lease before the exact-storage-key checks against both platform records and events, then writes intent, deletes and writes completion while still holding the lease. It handles temporary and immutable orphan objects. Generic platform-record writes also acquire a register lease for valid T020 storage references and reject malformed or cross-workspace T020-style paths.
 - PostgreSQL replay contracts cover RLS and grants, function permissions, active-lease conflict, wrong-token release, idempotent release, invalid TTL rejection and expired-lease reclamation. Static tests cover Edge ordering and the operator contract.
 
