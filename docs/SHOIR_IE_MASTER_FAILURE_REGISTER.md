@@ -1,6 +1,6 @@
 # Shoir-IE Master Failure Register
 
-Assessment date: 2026-11-06. Evidence baseline: `bd76f8450c20e18aa74d9b70d0945e735aa2b804`.
+Assessment date: 2026-11-20. Historical evidence baseline: `bd76f8450c20e18aa74d9b70d0945e735aa2b804`. Current candidate retest baseline: `daa179201886fa21d0065a1dc85c3a2599fc937f`.
 
 ## Individually recovered failures
 
@@ -96,3 +96,31 @@ F-006 remains open until the corrected full validation passes.
 | Closure rule | Confirm a cancelled superseded run does not start another long test/render/browser stage; confirm the new exact-head validation completes all stages normally and uploads JUnit/export/browser evidence. |
 
 F-007 remains open until the workflow retest confirms cancellation propagation and exact-head full validation passes.
+
+
+## F-008 — exact-head parallel regression diagnosis and corrections (2026-11-20)
+
+| Field | Evidence |
+|---|---|
+| Diagnostic candidate | `c1d7ee083bf57b692596ed481938d22d25c9085b` |
+| Full validation run | [#44765367670](https://github.com/MSJ1708/shoir-ie/actions/runs/44765367670) |
+| Diagnostic artifact | `shoir-ie-parallel-regression-diagnostics` (JUnit XML and pytest console log; downloaded and inspected). |
+| Parallel suite result | **1,529 tests; 14 failures; 0 errors; 0 skips.** The parallel step completed, then the workflow continued to the serial AppTest phase. |
+| Root-cause groups | (1) Three tests still expected the retired metadata-only `dataset_version_register` route/RPC instead of HTTP 410 and the resumable upload/finalize flow. (2) Two signed-upload fixtures omitted the separately required `upload_token`; their old `requests.put` mock did not exercise the current TUS client. (3) Several T020 source-contract tests asserted pre-fencing RPC text/cleanup helper structure rather than the current lease-renewal wrapper and inlined fail-closed cleanup path. (4) Two module-run tests exposed a real missing `Sequence` import in `industrial_experience.py`. (5) One lineage test selected `predicted_json` while asserting the actual outcome value; the correct column is `actual_json`. |
+| Corrections | The retired route tests now assert the authenticated, entitlement-checked HTTP 410 contract and absence of a metadata RPC; upload fixtures provide a valid opaque capability and stub the resumable TUS helper without network access; storage lifecycle contracts now assert the current lease, renewal, fail-closed reference-check and `finally` ordering; `Sequence` is imported; the outcome test selects `actual_json`. |
+| Fix commits | `f6caae19ca486f5f7ddbf1d568b04d3af72c0639`; `1f9e6c7ac6092b9a44aa588c3cb1a9bc0aa467e0`; `5e81521aa812b7c1ca311f45d866800c31841dda`; `672766c96516405266bead4a0b85a549c5fab5a2`; `daa179201886fa21d0065a1dc85c3a2599fc937f`. |
+| Retest | [Full validation #44771724115](https://github.com/MSJ1708/shoir-ie/actions/runs/44771724115) and [Engine Regression #44771723781](https://github.com/MSJ1708/shoir-ie/actions/runs/44771723781) target the corrected exact HEAD `daa179201886fa21d0065a1dc85c3a2599fc937f`. Results were pending at this register update. |
+| Closure rule | Obtain the new exact-head parallel JUnit artifact; verify all 14 failures are absent, all skipped/warning details are reviewed, the serial AppTests and PostgreSQL regressions pass, and the other seven required CI workflows pass on the same SHA. Do not close F-008 based on code inspection alone. |
+
+## Latest exact-head CI snapshot — 2026-11-20
+
+Candidate: `daa179201886fa21d0065a1dc85c3a2599fc937f`.
+
+- Edge Function verification [#44771724015](https://github.com/MSJ1708/shoir-ie/actions/runs/44771724015): **PASS**.
+- Clean PostgreSQL migration-history replay [#44771723864](https://github.com/MSJ1708/shoir-ie/actions/runs/44771723864): running at refresh.
+- Production v9 compatibility [#44771723834](https://github.com/MSJ1708/shoir-ie/actions/runs/44771723834): running at refresh.
+- Subscription transaction integration [#44771723946](https://github.com/MSJ1708/shoir-ie/actions/runs/44771723946): running at refresh.
+- Security/quality, Excel Intelligence, Engine Regression and full validation: queued/pending at refresh.
+
+Running or queued states are not passes. The hosted authenticated deployment smoke remains skipped until the owner configures the dedicated staging app and disposable-account secrets. No staging or production migration/deployment is implied.
+
