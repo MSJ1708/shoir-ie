@@ -45,11 +45,13 @@ Use only the staging project URL and staging publishable key. The repository's s
 ```toml
 [shoir]
 environment = "staging"
-supabase_url = "https://hfhrosthswcybccepmak.supabase.co"
+
+[supabase]
+edge_url = "https://hfhrosthswcybccepmak.supabase.co/functions/v1/shoir-persistence"
 publishable_key = "PASTE_THE_STAGING_PUBLISHABLE_KEY_HERE"
 ```
 
-Replace the placeholder only in Streamlit's secret editor. The equivalent environment names documented by the app are `SHOIR_ENVIRONMENT=staging`, `SHOIR_SUPABASE_EDGE_URL` and `SHOIR_SUPABASE_PUBLISHABLE_KEY`.
+Replace the placeholder only in Streamlit's secret editor. The app reads `[shoir].environment`, `[supabase].edge_url` and `[supabase].publishable_key`. The equivalent environment names are `SHOIR_ENVIRONMENT=staging`, `SHOIR_SUPABASE_EDGE_URL` and `SHOIR_SUPABASE_PUBLISHABLE_KEY`. The Edge URL must be the full `/functions/v1/shoir-persistence` endpoint, not only the project root.
 
 Do not configure any direct database DSN in the staging Streamlit app. The app refuses direct fallback DSNs including `database.url`, `postgresql.url`, `supabase.url`, `SHOIR_DATABASE_URL`, `SUPABASE_DB_URL` and `DATABASE_URL`. A leftover production DSN must not bypass the staging Edge Function.
 
