@@ -25,8 +25,10 @@ def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
     lease_acquire = source.index('"shoir_dataset_storage_lease_acquire"')
     storage_read = source.index(".download(uploadPath)")
     lease_release = source.index('"shoir_dataset_storage_lease_release"')
-    release_finally = source.index("} finally {", lease_release)
-    assert lease_acquire < storage_read < lease_release < release_finally
+    release_finally = source.rfind("} finally {", 0, lease_release)
+
+    assert release_finally >= 0
+    assert lease_acquire < storage_read < release_finally < lease_release
     assert 'p_lease_operation: "finalize"' in source
     assert "p_lease_seconds: 600" in source
     lease_renewal = source.index('"shoir_dataset_storage_lease_renew"')
@@ -49,7 +51,7 @@ def test_new_content_addressed_object_is_deleted_only_after_two_successful_no_re
 
     assert record_query < event_query < record_refs < no_references < delete_object
     assert '.contains("payload_json", { storage_key: storageKey })' in source
-    assert "uncertain reference check must never turn into a destructive" in source
+    assert "An uncertain lease/reference check must never authorize deletion." in source
 
 
 def test_metadata_rpc_failure_keeps_uncertain_object_and_cleans_only_temp_upload():
@@ -59,16 +61,18 @@ def test_metadata_rpc_failure_keeps_uncertain_object_and_cleans_only_temp_upload
         source.index("shoir_platform_register_dataset_version_with_storage_and_lease"),
     )
     reference_checks = source.index("const [recordRefs, eventRefs]", rpc_error)
-    temp_cleanup = source.index("await cleanupTemporaryUpload()", reference_checks)
-    throw_original_error = source.index("throw error;", temp_cleanup)
+    temp_cleanup = source.index("const tempCleanupLeaseRenewed", reference_checks)
+    temp_remove = source.index(".remove([", temp_cleanup)
+    throw_original_error = source.index("throw error;", temp_remove)
     helper = source.index("const cleanupTemporaryUpload = async")
-    helper_renew = source.index('"shoir_dataset_storage_lease_renew"', helper)
+    helper_renew = source.index("renewDatasetStorageLifecycleLease(", helper)
     helper_remove = source.index(".remove([uploadPath])", helper)
 
     assert helper < helper_renew < helper_remove
-    assert rpc_error < reference_checks < temp_cleanup < throw_original_error
+    assert rpc_error < reference_checks < temp_cleanup < temp_remove < throw_original_error
     assert "reference checks were unavailable, so the immutable object was retained" in source
-    assert "the immutable object was retained because reference status was uncertain" in source
+    assert "the immutable object was retained because lease or reference status was uncertain" in source
+    assert "uploadPath" in source[temp_cleanup:throw_original_error]
 
 
 def test_early_temporary_cleanup_paths_all_renew_the_finalization_lease():
@@ -77,6 +81,7 @@ def test_early_temporary_cleanup_paths_all_renew_the_finalization_lease():
     before_storage = source.index("const leaseRenewedBeforeStorage")
     cleanup_calls = source[helper:before_storage].count("await cleanupTemporaryUpload()")
     assert cleanup_calls == 4
+    assert "renewDatasetStorageLifecycleLease(" in source[helper:before_storage]
     assert "if (!leaseRenewed)" in source[helper:before_storage]
     assert "if (cleanupError)" in source[helper:before_storage]
     assert ".remove([uploadPath])" in source[helper:before_storage]
@@ -148,7 +153,7 @@ def test_generic_platform_record_storage_reference_uses_dataset_lifecycle_lease(
     save = source[start:end]
     classification = save.index("classifyDatasetStorageSweepPath")
     lease_acquire = save.index('"shoir_dataset_storage_lease_acquire"')
-    lease_renewal = save.index('"shoir_dataset_storage_lease_renew"')
+    lease_renewal = save.index("renewDatasetStorageLifecycleLease(")
     record_upsert = save.index('"shoir_platform_upsert_record_with_dataset_lease"')
     lease_release = save.index('"shoir_dataset_storage_lease_release"')
     assert classification < lease_acquire < lease_renewal < record_upsert < lease_release
