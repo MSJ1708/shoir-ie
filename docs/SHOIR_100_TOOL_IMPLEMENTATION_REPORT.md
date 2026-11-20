@@ -225,16 +225,16 @@ The canonical T020 dataset-versioning path now uses `shoir_supabase_tus.py` for 
 
 The Edge Function's version-finalize flow now registers the content-addressed object in the metadata transaction before removing the temporary object. If metadata registration reports an error, a newly created object is removed only after successful no-reference checks against both the record and event ledgers. Query uncertainty retains the object. After successful registration, temporary cleanup failure is reported separately and does not convert a committed version into a false failure.
 
-New tests: `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. This is a source implementation update, not hosted Storage acceptance. Scheduled cleanup for historical orphan objects and abandoned temporary uploads remains absent; hosted interrupted-upload/resume, fresh-session, cross-workspace and raw-workbook acceptance remain required.
+New tests: `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. This is a source implementation update, not hosted Storage acceptance. The candidate now includes a manual, session-authenticated T020 operator sweep for aged temporary and immutable orphans, protected by the shared lifecycle lease and transaction-fenced registration/reference writes. It remains unscheduled and staging-only; hosted interrupted-upload/resume, fresh-session, cross-workspace and raw-workbook acceptance remain required.
 
 
 ## 2026-11-20 dataset lifecycle coordination update
 
 The T020 candidate now has a database-backed lifecycle lease shared by Storage finalization and orphan cleanup:
 
-- Migration: `20261120115000_shoir_dataset_storage_lifecycle_leases.sql`.
-- The lease table is RLS-enabled and has no direct grants to browser roles or service_role. Only the session-validated Edge Function can call the pinned-search-path SECURITY DEFINER acquire/release RPCs.
-- A workspace/dataset unique key serializes finalization and cleanup. The finalizer holds a 300-second lease across Storage verification, immutable-object creation/reuse, metadata registration and temporary upload cleanup.
+- Migrations: `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`.
+- The lease table is RLS-enabled and has no direct grants to browser roles or service_role. Only the session-validated Edge Function can call the pinned-search-path SECURITY DEFINER acquire/renew/release RPCs and the fenced metadata wrappers.
+- A workspace/dataset unique key serializes finalization and cleanup. The finalizer acquires a lease up to the 600-second maximum and renews only its still-live token before Storage cleanup and metadata registration. The fencing migration locks the matching live lease row in the same metadata transaction.
 - The staging-only T020 maintenance action holds the same lease while checking both metadata ledgers, writing kind-specific deletion intent, deleting an eligible temporary or immutable object and writing completion evidence. It preserves preview-by-default, 48-hour age, the 500-object/200-directory scan bound, 100 reference checks and 50 deletions per run. An expired lease can be reclaimed after a crashed invocation; only the matching token can release a lease.
 - The 100-tool matrix remains 96 `IMPLEMENTED_NEEDS_VALIDATION`, 4 `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), and 0 `VERIFIED_WORKING`. T020 is not promoted based on source presence.
 
