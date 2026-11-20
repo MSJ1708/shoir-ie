@@ -207,12 +207,14 @@ def test_dataset_version_edge_action_uses_authenticated_session_and_is_retired()
 def test_private_dataset_upload_verifies_hash_and_finalizes_after_signed_upload(monkeypatch):
     import hashlib
     import durable_account_store as store
-    import requests
+    import shoir_supabase_tus
 
     raw = b"asset_id,throughput_tph\nA-1,12.5\n"
     calls = []
+    uploads = []
     monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
+
     def edge(action, payload):
         calls.append((action, dict(payload)))
         if action == "dataset_upload_create":
@@ -223,12 +225,12 @@ def test_private_dataset_upload_verifies_hash_and_finalizes_after_signed_upload(
                 "upload_token": "opaque-upload-capability-token-1234",
             }
         return {"ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}}
+
     monkeypatch.setattr(store, "_edge_call", edge)
-    uploads = []
     monkeypatch.setattr(
-        requests, "put",
-        lambda url, data, headers, timeout: uploads.append((url, data, headers, timeout)) or
-            type("Response", (), {"status_code": 200, "text": ""})(),
+        shoir_supabase_tus,
+        "upload_signed_tus",
+        lambda **kwargs: uploads.append(kwargs) or "https://hfhrosthswcybccepmak.storage.supabase.co/storage/v1/upload/resumable/test",
     )
     digest = hashlib.sha256(raw).hexdigest()
     result = store.edge_upload_and_register_dataset_version(
@@ -240,8 +242,9 @@ def test_private_dataset_upload_verifies_hash_and_finalizes_after_signed_upload(
     assert [item[0] for item in calls] == [
         "dataset_upload_create", "dataset_version_finalize"
     ]
-    assert uploads[0][1] == raw
-    assert uploads[0][2]["Content-Type"] == "text/csv"
+    assert uploads[0]["file_bytes"] == raw
+    assert uploads[0]["signed_upload_token"] == "opaque-upload-capability-token-1234"
+    assert uploads[0]["content_type"] == "text/csv"
     assert calls[1][1]["upload_path"].startswith("tmp/workspace/")
 
 
@@ -619,10 +622,11 @@ def test_edge_list_platform_records_forwards_authorized_organization_workspace_s
 def test_dataset_upload_forwards_authorized_organization_scope(monkeypatch):
     import hashlib
     import durable_account_store as store
-    import requests
+    import shoir_supabase_tus
 
     raw = b"asset_id,units\\nA-1,10\\n"
     calls = []
+    uploads = []
     monkeypatch.setattr(store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(store, "STAGING_SUPABASE_PROJECT_HOST", "hfhrosthswcybccepmak.supabase.co")
 
@@ -639,8 +643,9 @@ def test_dataset_upload_forwards_authorized_organization_scope(monkeypatch):
 
     monkeypatch.setattr(store, "_edge_call", edge)
     monkeypatch.setattr(
-        requests, "put",
-        lambda *_args, **_kwargs: type("Response", (), {"status_code": 200, "text": ""})(),
+        shoir_supabase_tus,
+        "upload_signed_tus",
+        lambda **kwargs: uploads.append(kwargs) or "https://hfhrosthswcybccepmak.storage.supabase.co/storage/v1/upload/resumable/test",
     )
     store.edge_upload_and_register_dataset_version(
         "synthetic-user", "opaque-session-token", "workspace-name",
@@ -650,6 +655,7 @@ def test_dataset_upload_forwards_authorized_organization_scope(monkeypatch):
         organization_id="00000000-0000-4000-8000-000000000001",
         organization_workspace_id="00000000-0000-4000-8000-000000000002",
     )
+    assert len(uploads) == 1
     for _, payload in calls:
         assert payload["organization_id"].endswith("0001")
         assert payload["organization_workspace_id"].endswith("0002")
