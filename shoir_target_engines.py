@@ -7625,6 +7625,20 @@ def evaluate_kpi_alerts(
     duplicate_count = int(frame["Alert ID"].duplicated().sum())
     if duplicate_count:
         raise RuntimeError("Internal KPI alert identity collision detected.")
+    kpi_view = frame.rename(columns={
+        "Alert ID": "alert_id",
+        "Rule ID": "rule_id",
+        "KPI": "kpi",
+        "Value": "value",
+        "Operator": "operator",
+        "Threshold": "threshold",
+        "Unit": "unit",
+        "Severity": "severity",
+        "State": "status",
+        "Event": "event",
+        "Source": "source",
+        "Observed at": "observed_at",
+    }).copy()
     alert_records = [
         {
             "fingerprint": str(row["Alert ID"]),
@@ -7654,6 +7668,7 @@ def evaluate_kpi_alerts(
         "future_kpi_count": future_count,
         "resolved_alert_count": int((frame["Event"] == "RESOLVED").sum()),
         "alerts": frame,
+        "kpis": kpi_view,
         "alert_records": alert_records,
         "next_open_alert_ids": sorted(seen_active_ids),
         "warning": (
