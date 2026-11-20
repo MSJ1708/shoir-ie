@@ -187,14 +187,14 @@ def main() -> int:
                             r"app has gone to sleep due to inactivity", re.I
                         )
                         wake_pattern = re.compile(
-                            r"^Yes,\\s*get this app back up!?$", re.I
+                            r"^Yes,\s*get this app back up!?$", re.I
                         )
                         # The Streamlit sleep page can expose the wake control as
                         # an accessible button, link, or a clickable text wrapper
                         # depending on the hosting shell version.
                         wake_button = page.locator(
                             "button, a, [role='button']"
-                        ).filter(has_text=re.compile(r"Yes,\\s*get this app back up", re.I)).first
+                        ).filter(has_text=re.compile(r"Yes,\s*get this app back up", re.I)).first
                         wake_text = page.get_by_text(wake_pattern, exact=True).first
                         item["wake_recovery_attempted"] = False
                         item["wake_recovery_succeeded"] = False
