@@ -34,13 +34,13 @@ The current candidate adds a session-authenticated T020 storage-maintenance acti
 
 - The action resolves the current personal workspace from the authenticated actor or resolves a shared organization workspace with database-enforced `manage` permission (Owner/Admin only).
 - Preview is the default. Deletion requires a separate explicit `confirm_delete=true` request and a Workbench confirmation checkbox.
-- Only exact T020 temporary-upload paths under the selected workspace can be deleted. Other workspaces, buckets, traversal paths, original XLSX files and immutable content-addressed dataset files are excluded.
-- A temporary object must have valid Storage timestamps and remain untouched for at least 48 hours. The newest of created, updated and last-accessed timestamps controls eligibility; missing, malformed or future timestamps are retained.
-- Both the managed-record and event ledgers must successfully confirm no reference to the exact temporary storage key. Any reference-query error retains the object.
-- A deletion-intent event is written before Storage removal; a separate deletion-confirmed event follows successful removal.
+- Only exact T020 temporary-upload and immutable content-addressed dataset paths under the selected workspace can be considered. Other workspaces, buckets, traversal paths and original XLSX workbook objects are excluded.
+- An object must have valid Storage timestamps and remain untouched for at least 48 hours. The newest of created, updated and last-accessed timestamps controls eligibility; missing, malformed or future timestamps are retained.
+- A private shoir_dataset_storage_lifecycle_leases row serializes finalization and cleanup by workspace/dataset. The finalizer holds a 300-second lease across Storage verification, immutable-object creation and atomic metadata registration. The sweep must acquire the same lease before checking references, writing deletion intent or removing an object. A live lease blocks the competing operation; a crashed operation is recoverable after expiry.
+- Both the managed-record and event ledgers must successfully confirm no reference to the exact Storage key while the lifecycle lease is held. Any reference-query, lease-acquisition or lease-release uncertainty fails closed for deletion.
+- A kind-specific deletion-intent event is written before Storage removal; a separate deletion-confirmed event follows successful removal. The audit payload records object kind and that the lease/reference checks were completed.
 - The scan is bounded to 500 objects/200 directories, 100 reference checks and 50 deletions per invocation. Operators can repeat preview/deletion to process remaining entries.
+- Preview is the default and never deletes. Deletion requires a separate explicit confirm_delete=true request and Workbench confirmation.
 - No automatic schedule is created. Scheduling this authenticated operation remains an external operational configuration.
 
-**Immutable content-addressed orphan objects are intentionally retained by this sweep.** Deleting one can race a concurrent dataset version-finalize request between its object read and metadata transaction. A safe immutable-object sweep needs an atomic lease/coordination protocol shared with dataset registration; age plus two reference reads alone is insufficient. This remains repository engineering work, not an external provider credential task.
-
-These source changes require exact-head Deno, Python, full regression and authenticated owner/member staging acceptance before an Edge deployment. Keep BETA / production NO-GO.
+The shared lifecycle lease closes the finalization-versus-orphan-cleanup race in the repository contract. Immutable orphan deletion is now implemented behind that lease and the same two-ledger check; it must still pass exact-head migration replay, Deno/Python CI, concurrency-oriented review and authenticated Owner/Admin staging acceptance before use. Keep BETA / production NO-GO.
