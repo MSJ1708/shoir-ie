@@ -1295,7 +1295,27 @@ def render_module_run_history(module: str, owner: str, key_suffix: str | None = 
         b.metric("Input rows", f"{record['input_rows']:,}")
         c.metric("Calculation time", f"{record['duration_ms']:,.1f} ms")
         st.caption(f"Input SHA-256: {record['input_hash']} · {record['snapshot_status']}")
-        st.caption(f"Method: {record['method']}")
+        st.caption(f"Dataset freshness: {record['dataset_dependency_status']}")
+        if record["is_stale"]:
+            st.error(
+                "This is a historical run whose source dataset is stale or unverified. "
+                "It remains available for audit, but must not be reused as current decision evidence. "
+                "Reload the current dataset and rerun the module."
+            )
+            if record["stale_dataset_dependencies"]:
+                st.dataframe(
+                    pd.DataFrame(record["stale_dataset_dependencies"]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        elif record["dataset_dependencies"]:
+            st.caption(
+                "Verified dataset version(s): "
+                + ", ".join(
+                    f"{item.get('dataset_id')} v{item.get('version')}"
+                    for item in record["dataset_dependencies"]
+                )
+            )
         if record["guardrail"]:
             st.warning(record["guardrail"])
         if record["snapshot_status"] != "Complete":
