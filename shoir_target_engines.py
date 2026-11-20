@@ -35,7 +35,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pulp
-from scipy.optimize import linprog
+from scipy.optimize import linprog, minimize
 from scipy.stats import f, nct, norm, t
 
 
@@ -2830,26 +2830,205 @@ def analyze_water_waste_efficiency(process_flows: Sequence[Mapping[str, Any]]) -
     }
 
 
-def analyze_weibull_reliability(failure_times: Sequence[float]) -> dict[str, Any]:
-    """Fit a two-parameter Weibull model to uncensored positive failure times."""
-    if isinstance(failure_times, (str, bytes)) or not isinstance(failure_times, Sequence) or len(failure_times) < 5:
-        raise ValueError("Provide at least five uncensored failure-time observations.")
-    values = [_finite_number(v, f"Failure time observation {i}") for i, v in enumerate(failure_times, start=1)]
-    if any(v <= 0 for v in values):
-        raise ValueError("Failure times must be strictly greater than zero.")
+def analyze_weibull_reliability(
+    failure_times: Sequence[float],
+    event_observed: Sequence[bool | int] | None = None,
+    *,
+    confidence_level: float = 0.95,
+) -> dict[str, Any]:
+    """Fit a two-parameter Weibull model with optional right-censoring.
+
+    event_observed[i] is True/1 for an observed failure and False/0 for a
+    right-censored observation. Confidence intervals use an approximate
+    observed-information (Wald) interval on log parameters. The Kaplan-Meier
+    comparison below is a descriptive diagnostic, not a calibrated hypothesis
+    test or an engineering reliability certification.
+    """
+    if (
+        isinstance(failure_times, (str, bytes))
+        or not isinstance(failure_times, Sequence)
+        or len(failure_times) < 5
+    ):
+        raise ValueError("Provide at least five failure/censoring time observations.")
+
+    values = [
+        _finite_number(value, f"Failure/censoring time observation {index}")
+        for index, value in enumerate(failure_times, start=1)
+    ]
+    if any(value <= 0 for value in values):
+        raise ValueError("Failure and censoring times must be strictly greater than zero.")
     if len(set(values)) < 3:
-        raise ValueError("At least three distinct failure times are required for a meaningful fit.")
+        raise ValueError("At least three distinct failure/censoring times are required.")
+
+    if event_observed is None:
+        observed = np.ones(len(values), dtype=bool)
+    else:
+        if (
+            isinstance(event_observed, (str, bytes))
+            or not isinstance(event_observed, Sequence)
+            or len(event_observed) != len(values)
+        ):
+            raise ValueError("event_observed must be a boolean/0-or-1 list matching the time observations.")
+        flags: list[bool] = []
+        for index, flag in enumerate(event_observed, start=1):
+            if isinstance(flag, bool):
+                flags.append(flag)
+            elif isinstance(flag, (int, np.integer)) and flag in (0, 1):
+                flags.append(bool(flag))
+            else:
+                raise ValueError(f"Event flag {index} must be boolean or integer 0/1.")
+        observed = np.asarray(flags, dtype=bool)
+
+    failure_count = int(np.count_nonzero(observed))
+    censored_count = int(len(values) - failure_count)
+    if failure_count < 3:
+        raise ValueError("At least three observed failures are required to estimate a Weibull model.")
+
+    confidence = _finite_number(confidence_level, "Confidence level")
+    if not 0.50 <= confidence <= 0.99:
+        raise ValueError("Confidence level must be between 0.50 and 0.99.")
+
     from scipy.stats import weibull_min
+
     data = np.asarray(values, dtype=float)
-    try:
-        shape, location, scale = weibull_min.fit(data, floc=0)
-    except Exception as exc:
-        raise ValueError(f"Weibull fit did not converge: {exc}") from exc
-    if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
-        raise ValueError("Weibull fit returned invalid shape or scale parameters.")
-    log_likelihood = float(np.sum(weibull_min.logpdf(data, shape, loc=0, scale=scale)))
+    log_times = np.log(data)
+    failure_log_times = log_times[observed]
+    censored = censored_count > 0
+
+    def negative_log_likelihood(theta: np.ndarray) -> float:
+        log_shape, log_scale = float(theta[0]), float(theta[1])
+        shape = math.exp(log_shape)
+        # Bound the exponent before exp() so difficult trial points cannot
+        # overflow the optimizer or turn a non-finite result into a good fit.
+        exponent = shape * (log_times - log_scale)
+        if np.any(exponent > 700.0):
+            return 1.0e100 + float(np.sum(np.maximum(exponent - 700.0, 0.0)))
+        cumulative_hazard = np.exp(np.clip(exponent, -745.0, 700.0))
+        log_likelihood = (
+            failure_count * (log_shape - shape * log_scale)
+            + (shape - 1.0) * float(np.sum(failure_log_times))
+            - float(np.sum(cumulative_hazard))
+        )
+        if not math.isfinite(log_likelihood):
+            return 1.0e100
+        return -log_likelihood
+
+    if censored:
+        # Multi-start bounded MLE for right-censored observations.
+        min_log = float(np.min(log_times))
+        max_log = float(np.max(log_times))
+        bounds = [(-5.0, 5.0), (min_log - 20.0, max_log + 20.0)]
+        initial_scale = float(np.median(data))
+        candidates = []
+        for initial_shape in (0.5, 1.0, 1.5, 2.5, 5.0):
+            initial = np.asarray(
+                [math.log(initial_shape), math.log(initial_scale)],
+                dtype=float,
+            )
+            fitted = minimize(
+                negative_log_likelihood,
+                initial,
+                method="L-BFGS-B",
+                bounds=bounds,
+                options={"maxiter": 2000, "ftol": 1e-12, "gtol": 1e-8},
+            )
+            if np.all(np.isfinite(fitted.x)) and math.isfinite(float(fitted.fun)):
+                candidates.append(fitted)
+        if not candidates:
+            raise ValueError("Right-censored Weibull maximum-likelihood fit did not converge.")
+        best = min(candidates, key=lambda item: float(item.fun))
+        shape = math.exp(float(best.x[0]))
+        scale = math.exp(float(best.x[1]))
+        if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
+            raise ValueError("Weibull fit returned invalid shape or scale parameters.")
+        theta_hat = np.asarray(best.x, dtype=float)
+        fit_converged = bool(best.success)
+        fit_message = str(best.message)
+    else:
+        try:
+            shape, _location, scale = weibull_min.fit(data, floc=0)
+        except Exception as exc:
+            raise ValueError(f"Weibull fit did not converge: {exc}") from exc
+        if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
+            raise ValueError("Weibull fit returned invalid shape or scale parameters.")
+        theta_hat = np.asarray([math.log(float(shape)), math.log(float(scale))])
+        fit_converged = True
+        fit_message = "SciPy two-parameter uncensored maximum-likelihood fit."
+
+    log_likelihood = -negative_log_likelihood(theta_hat)
+    if not math.isfinite(log_likelihood):
+        raise ValueError("Weibull fit returned a non-finite log-likelihood.")
     parameter_count = 2
+    sample_size = len(values)
     aic = 2 * parameter_count - 2 * log_likelihood
+    bic = parameter_count * math.log(sample_size) - 2 * log_likelihood
+    aicc = (
+        aic + (2 * parameter_count * (parameter_count + 1))
+        / (sample_size - parameter_count - 1)
+        if sample_size > parameter_count + 1 else None
+    )
+
+    # Numerical observed information for approximate Wald intervals on
+    # log(shape) and log(scale). Suppress the interval rather than fabricate it
+    # when the curvature is singular or non-positive.
+    hessian = np.zeros((2, 2), dtype=float)
+    step = 1.0e-4
+    center_value = negative_log_likelihood(theta_hat)
+    interval_method = "APPROXIMATE_WALD_LOG_PARAMETER"
+    confidence_intervals: dict[str, Any] | None = None
+    try:
+        for i in range(2):
+            delta = np.zeros(2, dtype=float)
+            delta[i] = step
+            hessian[i, i] = (
+                negative_log_likelihood(theta_hat + delta)
+                - 2.0 * center_value
+                + negative_log_likelihood(theta_hat - delta)
+            ) / (step * step)
+        delta0 = np.asarray([step, step])
+        delta1 = np.asarray([step, -step])
+        cross = (
+            negative_log_likelihood(theta_hat + delta0)
+            - negative_log_likelihood(theta_hat + delta1)
+            - negative_log_likelihood(theta_hat - delta1)
+            + negative_log_likelihood(theta_hat - delta0)
+        ) / (4.0 * step * step)
+        hessian[0, 1] = hessian[1, 0] = cross
+        eigenvalues = np.linalg.eigvalsh(hessian)
+        if not np.all(np.isfinite(eigenvalues)) or float(np.min(eigenvalues)) <= 1e-9:
+            raise np.linalg.LinAlgError("Observed information is not positive definite.")
+        covariance = np.linalg.inv(hessian)
+        standard_errors = np.sqrt(np.diag(covariance))
+        if not np.all(np.isfinite(standard_errors)):
+            raise np.linalg.LinAlgError("Parameter standard errors are not finite.")
+        from scipy.stats import norm as _normal
+        z_value = float(_normal.ppf(0.5 + confidence / 2.0))
+        beta_low, beta_high = np.exp(
+            [theta_hat[0] - z_value * standard_errors[0],
+             theta_hat[0] + z_value * standard_errors[0]]
+        )
+        eta_low, eta_high = np.exp(
+            [theta_hat[1] - z_value * standard_errors[1],
+             theta_hat[1] + z_value * standard_errors[1]]
+        )
+        confidence_intervals = {
+            "method": interval_method,
+            "confidence_level": confidence,
+            "shape_beta": {
+                "lower": float(beta_low),
+                "upper": float(beta_high),
+                "standard_error_log_scale": float(standard_errors[0]),
+            },
+            "scale_eta": {
+                "lower": float(eta_low),
+                "upper": float(eta_high),
+                "standard_error_log_scale": float(standard_errors[1]),
+            },
+        }
+    except (ValueError, FloatingPointError, np.linalg.LinAlgError, OverflowError):
+        interval_method = "UNAVAILABLE_SINGULAR_OR_UNSTABLE_INFORMATION"
+        confidence_intervals = None
+
     b10 = float(scale * (-math.log(0.90)) ** (1.0 / shape))
     b50 = float(scale * (-math.log(0.50)) ** (1.0 / shape))
     mean_ttf = float(scale * math.gamma(1.0 + 1.0 / shape))
@@ -2862,23 +3041,67 @@ def analyze_weibull_reliability(failure_times: Sequence[float]) -> dict[str, Any
         }
         for probability in percentiles
     ])
+
+    # Kaplan-Meier versus model survival discrepancy. This is a visual/
+    # descriptive diagnostic only; fitted parameters invalidate ordinary
+    # one-sample KS critical values, so no p-value is claimed.
+    survival = 1.0
+    at_risk = sample_size
+    km_points: list[dict[str, float]] = []
+    for observed_time in sorted(set(values)):
+        at_time = np.asarray(values) == observed_time
+        deaths = int(np.count_nonzero(at_time & observed))
+        censored_at_time = int(np.count_nonzero(at_time & ~observed))
+        if deaths:
+            survival *= 1.0 - deaths / at_risk
+        fitted_survival = math.exp(-((observed_time / scale) ** shape))
+        km_points.append({
+            "Time": float(observed_time),
+            "Kaplan-Meier reliability": float(survival),
+            "Weibull reliability": float(fitted_survival),
+        })
+        at_risk -= deaths + censored_at_time
+    km_frame = pd.DataFrame(km_points)
+    km_max_difference = (
+        float(np.max(np.abs(
+            km_frame["Kaplan-Meier reliability"] - km_frame["Weibull reliability"]
+        )))
+        if len(km_frame) else None
+    )
     return {
-        "status": "WEIBULL_FIT_UNCENSORED_DATA",
-        "method": "Two-parameter Weibull maximum-likelihood fit with location fixed at zero",
-        "sample_size": int(len(data)),
+        "status": "WEIBULL_FIT_RIGHT_CENSORED_MLE" if censored else "WEIBULL_FIT_UNCENSORED_DATA",
+        "method": "Two-parameter Weibull maximum likelihood; right-censored survival contributions supported; location fixed at zero",
+        "sample_size": int(sample_size),
+        "failure_count": failure_count,
+        "censored_count": censored_count,
         "shape_beta": float(shape),
         "scale_eta": float(scale),
         "location": 0.0,
         "mean_time_to_failure": mean_ttf,
         "B10_life": b10,
         "B50_median_life": b50,
-        "log_likelihood": log_likelihood,
+        "log_likelihood": float(log_likelihood),
         "AIC": float(aic),
+        "AICc": float(aicc) if aicc is not None else None,
+        "BIC": float(bic),
+        "confidence_intervals": confidence_intervals,
+        "confidence_interval_method": interval_method,
+        "fit_converged": fit_converged,
+        "fit_message": fit_message,
         "minimum_observed_time": float(np.min(data)),
         "maximum_observed_time": float(np.max(data)),
         "reliability_percentiles": curve,
-        "assumptions": "Positive independent uncensored failure times, two-parameter Weibull distribution, fixed zero location, consistent unit of time.",
-        "warning": "Right-censored/interval-censored data and confidence intervals are not handled in this first implementation. The fit is not a maintenance guarantee; inspect sample quality, failure mode consistency and fit adequacy with a reliability engineer.",
+        "goodness_of_fit": {
+            "diagnostic": "Kaplan-Meier versus fitted Weibull reliability; descriptive only, not a formal hypothesis test",
+            "km_max_absolute_difference": km_max_difference,
+            "comparison_points": int(len(km_frame)),
+            "comparison_table": km_frame,
+            "formal_p_value": None,
+        },
+        "assumptions": "Independent observations; two-parameter Weibull distribution with fixed zero location; consistent time units; event_observed=false denotes independent right censoring.",
+        "warning": (
+            "Confidence intervals are approximate Wald intervals on log parameters using numerical observed information. Kaplan-Meier versus fitted survival is descriptive and has no calibrated p-value; formal goodness-of-fit, bootstrap intervals, competing risks and interval censoring still require specialist review. This fit is not a maintenance guarantee; inspect failure-mode consistency and sample quality with a reliability engineer."
+        ),
     }
 
 
