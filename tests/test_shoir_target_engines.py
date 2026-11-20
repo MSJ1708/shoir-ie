@@ -957,6 +957,47 @@ def test_project_portfolio_score_normalizes_direction_and_weights_reproducibly()
         ])
 
 
+def test_project_portfolio_weight_sensitivity_reveals_winner_changes():
+    from shoir_target_engines import score_project_portfolio
+
+    result = score_project_portfolio(
+        [
+            {"name": "Cost", "weight": 1, "direction": "minimize"},
+            {"name": "Quality", "weight": 1, "direction": "maximize"},
+        ],
+        [
+            {"name": "Project A", "scores": {"Cost": 0, "Quality": 0}},
+            {"name": "Project B", "scores": {"Cost": 100, "Quality": 100}},
+        ],
+        sensitivity_pct=20,
+    )
+    assert result["base_winner"] == "Project A"
+    assert result["sensitivity_scenario_count"] == 4
+    assert result["winner_change_count"] == 2
+    assert result["winner_stability_pct"] == pytest.approx(50.0)
+    assert set(result["weight_sensitivity"]["Scenario"]) == {"LOWER", "UPPER"}
+    assert set(result["weight_sensitivity"]["Winner"]) == {"Project A", "Project B"}
+    assert result["zero_weight_criteria_not_perturbed"] == []
+
+
+def test_project_portfolio_weight_sensitivity_rejects_invalid_range_and_reports_zero_weight():
+    from shoir_target_engines import score_project_portfolio
+
+    criteria = [
+        {"name": "Cost", "weight": 1, "direction": "minimize"},
+        {"name": "Safety", "weight": 0, "direction": "maximize"},
+    ]
+    alternatives = [
+        {"name": "A", "scores": {"Cost": 1, "Safety": 5}},
+        {"name": "B", "scores": {"Cost": 2, "Safety": 10}},
+    ]
+    result = score_project_portfolio(criteria, alternatives, sensitivity_pct=0)
+    assert result["zero_weight_criteria_not_perturbed"] == ["Safety"]
+    assert result["sensitivity_scenario_count"] == 4
+    with pytest.raises(ValueError, match="Sensitivity percentage"):
+        score_project_portfolio(criteria, alternatives, sensitivity_pct=101)
+
+
 def test_preventive_maintenance_planner_hazard_register_mrp_and_portfolio_fixtures():
     from shoir_target_engines import (
         plan_preventive_maintenance, assess_job_hazards,
