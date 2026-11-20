@@ -671,6 +671,10 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "p_workspace_key text, p_dataset_id text, p_lease_token uuid, p_lease_operation text, p_actor_username_lc text, p_lease_seconds integer",
                 ),
                 (
+                    "shoir_dataset_storage_lease_renew",
+                    "p_workspace_key text, p_dataset_id text, p_lease_token uuid, p_lease_operation text, p_actor_username_lc text, p_lease_seconds integer",
+                ),
+                (
                     "shoir_dataset_storage_lease_release",
                     "p_workspace_key text, p_dataset_id text, p_lease_token uuid",
                 ),
@@ -883,6 +887,15 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (lease_workspace, lease_dataset, lease_token_a, "finalize", username, 600),
                 )[0]
                 assert renewed is True
+                wrong_actor_renewal = _fetchone(
+                    target,
+                    renew_sql,
+                    (lease_workspace, lease_dataset, lease_token_a, "finalize", "another.actor", 600),
+                )[0]
+                assert wrong_actor_renewal is False, "A mismatched actor must not renew a lease."
+                # Inspect the private table only as its owning migration role.
+                # The service_role's direct table denial is an intentional security invariant.
+                _execute(target, "RESET ROLE;")
                 renewed_expiry = _fetchone(
                     target,
                     """
@@ -893,6 +906,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (lease_workspace, lease_dataset, lease_token_a),
                 )[0]
                 assert renewed_expiry > first_lease[1]
+                _execute(target, "SET ROLE service_role;")
 
                 stale_renewal = _fetchone(
                     target,
