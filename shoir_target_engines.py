@@ -3587,6 +3587,342 @@ def optimize_task_resource_assignment(
     }
 
 
+def optimize_task_resource_schedule(
+    tasks: Sequence[Mapping[str, Any]],
+    resources: Sequence[Mapping[str, Any]],
+    *,
+    slot_minutes: int = 30,
+    time_limit_seconds: int = 15,
+) -> dict[str, Any]:
+    """Create a one-day, skill/precedence/capacity constrained resource schedule.
+
+    Time is discrete (30- or 60-minute slots). Each task is assigned once to
+    one eligible resource; each resource performs at most one task at a time.
+    Precedence, shift windows, earliest start and hard latest-finish limits are
+    enforced. Due hours are soft targets with weighted tardiness penalties.
+    The solver does not model breaks, multiple shifts/days, overtime, travel,
+    collective agreements or stochastic durations.
+    """
+    if isinstance(tasks, (str, bytes)) or not isinstance(tasks, Sequence) or not tasks:
+        raise ValueError("Provide at least one task object.")
+    if isinstance(resources, (str, bytes)) or not isinstance(resources, Sequence) or not resources:
+        raise ValueError("Provide at least one resource object.")
+    if len(tasks) > 30:
+        raise ValueError("The scheduling planner is limited to 30 tasks per run.")
+    if len(resources) > 15:
+        raise ValueError("The scheduling planner is limited to 15 resources per run.")
+    if isinstance(slot_minutes, bool) or slot_minutes not in (30, 60):
+        raise ValueError("slot_minutes must be 30 or 60.")
+    if isinstance(time_limit_seconds, bool) or not isinstance(time_limit_seconds, int) or not 1 <= time_limit_seconds <= 60:
+        raise ValueError("Solver time limit must be an integer between 1 and 60 seconds.")
+
+    slot_hours = slot_minutes / 60.0
+    slots_per_day = int(24 / slot_hours)
+    task_rows: list[dict[str, Any]] = []
+    task_index: dict[str, int] = {}
+    for index, raw in enumerate(tasks):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Task row {index + 1} must be an object.")
+        task_id = str(raw.get("task_id", raw.get("name", ""))).strip()
+        if not task_id or len(task_id) > 120:
+            raise ValueError(f"Task row {index + 1} needs a task_id of 1 to 120 characters.")
+        key = task_id.casefold()
+        if key in task_index:
+            raise ValueError(f"Task IDs must be unique: {task_id}.")
+        duration = _finite_number(raw.get("duration_hours"), f"Duration for {task_id}")
+        if duration <= 0 or duration > 24:
+            raise ValueError(f"Duration for {task_id} must be greater than zero and no more than 24 hours.")
+        duration_slots = int(math.ceil(duration / slot_hours - 1e-12))
+        earliest = _finite_number(raw.get("earliest_start_hour", 0), f"Earliest start for {task_id}")
+        latest = _finite_number(raw.get("latest_finish_hour", 24), f"Latest finish for {task_id}")
+        if not 0 <= earliest < 24 or not 0 < latest <= 24 or earliest >= latest:
+            raise ValueError(f"Start/finish window for {task_id} must be within the 0–24 hour day.")
+        due_raw = raw.get("due_hour")
+        due = None if due_raw is None or due_raw == "" else _finite_number(due_raw, f"Due hour for {task_id}")
+        if due is not None and not 0 < due <= 24:
+            raise ValueError(f"Due hour for {task_id} must be within (0, 24].")
+        priority = _finite_number(raw.get("priority_weight", 1), f"Priority weight for {task_id}")
+        if priority <= 0:
+            raise ValueError(f"Priority weight for {task_id} must be greater than zero.")
+        raw_skills = raw.get("required_skills", [])
+        if isinstance(raw_skills, (str, bytes)) or not isinstance(raw_skills, Sequence):
+            raise ValueError(f"Required skills for {task_id} must be a list of strings.")
+        skills = {str(skill).strip().casefold() for skill in raw_skills if str(skill).strip()}
+        predecessors = raw.get("predecessors", [])
+        if isinstance(predecessors, (str, bytes)) or not isinstance(predecessors, Sequence):
+            raise ValueError(f"Predecessors for {task_id} must be a list of task IDs.")
+        pred_keys = [str(pred).strip().casefold() for pred in predecessors]
+        if any(not pred for pred in pred_keys) or len(set(pred_keys)) != len(pred_keys):
+            raise ValueError(f"Predecessors for {task_id} must be non-blank and unique.")
+        task_index[key] = index
+        task_rows.append({
+            "task_id": task_id,
+            "key": key,
+            "duration_hours": duration,
+            "duration_slots": duration_slots,
+            "actual_slot_duration_hours": duration_slots * slot_hours,
+            "earliest_start_hour": earliest,
+            "latest_finish_hour": latest,
+            "due_hour": due,
+            "priority_weight": priority,
+            "required_skills": skills,
+            "predecessor_keys": pred_keys,
+        })
+
+    for task in task_rows:
+        for predecessor in task["predecessor_keys"]:
+            if predecessor not in task_index:
+                raise ValueError(f"Unknown predecessor {predecessor} referenced by {task['task_id']}.")
+            if predecessor == task["key"]:
+                raise ValueError(f"Task {task['task_id']} cannot precede itself.")
+    # Reject cyclic precedence graphs before constructing the MILP.
+    indegree = {task["key"]: 0 for task in task_rows}
+    successors: dict[str, list[str]] = {task["key"]: [] for task in task_rows}
+    for task in task_rows:
+        for predecessor in task["predecessor_keys"]:
+            indegree[task["key"]] += 1
+            successors[predecessor].append(task["key"])
+    queue = [key for key, degree in indegree.items() if degree == 0]
+    visited = 0
+    while queue:
+        current_key = queue.pop()
+        visited += 1
+        for successor in successors[current_key]:
+            indegree[successor] -= 1
+            if indegree[successor] == 0:
+                queue.append(successor)
+    if visited != len(task_rows):
+        raise ValueError("Task precedence graph contains a cycle.")
+
+    resource_rows: list[dict[str, Any]] = []
+    resource_names: set[str] = set()
+    for index, raw in enumerate(resources):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Resource row {index + 1} must be an object.")
+        name = str(raw.get("resource", raw.get("resource_id", raw.get("name", "")))).strip()
+        key = name.casefold()
+        if not name or len(name) > 120 or key in resource_names:
+            raise ValueError(f"Resource names must be non-blank and unique (row {index + 1}).")
+        resource_names.add(key)
+        raw_skills = raw.get("skills", [])
+        if isinstance(raw_skills, (str, bytes)) or not isinstance(raw_skills, Sequence):
+            raise ValueError(f"Skills for resource {name} must be a list of strings.")
+        skills = {str(skill).strip().casefold() for skill in raw_skills if str(skill).strip()}
+        shift_start = _finite_number(raw.get("shift_start_hour", 0), f"Shift start for {name}")
+        shift_end = _finite_number(raw.get("shift_end_hour", 8), f"Shift end for {name}")
+        hourly_cost = _finite_number(raw.get("hourly_cost", 0), f"Hourly cost for {name}")
+        if not 0 <= shift_start < 24 or not 0 < shift_end <= 24 or shift_start >= shift_end:
+            raise ValueError(f"Shift window for {name} must be within the 0–24 hour day.")
+        if hourly_cost < 0:
+            raise ValueError(f"Hourly cost for {name} cannot be negative.")
+        resource_rows.append({
+            "resource": name,
+            "key": key,
+            "skills": skills,
+            "shift_start_slot": int(math.ceil(shift_start / slot_hours - 1e-12)),
+            "shift_end_slot": int(math.floor(shift_end / slot_hours + 1e-12)),
+            "hourly_cost": hourly_cost,
+        })
+
+    # Candidate options are bounded by 30 tasks × 15 resources × 48 half-hour starts.
+    candidates: dict[str, list[tuple[int, int]]] = {}
+    ineligible_reasons: dict[str, str] = {}
+    for task in task_rows:
+        options: list[tuple[int, int]] = []
+        earliest_slot = int(math.ceil(task["earliest_start_hour"] / slot_hours - 1e-12))
+        latest_finish_slot = int(math.floor(task["latest_finish_hour"] / slot_hours + 1e-12))
+        for resource_index, resource in enumerate(resource_rows):
+            if not task["required_skills"].issubset(resource["skills"]):
+                continue
+            start_low = max(earliest_slot, resource["shift_start_slot"])
+            start_high = min(
+                resource["shift_end_slot"] - task["duration_slots"],
+                latest_finish_slot - task["duration_slots"],
+                slots_per_day - task["duration_slots"],
+            )
+            for start_slot in range(start_low, start_high + 1):
+                options.append((resource_index, start_slot))
+        candidates[task["key"]] = options
+        if not options:
+            ineligible_reasons[task["task_id"]] = (
+                "No resource meets the required skills and shift/latest-finish window."
+            )
+    if ineligible_reasons:
+        return {
+            "status": "INFEASIBLE_NO_ELIGIBLE_RESOURCE_SLOT",
+            "task_count": len(task_rows),
+            "resource_count": len(resource_rows),
+            "unassigned_tasks": list(ineligible_reasons),
+            "infeasibility_reasons": ineligible_reasons,
+            "schedule": pd.DataFrame(),
+            "method": "Bounded discrete-time resource scheduling; no feasible candidate slot for at least one task.",
+            "warning": "No task was scheduled because at least one task has no eligible resource/shift slot. Revise skill or availability data; do not silently drop the task.",
+        }
+
+    import pulp
+
+    model = pulp.LpProblem("shoir_task_resource_schedule", pulp.LpMinimize)
+    variables: dict[tuple[str, int, int], Any] = {}
+    by_task: dict[str, list[Any]] = {task["key"]: [] for task in task_rows}
+    for task in task_rows:
+        for resource_index, start_slot in candidates[task["key"]]:
+            variable = pulp.LpVariable(
+                f"x_{task_index[task['key']]}_{resource_index}_{start_slot}",
+                lowBound=0,
+                upBound=1,
+                cat=pulp.LpBinary,
+            )
+            variables[(task["key"], resource_index, start_slot)] = variable
+            by_task[task["key"]].append(variable)
+        model += pulp.lpSum(by_task[task["key"]]) == 1
+
+    # One resource cannot overlap two tasks in any discrete slot.
+    for resource_index, resource in enumerate(resource_rows):
+        for occupied_slot in range(slots_per_day):
+            occupying = [
+                variable
+                for (task_key, r_index, start_slot), variable in variables.items()
+                if r_index == resource_index
+                and start_slot <= occupied_slot
+                < start_slot + next(
+                    task["duration_slots"] for task in task_rows if task["key"] == task_key
+                )
+            ]
+            if len(occupying) > 1:
+                model += pulp.lpSum(occupying) <= 1
+
+    start_expr: dict[str, Any] = {}
+    finish_expr: dict[str, Any] = {}
+    objective_terms: list[Any] = []
+    task_by_key = {task["key"]: task for task in task_rows}
+    for task in task_rows:
+        options = [
+            (resource_index, start_slot, variable)
+            for (task_key, resource_index, start_slot), variable in variables.items()
+            if task_key == task["key"]
+        ]
+        start_expr[task["key"]] = pulp.lpSum(
+            (start_slot * slot_hours) * variable
+            for _resource_index, start_slot, variable in options
+        )
+        actual_duration = task["actual_slot_duration_hours"]
+        finish_expr[task["key"]] = start_expr[task["key"]] + actual_duration
+        # Prefer earlier completion when due hours are not specified; enforce
+        # due hours as soft weighted-tardiness targets when supplied.
+        objective_terms.append(task["priority_weight"] * 0.1 * finish_expr[task["key"]])
+        if task["due_hour"] is not None:
+            tardiness = pulp.LpVariable(
+                f"tardiness_{task_index[task['key']]}",
+                lowBound=0,
+                cat=pulp.LpContinuous,
+            )
+            model += tardiness >= finish_expr[task["key"]] - task["due_hour"]
+            objective_terms.append(100.0 * task["priority_weight"] * tardiness)
+        for resource_index, _start_slot, variable in options:
+            objective_terms.append(
+                resource_rows[resource_index]["hourly_cost"] * actual_duration * variable
+            )
+
+    # Predecessor completion must be no later than successor start.
+    for task in task_rows:
+        for predecessor in task["predecessor_keys"]:
+            model += start_expr[task["key"]] >= finish_expr[predecessor]
+
+    model += pulp.lpSum(objective_terms)
+    try:
+        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds, gapRel=0.0)
+        if not solver.available():
+            raise RuntimeError("CBC mixed-integer solver is not available in this environment.")
+        model.solve(solver)
+    except Exception as exc:
+        raise ValueError(f"Constrained scheduling solver could not run: {exc}") from exc
+
+    solver_status = pulp.LpStatus.get(model.status, str(model.status))
+    if model.status != pulp.LpStatusOptimal:
+        return {
+            "status": "INFEASIBLE_OR_SOLVER_LIMIT",
+            "solver_status": solver_status,
+            "task_count": len(task_rows),
+            "resource_count": len(resource_rows),
+            "unassigned_tasks": [task["task_id"] for task in task_rows],
+            "schedule": pd.DataFrame(),
+            "method": "Time-indexed mixed-integer scheduling with resource eligibility, daily shifts and precedence constraints.",
+            "warning": "No optimal schedule was proven within the solver status/time limit. Treat this as not scheduled and revise the horizon or model bounds; do not use a partial assignment as an approved plan.",
+        }
+
+    scheduled_rows: list[dict[str, Any]] = []
+    resource_hours = {resource["key"]: 0.0 for resource in resource_rows}
+    for task in task_rows:
+        selected = [
+            (resource_index, start_slot)
+            for resource_index, start_slot in candidates[task["key"]]
+            if variables[(task["key"], resource_index, start_slot)].value() is not None
+            and variables[(task["key"], resource_index, start_slot)].value() > 0.5
+        ]
+        if len(selected) != 1:
+            raise ValueError(f"Solver returned no unique assignment for task {task['task_id']}.")
+        resource_index, start_slot = selected[0]
+        resource = resource_rows[resource_index]
+        start_hour = start_slot * slot_hours
+        finish_hour = start_hour + task["actual_slot_duration_hours"]
+        tardiness = max(0.0, finish_hour - task["due_hour"]) if task["due_hour"] is not None else 0.0
+        labor_cost = resource["hourly_cost"] * task["actual_slot_duration_hours"]
+        resource_hours[resource["key"]] += task["actual_slot_duration_hours"]
+        scheduled_rows.append({
+            "Task": task["task_id"],
+            "Resource": resource["resource"],
+            "Start hour": start_hour,
+            "Finish hour": finish_hour,
+            "Duration hours (rounded to slot)": task["actual_slot_duration_hours"],
+            "Due hour": task["due_hour"],
+            "Tardiness hours": tardiness,
+            "Priority weight": task["priority_weight"],
+            "Required skills": ", ".join(sorted(task["required_skills"])),
+            "Resource skills": ", ".join(sorted(resource["skills"])),
+            "Predecessors": ", ".join(task["predecessor_keys"]),
+            "Estimated labor cost": labor_cost,
+        })
+    schedule = pd.DataFrame(scheduled_rows).sort_values(
+        ["Start hour", "Resource", "Task"], kind="stable"
+    ).reset_index(drop=True)
+    resource_summary = pd.DataFrame([
+        {
+            "Resource": resource["resource"],
+            "Shift start hour": resource["shift_start_slot"] * slot_hours,
+            "Shift end hour": resource["shift_end_slot"] * slot_hours,
+            "Scheduled hours": resource_hours[resource["key"]],
+            "Available shift hours": (
+                resource["shift_end_slot"] - resource["shift_start_slot"]
+            ) * slot_hours,
+            "Idle hours": (
+                resource["shift_end_slot"] - resource["shift_start_slot"]
+            ) * slot_hours - resource_hours[resource["key"]],
+        }
+        for resource in resource_rows
+    ])
+    return {
+        "status": "OPTIMAL_CONSTRAINED_SCHEDULE",
+        "solver_status": solver_status,
+        "task_count": len(task_rows),
+        "resource_count": len(resource_rows),
+        "assigned_count": int(len(schedule)),
+        "unassigned_tasks": [],
+        "total_assignment_cost": float(schedule["Estimated labor cost"].sum()),
+        "total_weighted_tardiness": float(
+            sum(
+                row["Tardiness hours"] * row["Priority weight"]
+                for row in scheduled_rows
+            )
+        ),
+        "makespan_hours": float(schedule["Finish hour"].max()) if not schedule.empty else 0.0,
+        "slot_minutes": slot_minutes,
+        "schedule": schedule,
+        "resource_summary": resource_summary,
+        "method": "Time-indexed mixed-integer schedule with 30/60-minute slots, one-task-at-a-time resource capacity, skill eligibility, shift windows and precedence constraints.",
+        "warning": "One-day deterministic schedule. Durations are rounded upward to the selected slot. Due hours are soft targets; latest_finish_hour and resource shifts are hard bounds. Breaks, multiple days/shifts, overtime, travel, legal working-time rules and uncertainty are not modelled; obtain local supervisor approval before dispatch.",
+    }
+
+
 def compare_energy_performance_scenarios(
     baseline: Mapping[str, Any],
     alternatives: Sequence[Mapping[str, Any]],
