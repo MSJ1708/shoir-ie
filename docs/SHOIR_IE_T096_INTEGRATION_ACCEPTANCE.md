@@ -13,7 +13,7 @@ The generic HTTPS REST path is now more than a metadata stub:
 
 ## What is not verified
 
-No SAP, Oracle or other customer ERP sandbox endpoint, provider tenant, least-privilege credential, API scope or network route has been configured for a live test. The generic adapter is not a vendor-specific SAP/Oracle adapter. The provider-specific transport interface still requires an independently reviewed implementation that resolves the opaque credential reference server-side.
+No SAP, Oracle or other customer ERP sandbox endpoint, provider tenant, least-privilege credential, API scope or network route has been configured for a live test. The generic adapter is not a vendor-specific SAP/Oracle adapter. The provider-specific transport implementation is now present in the candidate branch; its supported cloud-product scope and the remaining hosted acceptance requirements are recorded below.
 
 The 22-row `docs/integrations/ERP_ACCEPTANCE_MATRIX.csv` remains NOT RUN for live product acceptance. No live connection, data import, ongoing sync or external ERP persistence is claimed.
 
@@ -33,3 +33,12 @@ Mocks and product profile metadata do not count as live SAP/Oracle acceptance. T
 
 The existing Workbench now exposes a focused T096 form. It provides configuration inspection without outbound network access and a separate confirmed live-read action. The latter is guarded by the server-resolved application environment and refuses to run unless it is exactly `staging`; credentials remain referenced only by server-side environment/Streamlit secret names. A new AppTest exercises the inspection route, and connector unit coverage asserts that production is denied before the adapter can make a network request. This UI/test addition does not replace provider-specific SAP/Oracle implementation or a live provider acceptance run.
 
+
+
+## Repository implementation update — 2026-11-20
+
+The candidate now includes `shoir_erp_provider_transport.py` with a server-side OAuth 2.0 client-credentials token resolver, bounded token caching, TLS-verified HTTPS requests pinned to a validated DNS address, exact host allowlisting, redirect rejection, bounded JSON responses and sanitized transport failures. It provides distinct pagination handling for SAP S/4HANA Cloud OData V2/V4 (`value` / `d.results`, OData next links) and Oracle Fusion REST (`items`, `hasMore`, next links or bounded offset pagination). The first transport scope is SAP S/4HANA Cloud Public/Private and Oracle Fusion ERP/SCM. SAP ECC and Oracle EBS remain explicitly unsupported until their legacy authentication/API profiles receive separate adapters; they fail closed rather than silently using the cloud flow.
+
+A server-side credential resolver is injected by the deployment. It receives only the opaque `credential_ref` and must return the provider's token URL, client ID, client secret and scope from the approved secret manager. No client secret or access token belongs in a Workbench payload, repository file or browser. The common connector adapter still performs authenticated actor, workspace and resource authorization before any transport call.
+
+Automated transport-contract tests cover token exchange/cache, SAP OData and Oracle Fusion pagination, redirect rejection and cross-origin pagination rejection. These are synthetic HTTP-contract tests; they do **not** prove a live provider endpoint, real account scopes, tenant-specific schemas, pagination variants or provider rate-limit behavior. The existing Workbench T096 form has not yet been wired to create/manage these provider credentials and run the provider-aware resource flow. Live provider acceptance remains blocked on an owner-selected sandbox, approved host and credential reference, secret-manager configuration, end-to-end UI integration and independent security review. Keep T096 `EXTERNAL_CONFIGURATION_REQUIRED` until that evidence exists.
