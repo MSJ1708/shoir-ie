@@ -1059,7 +1059,7 @@ def _require_facility_tool_access(tier: str, username: str) -> dict[str, Any]:
             "Facility workspace access is limited to your own active account."
         )
 
-    tier_label = re.sub(r"\\s+", " ", str(tier or "").strip()).casefold()
+    tier_label = " ".join(str(tier or "").strip().casefold().split())
     if tier_label not in _FACILITY_VALID_TIER_LABELS:
         raise PermissionError(
             "Unable to verify your Shoir-IE subscription tier; Facility access is denied."
