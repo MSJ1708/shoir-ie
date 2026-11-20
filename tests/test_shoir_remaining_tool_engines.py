@@ -333,7 +333,7 @@ def test_identity_config_reports_readiness_without_claiming_sso_active(monkeypat
     assert out["status"] == "READY_FOR_AUTHORIZED_IDP_TEST"
     assert out["sso_active"] is False
     assert out["mfa_active"] is False
-    assert out["oidc_login_flow_implemented"] is False
+    assert out["oidc_login_flow_implemented"] is True
     assert out["provider_authentication_tested"] is False
     assert out["provider_mfa_evidence_verified"] is False
     assert out["audit_sink_configured"] is False
