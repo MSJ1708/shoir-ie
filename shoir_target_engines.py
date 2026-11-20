@@ -7550,8 +7550,10 @@ def evaluate_kpi_alerts(
             raise ValueError(f"Alert rule {index} must be an object.")
         rule_id = str(rule.get("rule_id", "")).strip()
         name = str(rule.get("kpi", "")).strip()
-        operator = str(rule.get("operator", "")).strip()
+        operator = str(rule.get("operator", "")).strip().casefold()
+        operator = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}.get(operator, operator)
         severity = str(rule.get("severity", "WARNING")).strip().upper()
+        severity = {"LOW": "INFO", "MEDIUM": "WARNING", "HIGH": "CRITICAL"}.get(severity, severity)
         if not rule_id or len(rule_id) > 100 or rule_id.casefold() in seen_rules:
             raise ValueError("Alert rule IDs must be non-empty, unique and no longer than 100 characters.")
         seen_rules.add(rule_id.casefold())
@@ -7623,16 +7625,36 @@ def evaluate_kpi_alerts(
     duplicate_count = int(frame["Alert ID"].duplicated().sum())
     if duplicate_count:
         raise RuntimeError("Internal KPI alert identity collision detected.")
+    alert_records = [
+        {
+            "fingerprint": str(row["Alert ID"]),
+            "alert_id": str(row["Alert ID"]),
+            "rule_id": str(row["Rule ID"]),
+            "kpi": str(row["KPI"]),
+            "severity": str(row["Severity"]),
+            "source": str(row["Source"]),
+            "state": "OPEN",
+            "new_alert": str(row["Event"]) == "NEW",
+            "Event": str(row["Event"]),
+        }
+        for row in rows if row["State"] == "OPEN"
+    ]
+    future_count = int((frame["State"] == "FUTURE_TIMESTAMP").sum())
+    open_count = int((frame["State"] == "OPEN").sum())
     return {
         "status": "KPI_ALERT_RULES_EVALUATED",
         "evaluated_at": now.isoformat(),
         "rule_count": len(frame),
-        "open_alert_count": int((frame["State"] == "OPEN").sum()),
+        "kpi_count": len(by_name),
+        "open_alert_count": open_count,
+        "breached_kpi_count": open_count,
         "new_alert_count": int((frame["Event"] == "NEW").sum()),
         "continuing_alert_count": int((frame["Event"] == "CONTINUING").sum()),
         "stale_or_missing_count": int(frame["State"].isin(["STALE_DATA", "MISSING_DATA", "INVALID_TIMESTAMP", "FUTURE_TIMESTAMP", "SOURCE_NOT_IDENTIFIED"]).sum()),
+        "future_kpi_count": future_count,
         "resolved_alert_count": int((frame["Event"] == "RESOLVED").sum()),
         "alerts": frame,
+        "alert_records": alert_records,
         "next_open_alert_ids": sorted(seen_active_ids),
         "warning": (
             "This evaluation does not dispatch notifications or prove that KPI sources are live. "
