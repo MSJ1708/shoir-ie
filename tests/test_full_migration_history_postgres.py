@@ -54,6 +54,7 @@ EXPECTED_VERSIONS = [
     "20261107153000",
     "20261107160000",
     "20261118170000",
+    "20261120115000",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -410,6 +411,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "shoir_platform_artifacts",
                 "shoir_platform_jobs",
                 "shoir_security_audit_events",
+                "shoir_dataset_storage_lifecycle_leases",
             }
             rows = _fetchone(
                 target,
@@ -432,6 +434,10 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 "shoir_organization_workspace_states": {
                     "workspace_key", "state_json", "revision",
                     "updated_by_username_lc", "updated_at",
+                },
+                "shoir_dataset_storage_lifecycle_leases": {
+                    "workspace_key", "dataset_id", "lease_token",
+                    "lease_operation", "actor_username_lc", "acquired_at", "expires_at",
                 },
             }
             for table, expected in required_columns.items():
@@ -645,6 +651,52 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             assert "shoir-industrial-datasets" in storage_policy[0]
             assert "shoir-industrial-datasets" in storage_policy[1]
 
+            lease_table_rls = _fetchone(
+                target,
+                "SELECT relrowsecurity FROM pg_class WHERE oid='public.shoir_dataset_storage_lifecycle_leases'::regclass;",
+            )[0]
+            assert lease_table_rls is True, "Dataset lifecycle lease table must enable RLS."
+            for role in ("anon", "authenticated", "service_role"):
+                for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    assert _fetchone(
+                        target,
+                        "SELECT has_table_privilege(%s, 'public.shoir_dataset_storage_lifecycle_leases', %s);",
+                        (role, privilege),
+                    )[0] is False, f"{role} unexpectedly has {privilege} on dataset lifecycle leases."
+
+            lease_functions = (
+                (
+                    "shoir_dataset_storage_lease_acquire",
+                    "p_workspace_key text, p_dataset_id text, p_lease_token uuid, p_lease_operation text, p_actor_username_lc text, p_lease_seconds integer",
+                ),
+                (
+                    "shoir_dataset_storage_lease_release",
+                    "p_workspace_key text, p_dataset_id text, p_lease_token uuid",
+                ),
+            )
+            for function_name, identity_args in lease_functions:
+                lease_acl = _fetchone(
+                    target,
+                    """
+                    SELECT p.prosecdef, p.proconfig,
+                           has_function_privilege('anon', p.oid, 'EXECUTE'),
+                           has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                           has_function_privilege('service_role', p.oid, 'EXECUTE')
+                    FROM pg_proc p
+                    JOIN pg_namespace n ON n.oid=p.pronamespace
+                    WHERE n.nspname='public'
+                      AND p.proname=%s
+                      AND pg_get_function_identity_arguments(p.oid)=%s;
+                    """,
+                    (function_name, identity_args),
+                )
+                assert lease_acl is not None, f"Missing {function_name} after migration replay."
+                assert lease_acl[0] is True, f"{function_name} must be SECURITY DEFINER."
+                assert "search_path=pg_catalog, public" in (lease_acl[1] or [])
+                assert lease_acl[2] is False
+                assert lease_acl[3] is False
+                assert lease_acl[4] is True
+
             storage_function = _fetchone(
                 target,
                 """
@@ -787,6 +839,110 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             # and the service_role identity for the complete RPC exercise.
             try:
                 _execute(target, "SET ROLE service_role;")
+
+                lease_workspace = "f" * 32
+                lease_dataset = "DS-ABCDEF123456"
+                lease_token_a = "00000000-0000-4000-8000-000000000011"
+                lease_token_b = "00000000-0000-4000-8000-000000000012"
+                lease_token_c = "00000000-0000-4000-8000-000000000013"
+                acquire_sql = """
+                    SELECT acquired, expires_at
+                    FROM public.shoir_dataset_storage_lease_acquire(
+                        %s, %s, %s::uuid, %s, %s, %s
+                    );
+                """
+                first_lease = _fetchone(
+                    target,
+                    acquire_sql,
+                    (lease_workspace, lease_dataset, lease_token_a, "finalize", username, 300),
+                )
+                assert first_lease[0] is True
+                assert first_lease[1] > datetime.datetime.now(datetime.timezone.utc)
+
+                blocked_lease = _fetchone(
+                    target,
+                    acquire_sql,
+                    (lease_workspace, lease_dataset, lease_token_b, "sweep", username, 300),
+                )
+                assert blocked_lease[0] is False
+                assert blocked_lease[1] == first_lease[1]
+
+                wrong_release = _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_dataset_storage_lease_release(
+                        %s, %s, %s::uuid
+                    );
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_b),
+                )[0]
+                assert wrong_release is False, "A stale token must not release another lease."
+
+                correct_release = _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_dataset_storage_lease_release(
+                        %s, %s, %s::uuid
+                    );
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_a),
+                )[0]
+                assert correct_release is True
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_dataset_storage_lease_release(
+                        %s, %s, %s::uuid
+                    );
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_a),
+                )[0] is False, "Releasing an already-released token must be idempotently false."
+
+                second_lease = _fetchone(
+                    target,
+                    acquire_sql,
+                    (lease_workspace, lease_dataset, lease_token_b, "sweep", username, 300),
+                )
+                assert second_lease[0] is True
+
+                _execute(target, "SAVEPOINT invalid_dataset_lease_ttl;")
+                with pytest.raises(psycopg2.Error) as invalid_lease_ttl:
+                    _fetchone(
+                        target,
+                        acquire_sql,
+                        (lease_workspace, "DS-INVALID000000", lease_token_c, "sweep", username, 10),
+                    )
+                assert invalid_lease_ttl.value.pgcode == "22023"
+                _execute(target, "ROLLBACK TO SAVEPOINT invalid_dataset_lease_ttl;")
+
+                _execute(target, "RESET ROLE;")
+                _execute(
+                    target,
+                    """
+                    UPDATE public.shoir_dataset_storage_lifecycle_leases
+                       SET expires_at = clock_timestamp() - interval '1 second'
+                     WHERE workspace_key=%s AND dataset_id=%s
+                       AND lease_token=%s::uuid;
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_b),
+                )
+                _execute(target, "SET ROLE service_role;")
+                reclaimed_lease = _fetchone(
+                    target,
+                    acquire_sql,
+                    (lease_workspace, lease_dataset, lease_token_c, "finalize", username, 300),
+                )
+                assert reclaimed_lease[0] is True, "Expired lifecycle leases must be reclaimable."
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_dataset_storage_lease_release(
+                        %s, %s, %s::uuid
+                    );
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_c),
+                )[0] is True
+
                 assert _fetchone(
                     target,
                     "SELECT has_table_privilege('service_role', 'public.shoir_organization_audit_events', 'UPDATE');",
