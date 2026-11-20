@@ -187,7 +187,7 @@ def main() -> int:
                             r"app has gone to sleep due to inactivity", re.I
                         )
                         wake_pattern = re.compile(
-                            r"Yes,\\s*get this app back up!?", re.I
+                            r"Yes,\s*get this app back up!?", re.I
                         )
                         item["wake_recovery_attempted"] = False
                         item["wake_recovery_succeeded"] = False
@@ -211,26 +211,31 @@ def main() -> int:
                                 initial_sleep_body = candidate_body
                                 break
 
+                        item["wake_recovery_frame_count"] = len(page.frames)
+                        item["sleeping_frame_detected"] = sleeping_frame is not None
                         if sleeping_frame is not None:
                             item["wake_recovery_frame_url"] = sleeping_frame.url
+                            item["sleeping_frame_body_preview"] = " ".join(initial_sleep_body.split())[:400]
                             wake_target = None
                             wake_strategy = None
                             interactive_wake = sleeping_frame.locator(
                                 "button, a, [role='button']"
                             ).filter(has_text=wake_pattern).first
                             try:
-                                if interactive_wake.count() and interactive_wake.is_visible():
+                                item["wake_recovery_interactive_count"] = interactive_wake.count()
+                                if item["wake_recovery_interactive_count"] and interactive_wake.is_visible():
                                     wake_target = interactive_wake
                                     wake_strategy = "frame-interactive-element"
                             except Exception:
-                                pass
+                                item["wake_recovery_interactive_count"] = 0
 
                             if wake_target is None:
                                 try:
                                     visible_wake_text = sleeping_frame.get_by_text(
                                         wake_pattern, exact=False
                                     ).last
-                                    if visible_wake_text.count() and visible_wake_text.is_visible():
+                                    item["wake_recovery_text_count"] = visible_wake_text.count()
+                                    if item["wake_recovery_text_count"] and visible_wake_text.is_visible():
                                         wake_target = visible_wake_text
                                         wake_strategy = "frame-visible-text"
                                 except Exception:
