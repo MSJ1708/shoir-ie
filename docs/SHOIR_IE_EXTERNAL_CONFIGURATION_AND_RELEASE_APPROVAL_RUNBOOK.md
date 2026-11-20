@@ -140,6 +140,8 @@ server_metadata_url = "https://YOUR-IDP-ISSUER/.well-known/openid-configuration"
 
 The application uses the provider name `enterprise` and calls `st.login("enterprise")`. It requires the supported Streamlit OIDC API and exposed `st.user.tokens["id"]`. The repository pins the supported range to `streamlit>=1.61,<2`.
 
+The Workbench T098 readiness inspector reads these nested Streamlit `[auth]` settings and reports whether their syntax/configuration is present without exposing values. It cannot inspect the separate Supabase Edge Function secret manager; its result explicitly labels Edge verifier configuration as `NOT_INSPECTABLE_FROM_STREAMLIT`. A “Streamlit configuration ready” result is not evidence that the Edge secrets exist, that the provider accepted authentication, that MFA claims are correct, or that the audit migration is deployed.
+
 ### 5.3 Staging Supabase Edge Function secrets
 
 In the staging Supabase project only, configure these Edge Function secrets via the Supabase secret manager:
