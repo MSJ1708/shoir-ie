@@ -223,6 +223,81 @@ def test_kpi_alert_evaluation_handles_threshold_freshness_and_dedupe():
     assert again["new_alert_count"] == 0
 
 
+def test_kpi_alert_adapter_keeps_existing_breach_open_until_fresh_recovery():
+    initial = evaluate_kpi_alerts({
+        "as_of": "2026-11-20T10:01:00Z",
+        "kpis": [{
+            "name": "Scrap Rate",
+            "value": 4.2,
+            "threshold": 3.0,
+            "operator": "gt",
+            "measured_at": "2026-11-20T10:00:00Z",
+            "max_age_minutes": 120,
+            "rule_id": "scrap-high",
+            "severity": "HIGH",
+        }],
+        "existing_alerts": [],
+    })
+    assert initial["new_alert_count"] == 1
+    prior = initial["alert_records"]
+
+    stale = evaluate_kpi_alerts({
+        "as_of": "2026-11-20T12:30:00Z",
+        "kpis": [{
+            "name": "Scrap Rate",
+            "value": 2.0,
+            "threshold": 3.0,
+            "operator": "gt",
+            "measured_at": "2026-11-20T09:00:00Z",
+            "max_age_minutes": 120,
+            "rule_id": "scrap-high",
+            "severity": "HIGH",
+        }],
+        "existing_alerts": prior,
+    })
+    assert stale["resolved_alert_count"] == 0
+    assert stale["open_alert_count"] == 1
+    assert stale["unverified_open_alert_count"] == 1
+    assert stale["alert_records"][0]["state"] == "OPEN_UNVERIFIED"
+    assert stale["alerts"].iloc[0]["Event"] == "UNVERIFIED"
+
+    recovered = evaluate_kpi_alerts({
+        "as_of": "2026-11-20T12:31:00Z",
+        "kpis": [{
+            "name": "Scrap Rate",
+            "value": 2.0,
+            "threshold": 3.0,
+            "operator": "gt",
+            "measured_at": "2026-11-20T12:30:00Z",
+            "max_age_minutes": 120,
+            "rule_id": "scrap-high",
+            "severity": "HIGH",
+        }],
+        "existing_alerts": stale["alert_records"],
+    })
+    assert recovered["resolved_alert_count"] == 1
+    assert recovered["open_alert_count"] == 0
+    assert recovered["alert_records"] == []
+
+
+def test_kpi_alert_adapter_preserves_per_record_maximum_age_and_user_provenance():
+    out = evaluate_kpi_alerts({
+        "as_of": "2026-11-20T12:00:00Z",
+        "kpis": [
+            {"name": "Fresh", "value": 10, "threshold": 5, "operator": "gt",
+             "measured_at": "2026-11-20T11:59:00Z", "max_age_minutes": 5},
+            {"name": "Stale", "value": 10, "threshold": 5, "operator": "gt",
+             "measured_at": "2026-11-20T11:50:00Z", "max_age_minutes": 5},
+        ],
+        "existing_alerts": [],
+    })
+    assert out["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    states = out["kpis"].set_index("kpi")["status"].to_dict()
+    assert states == {"Fresh": "OPEN", "Stale": "STALE_DATA"}
+    assert out["new_alert_count"] == 1
+    assert out["stale_kpi_count"] == 1
+
+
 def test_kpi_alert_evaluation_blocks_future_dated_measurements():
     out = evaluate_kpi_alerts({
         "as_of": "2026-10-26T12:00:00Z",
