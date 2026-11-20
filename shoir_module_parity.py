@@ -652,6 +652,28 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
     st.caption(f"Source: {source}{(' · ' + sheet) if sheet else ''} · Changes are captured by the workspace autosave.")
 
 
+def _current_dataset_dependencies() -> list[dict[str, Any]]:
+    """Return only the explicitly activated, revalidated immutable dataset version."""
+    state = st.session_state
+    if state.get("shoir_dataset_dependency_tracking_enabled") is not True:
+        return []
+    if state.get("shoir_dataset_lineage_blocked") is True:
+        raise PermissionError(
+            "A linked dataset is blocked because its current version or Digital Thread lineage could not be revalidated."
+        )
+    dependency = state.get("shoir_active_dataset_dependency")
+    if not isinstance(dependency, dict):
+        raise PermissionError(
+            "Dataset lineage tracking is enabled but no verified active dataset dependency is available."
+        )
+    required = ("dataset_id", "version", "data_hash", "version_fingerprint")
+    if any(dependency.get(key) in (None, "") for key in required):
+        raise PermissionError(
+            "The active dataset dependency is incomplete; refresh and validate the managed dataset before saving a module run."
+        )
+    return [dict(dependency)]
+
+
 def _render_results(module: str, keys: dict[str, str]) -> None:
     token = module_token(module)
     df = st.session_state.get(keys["data"], pd.DataFrame())
@@ -790,6 +812,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                             module, username, profile, result_df, playbook_analysis,
                             duration_ms=max(0.0, (time.perf_counter_ns() - playbook_started_ns) / 1_000_000.0),
                             status="Completed",
+                            dataset_dependencies=_current_dataset_dependencies(),
                         )
                     except Exception as persist_exc:
                         st.warning(
@@ -1013,6 +1036,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
             saved_run = save_module_analysis_run(
                 module, username, profile, result_df, snapshot_analysis,
                 duration_ms=0.0, status="Snapshot",
+                dataset_dependencies=_current_dataset_dependencies(),
             )
             st.session_state[f"module_parity_last_run_{token}"] = saved_run["run_id"]
             st.success(f"Result snapshot saved as {saved_run['run_id']}.")
