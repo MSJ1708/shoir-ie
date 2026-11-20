@@ -11,7 +11,7 @@ CREATE TABLE public.shoir_dataset_storage_lifecycle_leases (
         CHECK (dataset_id ~ '^DS-[A-F0-9]{12,32}$'),
     lease_token uuid NOT NULL,
     lease_operation text NOT NULL
-        CHECK (lease_operation IN ('finalize', 'sweep')),
+        CHECK (lease_operation IN ('finalize', 'register', 'sweep')),
     actor_username_lc text NOT NULL
         CHECK (length(btrim(actor_username_lc)) BETWEEN 1 AND 128),
     acquired_at timestamptz NOT NULL,
@@ -47,7 +47,7 @@ BEGIN
        OR p_dataset_id !~ '^DS-[A-F0-9]{12,32}$'
        OR p_lease_token IS NULL
        OR p_lease_operation IS NULL
-       OR p_lease_operation NOT IN ('finalize', 'sweep')
+       OR p_lease_operation NOT IN ('finalize', 'register', 'sweep')
        OR p_actor_username_lc IS NULL
        OR length(btrim(p_actor_username_lc)) NOT BETWEEN 1 AND 128
        OR p_lease_seconds IS NULL
@@ -137,11 +137,11 @@ GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_release(
 ) TO service_role;
 
 COMMENT ON TABLE public.shoir_dataset_storage_lifecycle_leases IS
-    'Private server-only fencing leases serializing dataset Storage finalization and reference-aware cleanup.';
+    'Private server-only fencing leases serializing dataset Storage finalization, reference registration and cleanup.';
 COMMENT ON FUNCTION public.shoir_dataset_storage_lease_acquire(
     text, text, uuid, text, text, integer
 ) IS
-    'Atomically acquire a workspace/dataset Storage lifecycle lease or report the active lease expiry. Only the session-validated Edge Function service role may execute.';
+    'Atomically acquire a workspace/dataset Storage lifecycle lease for finalization, reference registration or cleanup; otherwise report the active lease expiry. Only the session-validated Edge Function service role may execute.';
 COMMENT ON FUNCTION public.shoir_dataset_storage_lease_release(
     text, text, uuid
 ) IS
