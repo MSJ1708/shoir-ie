@@ -345,6 +345,26 @@ def test_identity_config_inspects_nested_streamlit_auth_without_claiming_sso_act
     assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
 
+def test_identity_config_rejects_private_ip_metadata_endpoint():
+    out = identity_audit_configuration_status({
+        "auth": {
+            "redirect_uri": "https://staging.example.test/oauth2callback",
+            "cookie_secret": "x" * 48,
+            "expose_tokens": "id",
+            "enterprise": {
+                "client_id": "shoir-staging",
+                "client_secret": "do-not-return",
+                "server_metadata_url": "https://192.168.1.20/.well-known/openid-configuration",
+            },
+        }
+    })
+    assert out["status"] == "CONFIGURATION_INVALID"
+    assert out["streamlit_configuration_ready"] is False
+    assert not out["oidc_issuer_syntax_valid"]
+    assert any("server_metadata_url" in item for item in out["configuration_problems"])
+    assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
+
+
 def test_identity_config_fails_closed_when_provider_is_missing():
     out = identity_audit_configuration_status({"auth": {}})
     assert out["status"] == "NOT_CONFIGURED"
