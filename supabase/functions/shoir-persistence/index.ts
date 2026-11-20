@@ -2368,7 +2368,7 @@ Deno.serve(async (req) => {
         next_step: dryRun
           ? "Preview only. Both temporary and immutable objects are eligible only after the 48-hour age check, successful dual-ledger no-reference checks and an acquired dataset lifecycle lease. A separate explicit confirm_delete=true request is required to delete."
           : "Review append-only intent and completion events, lease/release failures and deletion counts. Repeat a bounded dry run/deletion for remaining candidates.",
-      });;
+      });
     }
 
     if (action === "dataset_download_url") {
@@ -2574,267 +2574,267 @@ Deno.serve(async (req) => {
       }
 
       try {
-      const uploadPath = String(body.upload_path || "").trim();
-      const name = String(body.name || "").trim();
-      const sourceName = String(body.source_name || "").trim();
-      const dataHash = String(body.data_hash || "").toLowerCase();
-      const fingerprint = String(body.version_fingerprint || "").toLowerCase();
-      const rowCount = Number(body.row_count);
-      const columnCount = Number(body.column_count);
-      const schema = body.schema;
-      const transformations = body.transformations || [];
-      if (
-        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
-        !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
-        uploadPath.includes("..") ||
-        uploadPath.length > 240 ||
-        !name ||
-        name.length > 200 ||
-        sourceName.length > 500 ||
-        !/^[0-9a-f]{64}$/.test(dataHash) ||
-        !/^[0-9a-f]{64}$/.test(fingerprint) ||
-        !Number.isSafeInteger(rowCount) ||
-        rowCount < 0 ||
-        rowCount > 100000000 ||
-        !Number.isSafeInteger(columnCount) ||
-        columnCount < 0 ||
-        columnCount > 5000 ||
-        !schema ||
-        typeof schema !== "object" ||
-        Array.isArray(schema) ||
-        new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
-        !Array.isArray(transformations) ||
-        transformations.length > 50 ||
-        new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
-          16384
-      ) {
-        return sendResponse(
-          { error: "Dataset version metadata is invalid." },
-          400,
-        );
-      }
-      const expectedFingerprint = await sha256Hex(
-        stablePlatformJson({
-          dataset_id: datasetId,
-          data_hash: dataHash,
-          schema,
-          transformations,
-        }),
-      );
-      if (expectedFingerprint !== fingerprint) {
-        return sendResponse(
-          {
-            error:
-              "Dataset version fingerprint does not match the submitted metadata.",
-          },
-          422,
-        );
-      }
-      const { data: uploaded, error: downloadError } = await supabase.storage
-        .from("shoir-industrial-datasets")
-        .download(uploadPath);
-      if (downloadError || !uploaded) {
-        throw downloadError ||
-          new Error("Uploaded dataset file is missing.");
-      }
-      if (uploaded.size > 52428800) {
-        await supabase.storage
-          .from("shoir-industrial-datasets")
-          .remove([uploadPath]);
-        return sendResponse(
-          { error: "Dataset file exceeds the 50 MiB storage limit." },
-          413,
-        );
-      }
-      const bytes = new Uint8Array(await uploaded.arrayBuffer());
-      const digest = await sha256Bytes(bytes);
-      if (digest !== dataHash) {
-        await supabase.storage
-          .from("shoir-industrial-datasets")
-          .remove([uploadPath]);
-        return sendResponse(
-          {
-            error:
-              "Uploaded dataset content hash does not match the registered data hash.",
-          },
-          422,
-        );
-      }
-      let csvShape;
-      try {
-        csvShape = inspectCsvShape(bytes);
-      } catch (shapeError) {
-        await supabase.storage
-          .from("shoir-industrial-datasets")
-          .remove([uploadPath]);
-        throw shapeError;
-      }
-      const schemaColumns = Object.keys(schema as Record<string, unknown>);
-      if (
-        csvShape.rowCount !== rowCount ||
-        csvShape.columnCount !== columnCount ||
-        schemaColumns.length !== csvShape.columnCount ||
-        csvShape.headers.some((header) => !schemaColumns.includes(header))
-      ) {
-        await supabase.storage
-          .from("shoir-industrial-datasets")
-          .remove([uploadPath]);
-        return sendResponse(
-          {
-            error:
-              "Dataset row count, column count or schema does not match the uploaded CSV.",
-          },
-          422,
-        );
-      }
-      const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
-        ".csv";
-      const bucket = supabase.storage.from("shoir-industrial-datasets");
-      let createdFinalObject = false;
-      const { data: existingFile, error: existingError } = await bucket
-        .download(storageKey);
-      if (!existingError && existingFile) {
-        const existingBytes = new Uint8Array(
-          await existingFile.arrayBuffer(),
-        );
-        const existingHash = await sha256Bytes(existingBytes);
-        if (existingHash !== dataHash) {
-          await bucket.remove([uploadPath]);
-          throw new Error(
-            "Existing immutable dataset object does not match its content hash.",
+        const uploadPath = String(body.upload_path || "").trim();
+        const name = String(body.name || "").trim();
+        const sourceName = String(body.source_name || "").trim();
+        const dataHash = String(body.data_hash || "").toLowerCase();
+        const fingerprint = String(body.version_fingerprint || "").toLowerCase();
+        const rowCount = Number(body.row_count);
+        const columnCount = Number(body.column_count);
+        const schema = body.schema;
+        const transformations = body.transformations || [];
+        if (
+          !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+          !uploadPath.startsWith("tmp/" + workspaceKey + "/" + datasetId + "/") ||
+          uploadPath.includes("..") ||
+          uploadPath.length > 240 ||
+          !name ||
+          name.length > 200 ||
+          sourceName.length > 500 ||
+          !/^[0-9a-f]{64}$/.test(dataHash) ||
+          !/^[0-9a-f]{64}$/.test(fingerprint) ||
+          !Number.isSafeInteger(rowCount) ||
+          rowCount < 0 ||
+          rowCount > 100000000 ||
+          !Number.isSafeInteger(columnCount) ||
+          columnCount < 0 ||
+          columnCount > 5000 ||
+          !schema ||
+          typeof schema !== "object" ||
+          Array.isArray(schema) ||
+          new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+          !Array.isArray(transformations) ||
+          transformations.length > 50 ||
+          new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
+            16384
+        ) {
+          return sendResponse(
+            { error: "Dataset version metadata is invalid." },
+            400,
           );
         }
-      } else {
-        const uploadBlob = new Blob(
-          [bytes.slice().buffer as ArrayBuffer],
-          { type: "text/csv" },
+        const expectedFingerprint = await sha256Hex(
+          stablePlatformJson({
+            dataset_id: datasetId,
+            data_hash: dataHash,
+            schema,
+            transformations,
+          }),
         );
-        const { error: storeError } = await bucket.upload(
-          storageKey,
-          uploadBlob,
-          { contentType: "text/csv", upsert: false },
-        );
-        if (storeError) {
-          const { data: racedFile, error: racedError } = await bucket
-            .download(storageKey);
-          if (racedError || !racedFile) throw storeError;
-          const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
-          const racedHash = await sha256Bytes(racedBytes);
-          if (racedHash !== dataHash) {
+        if (expectedFingerprint !== fingerprint) {
+          return sendResponse(
+            {
+              error:
+                "Dataset version fingerprint does not match the submitted metadata.",
+            },
+            422,
+          );
+        }
+        const { data: uploaded, error: downloadError } = await supabase.storage
+          .from("shoir-industrial-datasets")
+          .download(uploadPath);
+        if (downloadError || !uploaded) {
+          throw downloadError ||
+            new Error("Uploaded dataset file is missing.");
+        }
+        if (uploaded.size > 52428800) {
+          await supabase.storage
+            .from("shoir-industrial-datasets")
+            .remove([uploadPath]);
+          return sendResponse(
+            { error: "Dataset file exceeds the 50 MiB storage limit." },
+            413,
+          );
+        }
+        const bytes = new Uint8Array(await uploaded.arrayBuffer());
+        const digest = await sha256Bytes(bytes);
+        if (digest !== dataHash) {
+          await supabase.storage
+            .from("shoir-industrial-datasets")
+            .remove([uploadPath]);
+          return sendResponse(
+            {
+              error:
+                "Uploaded dataset content hash does not match the registered data hash.",
+            },
+            422,
+          );
+        }
+        let csvShape;
+        try {
+          csvShape = inspectCsvShape(bytes);
+        } catch (shapeError) {
+          await supabase.storage
+            .from("shoir-industrial-datasets")
+            .remove([uploadPath]);
+          throw shapeError;
+        }
+        const schemaColumns = Object.keys(schema as Record<string, unknown>);
+        if (
+          csvShape.rowCount !== rowCount ||
+          csvShape.columnCount !== columnCount ||
+          schemaColumns.length !== csvShape.columnCount ||
+          csvShape.headers.some((header) => !schemaColumns.includes(header))
+        ) {
+          await supabase.storage
+            .from("shoir-industrial-datasets")
+            .remove([uploadPath]);
+          return sendResponse(
+            {
+              error:
+                "Dataset row count, column count or schema does not match the uploaded CSV.",
+            },
+            422,
+          );
+        }
+        const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
+          ".csv";
+        const bucket = supabase.storage.from("shoir-industrial-datasets");
+        let createdFinalObject = false;
+        const { data: existingFile, error: existingError } = await bucket
+          .download(storageKey);
+        if (!existingError && existingFile) {
+          const existingBytes = new Uint8Array(
+            await existingFile.arrayBuffer(),
+          );
+          const existingHash = await sha256Bytes(existingBytes);
+          if (existingHash !== dataHash) {
+            await bucket.remove([uploadPath]);
             throw new Error(
-              "Concurrent immutable dataset upload has a different content hash.",
+              "Existing immutable dataset object does not match its content hash.",
             );
           }
         } else {
-          createdFinalObject = true;
-        }
-      }
-      const versionRecordId = "SPR-" +
-        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const headRecordId = "SPR-" +
-        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const eventId = "SPE-" +
-        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const { data, error } = await supabase.rpc(
-        "shoir_platform_register_dataset_version_with_storage",
-        {
-          p_workspace_key: workspaceKey,
-          p_dataset_id: datasetId,
-          p_name: name,
-          p_source_name: sourceName,
-          p_data_hash: dataHash,
-          p_version_fingerprint: fingerprint,
-          p_row_count: rowCount,
-          p_column_count: columnCount,
-          p_schema_json: schema,
-          p_transformations_json: transformations,
-          p_actor: row.username_lc,
-          p_version_record_id: versionRecordId,
-          p_head_record_id: headRecordId,
-          p_event_id: eventId,
-          p_storage_key: storageKey,
-        },
-      );
-      if (error) {
-        // The RPC may have committed even if its response was lost. Only
-        // remove a file created by this request after both metadata ledgers
-        // have confirmed that no record or event references the object.
-        if (createdFinalObject) {
-          try {
-            const [recordRefs, eventRefs] = await Promise.all([
-              supabase.from("shoir_platform_records")
-                .select("record_id")
-                .eq("workspace_key", workspaceKey)
-                .contains("payload_json", { storage_key: storageKey })
-                .limit(1),
-              supabase.from("shoir_platform_events")
-                .select("event_id")
-                .eq("workspace_key", workspaceKey)
-                .contains("payload_json", { storage_key: storageKey })
-                .limit(1),
-            ]);
-            if (recordRefs.error || eventRefs.error) {
-              console.warn(
-                "Dataset metadata registration failed; reference checks were unavailable, so the immutable object was retained.",
+          const uploadBlob = new Blob(
+            [bytes.slice().buffer as ArrayBuffer],
+            { type: "text/csv" },
+          );
+          const { error: storeError } = await bucket.upload(
+            storageKey,
+            uploadBlob,
+            { contentType: "text/csv", upsert: false },
+          );
+          if (storeError) {
+            const { data: racedFile, error: racedError } = await bucket
+              .download(storageKey);
+            if (racedError || !racedFile) throw storeError;
+            const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
+            const racedHash = await sha256Bytes(racedBytes);
+            if (racedHash !== dataHash) {
+              throw new Error(
+                "Concurrent immutable dataset upload has a different content hash.",
               );
-            } else if (
-              (recordRefs.data || []).length === 0 &&
-              (eventRefs.data || []).length === 0
-            ) {
-              const { error: orphanRemoveError } = await bucket.remove([
-                storageKey,
+            }
+          } else {
+            createdFinalObject = true;
+          }
+        }
+        const versionRecordId = "SPR-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const headRecordId = "SPR-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const eventId = "SPE-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const { data, error } = await supabase.rpc(
+          "shoir_platform_register_dataset_version_with_storage",
+          {
+            p_workspace_key: workspaceKey,
+            p_dataset_id: datasetId,
+            p_name: name,
+            p_source_name: sourceName,
+            p_data_hash: dataHash,
+            p_version_fingerprint: fingerprint,
+            p_row_count: rowCount,
+            p_column_count: columnCount,
+            p_schema_json: schema,
+            p_transformations_json: transformations,
+            p_actor: row.username_lc,
+            p_version_record_id: versionRecordId,
+            p_head_record_id: headRecordId,
+            p_event_id: eventId,
+            p_storage_key: storageKey,
+          },
+        );
+        if (error) {
+          // The RPC may have committed even if its response was lost. Only
+          // remove a file created by this request after both metadata ledgers
+          // have confirmed that no record or event references the object.
+          if (createdFinalObject) {
+            try {
+              const [recordRefs, eventRefs] = await Promise.all([
+                supabase.from("shoir_platform_records")
+                  .select("record_id")
+                  .eq("workspace_key", workspaceKey)
+                  .contains("payload_json", { storage_key: storageKey })
+                  .limit(1),
+                supabase.from("shoir_platform_events")
+                  .select("event_id")
+                  .eq("workspace_key", workspaceKey)
+                  .contains("payload_json", { storage_key: storageKey })
+                  .limit(1),
               ]);
-              if (orphanRemoveError) {
+              if (recordRefs.error || eventRefs.error) {
                 console.warn(
-                  "Dataset metadata registration failed; the confirmed-unreferenced object could not be removed.",
+                  "Dataset metadata registration failed; reference checks were unavailable, so the immutable object was retained.",
                 );
+              } else if (
+                (recordRefs.data || []).length === 0 &&
+                (eventRefs.data || []).length === 0
+              ) {
+                const { error: orphanRemoveError } = await bucket.remove([
+                  storageKey,
+                ]);
+                if (orphanRemoveError) {
+                  console.warn(
+                    "Dataset metadata registration failed; the confirmed-unreferenced object could not be removed.",
+                  );
+                }
               }
+            } catch {
+              // An uncertain reference check must never turn into a destructive
+              // cleanup attempt. A later explicit, reference-aware sweep can
+              // reconcile the retained object.
+              console.warn(
+                "Dataset metadata registration failed; the immutable object was retained because reference status was uncertain.",
+              );
+            }
+          }
+          try {
+            const { error: tempRemoveError } = await bucket.remove([uploadPath]);
+            if (tempRemoveError) {
+              console.warn(
+                "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
+              );
             }
           } catch {
-            // An uncertain reference check must never turn into a destructive
-            // cleanup attempt. A later explicit, reference-aware sweep can
-            // reconcile the retained object.
             console.warn(
-              "Dataset metadata registration failed; the immutable object was retained because reference status was uncertain.",
+              "Dataset metadata registration failed; temporary upload cleanup could not be confirmed.",
             );
           }
+          throw error;
         }
+
+        const registration = Array.isArray(data) ? data[0] : data;
+        // Register the content-addressed object first. Temporary upload removal
+        // is best-effort after the atomic metadata transaction; cleanup failure
+        // must not tell the caller that an already-registered version failed.
+        let temporaryCleanupPending = false;
         try {
           const { error: tempRemoveError } = await bucket.remove([uploadPath]);
-          if (tempRemoveError) {
-            console.warn(
-              "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
-            );
-          }
+          temporaryCleanupPending = Boolean(tempRemoveError);
         } catch {
+          temporaryCleanupPending = true;
+        }
+        if (temporaryCleanupPending) {
           console.warn(
-            "Dataset metadata registration failed; temporary upload cleanup could not be confirmed.",
+            "Dataset version registered successfully; temporary upload cleanup remains pending.",
           );
         }
-        throw error;
-      }
-
-      const registration = Array.isArray(data) ? data[0] : data;
-      // Register the content-addressed object first. Temporary upload removal
-      // is best-effort after the atomic metadata transaction; cleanup failure
-      // must not tell the caller that an already-registered version failed.
-      let temporaryCleanupPending = false;
-      try {
-        const { error: tempRemoveError } = await bucket.remove([uploadPath]);
-        temporaryCleanupPending = Boolean(tempRemoveError);
-      } catch {
-        temporaryCleanupPending = true;
-      }
-      if (temporaryCleanupPending) {
-        console.warn(
-          "Dataset version registered successfully; temporary upload cleanup remains pending.",
-        );
-      }
-      return sendResponse({
-        ok: true,
-        registration,
-        temporary_cleanup_pending: temporaryCleanupPending,
-      });
+        return sendResponse({
+          ok: true,
+          registration,
+          temporary_cleanup_pending: temporaryCleanupPending,
+        });
       } finally {
         try {
           const { data: released, error: releaseError } = await supabase.rpc(
