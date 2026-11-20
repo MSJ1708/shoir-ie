@@ -31,8 +31,8 @@ def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
     assert lease_acquire < storage_read < release_finally < lease_release
     assert 'p_lease_operation: "finalize"' in source
     assert "p_lease_seconds: 600" in source
-    lease_renewal = source.index('"shoir_dataset_storage_lease_renew"')
-    assert lease_acquire < storage_read < lease_renewal < lease_release
+    lease_renewal = source.index("renewDatasetStorageLifecycleLease(", storage_read)
+    assert lease_acquire < storage_read < lease_renewal < release_finally < lease_release
 
 
 def test_new_content_addressed_object_is_deleted_only_after_two_successful_no_reference_checks():
