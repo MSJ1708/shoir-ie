@@ -188,7 +188,10 @@ def create_manifest(root: str | Path, manifest_path: str | Path) -> dict[str, An
 
     body = _manifest_body(objects)
     manifest = {**body, "manifest_sha256": hashlib.sha256(_canonical_json(body)).hexdigest()}
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ManifestError("Manifest destination directory cannot be created.") from exc
     if destination.exists() and destination.is_symlink():
         raise ManifestError("Manifest destination must not be a symbolic link.")
     temporary_name: str | None = None
@@ -233,7 +236,8 @@ def _load_manifest(manifest_path: str | Path) -> tuple[dict[str, Any], dict[str,
         raise ManifestError("Manifest is unreadable or is not valid UTF-8 JSON.") from exc
     if not isinstance(document, dict):
         raise ManifestError("Manifest root must be a JSON object.")
-    if document.get("schema_version") != SCHEMA_VERSION:
+    schema_version = document.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != SCHEMA_VERSION:
         raise ManifestError("Manifest schema version is unsupported.")
     if document.get("hash_algorithm") != "sha256":
         raise ManifestError("Manifest hash algorithm must be sha256.")
@@ -267,9 +271,12 @@ def _load_manifest(manifest_path: str | Path) -> tuple[dict[str, Any], dict[str,
         by_path[object_path] = {"path": object_path, "size_bytes": size, "sha256": digest}
         casefold_paths.add(object_path.casefold())
 
-    if document.get("object_count") != len(by_path):
+    object_count = document.get("object_count")
+    total_bytes = document.get("total_bytes")
+    if isinstance(object_count, bool) or not isinstance(object_count, int) or object_count != len(by_path):
         raise ManifestError("Manifest object_count does not match its object list.")
-    if document.get("total_bytes") != sum(item["size_bytes"] for item in by_path.values()):
+    expected_total_bytes = sum(item["size_bytes"] for item in by_path.values())
+    if isinstance(total_bytes, bool) or not isinstance(total_bytes, int) or total_bytes != expected_total_bytes:
         raise ManifestError("Manifest total_bytes does not match its object list.")
     manifest_hash = document.get("manifest_sha256")
     body = {key: value for key, value in document.items() if key != "manifest_sha256"}
