@@ -55,6 +55,7 @@ EXPECTED_VERSIONS = [
     "20261107160000",
     "20261118170000",
     "20261120115000",
+    "20261120130000",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
