@@ -297,6 +297,42 @@ def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates(
         analyze_pareto_root_cause({"Machine": 1}, due_date="tomorrow")
 
 
+def test_pareto_root_cause_builds_six_category_fishbone_and_marks_hypotheses():
+    from shoir_target_engines import analyze_pareto_root_cause
+
+    result = analyze_pareto_root_cause(
+        {"Machine": 12, "Method": 8},
+        fishbone_causes={
+            "Manpower": ["Operator training gap"],
+            "Machine": ["Sensor bracket vibration"],
+            "Method": ["Changeover checklist omits inspection"],
+            "Material": [],
+            "Measurement": ["Counter calibration not recorded"],
+            "Environment": ["Dust ingress suspected"],
+        },
+    )
+    assert result["fishbone_status"] == "HYPOTHESES_RECORDED"
+    assert result["fishbone_cause_count"] == 5
+    assert result["fishbone_summary"]["Category"].tolist() == [
+        "Manpower", "Machine", "Method", "Measurement", "Environment"
+    ]
+    assert set(result["fishbone_summary"]["Status"]) == {"HYPOTHESIS — VERIFY"}
+    assert result["fishbone_causes"]["Material"] == []
+
+
+def test_pareto_root_cause_rejects_invalid_fishbone_categories_and_duplicates():
+    from shoir_target_engines import analyze_pareto_root_cause
+
+    with pytest.raises(ValueError, match="six M categories"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Finance": ["budget"]})
+    with pytest.raises(ValueError, match="list of text"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Machine": "bearing"})
+    with pytest.raises(ValueError, match="Duplicate fishbone cause"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Machine": ["Noise", "noise"]})
+    with pytest.raises(ValueError, match="12 cause"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Machine": [f"Cause {i}" for i in range(13)]})
+
+
 def test_5s_audit_reports_equal_pillar_scores_and_action_assignment_gaps():
     from shoir_target_engines import assess_5s_audit
 
