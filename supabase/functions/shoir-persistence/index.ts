@@ -3033,7 +3033,7 @@ Deno.serve(async (req) => {
             p_lease_token: recordLeaseToken,
             p_lease_operation: "register",
             p_actor_username_lc: String(row.username_lc || ""),
-            p_lease_seconds: 300,
+            p_lease_seconds: 600,
           },
         );
         if (leaseError) throw leaseError;
@@ -3054,19 +3054,56 @@ Deno.serve(async (req) => {
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
         const eventId = "SPE-" +
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-        const { data, error } = await supabase.rpc(
-          "shoir_platform_upsert_record",
-          {
-            p_record_id: recordId,
-            p_workspace_key: workspaceKey,
-            p_record_type: recordType,
-            p_entity_key: entityKey,
-            p_payload: payload,
-            p_content_hash: contentHash,
-            p_actor: row.username_lc,
-            p_event_id: eventId,
-          },
-        );
+        let data;
+        let error;
+        if (classifiedStoragePath && recordLeaseToken) {
+          const stillOwned = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            classifiedStoragePath.datasetId,
+            recordLeaseToken,
+            "register",
+            String(row.username_lc || ""),
+          );
+          if (!stillOwned) {
+            return sendResponse(
+              { error: "Dataset reference registration lease expired; retry the write." },
+              409,
+            );
+          }
+          const fencedWrite = await supabase.rpc(
+            "shoir_platform_upsert_record_with_dataset_lease",
+            {
+              p_record_id: recordId,
+              p_workspace_key: workspaceKey,
+              p_record_type: recordType,
+              p_entity_key: entityKey,
+              p_payload: payload,
+              p_content_hash: contentHash,
+              p_actor: row.username_lc,
+              p_event_id: eventId,
+              p_dataset_id: classifiedStoragePath.datasetId,
+              p_lease_token: recordLeaseToken,
+            },
+          );
+          data = fencedWrite.data;
+          error = fencedWrite.error;
+        } else {
+          const ordinaryWrite = await supabase.rpc(
+            "shoir_platform_upsert_record",
+            {
+              p_record_id: recordId,
+              p_workspace_key: workspaceKey,
+              p_record_type: recordType,
+              p_entity_key: entityKey,
+              p_payload: payload,
+              p_content_hash: contentHash,
+              p_actor: row.username_lc,
+              p_event_id: eventId,
+            },
+          );
+          data = ordinaryWrite.data;
+          error = ordinaryWrite.error;
+        }
         if (error) throw error;
         const saved = Array.isArray(data) ? data[0] : data;
         return sendResponse({ ok: true, record: saved });
