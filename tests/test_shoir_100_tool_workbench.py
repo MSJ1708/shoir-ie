@@ -152,6 +152,11 @@ def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
     assert root_cause["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert root_cause["fishbone_cause_count"] == 2
     assert root_cause["fishbone_status"] == "HYPOTHESES_RECORDED"
+    saved_inputs = at.session_state.get("shoir_tool_inputs_T028")
+    assert saved_inputs is not None
+    saved_fishbone = json.loads(saved_inputs["fishbone_causes_json"])
+    assert saved_fishbone["Manpower"] == ["Training gap"]
+    assert saved_fishbone["Machine"] == ["Loose sensor mount"]
 
 
 def test_workbench_runs_5s_and_revisioned_kaizen_a3():
