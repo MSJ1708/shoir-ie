@@ -187,45 +187,86 @@ def main() -> int:
                             r"app has gone to sleep due to inactivity", re.I
                         )
                         wake_pattern = re.compile(
-                            r"^Yes,\s*get this app back up!?$", re.I
+                            r"Yes,\\s*get this app back up!?", re.I
                         )
-                        # The Streamlit sleep page can expose the wake control as
-                        # an accessible button, link, or a clickable text wrapper
-                        # depending on the hosting shell version.
-                        wake_button = page.locator(
-                            "button, a, [role='button']"
-                        ).filter(has_text=re.compile(r"Yes,\s*get this app back up", re.I)).first
-                        wake_text = page.get_by_text(wake_pattern, exact=True).first
                         item["wake_recovery_attempted"] = False
                         item["wake_recovery_succeeded"] = False
                         item["wake_recovery_strategy"] = None
-                        initial_body = page.locator("body").inner_text(timeout=5_000)
-                        if sleep_marker.search(initial_body):
+                        item["wake_recovery_frame_url"] = None
+
+                        # Streamlit's hosted sleep notice can be inside a child
+                        # frame. Search each frame, then click the wake control
+                        # inside the exact frame that contains the sleep message.
+                        sleeping_frame = None
+                        initial_sleep_body = ""
+                        for candidate_frame in list(page.frames):
+                            try:
+                                candidate_body = candidate_frame.locator("body").inner_text(
+                                    timeout=2_000
+                                )
+                            except Exception:
+                                continue
+                            if sleep_marker.search(candidate_body):
+                                sleeping_frame = candidate_frame
+                                initial_sleep_body = candidate_body
+                                break
+
+                        if sleeping_frame is not None:
+                            item["wake_recovery_frame_url"] = sleeping_frame.url
                             wake_target = None
-                            if wake_button.count() and wake_button.is_visible():
-                                wake_target = wake_button
-                                item["wake_recovery_strategy"] = "interactive-element"
-                            elif wake_text.count() and wake_text.is_visible():
-                                wake_target = wake_text
-                                item["wake_recovery_strategy"] = "visible-text"
+                            wake_strategy = None
+                            interactive_wake = sleeping_frame.locator(
+                                "button, a, [role='button']"
+                            ).filter(has_text=wake_pattern).first
+                            try:
+                                if interactive_wake.count() and interactive_wake.is_visible():
+                                    wake_target = interactive_wake
+                                    wake_strategy = "frame-interactive-element"
+                            except Exception:
+                                pass
+
+                            if wake_target is None:
+                                try:
+                                    visible_wake_text = sleeping_frame.get_by_text(
+                                        wake_pattern, exact=False
+                                    ).last
+                                    if visible_wake_text.count() and visible_wake_text.is_visible():
+                                        wake_target = visible_wake_text
+                                        wake_strategy = "frame-visible-text"
+                                except Exception:
+                                    pass
+
                             if wake_target is not None:
                                 item["wake_recovery_attempted"] = True
-                                wake_target.click(timeout=8_000)
+                                item["wake_recovery_strategy"] = wake_strategy
+                                try:
+                                    wake_target.click(timeout=8_000)
+                                except PlaywrightError:
+                                    # The visible message is itself the documented
+                                    # one-time wake affordance, though some hosting
+                                    # shell versions omit a semantic button wrapper.
+                                    wake_target.click(timeout=8_000, force=True)
+
                                 wake_deadline = time.monotonic() + 90
                                 while time.monotonic() < wake_deadline:
-                                    try:
-                                        awakened_body = page.locator("body").inner_text(
-                                            timeout=2_000
-                                        )
-                                    except Exception:
-                                        awakened_body = ""
-                                    if not sleep_marker.search(awakened_body):
+                                    still_asleep = False
+                                    for candidate_frame in list(page.frames):
+                                        try:
+                                            candidate_body = candidate_frame.locator("body").inner_text(
+                                                timeout=2_000
+                                            )
+                                        except Exception:
+                                            continue
+                                        if sleep_marker.search(candidate_body):
+                                            still_asleep = True
+                                            break
+                                    if not still_asleep:
                                         item["wake_recovery_succeeded"] = True
                                         break
                                     page.wait_for_timeout(1_000)
                             else:
                                 item["failure_reasons"].append(
-                                    "Staging app is asleep and its explicit wake control was not available as an actionable element or visible text."
+                                    "Staging app is asleep, but no actionable wake control was found inside the sleeping frame."
                                 )
                         frame_records = []
                         rendered_bodies = []
