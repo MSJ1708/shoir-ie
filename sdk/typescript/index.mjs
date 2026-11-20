@@ -4,7 +4,7 @@ const API_PATH = "/functions/v1/shoir-persistence";
 
 function requiredText(value, field, maximum = 4096) {
   if (typeof value !== "string" || !value.trim() || value.length > maximum ||
-      /[\\x00-\\x1f\\x7f]/.test(value)) {
+      /[\x00-\x1f\x7f]/.test(value)) {
     throw new TypeError(field + " is missing or invalid.");
   }
   return value.trim();
@@ -17,7 +17,7 @@ function validateEndpoint(value) {
   } catch {
     throw new TypeError("edgeUrl must be a valid HTTPS Supabase function URL.");
   }
-  const match = /^([a-z0-9]{20})\\.supabase\\.co$/i.exec(url.hostname);
+  const match = /^([a-z0-9]{20})\.supabase\.co$/i.exec(url.hostname);
   if (url.protocol !== "https:" || !match || url.pathname !== API_PATH ||
       url.username || url.password || url.search || url.hash || url.port) {
     throw new TypeError("edgeUrl must be the exact HTTPS Supabase shoir-persistence function endpoint.");
