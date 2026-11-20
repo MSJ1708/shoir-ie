@@ -1627,7 +1627,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 run_method = st.form_submit_button("Run workspace recovery action", type="primary", use_container_width=True, key="tool099_run")
                             elif selected_tool["tool_id"] == "T094":
                                 st.caption(
-                                    "Freshness-aware KPI threshold evaluation. Use gt/gte/lt/lte or >, >=, <, <= operators; each KPI reading must have one unique name, and each rule must reference that name. No email, SMS or external notification is sent."
+                                    "Freshness-aware KPI threshold evaluation. Use gt/gte/lt/lte or >, >=, <, <= operators. Rules with missing or stale readings are classified rather than silently treated as healthy. No email, SMS or external notification is sent."
                                 )
                                 kpi_records_json = st.text_area(
                                     "KPI readings (JSON list: kpi, value, unit, observed_at, source)",
@@ -2425,7 +2425,6 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         evaluate_kpi_alerts,
                                     )
                                     from shoir_resilience_suite import simulate_disruption_scenarios
-                                    from shoir_remaining_tool_engines import evaluate_kpi_alerts as evaluate_kpi_alerts_with_dedup
                                     if selected_tool["tool_id"] == "T007":
                                         result = classify_diagnostic(diagnostic_inspector_text)
                                         result["reported_subsystem"] = diagnostic_category
@@ -2917,65 +2916,29 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         parsed_rules = json.loads(kpi_rules_json)
                                         if not isinstance(parsed_kpis, list) or not isinstance(parsed_rules, list):
                                             raise ValueError("KPI readings and alert rules must each be JSON lists.")
-                                        if not parsed_kpis:
-                                            raise ValueError("Add at least one KPI reading.")
                                         if not parsed_rules:
                                             raise ValueError("Add at least one KPI alert rule.")
-    
-                                        readings_by_name = {}
-                                        for reading in parsed_kpis:
-                                            if not isinstance(reading, dict):
-                                                raise ValueError("Each KPI reading must be a JSON object.")
-                                            reading_name = str(reading.get("kpi") or "").strip()
-                                            if not reading_name:
-                                                raise ValueError("Every KPI reading must include a non-empty kpi name.")
-                                            reading_key = reading_name.casefold()
-                                            if reading_key in readings_by_name:
-                                                raise ValueError(f"More than one KPI reading matches '{reading_name}'. Use one reading per KPI name.")
-                                            readings_by_name[reading_key] = reading
-    
-                                        evaluator_records = []
-                                        seen_rule_ids = set()
-                                        for index, rule in enumerate(parsed_rules, start=1):
-                                            if not isinstance(rule, dict):
-                                                raise ValueError("Each KPI alert rule must be a JSON object.")
-                                            rule_id = str(rule.get("rule_id") or "").strip()
-                                            rule_kpi = str(rule.get("kpi") or "").strip()
-                                            severity = str(rule.get("severity") or "").strip()
-                                            if not rule_id or not rule_kpi or not severity:
-                                                raise ValueError("Every alert rule must include rule_id, kpi and severity.")
-                                            if rule_id.casefold() in seen_rule_ids:
-                                                raise ValueError(f"Duplicate KPI rule_id: {rule_id}.")
-                                            seen_rule_ids.add(rule_id.casefold())
-                                            reading = readings_by_name.get(rule_kpi.casefold())
-                                            if reading is None:
-                                                raise ValueError(f"No KPI reading was supplied for alert rule '{rule_id}' ({rule_kpi}).")
-                                            evaluator_records.append({
-                                                "name": rule_kpi,
-                                                "value": reading.get("value"),
-                                                "unit": reading.get("unit") or "",
-                                                "measured_at": reading.get("observed_at"),
-                                                "source": reading.get("source") or "",
-                                                "threshold": rule.get("threshold"),
-                                                "operator": rule.get("operator"),
-                                                "rule_id": rule_id,
-                                                "severity": severity,
-                                                "max_age_minutes": float(kpi_stale_hours) * 60.0,
-                                            })
-    
+
                                         existing_open_alerts = st.session_state.get("shoir_kpi_open_alert_records", [])
                                         if not isinstance(existing_open_alerts, list) or any(
                                             not isinstance(item, dict) for item in existing_open_alerts
                                         ):
                                             raise ValueError("Saved KPI alert state is invalid; clear the existing alert state and rerun.")
-                                        result = evaluate_kpi_alerts_with_dedup({
-                                            "kpis": evaluator_records,
-                                            "as_of": kpi_as_of.strip() or None,
-                                            "existing_alerts": existing_open_alerts,
-                                        })
+                                        previous_open_alert_ids = [
+                                            str(item.get("alert_id") or "").strip()
+                                            for item in existing_open_alerts
+                                            if str(item.get("state") or "OPEN").upper() == "OPEN"
+                                            and str(item.get("alert_id") or "").strip()
+                                        ]
+                                        result = evaluate_kpi_alerts(
+                                            parsed_kpis,
+                                            parsed_rules,
+                                            as_of=kpi_as_of.strip() or None,
+                                            stale_after_hours=float(kpi_stale_hours),
+                                            previous_open_alert_ids=previous_open_alert_ids,
+                                        )
                                         next_open_alerts = []
                                         for alert in result["alert_records"]:
-                                            alert["state"] = "OPEN"
                                             next_open_alerts.append({
                                                 "fingerprint": alert["fingerprint"],
                                                 "alert_id": alert["alert_id"],
@@ -2984,7 +2947,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             })
                                         st.session_state["shoir_kpi_open_alert_records"] = next_open_alerts
                                         # Keep the older ID-only view available for any pre-existing
-                                        # UI/session consumers; the evaluator itself uses fingerprints.
+                                        # UI/session consumers. The canonical evaluator resolves an
+                                        # alert only when a fresh, valid reading returns to NORMAL.
                                         st.session_state["shoir_kpi_open_alert_ids"] = [
                                             item["alert_id"] for item in next_open_alerts
                                         ]
