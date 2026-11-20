@@ -212,7 +212,12 @@ For staging:
 1. record the configured database backup/PITR schedule, recovery window and retention;
 2. define and approve RPO and RTO;
 3. establish an encrypted off-project database backup/export in a separate failure domain, with access controls and key custody/rotation;
-4. separately back up all required Supabase Storage object bytes (database backups do not include Storage API file bodies); produce a path/size/SHA-256 manifest;
+4. separately back up all required Supabase Storage object bytes (database backups do not include Storage API file bodies); produce a path/size/SHA-256 manifest using the repository helper after the authorized export completes:
+   ```bash
+   python scripts/shoir_storage_recovery_manifest.py create --root ./protected-storage-export --manifest ./protected-recovery-evidence/storage-manifest.json
+   python scripts/shoir_storage_recovery_manifest.py verify --root ./isolated-restored-storage --manifest ./protected-recovery-evidence/storage-manifest.json
+   ```
+   The helper hashes local files only; it does not export Supabase objects, encrypt the backup, sign the manifest or validate database consistency. Keep export and manifest outside Git and public artifacts.
 5. inventory Edge secrets, IdP credentials, DNS/TLS and Streamlit configuration in the approved secret manager;
 6. provision an isolated disposable restore target that has no production write path or production provider connection;
 7. restore database and Storage bytes, check migration/schema/grants/RLS/RPC, object checksums and tenant isolation;
