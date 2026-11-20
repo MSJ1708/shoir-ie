@@ -671,6 +671,10 @@ def _current_dataset_dependencies() -> list[dict[str, Any]]:
         raise PermissionError(
             "The active dataset dependency is incomplete; refresh and validate the managed dataset before saving a module run."
         )
+    if dependency.get("current_version_verified") is not True:
+        raise PermissionError(
+            "The active dataset version is not verified as current; refresh it before saving a module run."
+        )
     return [dict(dependency)]
 
 
