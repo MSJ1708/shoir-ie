@@ -2741,7 +2741,7 @@ def score_project_portfolio(
             if criterion["weight"] == 0
         ],
         "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination. Sensitivity independently multiplies each criterion weight up/down by the stated percentage and renormalizes all weights.",
-        "warning": "This is a decision aid, not an objective or universally correct ranking. One-at-a-time weight sensitivity is not a probability distribution or an assurance of robustness; it does not vary project scores, data uncertainty, criterion definitions or correlated weights. Review all assumptions before selecting a project.",
+        "warning": "This is a decision aid, not an objective or universally correct ranking. Sensitivity analysis is one-at-a-time weight perturbation, not a probability distribution or an assurance of robustness; it does not vary project scores, data uncertainty, criterion definitions or correlated weights. Review all assumptions before selecting a project.",
     }
 
 
