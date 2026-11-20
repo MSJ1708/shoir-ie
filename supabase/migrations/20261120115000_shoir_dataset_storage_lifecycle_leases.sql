@@ -46,6 +46,7 @@ BEGIN
        OR p_dataset_id IS NULL
        OR p_dataset_id !~ '^DS-[A-F0-9]{12,32}$'
        OR p_lease_token IS NULL
+       OR p_lease_operation IS NULL
        OR p_lease_operation NOT IN ('finalize', 'sweep')
        OR p_actor_username_lc IS NULL
        OR length(btrim(p_actor_username_lc)) NOT BETWEEN 1 AND 128
@@ -72,7 +73,7 @@ BEGIN
         acquired_at = EXCLUDED.acquired_at,
         expires_at = EXCLUDED.expires_at
     WHERE current_lease.expires_at <= clock_timestamp()
-    RETURNING expires_at INTO v_expires_at;
+    RETURNING current_lease.expires_at INTO v_expires_at;
 
     IF FOUND THEN
         RETURN QUERY SELECT TRUE, v_expires_at;
