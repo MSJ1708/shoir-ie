@@ -1127,6 +1127,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     "Trailing window (0 = all observations)", min_value=0, max_value=10000,
                                     value=0, step=1, key="tool075_window"
                                 )
+                                st.caption("Optional lineage labels are user-supplied; they are saved with this result but are not verified against a model or dataset registry.")
+                                drift_model_id = st.text_input("Model ID (optional)", key="tool075_model_id")
+                                drift_model_version = st.text_input("Model version (optional)", key="tool075_model_version")
+                                drift_dataset_id = st.text_input("Dataset ID (optional)", key="tool075_dataset_id")
+                                drift_dataset_version = st.text_input("Dataset version (optional)", key="tool075_dataset_version")
+                                drift_source_label = st.text_input("Forecast/actual source label (optional)", key="tool075_source_label")
+                                drift_period_start = st.text_input("Evaluation period start (YYYY-MM-DD, optional)", key="tool075_period_start")
+                                drift_period_end = st.text_input("Evaluation period end (YYYY-MM-DD, optional)", key="tool075_period_end")
                                 run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True, key="tool075_run")
                             elif selected_tool["tool_id"] == "T026":
                                 st.caption("OEE uses aligned planned time, downtime, ideal cycle, total and good output. Values above 100% are flagged for review, not capped.")
@@ -1917,7 +1925,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         elif selected_tool["tool_id"] == "T075":
                             current_tool_inputs = {
                                 "predictions_text": predictions_text, "actuals_text": actuals_text,
-                                "maximum_mae": max_mae, "trailing_window": int(window),
+                                "maximum_mae": max_mae,
+                                "trailing_window": int(window),
+                                "model_id": drift_model_id,
+                                "model_version": drift_model_version,
+                                "dataset_id": drift_dataset_id,
+                                "dataset_version": drift_dataset_version,
+                                "source_label": drift_source_label,
+                                "evaluation_period_start": drift_period_start,
+                                "evaluation_period_end": drift_period_end,
                             }
                         elif selected_tool["tool_id"] == "T026":
                             current_tool_inputs = {"planned_time": oee_planned, "downtime": oee_downtime, "ideal_cycle_time": oee_cycle, "total_count": oee_total, "good_count": oee_good, "time_unit": oee_unit}
@@ -2623,8 +2639,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         except ValueError as exc:
                                             raise ValueError("Predictions and actuals must be comma-separated numbers.") from exc
                                         result = monitor_forecast_drift(
-                                            predictions, actuals, max_mae,
+                                            predictions,
+                                            actuals,
+                                            max_mae,
                                             window=int(window) if int(window) > 0 else None,
+                                            model_id=drift_model_id,
+                                            model_version=drift_model_version,
+                                            dataset_id=drift_dataset_id,
+                                            dataset_version=drift_dataset_version,
+                                            source_label=drift_source_label,
+                                            evaluation_period_start=drift_period_start,
+                                            evaluation_period_end=drift_period_end,
                                         )
                                     elif selected_tool["tool_id"] == "T026":
                                         result = calculate_oee(oee_planned, oee_downtime, oee_cycle, oee_total, oee_good, time_unit=oee_unit)
