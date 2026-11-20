@@ -768,6 +768,39 @@ def test_module_run_snapshots_are_version_linked_and_invalidated(tmp_path, monke
     assert unlinked_loaded["is_stale"] is False
 
 
+def test_module_parity_links_only_explicit_verified_active_dataset(monkeypatch):
+    import shoir_module_parity as parity
+
+    state = {}
+    monkeypatch.setattr(parity.st, "session_state", state, raising=False)
+    assert parity._current_dataset_dependencies() == []
+
+    state.update({
+        "shoir_dataset_dependency_tracking_enabled": True,
+        "shoir_dataset_lineage_blocked": False,
+        "shoir_active_dataset_dependency": {
+            "dataset_id": "DS-ABCDEF123456",
+            "version": 2,
+            "data_hash": "a" * 64,
+            "version_fingerprint": "b" * 64,
+            "current_version_verified": True,
+        },
+    })
+    linked = parity._current_dataset_dependencies()
+    assert len(linked) == 1
+    assert linked[0]["dataset_id"] == "DS-ABCDEF123456"
+    assert linked[0]["version"] == 2
+
+    state["shoir_dataset_lineage_blocked"] = True
+    with pytest.raises(PermissionError, match="lineage could not be revalidated"):
+        parity._current_dataset_dependencies()
+
+    state["shoir_dataset_lineage_blocked"] = False
+    state["shoir_active_dataset_dependency"]["current_version_verified"] = False
+    with pytest.raises(PermissionError, match="not verified as current"):
+        parity._current_dataset_dependencies()
+
+
 def test_module_run_schema_migrates_legacy_snapshots_to_not_linked(tmp_path):
     import sqlite3
     from contextlib import closing
