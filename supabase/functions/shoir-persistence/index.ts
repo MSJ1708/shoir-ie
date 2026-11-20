@@ -3039,7 +3039,10 @@ Deno.serve(async (req) => {
         {
           error:
             "Metadata-only dataset version registration is retired. Use dataset_upload_create followed by dataset_version_finalize so uploaded content, hash verification, Storage reference and version metadata are committed together.",
-          required_actions: ["dataset_upload_create", "dataset_version_finalize"],
+          required_actions: [
+            "dataset_upload_create",
+            "dataset_version_finalize",
+          ],
         },
         410,
       );
