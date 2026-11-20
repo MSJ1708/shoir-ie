@@ -148,40 +148,34 @@ def test_edge_platform_list_uses_stable_secondary_ordering_and_safe_offset():
 
 
 
-def test_dataset_version_registration_requires_session_and_calls_atomic_rpc(monkeypatch):
-    calls = []
+def test_dataset_version_registration_requires_session_and_is_retired(monkeypatch):
     monkeypatch.setattr(
         store, "_edge_call",
-        lambda action, payload: calls.append((action, payload)) or {
-            "ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}
-        },
+        lambda *_: pytest.fail("the retired metadata-only route must not make a network request"),
     )
-    result = store.edge_register_dataset_version(
-        username="synthetic-user",
-        token="opaque-session-token",
-        workspace="plant-a",
-        dataset_id="DS-ABCDEF012345",
-        name="Production",
-        source_name="production.csv",
-        data_hash="a" * 64,
-        version_fingerprint="b" * 64,
-        row_count=100,
-        column_count=8,
-        schema={"asset_id": {"dtype": "object"}},
-        transformations=[{"operation": "import", "status": "validated"}],
-    )
-    assert result["ok"] is True
-    assert calls[0][0] == "dataset_version_register"
-    assert calls[0][1]["workspace"] == "plant-a"
-    assert calls[0][1]["dataset_id"] == "DS-ABCDEF012345"
+    with pytest.raises(RuntimeError, match="Metadata-only dataset version registration is retired"):
+        store.edge_register_dataset_version(
+            username="synthetic-user",
+            token="opaque-session-token",
+            workspace="plant-a",
+            dataset_id="DS-ABCDEF012345",
+            name="Production",
+            source_name="production.csv",
+            data_hash="a" * 64,
+            version_fingerprint="b" * 64,
+            row_count=100,
+            column_count=8,
+            schema={"asset_id": {"dtype": "object"}},
+            transformations=[{"operation": "import", "status": "validated"}],
+        )
 
 
 def test_dataset_version_registration_rejects_invalid_metadata_before_network(monkeypatch):
     monkeypatch.setattr(
         store, "_edge_call",
-        lambda *_: pytest.fail("invalid dataset metadata must not reach the Edge Function"),
+        lambda *_: pytest.fail("the retired metadata-only route must not make a network request"),
     )
-    with pytest.raises(ValueError, match="content hash"):
+    with pytest.raises(RuntimeError, match="Metadata-only dataset version registration is retired"):
         store.edge_register_dataset_version(
             username="synthetic-user", token="opaque-session-token",
             workspace="plant-a", dataset_id="DS-ABCDEF012345",
@@ -191,7 +185,7 @@ def test_dataset_version_registration_rejects_invalid_metadata_before_network(mo
         )
 
 
-def test_dataset_version_edge_action_uses_authenticated_session_and_atomic_rpc():
+def test_dataset_version_edge_action_uses_authenticated_session_and_is_retired():
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] /
               "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
@@ -202,10 +196,12 @@ def test_dataset_version_edge_action_uses_authenticated_session_and_atomic_rpc()
     assert 'String(body.token || "")' in action
     assert "username" in action
     assert '"workspace"' in action
-    assert 'supabase.rpc(' in action
-    assert '"shoir_platform_register_dataset_version"' in action
-    assert 'p_workspace_key: workspaceKey' in action
-
+    assert "datasetEntitlementDenialForRequest(" in action
+    assert "resolveManagedWorkspaceKey(" not in action
+    assert "410," in action
+    assert '"dataset_upload_create"' in action
+    assert '"dataset_version_finalize"' in action
+    assert 'supabase.rpc(' not in action
 
 
 def test_private_dataset_upload_verifies_hash_and_finalizes_after_signed_upload(monkeypatch):
@@ -224,6 +220,7 @@ def test_private_dataset_upload_verifies_hash_and_finalizes_after_signed_upload(
                 "ok": True,
                 "upload_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/upload/sign/shoir-industrial-datasets/tmp/workspace/DS-ABCDEF012345/upload.csv?token=opaque",
                 "upload_path": "tmp/workspace/DS-ABCDEF012345/upload.csv",
+                "upload_token": "opaque-upload-capability-token-1234",
             }
         return {"ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}}
     monkeypatch.setattr(store, "_edge_call", edge)
@@ -315,7 +312,9 @@ def test_dataset_upload_edge_actions_require_session_and_private_storage():
     assert '.createSignedUploadUrl(uploadPath, { upsert: false })' in create
     assert 'await sha256Bytes(bytes)' in finalize
     assert 'digest !== dataHash' in finalize
-    assert '"shoir_platform_register_dataset_version_with_storage"' in finalize
+    assert '"shoir_platform_register_dataset_version_with_storage_and_lease"' in finalize
+    assert '"shoir_dataset_storage_lease_acquire"' in finalize
+    assert "renewDatasetStorageLifecycleLease(" in finalize
     assert 'p_storage_key: storageKey' in finalize
 
 
@@ -541,7 +540,15 @@ def test_every_dataset_edge_action_enforces_server_side_professional_entitlement
         action = action[:next_action] if next_action >= 0 else action
         assert "getSession(" in action, action_name
         assert "datasetEntitlementDenialForRequest(" in action, action_name
-        assert "resolveManagedWorkspaceKey(" in action, action_name
+        if action_name == "dataset_version_register":
+            # This compatibility endpoint is deliberately retired. It authenticates
+            # and checks entitlement, then returns 410 without reading or writing data.
+            assert "410," in action, action_name
+            assert '"dataset_upload_create"' in action, action_name
+            assert '"dataset_version_finalize"' in action, action_name
+            assert "supabase.rpc(" not in action, action_name
+        else:
+            assert "resolveManagedWorkspaceKey(" in action, action_name
 
     save = source.split('if (action === "platform_record_save") {', 1)[1].split(
         'if (action === "platform_record_list") {', 1
@@ -626,6 +633,7 @@ def test_dataset_upload_forwards_authorized_organization_scope(monkeypatch):
                 "ok": True,
                 "upload_url": "https://hfhrosthswcybccepmak.supabase.co/storage/v1/object/upload/sign/shoir-industrial-datasets/tmp/workspace/DS-ABCDEF012345/upload.csv?token=opaque",
                 "upload_path": "tmp/workspace/DS-ABCDEF012345/upload.csv",
+                "upload_token": "opaque-upload-capability-token-1234",
             }
         return {"ok": True, "registration": {"dataset_id": payload["dataset_id"], "version": 1}}
 
