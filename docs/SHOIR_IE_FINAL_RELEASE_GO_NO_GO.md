@@ -143,7 +143,19 @@ Repository-side follow-up now includes:
 - A fail-closed Facility Layout T065 renderer guard requiring an authenticated session, matching active username and canonical Starter-tier tool entitlement.
 - The current 100-tool source audit and reconciled T098 identity/audit handoff. T098's optional OIDC login, server-side ID-token verifier, verified-email account mapping, optional provider-claim MFA, replay protection and append-only audit implementation are present in PR #232. No IdP tenant/client/secrets/MFA mapping, hosted login acceptance or staging audit migration deployment is established.
 - A signed Supabase TUS dataset upload client with 6 MiB chunks, bounded retry and offset recovery. Resume URL is held only in the active Streamlit server session (23-hour validity window); this is not guaranteed across restarts or fresh devices.
-- Dataset finalization now registers immutable metadata before temporary cleanup and checks both record/event ledgers before removing a newly created final object after a failed RPC. T020 also has a staging-only, session-authenticated storage-maintenance action: dry-run by default, 48-hour minimum inactivity, exact workspace path validation, dual-ledger no-reference checks and append-only intent/completion audit for abandoned temporary uploads, with a 50-object deletion cap per run. Immutable content-addressed objects are deliberately retained until finalization and cleanup share an atomic lease; automatic scheduling is not configured.
+- Dataset finalization now registers immutable metadata before temporary cleanup and removes a newly created final object after a failed RPC only when both metadata ledgers confirm no reference. New migration `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` adds a private server-only workspace/dataset lease shared by finalization and cleanup. T020 cleanup now previews by default and can delete 48-hour-old, unreferenced temporary or immutable dataset objects only while holding that lease and after successful dual-ledger checks; it records kind-specific deletion intent/completion events, caps each invocation at 50 deletions and fails closed on uncertain lease/reference state. The lease expires after 300 seconds if an invocation crashes. No automatic schedule is configured.
+
+
+
+### Repository engineering update — 2026-11-20: dataset Storage lifecycle coordination
+
+The release-hardening candidate now includes:
+- A server-only PostgreSQL lease table and SECURITY DEFINER acquire/release RPCs with pinned search paths, RLS, no direct browser/service-role table grants, bounded 30–600 second lease duration and matching-token release.
+- Dataset finalization holds a 300-second workspace/dataset lease across temporary object download, content verification, immutable object creation/reuse, atomic metadata registration and temporary cleanup.
+- T020 cleanup acquires the same lease before the exact-storage-key checks against both platform records and events, then writes intent, deletes and writes completion while still holding the lease. It now handles temporary and immutable orphan objects.
+- PostgreSQL replay contracts cover RLS and grants, function permissions, active-lease conflict, wrong-token release, idempotent release, invalid TTL rejection and expired-lease reclamation. Static tests cover Edge ordering and the operator contract.
+
+**This is not yet accepted for staging deployment.** The migration and Edge Function source are in PR #232 only. Run exact-head migration replay, Edge formatting/type/security, Engine Regression and full validation; inspect all artifacts and warnings; obtain independent review; then confirm a staging backup/rollback point before deploying to staging. No staging or production migration/function deployment is authorized by this repository commit.
 
 The T094 result and open-alert state are now included in eligible workspace snapshots and the Workbench test round-trips them through the serializer. This remains local automated evidence, not deployed managed-backend acceptance.
 
