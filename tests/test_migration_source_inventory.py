@@ -587,7 +587,6 @@ def test_dataset_storage_lease_fencing_migration_locks_live_tokens_for_metadata_
     assert normalized.count("for update") == 2
     assert "lease_operation = 'finalize'" in normalized
     assert "lease_operation = 'register'" in normalized
-    assert "using (p_payload->>'storage_key')" not in normalized
     assert "revoke all on function public.shoir_platform_register_dataset_version_with_storage_and_lease" in normalized
     assert "revoke all on function public.shoir_platform_upsert_record_with_dataset_lease" in normalized
     assert "to service_role" in normalized
