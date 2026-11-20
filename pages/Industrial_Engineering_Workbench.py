@@ -2924,9 +2924,38 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             not isinstance(item, dict) for item in existing_open_alerts
                                         ):
                                             raise ValueError("Saved KPI alert state is invalid; clear the existing alert state and rerun.")
+                                        # Migrate alert identities created by the pre-canonical
+                                        # Workbench evaluator. Keep the rule identity stable so an
+                                        # existing alert becomes CONTINUING/RESOLVED, not a duplicate
+                                        # alert that remains orphaned forever.
+                                        current_rules_by_id = {
+                                            str(rule.get("rule_id") or "").strip().casefold(): rule
+                                            for rule in parsed_rules
+                                            if isinstance(rule, dict) and str(rule.get("rule_id") or "").strip()
+                                        }
+                                        migrated_alerts = []
+                                        migrated_ids = set()
+                                        for existing_alert in existing_open_alerts:
+                                            migrated_alert = dict(existing_alert)
+                                            prior_id = str(migrated_alert.get("alert_id") or "").strip()
+                                            prior_rule_id = str(migrated_alert.get("rule_id") or "").strip()
+                                            matching_rule = current_rules_by_id.get(prior_rule_id.casefold())
+                                            if prior_id.startswith("alert-") and matching_rule is not None:
+                                                matching_kpi = str(matching_rule.get("kpi") or "").strip()
+                                                if matching_kpi:
+                                                    canonical_identity = prior_rule_id + "::" + matching_kpi.casefold()
+                                                    canonical_id = "ALT-" + hashlib.sha256(
+                                                        canonical_identity.encode("utf-8")
+                                                    ).hexdigest()[:20].upper()
+                                                    migrated_alert["alert_id"] = canonical_id
+                                                    migrated_alert["fingerprint"] = canonical_id
+                                                    prior_id = canonical_id
+                                            if prior_id and prior_id not in migrated_ids:
+                                                migrated_ids.add(prior_id)
+                                                migrated_alerts.append(migrated_alert)
                                         previous_open_alert_ids = [
                                             str(item.get("alert_id") or "").strip()
-                                            for item in existing_open_alerts
+                                            for item in migrated_alerts
                                             if str(item.get("state") or "OPEN").upper().startswith("OPEN")
                                             and str(item.get("alert_id") or "").strip()
                                         ]
@@ -2951,7 +2980,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         # Preserve prior alerts for rules that were omitted from the
                                         # current evaluation. Removing a rule is not evidence of recovery.
                                         next_open_ids = set(result["next_open_alert_ids"])
-                                        for prior_alert in existing_open_alerts:
+                                        for prior_alert in migrated_alerts:
                                             prior_id = str(prior_alert.get("alert_id") or "")
                                             if prior_id in next_open_ids and prior_id not in observed_alert_ids:
                                                 next_open_alerts.append(dict(prior_alert))
