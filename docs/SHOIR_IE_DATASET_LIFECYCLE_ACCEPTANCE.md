@@ -13,3 +13,16 @@ Documented gaps:
 - organisation ownership is unavailable because the organisation migration is not deployed.
 
 Complete by testing two-version register/retrieve after fresh login, real object SHA-256, signed-link permissions, schema fingerprint and row/column checks, workbook round-trip separately, retention/deletion, safe orphan cleanup and stale dependent outputs. Use authenticated disposable accounts and record exact deployed commit/function version. Do not claim the full Import→Decide→Export chain until downstream lineage and exports pass.
+
+
+## Candidate update — 2026-11-20: resumable upload and registration cleanup
+
+The release-hardening candidate now includes `shoir_supabase_tus.py` and routes managed normalized-CSV uploads through Supabase Storage's TUS endpoint on the direct project storage hostname. It uses the required 6 MiB chunk size, a signed upload token, bounded retries, HEAD-based offset reconciliation after uncertain PATCH responses, strict upload-location host validation, and disabled redirects. The existing 50 MiB cap remains.
+
+The resumable upload URL is retained only in the active server-side Streamlit session, bound to the user/workspace/dataset/content hash/organization scope, with a 23-hour local expiry. The server can resume the same upload on a rerun or transient connection loss while that session remains available. This is **not** cross-device or guaranteed process-restart persistence; an expired or unavailable upload capability starts a fresh upload.
+
+Dataset finalization now keeps the temporary upload until the atomic metadata RPC succeeds. If that RPC reports failure after a new content-addressed object was created, deletion is attempted only after both the managed-record and event ledgers are successfully queried and confirm no reference exists. An error in either reference query fails closed and retains the object. A pre-existing or concurrent object is never removed by this failure path. After a successful registration, temporary-object removal is best-effort and returned as `temporary_cleanup_pending` rather than falsely reporting the registration as failed.
+
+Regression coverage is added in `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. These are candidate source/test additions until the exact final SHA completes all required CI.
+
+**Still not implemented:** a scheduled, reference-aware sweep for pre-existing/aged orphan objects and abandoned temporary uploads. This must enumerate candidate objects, check all metadata references and tenant/workspace boundaries, retain objects whenever the metadata check fails, and produce a deletion audit. Do not delete objects based on age alone. Hosted staging upload/resume/download, fresh-login, cross-workspace, object-retention and original-workbook round-trip acceptance remain open.

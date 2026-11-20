@@ -217,3 +217,12 @@ This addendum supersedes older tranche wording in this report where it conflicts
 - T096 remains a generic HTTPS GET-only adapter until a real provider-specific SAP/Oracle adapter and authorized staging endpoint/credential are accepted. T097 remains a local manifest/contract inspector until a hosted authenticated tenant-scoped gateway, published OpenAPI contract and externally consumed SDK are proven. T099's personal workspace export is not database PITR or independent Storage-object recovery; a full isolated restore and measured RPO/RTO remain required.
 
 Keep PR #232 draft, Shoir-IE BETA, and production NO-GO. A successful exact-head CI run is necessary but not sufficient for the hosted and external acceptance above.
+
+
+## 2026-11-20 dataset lifecycle implementation update
+
+The canonical T020 dataset-versioning path now uses `shoir_supabase_tus.py` for private signed TUS uploads (6 MiB chunks, bounded retry, HEAD offset reconciliation, no redirects and strict direct-storage host validation). The resumable upload URL is session-scoped with a 23-hour expiry and binds to the actor, workspace, dataset ID, content hash and organization scope. This resumes across Streamlit reruns and recoverable request interruptions within the same session; it does not promise durable cross-device or process-restart recovery.
+
+The Edge Function's version-finalize flow now registers the content-addressed object in the metadata transaction before removing the temporary object. If metadata registration reports an error, a newly created object is removed only after successful no-reference checks against both the record and event ledgers. Query uncertainty retains the object. After successful registration, temporary cleanup failure is reported separately and does not convert a committed version into a false failure.
+
+New tests: `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. This is a source implementation update, not hosted Storage acceptance. Scheduled cleanup for historical orphan objects and abandoned temporary uploads remains absent; hosted interrupted-upload/resume, fresh-session, cross-workspace and raw-workbook acceptance remain required.

@@ -133,3 +133,20 @@ The exact-head full run on `8f671ed83f4fc05dcae558b5a7d751b3b64db151` completed 
 The three Streamlit-heavy modules are removed from the parallel xdist suite and are now run in a dedicated serial AppTest step with a 30-minute per-test diagnostic ceiling. The nine-canonical-tool UI route test has the same explicit timeout marker so its full route/entitlement matrix is not killed at ten minutes. PostgreSQL integration remains its own serial step. Both parallel and serial reports remain uploaded as separate JUnit XML files. This preserves all test cases; none is skipped or weakened.
 
 The updated exact-head CI must still run and pass before this remediation is considered complete.
+
+
+## Current candidate reconciliation — 2026-11-20
+
+**Decision remains NO-GO — RELEASE NOT AUTHORISED. Keep BETA and PR #232 draft/unmerged.** This note supersedes older implementation descriptions where they conflict with the active release-hardening candidate; historical test and deployment evidence remains tied to its original SHA only.
+
+Repository-side follow-up now includes:
+- A fail-closed Facility Layout T065 renderer guard requiring an authenticated session, matching active username and canonical Starter-tier tool entitlement.
+- The current 100-tool source audit and reconciled T098 identity/audit handoff. T098's optional OIDC login, server-side ID-token verifier, verified-email account mapping, optional provider-claim MFA, replay protection and append-only audit implementation are present in PR #232. No IdP tenant/client/secrets/MFA mapping, hosted login acceptance or staging audit migration deployment is established.
+- A signed Supabase TUS dataset upload client with 6 MiB chunks, bounded retry and offset recovery. Resume URL is held only in the active Streamlit server session (23-hour validity window); this is not guaranteed across restarts or fresh devices.
+- Dataset finalize ordering that registers metadata before temporary cleanup and uses successful record+event reference checks before deleting a newly created final object after an RPC failure. Older orphan/temporary objects still have no scheduled reference-aware sweep.
+
+These source changes require all applicable workflows to pass on the exact final candidate SHA. A previous head's green workflows do not certify later commits, and local unauthenticated browser smoke is not hosted authenticated acceptance.
+
+Still externally controlled: real T096 provider sandbox/credential and provider-specific SAP/Oracle implementation; T097 public API host/gateway/OpenAPI/SDK/external client; T098 real OIDC provider/secrets/MFA policy/hosted tests; T099 backup/PITR/off-project Storage-object backups and isolated restore with measured RPO/RTO. Also outstanding: apply reviewed staging-only migrations and deploy matching Edge Function after staging backup/rollback proof; disposable authenticated Owner/Admin/Engineer/Approver/Viewer and cross-org acceptance; complete workbook/data/model/simulation/optimization/decision/export browser journeys; Office-hosted add-in/Microsoft tenant validation; independent engineering/security review; Saudi PDPL/e-commerce/privacy/refund/legal identity review; written release approval and eventual production parity/cutover.
+
+No staging or production database mutation, secret change, Edge deploy, Streamlit deployment, merge, branch-ruleset change or production cutover is authorized or claimed by this repository work. Do not promote any tool to `VERIFIED_WORKING` on source/route/test presence alone.

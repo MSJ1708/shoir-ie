@@ -125,3 +125,14 @@ A final ordering review found that the newly active dataset dependency and Threa
 - The fresh-session retry regression test verifies that reopening the same version after a deliberately failed save clears the block only after a successful persistence call, and that the saved snapshot includes the active dependency, current node ID and unblocked state.
 
 The latest candidate also includes a Workbench AppTest asserting that a future-dated T094 KPI observation is visible as `FUTURE_TIMESTAMP` but opens no alert. T094 unit and UI tests are both authored; exact-head CI remains pending.
+
+
+## Candidate update — 2026-11-20: TUS upload and safe object-registration failure handling
+
+The release-hardening candidate adds a server-side Supabase Storage TUS client (`shoir_supabase_tus.py`) for the normalized dataset CSV path. It uses the direct storage hostname, 6 MiB chunks, signed upload capability, bounded PATCH retries, HEAD-based authoritative offset recovery, strict host/location validation and no redirects. The 50 MiB limit remains. Resume capability is kept in the current Streamlit server session for up to 23 hours and bound to the actor/workspace/dataset/hash/organization scope. Resume survives reruns and recoverable request interruptions while the session and signed upload remain valid; it is not guaranteed across process restarts, new devices or fresh login.
+
+The Edge finalizer now performs the atomic metadata registration before deleting its temporary upload. When registration reports failure, it checks both `shoir_platform_records` and `shoir_platform_events`; a newly created final object is removed only if both successful queries prove that no reference exists. Query failures retain the object. Previously existing/race-created content-addressed objects are not removed. A successful metadata registration remains successful if later temporary cleanup fails; the response flags `temporary_cleanup_pending`.
+
+The unit and static regression contracts are in `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. They require exact-head CI.
+
+The following remain open: scheduled reference-aware cleanup of older orphan objects and abandoned temporary objects; hosted staging validation of signed TUS creation, interrupted upload/resume, server hash/shape verification, fresh-session historical download, tenant isolation and retention; raw workbook preservation and end-to-end dataset-to-decision/export continuity. The old local SQLite dataset metadata registry still does not contain the original workbook bytes.
