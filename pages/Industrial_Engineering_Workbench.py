@@ -1647,10 +1647,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 safety_rate_base = st.number_input("Rate base work hours", min_value=1.0, value=200000.0, step=25000.0, key="tool050_base")
                                 run_method = st.form_submit_button("Calculate incident trend and rates", type="primary", use_container_width=True, key="tool050_run")
                             elif selected_tool["tool_id"] == "T054":
-                                st.caption("One-level BOM explosion only. Provide the current validated BOM; this does not recursively explode subassemblies.")
+                                st.caption("Recursive multi-level BOM explosion with optional yield/scrap and informational revision labels. It does not select effectivity-dated revisions, alternate items, capacity, supplier pegging or order calendars.")
                                 mrp_bom_json = st.text_area(
-                                    "Bill of materials (JSON list: component, qty_per_parent, lead_time_periods, lot_size_multiple)",
-                                    value='[{"component":"Screw","qty_per_parent":4,"lead_time_periods":2,"lot_size_multiple":10},{"component":"Bolt","qty_per_parent":2,"lead_time_periods":1,"lot_size_multiple":1}]',
+                                    "Nested bill of materials (JSON list: component, qty_per_parent, lead_time_periods, lot_size_multiple, optional yield_pct or scrap_pct, revision and children)",
+                                    value='[{"component":"Subassembly","qty_per_parent":1,"lead_time_periods":1,"lot_size_multiple":1,"revision":"SUB-A","children":[{"component":"Screw","qty_per_parent":4,"lead_time_periods":2,"lot_size_multiple":10,"scrap_pct":0}]},{"component":"Bolt","qty_per_parent":2,"lead_time_periods":1,"lot_size_multiple":1,"revision":"BOLT-B"}]',
+                                    help="Nested children are exploded from the parent's planned order receipt. Repeated items at the same level are aggregated; the same item at multiple levels is rejected to prevent ambiguous stock netting.",
                                     key="tool054_bom",
                                 )
                                 mrp_inventory_json = st.text_area(
@@ -2354,7 +2355,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         build_value_stream_map, analyze_fmea, analyze_mm1_queue,
                                         analyze_industrial_cost_variance, calculate_roi_evidence,
                                         plan_preventive_maintenance, assess_job_hazards,
-                                        plan_material_requirements, score_project_portfolio,
+                                        plan_material_requirements, plan_recursive_material_requirements, score_project_portfolio,
                                         merge_data_tables, process_time_series,
                                         generate_synthetic_industrial_data, plan_acceptance_sampling,
                                         analyze_process_mining, analyze_water_waste_efficiency,
@@ -2951,7 +2952,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             raise ValueError("BOM must be a JSON list of component objects.")
                                         if not isinstance(parsed_inventory, dict):
                                             raise ValueError("Inventory must be a JSON object keyed by component.")
-                                        result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
+                                        result = plan_recursive_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
                                     elif selected_tool["tool_id"] == "T076":
                                         parsed_events = json.loads(process_event_log_json)
                                         if not isinstance(parsed_events, list):
