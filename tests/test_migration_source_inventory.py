@@ -551,6 +551,8 @@ def test_dataset_storage_lifecycle_lease_migration_is_private_and_token_fenced()
     assert "security definer" in normalized
     assert "set search_path = pg_catalog, public" in normalized
     assert "where current_lease.expires_at <= clock_timestamp()" in normalized
+    assert "lease_operation in ('finalize', 'register', 'sweep')" in normalized
+    assert "p_lease_operation not in ('finalize', 'register', 'sweep')" in normalized
     assert "p_lease_seconds not between 30 and 600" in normalized
     assert "lease_token = p_lease_token" in normalized
     assert (
