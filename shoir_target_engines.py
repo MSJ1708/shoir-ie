@@ -7572,31 +7572,49 @@ def evaluate_kpi_alerts(
         source = ""
         observed = None
         breached = False
+        age_minutes: float | None = None
+        minutes_until_observation: float | None = None
+        maximum_age_minutes = stale_hours * 60.0
         if record is not None:
             value = _finite_number(record.get("value"), f"KPI value for {name}")
             unit = str(record.get("unit", "")).strip()
             source = str(record.get("source", "")).strip()
             observed = pd.to_datetime(record.get("observed_at"), utc=True, errors="coerce")
+            if record.get("max_age_minutes") is not None:
+                maximum_age_minutes = _finite_number(
+                    record.get("max_age_minutes"), f"Maximum age for {name}"
+                )
+                if maximum_age_minutes < 0 or maximum_age_minutes > 24 * 365 * 60:
+                    raise ValueError(f"Maximum age for {name} must be between zero and one year.")
             if pd.isna(observed):
                 state = "INVALID_TIMESTAMP"
             elif observed > now:
                 state = "FUTURE_TIMESTAMP"
-            elif not source:
-                state = "SOURCE_NOT_IDENTIFIED"
-            elif (now - observed).total_seconds() > stale_hours * 3600:
-                state = "STALE_DATA"
+                minutes_until_observation = max(0.0, (observed - now).total_seconds() / 60.0)
             else:
-                if operator == ">":
-                    breached = value > threshold
-                elif operator == ">=":
-                    breached = value >= threshold
-                elif operator == "<":
-                    breached = value < threshold
-                elif operator == "<=":
-                    breached = value <= threshold
+                age_minutes = max(0.0, (now - observed).total_seconds() / 60.0)
+                if not source:
+                    state = "SOURCE_NOT_IDENTIFIED"
+                elif age_minutes > maximum_age_minutes:
+                    state = "STALE_DATA"
                 else:
-                    breached = math.isclose(value, threshold, rel_tol=1e-9, abs_tol=1e-12)
-                state = "OPEN" if breached else "NORMAL"
+                    if operator == ">":
+                        breached = value > threshold
+                    elif operator == ">=":
+                        breached = value >= threshold
+                    elif operator == "<":
+                        breached = value < threshold
+                    elif operator == "<=":
+                        breached = value <= threshold
+                    else:
+                        breached = math.isclose(value, threshold, rel_tol=1e-9, abs_tol=1e-12)
+                    state = "OPEN" if breached else "NORMAL"
+        freshness = (
+            "FUTURE" if state == "FUTURE_TIMESTAMP"
+            else "STALE" if state == "STALE_DATA"
+            else "FRESH" if state in {"OPEN", "NORMAL"}
+            else "UNKNOWN"
+        )
         alert_identity = rule_id + "::" + name.casefold()
         import hashlib
         alert_id = "ALT-" + hashlib.sha256(alert_identity.encode("utf-8")).hexdigest()[:20].upper()
@@ -7627,6 +7645,10 @@ def evaluate_kpi_alerts(
             "Event": event_state,
             "Source": source or "NOT PROVIDED",
             "Observed at": "" if observed is None or pd.isna(observed) else observed.isoformat(),
+            "Freshness": freshness,
+            "Age minutes": age_minutes,
+            "Minutes until observation": minutes_until_observation,
+            "Maximum age minutes": maximum_age_minutes,
         })
     frame = pd.DataFrame(rows)
     duplicate_count = int(frame["Alert ID"].duplicated().sum())
@@ -7645,6 +7667,10 @@ def evaluate_kpi_alerts(
         "Event": "event",
         "Source": "source",
         "Observed at": "observed_at",
+        "Freshness": "freshness",
+        "Age minutes": "age_minutes",
+        "Minutes until observation": "minutes_until_observation",
+        "Maximum age minutes": "max_age_minutes",
     }).copy()
     unmatched_prior_ids = prior - processed_alert_ids
     seen_active_ids.update(unmatched_prior_ids)
