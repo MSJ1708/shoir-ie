@@ -1691,7 +1691,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 )
                                 run_method = st.form_submit_button("Balance water and waste flows", type="primary", use_container_width=True, key="tool079_run")
                             elif selected_tool["tool_id"] == "T084":
-                                st.caption("Criterion weights are subjective inputs. Scores are normalized direction-aware; sensitivity analysis is not yet included.")
+                                st.caption("Criterion weights are subjective inputs. Direction-aware scores are normalized to 0–100. One-at-a-time sensitivity changes each criterion weight up/down, then renormalizes all weights; it is not a probability model.")
                                 portfolio_criteria_json = st.text_area(
                                     "Criteria (JSON list: name, weight, direction maximize/minimize)",
                                     value='[{"name":"Cost","weight":2,"direction":"minimize"},{"name":"Quality","weight":1,"direction":"maximize"}]',
@@ -1702,7 +1702,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     value='[{"name":"Project A","scores":{"Cost":100,"Quality":70}},{"name":"Project B","scores":{"Cost":200,"Quality":90}}]',
                                     key="tool084_alternatives",
                                 )
-                                run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
+                                portfolio_sensitivity_pct = st.number_input(
+                                    "One-at-a-time criterion-weight sensitivity (%)",
+                                    min_value=0.0, max_value=100.0, value=20.0, step=5.0,
+                                    help="Each criterion weight is independently multiplied by 1 ± this percentage and all scenario weights are renormalized.",
+                                    key="tool084_sensitivity_pct",
+                                )
+                                run_method = st.form_submit_button("Score portfolio and test weight sensitivity", type="primary", use_container_width=True, key="tool084_run")
                             elif selected_tool["tool_id"] == "T033":
                                 st.caption("Balanced crossed design: every part must be measured by every operator on each repeated trial. Review the organization's MSA standard and acceptance criteria before decisions.")
                                 msa_observations_json = st.text_area(
@@ -2014,7 +2020,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         elif selected_tool["tool_id"] == "T077":
                             current_tool_inputs = {"baseline_json": energy_baseline_json, "alternatives_json": energy_alternatives_json}
                         elif selected_tool["tool_id"] == "T084":
-                            current_tool_inputs = {"criteria_json": portfolio_criteria_json, "alternatives_json": portfolio_alternatives_json}
+                            current_tool_inputs = {
+                                "criteria_json": portfolio_criteria_json,
+                                "alternatives_json": portfolio_alternatives_json,
+                                "sensitivity_pct": portfolio_sensitivity_pct,
+                            }
                         elif selected_tool["tool_id"] == "T076":
                             current_tool_inputs = {"event_log_json": process_event_log_json}
                         elif selected_tool["tool_id"] == "T079":
@@ -2993,7 +3003,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         parsed_alternatives = json.loads(portfolio_alternatives_json)
                                         if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
                                             raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
-                                        result = score_project_portfolio(parsed_criteria, parsed_alternatives)
+                                        result = score_project_portfolio(
+                                            parsed_criteria,
+                                            parsed_alternatives,
+                                            sensitivity_pct=portfolio_sensitivity_pct,
+                                        )
                                     elif selected_tool["tool_id"] == "T033":
                                         parsed_msa = json.loads(msa_observations_json)
                                         if not isinstance(parsed_msa, list):
