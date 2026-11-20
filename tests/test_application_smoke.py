@@ -24,6 +24,9 @@ def test_validation_workflow_covers_parallel_core_and_isolated_apptests():
     workflow = Path(".github/workflows/shoir-validation.yml").read_text(encoding="utf-8")
     assert "compileall" in workflow
     assert "pytest -vv -n 4 --dist=loadfile" in workflow
+    parallel_step = workflow.split("name: Run parallel regression suite", 1)[1].split("name: Upload parallel regression diagnostics immediately", 1)[0]
+    assert "set -euo pipefail" in parallel_step, "pytest failures must propagate through tee to fail CI"
+    assert "| tee artifacts/test-results/pytest-parallel.log" in parallel_step
     assert "--ignore=tests/test_shoir_resource_intelligence.py" in workflow
     assert "--ignore=tests/test_shoir_100_tool_workbench.py" in workflow
     assert "--ignore=tests/test_shoir_tool_trust_center_workbench.py" in workflow

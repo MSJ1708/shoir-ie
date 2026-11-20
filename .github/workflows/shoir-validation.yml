@@ -55,6 +55,7 @@ jobs:
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTHONTRACEMALLOC: "5"
         run: |
+          set -euo pipefail
           mkdir -p artifacts/test-results
           python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -n 4 --dist=loadfile -ra --timeout=600 \
             --ignore=tests/test_atomic_subscription_migration_postgres.py \
