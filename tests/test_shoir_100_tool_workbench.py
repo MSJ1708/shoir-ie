@@ -139,8 +139,8 @@ def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
     at.text_area(key="tool028_fishbone_causes").set_value(
         '{"Manpower":["Training gap"],"Machine":["Loose sensor mount"],"Method":[],"Material":[],"Measurement":[],"Environment":[]}'
     )
-    at.run(timeout=45)
-    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    # Streamlit form values should be submitted together without an intervening
+    # rerun, otherwise the unsent textarea value is discarded.
     at.button(key="tool028_run").click()
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -419,10 +419,7 @@ def test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_met
             at.text_area(key="tool041_events").set_value(
                 "[true,true,false,true,false,true,true,false,true,true]"
             )
-            at.run(timeout=90)
-            assert not at.exception, "T041 censored-input form raised: " + "\\n".join(
-                str(error.value) for error in at.exception
-            )
+        # Submit the form once after any input edits; do not rerun before click.
         at.button(key=button_key).click()
         at.run(timeout=90)
         assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
@@ -635,7 +632,7 @@ def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
     research = AppTest.from_file(page, default_timeout=90)
     research.session_state["current_user"] = "research-power-checker"
     research.session_state["authenticated"] = True
-    research.session_state["user_tier"] = "Research Pack ($30 add-on)"
+    research.session_state["user_tier"] = "Research Pack"
     research.run(timeout=90)
     assert not research.exception, "\\n".join(
         str(error.value) for error in research.exception
@@ -647,6 +644,13 @@ def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
     research.run(timeout=90)
     assert not research.exception, "\\n".join(
         str(error.value) for error in research.exception
+    )
+    assert research.selectbox(key="shoir_100_tool_inspector").value == (
+        "T085 · Statistical Power and Sample-Size Planner"
+    )
+    assert research.button(key="tool085_run") is not None, (
+        "Research Pack entitlement should render the T085 form; visible errors: "
+        + " | ".join(str(item.value) for item in research.error)
     )
     research.button(key="tool085_run").click()
     research.run(timeout=90)
