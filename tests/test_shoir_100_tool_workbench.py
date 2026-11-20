@@ -592,6 +592,13 @@ def test_workbench_runs_t075_forecast_drift_monitor_and_persists_assumptions():
     )
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.text_input(key="tool075_model_id").set_value("MODEL-TEST-01")
+    at.text_input(key="tool075_model_version").set_value("v1.4")
+    at.text_input(key="tool075_dataset_id").set_value("DS-ABCDEF123456")
+    at.text_input(key="tool075_dataset_version").set_value("2026-11-01")
+    at.text_input(key="tool075_source_label").set_value("Synthetic staging test")
+    at.text_input(key="tool075_period_start").set_value("2026-10-01")
+    at.text_input(key="tool075_period_end").set_value("2026-10-31")
     at.button(key="tool075_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -601,10 +608,20 @@ def test_workbench_runs_t075_forecast_drift_monitor_and_persists_assumptions():
     assert result["status"] == "DRIFT_ALERT"
     assert result["mae"] == pytest.approx(7 / 3)
     assert result["observations"] == 3
+    assert result["lineage_status"] == "USER_SUPPLIED_MODEL_AND_DATASET_VERSIONS"
+    assert result["model_version"] == "v1.4"
+    assert result["dataset_version"] == "2026-11-01"
+    assert result["evaluation_period_start"] == "2026-10-01"
+    assert result["lineage_verification"] == "USER_SUPPLIED_UNVERIFIED"
     saved_inputs = at.session_state.get("shoir_tool_inputs_T075")
     assert saved_inputs is not None
     assert saved_inputs["maximum_mae"] == pytest.approx(2.0)
     assert saved_inputs["trailing_window"] == 0
+    assert saved_inputs["model_id"] == "MODEL-TEST-01"
+    assert saved_inputs["model_version"] == "v1.4"
+    assert saved_inputs["dataset_id"] == "DS-ABCDEF123456"
+    assert saved_inputs["dataset_version"] == "2026-11-01"
+    assert saved_inputs["evaluation_period_start"] == "2026-10-01"
     assert result.get("_workspace_persistence") in {
         "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
         "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
