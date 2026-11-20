@@ -546,8 +546,9 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
             "observed_at": measured_at,
             "source": source,
         }
-        if item.get("max_age_minutes") is not None:
-            record["max_age_minutes"] = _number(item.get("max_age_minutes"), f"{name}.max_age_minutes")
+        record["max_age_minutes"] = _number(
+            item.get("max_age_minutes", 60), f"{name}.max_age_minutes"
+        )
         normalized_records.append(record)
         rules.append({
             "rule_id": rule_id,
