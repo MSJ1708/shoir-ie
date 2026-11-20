@@ -241,6 +241,7 @@ _ORGANIZATION_EDGE_ACTIONS = {
     "org_workspace_create_session",
     "org_workspace_archive_session",
     "org_audit_list_session",
+    "workspace_manage_check",
 }
 
 
