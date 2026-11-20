@@ -15,7 +15,6 @@ import {
   PublicRequestError,
   readBoundedJsonObject,
   sessionEntitlementFields,
-  isDatasetStorageSweepObjectOlderThan,
 } from "./security.ts";
 
 Deno.test("only POST may dispatch persistence API actions", () => {
@@ -484,7 +483,7 @@ Deno.test("dataset storage sweep classifies only exact workspace-owned object pa
     workspace + "/" + dataset + "/" + "A".repeat(64) + ".csv",
     workspace + "/ds-ABCDEF012345/" + "a".repeat(64) + ".csv",
     "fedcba9876543210fedcba9876543210/" + dataset + "/" + "a".repeat(64) +
-      ".csv",
+    ".csv",
     workspace + "/" + dataset + "/source.xlsx",
     "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(31) + ".csv",
   ];
