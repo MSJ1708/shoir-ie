@@ -45,3 +45,15 @@ The current candidate adds a session-authenticated T020 storage-maintenance acti
 - No automatic schedule is created. Scheduling this authenticated operation remains an external operational configuration.
 
 The shared lifecycle lease is held by dataset finalization, reference-aware orphan cleanup, and the generic platform-record writer whenever it creates a top-level reference to a T020-managed Storage path. The generic writer rejects T020-style paths that are malformed or point outside the active workspace. The lease operation is recorded as finalize, register or sweep. Immutable orphan deletion is now implemented behind that lease and the same two-ledger check; it must still pass exact-head migration replay, Deno/Python CI, concurrency-oriented review and authenticated Owner/Admin staging acceptance before use. Keep BETA / production NO-GO.
+
+
+## Candidate fencing and early-cleanup update — 2026-11-20
+
+The shared lifecycle protocol is split across two ordered migrations:
+
+- `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` creates the private lease table and server-only acquire/renew/release RPCs.
+- `20261120130000_shoir_dataset_storage_lease_fencing.sql` adds token/operation/actor-checked, `FOR UPDATE`-fenced wrappers for dataset-version finalization and generic platform-record writes that introduce a T020 Storage reference.
+
+Each lease grant is 30–600 seconds. The finalizer and sweeper renew only the exact still-live token; an expired or reclaimed token cannot renew. Before any metadata write commits, the SQL wrapper locks and rechecks the matching lease row in the same transaction. The early finalizer cleanup paths for oversized uploads, hash mismatch, malformed CSV, schema mismatch and metadata-RPC failure all route through the helper that renews the lease before removing the temporary object. If renewal or Storage removal cannot be confirmed, the object is retained and left for the later bounded sweep.
+
+The exact-head PostgreSQL replay on candidate `d4955d165b0f59b5c160971f53cd6236bc65f140` passed, covering both migrations and lease/fencing contracts. Edge Function verification also passed on that head. Full Python/AppTest regression and independent review were not complete at this refresh. Neither migration nor the matching Edge Function has been deployed to staging or production.
