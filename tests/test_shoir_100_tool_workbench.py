@@ -546,6 +546,36 @@ def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
     assert "not verified ROI" in simulation["warning"]
 
 
+def test_workbench_runs_t084_portfolio_weight_sensitivity():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "portfolio-sensitivity-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select(
+        "T084 · Engineering Project Portfolio Scorer"
+    )
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool084_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T084")
+    assert result is not None
+    assert result["base_winner"] == "Project A"
+    assert result["sensitivity_scenario_count"] == 4
+    assert result["winner_stability_pct"] == pytest.approx(100.0)
+    saved_inputs = at.session_state.get("shoir_tool_inputs_T084")
+    assert saved_inputs is not None
+    assert saved_inputs["sensitivity_pct"] == pytest.approx(20.0)
+
+
 def test_workbench_runs_t075_forecast_drift_monitor_and_persists_assumptions():
     from streamlit.testing.v1 import AppTest
 
