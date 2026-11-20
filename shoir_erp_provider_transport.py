@@ -97,7 +97,7 @@ class PinnedHTTPSJsonClient:
         ):
             raise ERPProviderTransportError("The provider URL is not an approved HTTPS destination.")
         path = parsed.path or "/"
-        if not path.startswith("/") or "\\\" in path or any(ord(c) < 32 for c in path):
+        if not path.startswith("/") or chr(92) in path or any(ord(c) < 32 for c in path):
             raise ERPProviderTransportError("The provider URL path is invalid.")
         try:
             pinned_ip = _resolve_pinned_ip(
