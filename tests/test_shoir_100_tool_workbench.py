@@ -564,8 +564,14 @@ def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
     assert result["achieved_power"] >= result["target_power"]
     assert result.get("_workspace_persistence") in {
         "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
-        "SAVE_FAILED", "SAVE_PENDING",
+        "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
     }
+    saved_inputs = research.session_state.get("shoir_tool_inputs_T085")
+    assert saved_inputs is not None
+    assert saved_inputs["effect_size_cohens_d"] == pytest.approx(0.5)
+    assert saved_inputs["alpha"] == pytest.approx(0.05)
+    assert saved_inputs["target_power"] == pytest.approx(0.80)
+    assert saved_inputs["max_n_per_group"] == 10000
 
     professional = AppTest.from_file(page, default_timeout=90)
     professional.session_state["current_user"] = "professional-power-checker"
