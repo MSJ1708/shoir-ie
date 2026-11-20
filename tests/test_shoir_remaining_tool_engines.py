@@ -288,12 +288,15 @@ def test_kpi_alert_adapter_preserves_per_record_maximum_age_and_user_provenance(
              "measured_at": "2026-11-20T11:59:00Z", "max_age_minutes": 5},
             {"name": "Stale", "value": 10, "threshold": 5, "operator": "gt",
              "measured_at": "2026-11-20T11:50:00Z", "max_age_minutes": 5},
+            {"name": "Legacy Default", "value": 3, "threshold": 5, "operator": "gt",
+             "measured_at": "2026-11-20T11:30:00Z"},
         ],
         "existing_alerts": [],
     })
     assert out["data_provenance"] == "USER_ENTERED_UNVERIFIED"
     states = out["kpis"].set_index("kpi")["status"].to_dict()
-    assert states == {"Fresh": "OPEN", "Stale": "STALE_DATA"}
+    assert states == {"Fresh": "OPEN", "Stale": "STALE_DATA", "Legacy Default": "NORMAL"}
+    assert out["kpis"].set_index("kpi").loc["Legacy Default", "max_age_minutes"] == 60
     assert out["new_alert_count"] == 1
     assert out["stale_kpi_count"] == 1
 
