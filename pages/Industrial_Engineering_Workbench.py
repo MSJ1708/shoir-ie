@@ -1032,6 +1032,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 why_chain_text = st.text_area(
                                     "Optional five Whys (one statement per line)", key="tool028_whys"
                                 )
+                                fishbone_causes_json = st.text_area(
+                                    "Optional fishbone causes (JSON object with Manpower, Machine, Method, Material, Measurement and Environment lists)",
+                                    value='{"Manpower":[],"Machine":[],"Method":[],"Material":[],"Measurement":[],"Environment":[]}',
+                                    help="Enter observed or suspected cause statements by category. These are hypotheses until independently verified.",
+                                    key="tool028_fishbone_causes",
+                                )
                                 countermeasure_text = st.text_input("Proposed countermeasure", key="tool028_countermeasure")
                                 action_owner = st.text_input("Action owner", key="tool028_owner")
                                 action_due_date = st.text_input(
@@ -2453,6 +2459,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         if not isinstance(parsed_counts, dict):
                                             raise ValueError("Pareto counts must be a JSON object mapping category names to counts.")
                                         whys = [line.strip() for line in why_chain_text.splitlines() if line.strip()]
+                                        parsed_fishbone = json.loads(fishbone_causes_json)
+                                        if not isinstance(parsed_fishbone, dict):
+                                            raise ValueError("Fishbone causes must be a JSON object keyed by the six M categories.")
                                         result = analyze_pareto_root_cause(
                                             parsed_counts,
                                             problem_statement=problem_statement,
@@ -2460,6 +2469,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             countermeasure=countermeasure_text,
                                             owner=action_owner,
                                             due_date=action_due_date,
+                                            fishbone_causes=parsed_fishbone,
                                         )
                                         result["data_provenance"] = (
                                             "SYNTHETIC_EXAMPLE"
@@ -3497,6 +3507,37 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     px.bar(pareto, x="Category", y="Count", title="Pareto category counts"),
                                     use_container_width=True,
                                 )
+                                if result.get("fishbone_cause_count", 0):
+                                    st.markdown("**Fishbone cause map — hypotheses requiring evidence review**")
+                                    st.dataframe(result["fishbone_summary"], use_container_width=True, hide_index=True)
+                                    import plotly.graph_objects as go
+                                    figure = go.Figure()
+                                    figure.add_shape(type="line", x0=0.04, y0=0.50, x1=0.96, y1=0.50, line={"width": 3})
+                                    figure.add_annotation(x=0.98, y=0.50, text="Problem", showarrow=False, xanchor="left")
+                                    category_positions = {
+                                        "Manpower": (0.28, 0.80), "Machine": (0.53, 0.80), "Method": (0.78, 0.80),
+                                        "Material": (0.28, 0.20), "Measurement": (0.53, 0.20), "Environment": (0.78, 0.20),
+                                    }
+                                    for category, (x_pos, y_pos) in category_positions.items():
+                                        figure.add_shape(
+                                            type="line", x0=x_pos, y0=y_pos, x1=x_pos + 0.10, y1=0.50,
+                                            line={"width": 2},
+                                        )
+                                        causes = result["fishbone_causes"].get(category, [])
+                                        label = category + ("<br>" + "<br>".join(causes[:4]) if causes else "<br>(no entries)")
+                                        figure.add_annotation(
+                                            x=x_pos, y=y_pos, text=label, showarrow=False,
+                                            xanchor="center", yanchor="middle",
+                                            bgcolor="rgba(240,240,240,0.75)", bordercolor="gray",
+                                            font={"size": 10},
+                                        )
+                                    figure.update_layout(
+                                        title="Ishikawa / fishbone hypotheses",
+                                        xaxis={"visible": False, "range": [0, 1.08]},
+                                        yaxis={"visible": False, "range": [0, 1]},
+                                        height=480, showlegend=False, margin={"l": 20, "r": 80, "t": 60, "b": 20},
+                                    )
+                                    st.plotly_chart(figure, use_container_width=True)
                                 if result["why_chain"]:
                                     st.markdown("**Recorded 5-Why chain (requires evidence review)**")
                                     st.dataframe(pd.DataFrame(result["why_chain"]), use_container_width=True, hide_index=True)
