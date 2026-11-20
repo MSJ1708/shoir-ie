@@ -2603,6 +2603,20 @@ Deno.serve(async (req) => {
 
       try {
         const uploadPath = String(body.upload_path || "").trim();
+        const cleanupTemporaryUpload = async (): Promise<boolean> => {
+          const leaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
+          if (!leaseRenewed) return false;
+          const { error: cleanupError } = await supabase.storage
+            .from("shoir-industrial-datasets")
+            .remove([uploadPath]);
+          return !cleanupError;
+        };
         const name = String(body.name || "").trim();
         const sourceName = String(body.source_name || "").trim();
         const dataHash = String(body.data_hash || "").toLowerCase();
@@ -2669,9 +2683,7 @@ Deno.serve(async (req) => {
             new Error("Uploaded dataset file is missing.");
         }
         if (uploaded.size > 52428800) {
-          await supabase.storage
-            .from("shoir-industrial-datasets")
-            .remove([uploadPath]);
+          await cleanupTemporaryUpload();
           return sendResponse(
             { error: "Dataset file exceeds the 50 MiB storage limit." },
             413,
@@ -2743,7 +2755,7 @@ Deno.serve(async (req) => {
           );
           const existingHash = await sha256Bytes(existingBytes);
           if (existingHash !== dataHash) {
-            await bucket.remove([uploadPath]);
+            await cleanupTemporaryUpload();
             throw new Error(
               "Existing immutable dataset object does not match its content hash.",
             );
