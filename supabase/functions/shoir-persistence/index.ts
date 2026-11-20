@@ -2992,7 +2992,10 @@ Deno.serve(async (req) => {
           .test(referencedStorageKey);
       if (looksLikeDatasetStoragePath && !classifiedStoragePath) {
         return sendResponse(
-          { error: "Dataset storage references must be valid and scoped to the active workspace." },
+          {
+            error:
+              "Dataset storage references must be valid and scoped to the active workspace.",
+          },
           400,
         );
       }
@@ -3015,7 +3018,10 @@ Deno.serve(async (req) => {
         const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
         if (lease?.acquired !== true) {
           return sendResponse(
-            { error: "This dataset is busy with another storage operation. Retry shortly." },
+            {
+              error:
+                "This dataset is busy with another storage operation. Retry shortly.",
+            },
             409,
           );
         }
