@@ -2310,6 +2310,212 @@ def plan_material_requirements(
     }
 
 
+def plan_recursive_material_requirements(
+    bom: Sequence[Mapping[str, Any]],
+    parent_demand_units: float,
+    *,
+    inventory: Mapping[str, Any] | None = None,
+    due_period: int = 0,
+    max_levels: int = 20,
+) -> dict[str, Any]:
+    """Explode a nested BOM by level, net supply, and propagate planned releases.
+
+    Each component may include a `children` list defining its own BOM. A row
+    accepts component, qty_per_parent, lead_time_periods, lot_size_multiple,
+    optional scrap_pct or yield_pct, revision, and children. Supply is netted
+    once per component as requirements are processed in due-period order.
+    Revision labels are recorded/consistency-checked, but effectivity selection,
+    alternates, order calendars and supply pegging remain outside this planner.
+    """
+    demand = _finite_number(parent_demand_units, "Parent demand")
+    if demand <= 0 or not demand.is_integer():
+        raise ValueError("Parent demand must be a positive whole number of assemblies.")
+    if isinstance(due_period, bool) or not isinstance(due_period, int):
+        raise ValueError("Due period must be a whole number index.")
+    if isinstance(max_levels, bool) or not isinstance(max_levels, int) or not 1 <= max_levels <= 20:
+        raise ValueError("max_levels must be an integer between 1 and 20.")
+    if isinstance(bom, (str, bytes)) or not isinstance(bom, Sequence) or not bom:
+        raise ValueError("Provide at least one top-level BOM component object.")
+    if inventory is None:
+        inventory = {}
+    if not isinstance(inventory, Mapping):
+        raise ValueError("Inventory must be a mapping keyed by component name.")
+
+    import json
+
+    stock_by_key = {str(key).strip().casefold(): value for key, value in inventory.items()}
+    available_remaining: dict[str, float] = {}
+    safety_by_key: dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    component_depths: dict[str, int] = {}
+    level = 1
+    current: list[tuple[str, float, int, tuple[str, ...], Sequence[Mapping[str, Any]]]] = [
+        ("", demand, due_period, tuple(), bom)
+    ]
+    processed_component_rows = 0
+
+    while current:
+        if level > max_levels:
+            raise ValueError(f"Recursive BOM exceeded the configured {max_levels}-level limit.")
+        grouped: dict[tuple[str, int], dict[str, Any]] = {}
+        for parent_name, parent_demand, parent_due, ancestors, component_rows in current:
+            for row_index, component in enumerate(component_rows, start=1):
+                processed_component_rows += 1
+                if processed_component_rows > 5000:
+                    raise ValueError("Recursive BOM exceeds the 5,000-row safety limit.")
+                if not isinstance(component, Mapping):
+                    raise ValueError(f"BOM level {level}, row {row_index} must be an object.")
+                name = str(component.get("component", component.get("item", ""))).strip()
+                if not name or len(name) > 160:
+                    raise ValueError(f"BOM level {level}, row {row_index} needs a component name of 1 to 160 characters.")
+                key = name.casefold()
+                if key in ancestors:
+                    raise ValueError(f"Recursive BOM cycle detected: {' -> '.join((*ancestors, key))}.")
+                prior_depth = component_depths.get(key)
+                if prior_depth is not None and prior_depth != level:
+                    raise ValueError(
+                        f"Component {name} occurs at multiple BOM levels; normalize the BOM to one level per item before netting supply."
+                    )
+                component_depths[key] = level
+
+                qty = _finite_number(component.get("qty_per_parent"), f"Quantity per parent for {name}")
+                if qty <= 0:
+                    raise ValueError(f"Quantity per parent for {name} must be greater than zero.")
+                if "scrap_pct" in component and "yield_pct" in component:
+                    raise ValueError(f"Specify either scrap_pct or yield_pct, not both, for {name}.")
+                if "scrap_pct" in component:
+                    scrap = _finite_number(component.get("scrap_pct"), f"Scrap percentage for {name}")
+                    if not 0 <= scrap < 100:
+                        raise ValueError(f"Scrap percentage for {name} must be in [0, 100).")
+                    yield_pct = 100.0 - scrap
+                else:
+                    yield_pct = _finite_number(component.get("yield_pct", 100), f"Yield percentage for {name}")
+                    if not 0 < yield_pct <= 100:
+                        raise ValueError(f"Yield percentage for {name} must be in (0, 100].")
+                gross = parent_demand * qty / (yield_pct / 100.0)
+                if not math.isfinite(gross) or gross < 0:
+                    raise ValueError(f"Calculated gross requirement for {name} is invalid.")
+
+                children = component.get("children", [])
+                if isinstance(children, (str, bytes)) or not isinstance(children, Sequence):
+                    raise ValueError(f"Children for {name} must be a JSON list of component objects.")
+                if children and any(not isinstance(child, Mapping) for child in children):
+                    raise ValueError(f"Every child BOM row for {name} must be an object.")
+                children_signature = json.dumps(children, sort_keys=True, separators=(",", ":"))
+                revision = str(component.get("revision", "") or "").strip()
+                lead = _finite_number(component.get("lead_time_periods", 0), f"Lead time periods for {name}")
+                lot = _finite_number(component.get("lot_size_multiple", 1), f"Lot size multiple for {name}")
+                if not lead.is_integer() or lead < 0:
+                    raise ValueError(f"Lead time periods for {name} must be a non-negative whole number.")
+                if not lot.is_integer() or lot <= 0:
+                    raise ValueError(f"Lot size multiple for {name} must be a positive whole number.")
+
+                group_key = (key, parent_due)
+                group = grouped.get(group_key)
+                if group is None:
+                    grouped[group_key] = {
+                        "name": name,
+                        "gross": gross,
+                        "lead": int(lead),
+                        "lot": int(lot),
+                        "revision": revision,
+                        "children": list(children),
+                        "children_signature": children_signature,
+                        "parents": {parent_name or "TOP_LEVEL"},
+                        "paths": {" -> ".join((*ancestors, key))},
+                    }
+                else:
+                    if (
+                        group["lead"] != int(lead)
+                        or group["lot"] != int(lot)
+                        or group["revision"] != revision
+                        or group["children_signature"] != children_signature
+                    ):
+                        raise ValueError(
+                            f"Conflicting BOM revision, lead time, lot size or child definition for repeated component {name}."
+                        )
+                    group["gross"] += gross
+                    group["parents"].add(parent_name or "TOP_LEVEL")
+                    group["paths"].add(" -> ".join((*ancestors, key)))
+
+        next_level: list[tuple[str, float, int, tuple[str, ...], Sequence[Mapping[str, Any]]]] = []
+        for (component_key, component_due), group in sorted(
+            grouped.items(), key=lambda item: (item[0][1], item[0][0])
+        ):
+            name = group["name"]
+            stock_record = stock_by_key.get(component_key, {})
+            if stock_record is None:
+                stock_record = {}
+            if not isinstance(stock_record, Mapping):
+                raise ValueError(f"Inventory record for {name} must be an object.")
+            if component_key not in available_remaining:
+                on_hand = _finite_number(stock_record.get("on_hand", 0), f"On-hand inventory for {name}")
+                receipts = _finite_number(stock_record.get("scheduled_receipts", 0), f"Scheduled receipts for {name}")
+                safety = _finite_number(stock_record.get("safety_stock", 0), f"Safety stock for {name}")
+                if min(on_hand, receipts, safety) < 0:
+                    raise ValueError(f"On-hand inventory, receipts and safety stock cannot be negative for {name}.")
+                available_remaining[component_key] = on_hand + receipts
+                safety_by_key[component_key] = safety
+            available = available_remaining[component_key]
+            safety = safety_by_key[component_key]
+            gross = float(group["gross"])
+            net = max(0.0, gross + safety - available)
+            lot = int(group["lot"])
+            planned = int(math.ceil(net / lot) * lot) if net > 0 else 0
+            # Consume gross demand from available supply once; never reuse the
+            # same on-hand/receipt balance when the item appears in later BOMs.
+            available_remaining[component_key] = max(0.0, available - gross)
+            lead = int(group["lead"])
+            release_period = component_due - lead
+            rows.append({
+                "Level": level,
+                "Component": name,
+                "Parent item(s)": ", ".join(sorted(group["parents"])),
+                "Source path(s)": " | ".join(sorted(group["paths"])),
+                "BOM revision": group["revision"] or "NOT_SPECIFIED",
+                "Gross requirement": gross,
+                "Yield (%)": 100.0 * gross / max(gross, 1e-12) if False else None,
+                "On hand + scheduled receipts": available,
+                "Safety stock": safety,
+                "Net requirement": net,
+                "Lot size multiple": lot,
+                "Planned order receipt": planned,
+                "Lead time (periods)": lead,
+                "Due period": component_due,
+                "Planned order release period": release_period,
+                "Release before current period": release_period < 0,
+                "Subassembly with BOM": bool(group["children"]),
+            })
+            if group["children"] and planned > 0:
+                ancestor_names = tuple(
+                    [part.casefold() for part in str(group["paths"]).split(" -> ")[0].split(" | ")]
+                )
+                # Each group has a single normalized item key; cycle detection
+                # is performed as the nested rows are processed below.
+                next_level.append((
+                    name, float(planned), release_period,
+                    (*ancestor_names, component_key), group["children"],
+                ))
+
+        current = next_level
+        level += 1
+
+    frame = pd.DataFrame(rows)
+    total_levels = int(frame["Level"].max()) if not frame.empty else 0
+    return {
+        "status": "MULTI_LEVEL_MRP_CALCULATED" if total_levels > 1 else "ONE_LEVEL_MRP_CALCULATED",
+        "parent_demand_units": int(demand),
+        "due_period": due_period,
+        "component_count": int(len(frame)),
+        "level_count": total_levels,
+        "total_gross_component_requirement": float(frame["Gross requirement"].sum()) if not frame.empty else 0.0,
+        "total_planned_order_receipts": float(frame["Planned order receipt"].sum()) if not frame.empty else 0.0,
+        "components": frame,
+        "assumptions": "Nested BOM quantities are exploded level by level. Yield/scrap is applied to each component gross requirement; on-hand and scheduled receipts are consumed once per component; lot multiples round planned receipts upward; child requirements are generated from planned receipts and due at the parent's release period.",
+        "warning": "First-pass deterministic multi-level MRP. It records one declared BOM revision per item but does not select effectivity-dated revisions, alternatives, supplier pegging, capacity, order calendars, time-phased scheduled receipts or substitute items. Confirm UOM, BOM ownership/revision, safety stock policy and period definitions before operational use.",
+    }
+
+
 def score_project_portfolio(
     criteria: Sequence[Mapping[str, Any]],
     alternatives: Sequence[Mapping[str, Any]],
