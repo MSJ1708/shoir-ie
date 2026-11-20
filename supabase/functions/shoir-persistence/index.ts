@@ -2306,6 +2306,7 @@ Deno.serve(async (req) => {
       const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
         ".csv";
       const bucket = supabase.storage.from("shoir-industrial-datasets");
+      let createdFinalObject = false;
       const { data: existingFile, error: existingError } = await bucket
         .download(storageKey);
       if (!existingError && existingFile) {
@@ -2340,10 +2341,10 @@ Deno.serve(async (req) => {
               "Concurrent immutable dataset upload has a different content hash.",
             );
           }
+        } else {
+          createdFinalObject = true;
         }
       }
-      const { error: removeError } = await bucket.remove([uploadPath]);
-      if (removeError) throw removeError;
       const versionRecordId = "SPR-" +
         crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
       const headRecordId = "SPR-" +
@@ -2370,9 +2371,86 @@ Deno.serve(async (req) => {
           p_storage_key: storageKey,
         },
       );
-      if (error) throw error;
+      if (error) {
+        // The RPC may have committed even if its response was lost. Only
+        // remove a file created by this request after both metadata ledgers
+        // have confirmed that no record or event references the object.
+        if (createdFinalObject) {
+          try {
+            const [recordRefs, eventRefs] = await Promise.all([
+              supabase.from("shoir_platform_records")
+                .select("record_id")
+                .eq("workspace_key", workspaceKey)
+                .contains("payload_json", { storage_key: storageKey })
+                .limit(1),
+              supabase.from("shoir_platform_events")
+                .select("event_id")
+                .eq("workspace_key", workspaceKey)
+                .contains("payload_json", { storage_key: storageKey })
+                .limit(1),
+            ]);
+            if (recordRefs.error || eventRefs.error) {
+              console.warn(
+                "Dataset metadata registration failed; reference checks were unavailable, so the immutable object was retained.",
+              );
+            } else if (
+              (recordRefs.data || []).length === 0 &&
+              (eventRefs.data || []).length === 0
+            ) {
+              const { error: orphanRemoveError } = await bucket.remove([
+                storageKey,
+              ]);
+              if (orphanRemoveError) {
+                console.warn(
+                  "Dataset metadata registration failed; the confirmed-unreferenced object could not be removed.",
+                );
+              }
+            }
+          } catch {
+            // An uncertain reference check must never turn into a destructive
+            // cleanup attempt. A later explicit, reference-aware sweep can
+            // reconcile the retained object.
+            console.warn(
+              "Dataset metadata registration failed; the immutable object was retained because reference status was uncertain.",
+            );
+          }
+        }
+        try {
+          const { error: tempRemoveError } = await bucket.remove([uploadPath]);
+          if (tempRemoveError) {
+            console.warn(
+              "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
+            );
+          }
+        } catch {
+          console.warn(
+            "Dataset metadata registration failed; temporary upload cleanup could not be confirmed.",
+          );
+        }
+        throw error;
+      }
+
       const registration = Array.isArray(data) ? data[0] : data;
-      return sendResponse({ ok: true, registration });
+      // Register the content-addressed object first. Temporary upload removal
+      // is best-effort after the atomic metadata transaction; cleanup failure
+      // must not tell the caller that an already-registered version failed.
+      let temporaryCleanupPending = false;
+      try {
+        const { error: tempRemoveError } = await bucket.remove([uploadPath]);
+        temporaryCleanupPending = Boolean(tempRemoveError);
+      } catch {
+        temporaryCleanupPending = true;
+      }
+      if (temporaryCleanupPending) {
+        console.warn(
+          "Dataset version registered successfully; temporary upload cleanup remains pending.",
+        );
+      }
+      return sendResponse({
+        ok: true,
+        registration,
+        temporary_cleanup_pending: temporaryCleanupPending,
+      });
     }
 
     if (action === "dataset_version_register") {
