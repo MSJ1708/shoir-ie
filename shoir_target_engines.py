@@ -2533,12 +2533,18 @@ def plan_recursive_material_requirements(
 def score_project_portfolio(
     criteria: Sequence[Mapping[str, Any]],
     alternatives: Sequence[Mapping[str, Any]],
+    *,
+    sensitivity_pct: float = 20.0,
 ) -> dict[str, Any]:
-    """Rank alternatives with explicit weights and min-max normalization."""
+    """Rank alternatives and run one-at-a-time multiplicative weight sensitivity."""
     if isinstance(criteria, (str, bytes)) or not isinstance(criteria, Sequence) or not criteria:
         raise ValueError("Provide at least one scoring criterion.")
     if isinstance(alternatives, (str, bytes)) or not isinstance(alternatives, Sequence) or len(alternatives) < 2:
         raise ValueError("Provide at least two project alternatives.")
+    sensitivity = _finite_number(sensitivity_pct, "Sensitivity percentage")
+    if not 0 <= sensitivity <= 100:
+        raise ValueError("Sensitivity percentage must be between 0 and 100.")
+
     normalized_criteria: list[dict[str, Any]] = []
     seen_criteria: set[str] = set()
     for i, criterion in enumerate(criteria, start=1):
@@ -2606,6 +2612,56 @@ def score_project_portfolio(
         by=["Weighted score (0–100)", "Project"], ascending=[False, True], kind="stable"
     ).reset_index(drop=True)
     frame.insert(0, "Rank", range(1, len(frame) + 1))
+
+    base_winner = str(frame.iloc[0]["Project"])
+    base_weights = {criterion["name"]: float(criterion["weight"]) for criterion in normalized_criteria}
+    sensitivity_rows: list[dict[str, Any]] = []
+    sensitivity_scenarios = (
+        ("LOWER", 1.0 - sensitivity / 100.0),
+        ("UPPER", 1.0 + sensitivity / 100.0),
+    )
+    for criterion in normalized_criteria:
+        criterion_name = criterion["name"]
+        for direction_label, multiplier in sensitivity_scenarios:
+            scenario_weights = dict(base_weights)
+            scenario_weights[criterion_name] *= multiplier
+            scenario_total = sum(scenario_weights.values())
+            if scenario_total <= 0:
+                continue
+            scored: list[tuple[str, float]] = []
+            for alternative in normalized_alternatives:
+                weighted = 0.0
+                for other_criterion in normalized_criteria:
+                    other_name = other_criterion["name"]
+                    low, high = ranges[other_name]
+                    value = alternative["scores"][other_name]
+                    if math.isclose(low, high, rel_tol=1e-12, abs_tol=1e-12):
+                        normalized_score = 100.0
+                    elif other_criterion["direction"] == "maximize":
+                        normalized_score = (value - low) / (high - low) * 100.0
+                    else:
+                        normalized_score = (high - value) / (high - low) * 100.0
+                    weighted += normalized_score * scenario_weights[other_name]
+                scored.append((alternative["name"], weighted / scenario_total))
+            scored.sort(key=lambda item: (-item[1], item[0]))
+            winner, winner_score = scored[0]
+            sensitivity_rows.append({
+                "Criterion perturbed": criterion_name,
+                "Scenario": direction_label,
+                "Weight multiplier": multiplier,
+                "Original weight": base_weights[criterion_name],
+                "Scenario weight before normalization": scenario_weights[criterion_name],
+                "Normalized scenario weight": scenario_weights[criterion_name] / scenario_total,
+                "Winner": winner,
+                "Winner score (0–100)": winner_score,
+                "Winner changed": winner != base_winner,
+                "Scenario ranking": " > ".join(name for name, _score in scored),
+            })
+    sensitivity_frame = pd.DataFrame(sensitivity_rows)
+    winner_stability = (
+        float((sensitivity_frame["Winner"] == base_winner).mean() * 100.0)
+        if not sensitivity_frame.empty else 100.0
+    )
     return {
         "status": "SCORED — WEIGHTS ARE USER-DEFINED",
         "method": "Criterion-level min-max normalization to 0–100, direction-aware, weighted average by user-supplied criterion weights",
@@ -2614,8 +2670,18 @@ def score_project_portfolio(
         "total_weight": total_weight,
         "ranking": frame,
         "criteria": pd.DataFrame(normalized_criteria),
-        "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination.",
-        "warning": "This is a decision aid, not an objective or universally correct ranking. Sensitivity to weights has not been calculated in this first implementation; review weights and data quality before selecting a project.",
+        "base_winner": base_winner,
+        "sensitivity_pct": sensitivity,
+        "weight_sensitivity": sensitivity_frame,
+        "sensitivity_scenario_count": int(len(sensitivity_frame)),
+        "winner_stability_pct": winner_stability,
+        "winner_change_count": int(sensitivity_frame["Winner changed"].sum()) if not sensitivity_frame.empty else 0,
+        "zero_weight_criteria_not_perturbed": [
+            criterion["name"] for criterion in normalized_criteria
+            if criterion["weight"] == 0
+        ],
+        "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination. Sensitivity independently multiplies each criterion weight up/down by the stated percentage and renormalizes all weights.",
+        "warning": "This is a decision aid, not an objective or universally correct ranking. One-at-a-time weight sensitivity is not a probability distribution or an assurance of robustness; it does not vary project scores, data uncertainty, criterion definitions or correlated weights. Review all assumptions before selecting a project.",
     }
 
 
