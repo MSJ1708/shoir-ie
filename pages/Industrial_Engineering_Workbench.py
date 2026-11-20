@@ -3523,8 +3523,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             type="line", x0=x_pos, y0=y_pos, x1=x_pos + 0.10, y1=0.50,
                                             line={"width": 2},
                                         )
+                                        from html import escape as html_escape
                                         causes = result["fishbone_causes"].get(category, [])
-                                        label = category + ("<br>" + "<br>".join(causes[:4]) if causes else "<br>(no entries)")
+                                        safe_causes = [html_escape(cause) for cause in causes[:4]]
+                                        label = category + ("<br>" + "<br>".join(safe_causes) if safe_causes else "<br>(no entries)")
                                         figure.add_annotation(
                                             x=x_pos, y=y_pos, text=label, showarrow=False,
                                             xanchor="center", yanchor="middle",
