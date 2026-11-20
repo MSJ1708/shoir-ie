@@ -618,7 +618,7 @@ def test_t096_provider_session_and_workspace_manage_routes_are_server_authorized
     assert 'await getSession(' in manage_action
     assert 'resolveManagedWorkspaceKey(' in manage_action
     assert '"manage"' in manage_action
-    assert '"workspace_manage_check"' in durable_account_store._ORGANIZATION_EDGE_ACTIONS
+    assert "workspace_manage_check" in durable_account_store._ORGANIZATION_EDGE_ACTIONS
 
 
 def test_provider_erp_read_rejects_non_admin_server_role_before_provider_config(monkeypatch):

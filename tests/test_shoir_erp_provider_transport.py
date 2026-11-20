@@ -22,6 +22,20 @@ class FakeHTTP:
         self.calls.append((method, url, dict(headers), body, max_response_bytes))
         return self.responses.pop(0)
 
+def serialized_calls(calls):
+    """JSON-safe request trace for assertions; decode bounded byte bodies."""
+    return json.dumps([
+        {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "body": body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else body,
+            "max_response_bytes": response_limit,
+        }
+        for method, url, headers, body, response_limit in calls
+    ])
+
+
 
 def profile(product_id="SAP_S4HANA_CLOUD_PUBLIC"):
     return erp.ERPConnectionProfile(
@@ -84,7 +98,7 @@ def test_sap_oauth_token_exchange_is_cached_and_odata_next_link_is_same_origin()
     assert len(fake.calls) == 3  # one token POST, two read-only GETs
     assert fake.calls[0][0] == "POST"
     assert fake.calls[1][0] == "GET" and fake.calls[2][0] == "GET"
-    assert "synthetic-secret" not in json.dumps(fake.calls)
+    assert "synthetic-secret" not in serialized_calls(fake.calls)
 
 
 def test_sap_transport_rejects_cross_origin_or_cross_path_next_link():
@@ -181,4 +195,4 @@ def test_oauth_token_cache_is_invalidated_when_client_secret_rotates():
     transport.get_json(profile(), "Orders", page_token=None, page_size=100)
 
     assert [call[0] for call in fake.calls] == ["POST", "GET", "POST", "GET"]
-    assert "rotated-synthetic-secret" not in json.dumps(fake.calls)
+    assert "rotated-synthetic-secret" not in serialized_calls(fake.calls)
