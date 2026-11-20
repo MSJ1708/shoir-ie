@@ -1281,8 +1281,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 sampling_max_n = st.number_input("Maximum sample size to search", min_value=1, max_value=5000, value=500, step=50, key="tool034_max_n")
                                 run_method = st.form_submit_button("Find attributes sampling plan", type="primary", use_container_width=True, key="tool034_run")
                             elif selected_tool["tool_id"] == "T041":
-                                st.caption("Two-parameter Weibull maximum-likelihood fit for positive uncensored failure times only. Censored observations and confidence intervals are not supported.")
-                                weibull_times_json = st.text_area("Uncensored failure times (JSON list, consistent time unit)", value='[120,220,300,410,520,680,800,950,1120,1390]', key="tool041_times")
+                                st.caption("Two-parameter Weibull maximum-likelihood model with optional right-censoring. Confidence intervals use an approximate observed-information method; Kaplan-Meier comparison is descriptive, not a formal goodness-of-fit test.")
+                                weibull_times_json = st.text_area(
+                                    "Failure or censoring times (JSON list, one consistent time unit)",
+                                    value='[120,220,300,410,520,680,800,950,1120,1390]',
+                                    key="tool041_times",
+                                )
+                                weibull_events_json = st.text_area(
+                                    "Observed failure flags (optional JSON list of true/false or 1/0; leave blank if all observations are failures)",
+                                    value="",
+                                    key="tool041_events",
+                                )
                                 run_method = st.form_submit_button("Fit Weibull reliability model", type="primary", use_container_width=True, key="tool041_run")
                             elif selected_tool["tool_id"] == "T043":
                                 st.caption("Interval-based due-date planner. It does not optimize labor, parts or downtime windows.")
@@ -1920,7 +1929,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         elif selected_tool["tool_id"] == "T034":
                             current_tool_inputs = {"aql_pct": sampling_aql, "ltpd_pct": sampling_ltpd, "producer_risk_pct": sampling_alpha, "consumer_risk_pct": sampling_beta, "max_sample_size": int(sampling_max_n)}
                         elif selected_tool["tool_id"] == "T041":
-                            current_tool_inputs = {"failure_times_json": weibull_times_json}
+                            current_tool_inputs = {
+                                "failure_times_json": weibull_times_json,
+                                "event_observed_json": weibull_events_json,
+                            }
                         elif selected_tool["tool_id"] == "T043":
                             current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
                         elif selected_tool["tool_id"] == "T045":
@@ -2683,8 +2695,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     elif selected_tool["tool_id"] == "T041":
                                         parsed_failure_times = json.loads(weibull_times_json)
                                         if not isinstance(parsed_failure_times, list):
-                                            raise ValueError("Failure-time observations must be a JSON list.")
-                                        result = analyze_weibull_reliability(parsed_failure_times)
+                                            raise ValueError("Failure/censoring times must be a JSON list.")
+                                        parsed_event_flags = None
+                                        if weibull_events_json.strip():
+                                            parsed_event_flags = json.loads(weibull_events_json)
+                                            if not isinstance(parsed_event_flags, list):
+                                                raise ValueError("Observed failure flags must be a JSON list.")
+                                        result = analyze_weibull_reliability(
+                                            parsed_failure_times,
+                                            event_observed=parsed_event_flags,
+                                        )
                                     elif selected_tool["tool_id"] == "T043":
                                         parsed_pm_tasks = json.loads(pm_tasks_json)
                                         if not isinstance(parsed_pm_tasks, list):
