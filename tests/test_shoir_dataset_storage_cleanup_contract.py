@@ -54,16 +54,32 @@ def test_new_content_addressed_object_is_deleted_only_after_two_successful_no_re
 
 def test_metadata_rpc_failure_keeps_uncertain_object_and_cleans_only_temp_upload():
     source = dataset_finalize_source()
-    rpc_error = source.index("if (error) {", source.index("shoir_platform_register_dataset_version_with_storage"))
+    rpc_error = source.index(
+        "if (error) {",
+        source.index("shoir_platform_register_dataset_version_with_storage_and_lease"),
+    )
     reference_checks = source.index("const [recordRefs, eventRefs]", rpc_error)
-    temp_upload_path = source.index("uploadPath,", reference_checks)
-    temp_cleanup = source.rfind("await bucket.remove([", reference_checks, temp_upload_path)
-    assert temp_cleanup >= reference_checks
+    temp_cleanup = source.index("await cleanupTemporaryUpload()", reference_checks)
     throw_original_error = source.index("throw error;", temp_cleanup)
+    helper = source.index("const cleanupTemporaryUpload = async")
+    helper_renew = source.index('"shoir_dataset_storage_lease_renew"', helper)
+    helper_remove = source.index(".remove([uploadPath])", helper)
 
+    assert helper < helper_renew < helper_remove
     assert rpc_error < reference_checks < temp_cleanup < throw_original_error
     assert "reference checks were unavailable, so the immutable object was retained" in source
     assert "the immutable object was retained because reference status was uncertain" in source
+
+
+def test_early_temporary_cleanup_paths_all_renew_the_finalization_lease():
+    source = dataset_finalize_source()
+    helper = source.index("const cleanupTemporaryUpload = async")
+    before_storage = source.index("const leaseRenewedBeforeStorage")
+    cleanup_calls = source[helper:before_storage].count("await cleanupTemporaryUpload()")
+    assert cleanup_calls == 4
+    assert "if (!leaseRenewed)" in source[helper:before_storage]
+    assert "if (cleanupError)" in source[helper:before_storage]
+    assert ".remove([uploadPath])" in source[helper:before_storage]
 
 
 def test_temporary_object_cleanup_failure_does_not_report_registered_version_as_failed():
