@@ -360,7 +360,8 @@ def test_identity_config_rejects_private_ip_metadata_endpoint():
     })
     assert out["status"] == "CONFIGURATION_INVALID"
     assert out["streamlit_configuration_ready"] is False
-    assert not out["oidc_issuer_syntax_valid"]
+    assert out["oidc_issuer_syntax_valid"] is None
+    assert not out["provider_metadata_url_syntax_valid"]
     assert any("server_metadata_url" in item for item in out["configuration_problems"])
     assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
@@ -389,7 +390,8 @@ def test_identity_config_rejects_invalid_nested_streamlit_auth_settings():
     assert out["status"] == "CONFIGURATION_INVALID"
     assert out["streamlit_configuration_ready"] is False
     assert not out["redirect_uri_syntax_valid"]
-    assert not out["oidc_issuer_syntax_valid"]
+    assert out["oidc_issuer_syntax_valid"] is None
+    assert not out["provider_metadata_url_syntax_valid"]
     assert len(out["configuration_problems"]) >= 3
     assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
