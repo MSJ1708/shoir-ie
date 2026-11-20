@@ -1207,6 +1207,103 @@ def test_weibull_fit_rejects_invalid_event_flags_and_insufficient_failures():
         analyze_weibull_reliability(times, confidence_level=0.2)
 
 
+def test_recursive_mrp_explodes_nested_bom_yield_scrap_and_component_inventory():
+    from shoir_target_engines import plan_recursive_material_requirements
+
+    result = plan_recursive_material_requirements(
+        [
+            {
+                "component": "Subassembly",
+                "qty_per_parent": 1,
+                "lead_time_periods": 1,
+                "lot_size_multiple": 1,
+                "revision": "SUB-A",
+                "children": [
+                    {
+                        "component": "Screw",
+                        "qty_per_parent": 4,
+                        "lead_time_periods": 2,
+                        "lot_size_multiple": 10,
+                        "scrap_pct": 10,
+                    }
+                ],
+            },
+            {
+                "component": "Bolt",
+                "qty_per_parent": 2,
+                "lead_time_periods": 1,
+                "lot_size_multiple": 1,
+                "revision": "BOLT-B",
+            },
+        ],
+        10,
+        inventory={
+            "Screw": {"on_hand": 20, "safety_stock": 5},
+            "Bolt": {"on_hand": 30},
+        },
+        due_period=0,
+    )
+    frame = result["components"].set_index("Component")
+    assert result["status"] == "MULTI_LEVEL_MRP_CALCULATED"
+    assert result["level_count"] == 2
+    assert frame.loc["Subassembly", "Planned order receipt"] == 10
+    assert frame.loc["Screw", "Gross requirement"] == pytest.approx(400 / 9 * 1)
+    assert frame.loc["Screw", "Planned order receipt"] == 160
+    assert frame.loc["Screw", "Effective yield (%)"] == pytest.approx(90.0)
+    assert frame.loc["Bolt", "Planned order receipt"] == 0
+    assert frame.loc["Screw", "Due period"] == -1
+
+
+def test_recursive_mrp_aggregates_repeated_components_once_and_rejects_cycles():
+    from shoir_target_engines import plan_recursive_material_requirements
+
+    aggregated = plan_recursive_material_requirements(
+        [
+            {"component": "Screw", "qty_per_parent": 1, "lot_size_multiple": 1},
+            {"component": "screw", "qty_per_parent": 2, "lot_size_multiple": 1},
+        ],
+        10,
+        inventory={"screw": {"on_hand": 10}},
+    )
+    assert len(aggregated["components"]) == 1
+    assert aggregated["components"].iloc[0]["Gross requirement"] == 30
+    assert aggregated["components"].iloc[0]["Net requirement"] == 20
+
+    with pytest.raises(ValueError, match="cycle detected"):
+        plan_recursive_material_requirements(
+            [
+                {
+                    "component": "A", "qty_per_parent": 1,
+                    "children": [
+                        {
+                            "component": "B", "qty_per_parent": 1,
+                            "children": [{"component": "A", "qty_per_parent": 1}],
+                        }
+                    ],
+                }
+            ],
+            1,
+        )
+
+
+def test_recursive_mrp_rejects_conflicting_revisions_and_invalid_yield():
+    from shoir_target_engines import plan_recursive_material_requirements
+
+    with pytest.raises(ValueError, match="Conflicting BOM revision"):
+        plan_recursive_material_requirements(
+            [
+                {"component": "Screw", "qty_per_parent": 1, "revision": "A"},
+                {"component": "screw", "qty_per_parent": 1, "revision": "B"},
+            ],
+            1,
+        )
+    with pytest.raises(ValueError, match="Yield percentage"):
+        plan_recursive_material_requirements(
+            [{"component": "Screw", "qty_per_parent": 1, "yield_pct": 0}],
+            1,
+        )
+
+
 def test_spare_parts_criticality_reorder_screen_reconciles_stock_and_lead_time():
     from shoir_target_engines import analyze_spare_parts_criticality
 
