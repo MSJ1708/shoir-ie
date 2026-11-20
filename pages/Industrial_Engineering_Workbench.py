@@ -2927,7 +2927,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         previous_open_alert_ids = [
                                             str(item.get("alert_id") or "").strip()
                                             for item in existing_open_alerts
-                                            if str(item.get("state") or "OPEN").upper() == "OPEN"
+                                            if str(item.get("state") or "OPEN").upper().startswith("OPEN")
                                             and str(item.get("alert_id") or "").strip()
                                         ]
                                         result = evaluate_kpi_alerts(
@@ -2938,13 +2938,23 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                             previous_open_alert_ids=previous_open_alert_ids,
                                         )
                                         next_open_alerts = []
+                                        observed_alert_ids = set()
                                         for alert in result["alert_records"]:
+                                            alert_id = str(alert["alert_id"])
+                                            observed_alert_ids.add(alert_id)
                                             next_open_alerts.append({
                                                 "fingerprint": alert["fingerprint"],
-                                                "alert_id": alert["alert_id"],
+                                                "alert_id": alert_id,
                                                 "rule_id": alert.get("rule_id"),
-                                                "state": "OPEN",
+                                                "state": str(alert.get("state") or "OPEN"),
                                             })
+                                        # Preserve prior alerts for rules that were omitted from the
+                                        # current evaluation. Removing a rule is not evidence of recovery.
+                                        next_open_ids = set(result["next_open_alert_ids"])
+                                        for prior_alert in existing_open_alerts:
+                                            prior_id = str(prior_alert.get("alert_id") or "")
+                                            if prior_id in next_open_ids and prior_id not in observed_alert_ids:
+                                                next_open_alerts.append(dict(prior_alert))
                                         st.session_state["shoir_kpi_open_alert_records"] = next_open_alerts
                                         # Keep the older ID-only view available for any pre-existing
                                         # UI/session consumers. The canonical evaluator resolves an
