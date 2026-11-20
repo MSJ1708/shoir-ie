@@ -157,6 +157,30 @@ def test_generic_platform_record_storage_reference_uses_dataset_lifecycle_lease(
     assert "recordLeaseToken" in save
 
 
+def test_metadata_only_dataset_version_registration_is_retired():
+    edge_source = EDGE.read_text(encoding="utf-8")
+    action_start = edge_source.index('if (action === "dataset_version_register") {')
+    action_end = edge_source.index('if (action === "platform_record_save") {', action_start)
+    action = edge_source[action_start:action_end]
+    assert "return sendResponse(" in action
+    assert "410," in action
+    assert "dataset_upload_create" in action
+    assert "dataset_version_finalize" in action
+    assert 'supabase.rpc(\n        "shoir_platform_register_dataset_version"' not in action
+
+    store_source = (ROOT / "durable_account_store.py").read_text(encoding="utf-8")
+    helper_start = store_source.index("def edge_register_dataset_version(")
+    helper_end = store_source.index("def edge_save_platform_record(", helper_start)
+    helper = store_source[helper_start:helper_end]
+    assert "raise RuntimeError(" in helper
+    assert "edge_upload_and_register_dataset_version()" in helper
+    assert '_edge_call("dataset_version_register"' not in helper
+    assert '"dataset_version_register"' not in store_source[
+        store_source.index("shared_actions = {"):
+        store_source.index("if APP_ENVIRONMENT == \"staging\" and action in shared_actions")
+    ]
+
+
 def test_dataset_storage_lifecycle_migration_is_server_only_and_expiring():
     migration = (
         ROOT / "supabase" / "migrations" /
