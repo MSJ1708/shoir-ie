@@ -804,7 +804,7 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         "audit_logging_flag": audit_enabled,
         "sso_active": False,
         "mfa_active": False,
-        "oidc_login_flow_implemented": False,
+        "oidc_login_flow_implemented": True,
         "provider_authentication_tested": False,
         "provider_mfa_evidence_verified": False,
         "audit_sink_configured": False,
@@ -812,14 +812,14 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         "verified_at": None,
         "required_external_actions": [
             "Select an approved identity provider and configure its application/client and exact callback/logout URIs.",
-            "Implement and review the provider-supported login/callback/session integration in the existing authentication architecture.",
+            "Configure and validate the existing Streamlit OIDC login/callback and Edge Function session-exchange path against the selected provider; do not introduce a second authentication architecture.",
             "Validate issuer, audience, signature, state, nonce, expiry, redirect and logout/revocation behavior using a maintained protocol implementation.",
             "Map a validated provider identity to the existing application account, role, tier and workspace without privilege elevation.",
             "Prove MFA from the provider's documented policy/result; environment flags alone are not evidence.",
             "Configure a protected durable audit destination and verify representative events were written and can be read under authorized access.",
             "Run authenticated staging allow/deny, cross-workspace, expired/revoked session and audit-failure tests."
         ],
-        "warning": "This is a readiness check only. Configuration is not authentication, provider policy is not verified MFA evidence, and an audit toggle is not proof of a durable audit write. SSO/MFA and audit persistence remain unverified until the external protocol flow and durable event path are implemented and tested on authorized staging.",
+        "warning": "This is a readiness check only. The repository contains the Streamlit OIDC login and Edge Function token-verification/session-exchange path, but configuration is not authentication, provider policy is not verified MFA evidence, and an audit toggle is not proof of a durable audit write. Provider authentication, MFA claims and durable audit persistence remain unverified until accepted on authorized staging.",
     }
 
 
