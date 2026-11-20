@@ -1237,7 +1237,7 @@ def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
     assert first["breached_kpi_count"] == 1
     assert first["new_alert_count"] == 1
     assert first["alert_records"][0]["rule_id"] == "scrap-high"
-    assert first["alert_records"][0]["severity"] == "HIGH"
+    assert first["alert_records"][0]["severity"] == "CRITICAL"
     assert first["alert_records"][0]["source"] == "Synthetic acceptance fixture"
     assert at.session_state["shoir_kpi_open_alert_records"][0]["state"] == "OPEN"
 
@@ -1267,6 +1267,22 @@ def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
     assert repeated is not None
     assert repeated["new_alert_count"] == 0
     assert repeated["alert_records"][0]["new_alert"] is False
+
+    # A fresh reading back within the limit resolves the prior alert explicitly.
+    at.text_area(key="tool094_records").set_value(
+        '[{"kpi":"Scrap Rate","value":2,"unit":"%","observed_at":"2026-11-12T10:05:00Z","source":"Synthetic acceptance fixture"}]'
+    )
+    at.text_input(key="tool094_as_of").set_value("2026-11-12T10:10:00Z")
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "T094 recovery run raised: " + "\\n".join(str(error.value) for error in at.exception)
+    recovered = at.session_state.get("shoir_tool_result_T094")
+    assert recovered is not None
+    assert recovered["resolved_alert_count"] == 1
+    assert recovered["open_alert_count"] == 0
+    assert recovered["alert_records"] == []
+    assert recovered["alerts"].iloc[0]["Event"] == "RESOLVED"
+    assert at.session_state.get("shoir_kpi_open_alert_records", []) == []
 
 
 def test_workbench_t094_future_dated_measurement_does_not_open_alert():
