@@ -79,6 +79,14 @@ class PinnedHTTPSJsonClient:
             raise ERPProviderTransportError("The provider transport permits GET data reads and OAuth token POST only.")
         if body is not None and len(body) > 16 * 1024:
             raise ERPProviderTransportError("The provider request body exceeds its size limit.")
+        requested_limit = self.max_response_bytes if max_response_bytes is None else max_response_bytes
+        if (
+            isinstance(requested_limit, bool)
+            or not isinstance(requested_limit, int)
+            or not 1 <= requested_limit <= self.max_response_bytes
+        ):
+            raise ERPProviderTransportError("The provider response size limit is invalid.")
+        limit = requested_limit
         try:
             parsed = urlsplit(url)
             host = (parsed.hostname or "").rstrip(".").encode("idna").decode("ascii").lower()
@@ -115,7 +123,6 @@ class PinnedHTTPSJsonClient:
             pinned_ip=pinned_ip,
             timeout=self.timeout_seconds,
         )
-        limit = min(self.max_response_bytes, int(max_response_bytes or self.max_response_bytes))
         try:
             request_headers = {
                 "Accept": "application/json",
@@ -237,8 +244,15 @@ class OAuth2ClientCredentialsTransport:
         connection: erp.ERPConnectionProfile,
         credentials: OAuthClientCredentials,
     ) -> str:
+        # Include a one-way fingerprint of the secret so rotation cannot reuse
+        # a token cached under the previous credential. Never persist or log it.
+        secret_fingerprint = hashlib.sha256(credentials.client_secret.encode("utf-8")).hexdigest()
         cache_key = hashlib.sha256(
-            (connection.credential_ref + "|" + connection.product_id + "|" + credentials.token_url + "|" + credentials.client_id + "|" + credentials.scope).encode("utf-8")
+            (
+                connection.credential_ref + "|" + connection.product_id + "|"
+                + credentials.token_url + "|" + credentials.client_id + "|"
+                + credentials.scope + "|" + secret_fingerprint
+            ).encode("utf-8")
         ).hexdigest()
 
         def create() -> tuple[str, int]:

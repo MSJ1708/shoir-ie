@@ -3,6 +3,7 @@ import json
 import pytest
 
 import shoir_erp_connectors as erp
+import shoir_erp_provider_transport as provider_transport
 from shoir_erp_provider_transport import (
     ERPProviderTransportError,
     OracleFusionOAuthTransport,
@@ -139,3 +140,45 @@ def test_pinned_http_client_checks_exact_host_and_never_follows_redirects():
     )
     with pytest.raises(ERPProviderTransportError, match="approved HTTPS destination"):
         client.request("GET", "https://attacker.example.test/odata", headers={})
+
+
+@pytest.mark.parametrize("requested_limit", [0, -1, -2, 1025, True, 1.5])
+def test_request_response_limit_override_must_remain_within_client_bound(monkeypatch, requested_limit):
+    client = PinnedHTTPSJsonClient(
+        allowed_hosts={("erp.example.test", 443)},
+        max_response_bytes=1024,
+    )
+
+    def no_dns(*args, **kwargs):
+        raise AssertionError("Invalid response limits must be rejected before DNS or network access.")
+
+    monkeypatch.setattr(provider_transport, "_resolve_pinned_ip", no_dns)
+    with pytest.raises(ERPProviderTransportError, match="response size limit"):
+        client.request(
+            "GET",
+            "https://erp.example.test/odata/Orders",
+            headers={},
+            max_response_bytes=requested_limit,
+        )
+
+
+def test_oauth_token_cache_is_invalidated_when_client_secret_rotates():
+    current_credentials = credentials(None)
+    fake = FakeHTTP([
+        (200, "application/json", json.dumps({"access_token": "token-before-rotation", "token_type": "Bearer", "expires_in": 3600}).encode()),
+        (200, "application/json", json.dumps({"value": []}).encode()),
+        (200, "application/json", json.dumps({"access_token": "token-after-rotation", "token_type": "Bearer", "expires_in": 3600}).encode()),
+        (200, "application/json", json.dumps({"value": []}).encode()),
+    ])
+    transport = SAPODataOAuthTransport(
+        allowed_hosts={("erp.example.test", 443), ("identity.example.test", 443)},
+        credential_resolver=lambda _ref: dict(current_credentials),
+        http_client=fake,
+    )
+
+    transport.get_json(profile(), "Orders", page_token=None, page_size=100)
+    current_credentials["client_secret"] = "rotated-synthetic-secret"
+    transport.get_json(profile(), "Orders", page_token=None, page_size=100)
+
+    assert [call[0] for call in fake.calls] == ["POST", "GET", "POST", "GET"]
+    assert "rotated-synthetic-secret" not in json.dumps(fake.calls)

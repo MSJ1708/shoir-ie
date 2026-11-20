@@ -25,7 +25,7 @@ const client = new ShoirIEClient({
 const page = await client.listPlatformRecords({ recordType: "decision", limit: 50 });
 ```
 
-The SDK does not store, refresh, print or automatically retry the session token. It refuses non-HTTPS URLs, non-Supabase hosts, endpoint paths other than the exact persistence function, redirects, oversized payloads and invalid pagination inputs. Browser callers must also be covered by the Edge Function's server-side CORS origin allowlist.
+The SDK does not store, refresh, print or automatically retry the session token. It refuses non-HTTPS URLs, non-Supabase hosts, endpoint paths other than the exact persistence function, redirects, oversized request payloads and invalid pagination inputs. Each request uses a bounded timeout (15 seconds by default; configurable from 1 to 30 seconds), and response bodies are capped at 2 MiB while streamed. Browser callers must also be covered by the Edge Function's server-side CORS origin allowlist.
 
 ## Deliberate release boundary
 

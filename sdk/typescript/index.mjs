@@ -1,5 +1,7 @@
 const API_VERSION = "v1";
 const MAX_REQUEST_BYTES = 1024 * 1024;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_TIMEOUT_MS = 15_000;
 const API_PATH = "/functions/v1/shoir-persistence";
 
 function requiredText(value, field, maximum = 4096) {
@@ -32,6 +34,83 @@ function finiteInteger(value, field, minimum, maximum) {
   return value;
 }
 
+async function readBoundedJsonResponse(response) {
+  const contentLength = response.headers?.get?.("content-length");
+  if (contentLength !== null && contentLength !== undefined && String(contentLength).trim()) {
+    if (!/^[0-9]+$/.test(String(contentLength).trim())) {
+      throw new TypeError("The Shoir-IE API returned an invalid response length.");
+    }
+    if (Number(contentLength) > MAX_RESPONSE_BYTES) {
+      throw new RangeError("The Shoir-IE API response exceeds the 2 MiB SDK limit.");
+    }
+  }
+
+  const reader = response.body?.getReader?.();
+  if (reader) {
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        if (!(part.value instanceof Uint8Array)) {
+          throw new TypeError("The Shoir-IE API returned an invalid response stream.");
+        }
+        total += part.value.byteLength;
+        if (total > MAX_RESPONSE_BYTES) {
+          try { await reader.cancel(); } catch { /* Preserve the size bound. */ }
+          throw new RangeError("The Shoir-IE API response exceeds the 2 MiB SDK limit.");
+        }
+        chunks.push(part.value);
+      }
+    } catch (error) {
+      try { await reader.cancel(); } catch { /* Preserve the original failure. */ }
+      throw error;
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new TypeError("The Shoir-IE API returned malformed JSON.");
+    }
+  }
+
+  if (typeof response.text === "function") {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
+      throw new RangeError("The Shoir-IE API response exceeds the 2 MiB SDK limit.");
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new TypeError("The Shoir-IE API returned malformed JSON.");
+    }
+  }
+
+  // Compatibility for test doubles and fetch-compatible runtimes without a
+  // readable stream. Standard browser and Node fetch responses use streaming.
+  if (typeof response.json === "function") {
+    const data = await response.json();
+    let serialized;
+    try {
+      serialized = JSON.stringify(data);
+    } catch {
+      throw new TypeError("The Shoir-IE API returned an invalid JSON value.");
+    }
+    if (new TextEncoder().encode(serialized ?? "").byteLength > MAX_RESPONSE_BYTES) {
+      throw new RangeError("The Shoir-IE API response exceeds the 2 MiB SDK limit.");
+    }
+    return data;
+  }
+  throw new TypeError("The Shoir-IE API returned no readable response body.");
+}
+
 export class ShoirIEApiError extends Error {
   constructor(message, status, code = "API_ERROR") {
     super(message);
@@ -43,11 +122,12 @@ export class ShoirIEApiError extends Error {
 
 /** Session-scoped beta client. The user session token is never logged or persisted by this SDK. */
 export class ShoirIEClient {
-  constructor({ edgeUrl, publishableKey, username, sessionToken, fetchImpl = globalThis.fetch }) {
+  constructor({ edgeUrl, publishableKey, username, sessionToken, timeoutMs = DEFAULT_TIMEOUT_MS, fetchImpl = globalThis.fetch }) {
     this.edgeUrl = validateEndpoint(requiredText(edgeUrl, "edgeUrl", 2048));
     this.publishableKey = requiredText(publishableKey, "publishableKey", 1024);
     this.username = requiredText(username, "username", 120);
     this.sessionToken = requiredText(sessionToken, "sessionToken", 4096);
+    this.timeoutMs = finiteInteger(timeoutMs, "timeoutMs", 1_000, 30_000);
     if (typeof fetchImpl !== "function") {
       throw new TypeError("fetchImpl must be a fetch-compatible function.");
     }
@@ -84,16 +164,23 @@ export class ShoirIEClient {
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        body: serialized
+        body: serialized,
+        signal: AbortSignal.timeout(this.timeoutMs)
       });
-    } catch {
+    } catch (error) {
+      if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+        throw new ShoirIEApiError("The Shoir-IE API request timed out.", 0, "TIMEOUT");
+      }
       throw new ShoirIEApiError("The Shoir-IE API request failed before a response was received.", 0, "TRANSPORT_ERROR");
     }
     let data;
     try {
-      data = await response.json();
-    } catch {
-      throw new ShoirIEApiError("The Shoir-IE API returned a non-JSON response.", response.status, "INVALID_RESPONSE");
+      data = await readBoundedJsonResponse(response);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new ShoirIEApiError("The Shoir-IE API response exceeds the SDK size limit.", response.status, "RESPONSE_TOO_LARGE");
+      }
+      throw new ShoirIEApiError("The Shoir-IE API returned an invalid JSON response.", response.status, "INVALID_RESPONSE");
     }
     if (!response.ok || !data || typeof data !== "object" || data.error) {
       const message = typeof data?.error === "string" ? data.error.slice(0, 240) : "The Shoir-IE API rejected the request.";

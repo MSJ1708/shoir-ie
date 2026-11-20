@@ -3,6 +3,7 @@ export type ShoirIEJsonValue =
   | { [key: string]: ShoirIEJsonValue };
 export interface ShoirIEClientOptions {
   edgeUrl: string; publishableKey: string; username: string; sessionToken: string;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 export interface PlatformRecordPageOptions {

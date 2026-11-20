@@ -69,3 +69,64 @@ test("oversized payloads are rejected before fetch", async () => {
   await assert.rejects(() => client.savePlatformRecord({ recordType: "decision", entityKey: "D-1", payload: large }), /1 MiB/);
   assert.equal(calls, 0);
 });
+
+
+test("client applies a bounded request timeout signal", async () => {
+  let requestOptions;
+  const client = new ShoirIEClient({
+    ...base,
+    timeoutMs: 2_000,
+    fetchImpl: async (_url, options) => {
+      requestOptions = options;
+      return { ok: true, status: 200, json: async () => ({ ok: true, state_json: null }) };
+    }
+  });
+  await client.loadWorkspace();
+  assert.equal(requestOptions.signal instanceof AbortSignal, true);
+  assert.equal(requestOptions.signal.aborted, false);
+  assert.throws(() => new ShoirIEClient({ ...base, timeoutMs: 500 }), /between 1000 and 30000/);
+  assert.throws(() => new ShoirIEClient({ ...base, timeoutMs: 31_000 }), /between 1000 and 30000/);
+});
+
+test("client rejects oversized declared response before reading its body", async () => {
+  let bodyRead = false;
+  const client = new ShoirIEClient({
+    ...base,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => String(2 * 1024 * 1024 + 1) },
+      text: async () => { bodyRead = true; return "{}"; }
+    })
+  });
+  await assert.rejects(() => client.loadWorkspace(), error =>
+    error instanceof ShoirIEApiError && error.code === "RESPONSE_TOO_LARGE" && error.status === 200
+  );
+  assert.equal(bodyRead, false);
+});
+
+test("client cancels a response stream as soon as the SDK size limit is exceeded", async () => {
+  let cancelled = false;
+  let reads = 0;
+  const reader = {
+    async read() {
+      reads += 1;
+      return { done: false, value: new Uint8Array(2 * 1024 * 1024 + 1) };
+    },
+    async cancel() { cancelled = true; }
+  };
+  const client = new ShoirIEClient({
+    ...base,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: { getReader: () => reader }
+    })
+  });
+  await assert.rejects(() => client.loadWorkspace(), error =>
+    error instanceof ShoirIEApiError && error.code === "RESPONSE_TOO_LARGE"
+  );
+  assert.equal(cancelled, true);
+  assert.equal(reads, 1);
+});
