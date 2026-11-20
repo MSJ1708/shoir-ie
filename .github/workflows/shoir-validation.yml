@@ -120,7 +120,7 @@ jobs:
         run: |
           node --check excel_addin/planner.js
           node --check excel_addin/taskpane.js
-          node --test tests/excel_addin_planner.test.cjs
+          node --test tests/excel_addin_planner.test.cjs sdk/typescript/test/client.test.mjs
       - name: Validate Excel add-in manifest XML
         if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         run: |

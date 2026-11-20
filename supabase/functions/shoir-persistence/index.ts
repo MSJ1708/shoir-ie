@@ -770,6 +770,13 @@ Deno.serve(async (req) => {
   try {
     const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
+    const apiVersion = String(body.api_version || "v1").trim();
+    if (apiVersion !== "v1") {
+      return sendResponse({
+        error: "Unsupported API version.",
+        supported_versions: ["v1"],
+      }, 400);
+    }
 
     if (action === "oidc_login") {
       let oidcConfig: ReturnType<typeof readOidcVerifierConfig>;

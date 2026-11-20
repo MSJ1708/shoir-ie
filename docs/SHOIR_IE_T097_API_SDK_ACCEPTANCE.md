@@ -68,3 +68,10 @@ A passing local registry unit test or metadata-only Workbench screen does not sa
 8. Only then propose production configuration through a separately reviewed release.
 
 **No production endpoint, customer credential, or live customer data is required or permitted for this acceptance test.**
+
+
+## Repository implementation update — 2026-11-20
+
+The candidate now includes an initial typed JavaScript/TypeScript persistence SDK under `sdk/typescript`, a v1 OpenAPI contract draft and a backward-compatible Edge API version guard. The SDK covers three existing server-authorized actions: platform record list, platform record save and workspace load. It requires the configured Supabase publishable key plus the user's existing Shoir-IE session; it never accepts a service-role key, stores or prints session tokens, follows redirects or persists credentials. The Edge handler treats omitted `api_version` as v1 for old application clients and rejects unknown explicit versions. Contract and SDK tests are included in the repository CI path.
+
+**This does not close T097.** The SDK is not published to a package registry, no dedicated API hostname or customer gateway exists, no tenant-scoped API-key issue/rotate/revoke lifecycle or per-tenant API quota has been accepted, and no external client has consumed the package against a hosted staging tenant. Browser SDK consumers also require their exact origins to be approved by the Edge CORS allowlist. Keep T097 `EXTERNAL_CONFIGURATION_REQUIRED` until hosted endpoint, identity, quota, audit, external-client, lifecycle and independent security acceptance is complete.
