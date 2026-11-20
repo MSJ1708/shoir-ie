@@ -419,8 +419,9 @@ def analyze_pareto_root_cause(
     countermeasure: str = "",
     owner: str = "",
     due_date: str = "",
+    fishbone_causes: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
-    """Build a reproducible Pareto table and optionally record a complete 5-Why chain.
+    """Build Pareto, optional 5-Why/action, and an optional structured fishbone record.
 
     Pareto concentration describes the observed counts and does not establish
     causation. A 5-Why record is a hypothesis/evidence structure requiring
@@ -488,6 +489,68 @@ def analyze_pareto_root_cause(
         status = "ROOT_CAUSE_REVIEW_RECORDED" if follow_up_complete else "FOLLOW_UP_INCOMPLETE"
     else:
         status = "PARETO_ONLY"
+
+    # Optional six-category fishbone (Ishikawa) structure. This records
+    # investigation hypotheses; it does not infer or prove physical causes.
+    fishbone_categories = {
+        "Manpower": {"manpower", "man", "people", "personnel"},
+        "Machine": {"machine", "machinery", "equipment"},
+        "Method": {"method", "process"},
+        "Material": {"material", "materials"},
+        "Measurement": {"measurement", "measurements", "inspection"},
+        "Environment": {"environment", "mother nature", "mother_nature", "milieu"},
+    }
+    fishbone_by_category: dict[str, list[str]] = {
+        category: [] for category in fishbone_categories
+    }
+    if fishbone_causes is not None:
+        if not isinstance(fishbone_causes, Mapping):
+            raise ValueError("Fishbone causes must be a JSON object keyed by the six M categories.")
+        seen_fishbone_categories: set[str] = set()
+        for raw_category, raw_causes in fishbone_causes.items():
+            category_text = str(raw_category or "").strip().casefold()
+            canonical = next(
+                (
+                    category for category, aliases in fishbone_categories.items()
+                    if category_text in aliases or category_text == category.casefold()
+                ),
+                None,
+            )
+            if canonical is None:
+                raise ValueError(
+                    "Fishbone categories must be Manpower, Machine, Method, Material, Measurement or Environment."
+                )
+            if canonical in seen_fishbone_categories:
+                raise ValueError(f"Fishbone category {canonical} was supplied more than once.")
+            seen_fishbone_categories.add(canonical)
+            if isinstance(raw_causes, (str, bytes)) or not isinstance(raw_causes, Sequence):
+                raise ValueError(f"Fishbone causes for {canonical} must be a list of text statements.")
+            if len(raw_causes) > 12:
+                raise ValueError(f"Fishbone category {canonical} is limited to 12 cause statements.")
+            normalized_causes: list[str] = []
+            seen_causes: set[str] = set()
+            for index, raw_cause in enumerate(raw_causes, start=1):
+                cause = str(raw_cause or "").strip()
+                if not cause or len(cause) > 240:
+                    raise ValueError(
+                        f"Fishbone cause {index} in {canonical} must contain 1 to 240 characters."
+                    )
+                key = cause.casefold()
+                if key in seen_causes:
+                    raise ValueError(f"Duplicate fishbone cause in {canonical}: {cause}.")
+                seen_causes.add(key)
+                normalized_causes.append(cause)
+            fishbone_by_category[canonical] = normalized_causes
+
+    fishbone_rows = [
+        {"Category": category, "Cause": cause, "Status": "HYPOTHESIS — VERIFY"}
+        for category, causes in fishbone_by_category.items()
+        for cause in causes
+    ]
+    fishbone_frame = pd.DataFrame(
+        fishbone_rows, columns=["Category", "Cause", "Status"]
+    )
+    fishbone_count = len(fishbone_rows)
     return {
         "status": status,
         "method": "Descending Pareto analysis plus optional structured 5-Why/action record",
@@ -501,6 +564,10 @@ def analyze_pareto_root_cause(
         "owner": action_owner,
         "due_date": date_value,
         "follow_up_complete": follow_up_complete,
+        "fishbone_causes": fishbone_by_category,
+        "fishbone_summary": fishbone_frame,
+        "fishbone_cause_count": fishbone_count,
+        "fishbone_status": "HYPOTHESES_RECORDED" if fishbone_count else "NOT_PROVIDED",
         "formula": "Share = category count / total count; cumulative share = cumulative count / total count.",
         "warning": (
             "Pareto concentration and 5-Why statements do not prove causation. Validate proposed causes with process evidence."
