@@ -598,6 +598,7 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not alert_frame.empty:
         alert_frame = alert_frame[alert_frame["Event"].isin(["NEW", "CONTINUING", "UNVERIFIED"])].copy()
     result.update({
+        "tool_id": "T094",
         "status": "KPI_EVALUATION_COMPLETE",
         "stale_kpi_count": stale_count,
         "kpis": kpi_frame,
@@ -805,13 +806,17 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
     provider = provider if isinstance(provider, Mapping) else {}
 
     raw_exposed = auth.get("expose_tokens")
-    if isinstance(raw_exposed, str):
-        exposed_tokens = {raw_exposed.strip().casefold()}
+    if isinstance(raw_exposed, str) and raw_exposed.strip():
+        exposed_tokens = {
+            token.strip().casefold()
+            for token in re.split(r"[,\\s]+", raw_exposed)
+            if token.strip()
+        }
     elif isinstance(raw_exposed, (list, tuple, set)):
         exposed_tokens = {
             str(value).strip().casefold()
             for value in raw_exposed
-            if isinstance(value, str)
+            if isinstance(value, str) and value.strip()
         }
     else:
         exposed_tokens = set()
@@ -819,7 +824,7 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
     visible_settings = {
         "redirect_uri": ("auth.redirect_uri", auth.get("redirect_uri")),
         "cookie_secret": ("auth.cookie_secret", auth.get("cookie_secret")),
-        "expose_tokens_id": ("auth.expose_tokens includes id", "id" if "id" in exposed_tokens else ""),
+        "expose_tokens_id": ("auth.expose_tokens includes id", raw_exposed),
         "client_id": ("auth.enterprise.client_id", provider.get("client_id")),
         "client_secret": ("auth.enterprise.client_secret", provider.get("client_secret")),
         "server_metadata_url": ("auth.enterprise.server_metadata_url", provider.get("server_metadata_url")),
@@ -828,6 +833,7 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         key: isinstance(value, str) and bool(value.strip())
         for key, (_, value) in visible_settings.items()
     }
+    configured["expose_tokens_id"] = bool(exposed_tokens)
     missing = [
         visible_settings[key][0]
         for key, is_present in configured.items()
@@ -869,10 +875,12 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         problems.append("auth.cookie_secret must contain at least 32 characters.")
     if configured["server_metadata_url"] and not metadata_valid:
         problems.append("auth.enterprise.server_metadata_url must be a public HTTPS URL.")
+    if configured["expose_tokens_id"] and "id" not in exposed_tokens:
+        problems.append("auth.expose_tokens must include the ID token value `id`.")
     complete = not missing and not problems and redirect_valid and cookie_valid and metadata_valid
     status = (
-        "NOT_CONFIGURED" if missing
-        else "CONFIGURATION_INVALID" if problems or not complete
+        "CONFIGURATION_INVALID" if problems
+        else "NOT_CONFIGURED" if missing
         else "STREAMLIT_CONFIGURATION_READY_EDGE_SETTINGS_UNVERIFIED"
     )
 
