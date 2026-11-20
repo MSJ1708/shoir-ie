@@ -2196,6 +2196,7 @@ Deno.serve(async (req) => {
       let referenceChecksCompleted = 0;
       let leaseBusyCount = 0;
       let leaseAcquisitionFailures = 0;
+      let leaseRenewalFailures = 0;
       let leaseReleaseFailures = 0;
       let deferredDeleteCandidateCount = 0;
       let eligibleTemporaryCount = 0;
@@ -2219,7 +2220,7 @@ Deno.serve(async (req) => {
               p_lease_token: leaseToken,
               p_lease_operation: "sweep",
               p_actor_username_lc: String(row.username_lc || ""),
-              p_lease_seconds: 300,
+              p_lease_seconds: 600,
             },
           );
           if (leaseError) {
@@ -2232,6 +2233,17 @@ Deno.serve(async (req) => {
             continue;
           }
           leaseAcquired = true;
+          const initialLeaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            candidate.dataset_id,
+            leaseToken,
+            "sweep",
+            String(row.username_lc || ""),
+          );
+          if (!initialLeaseRenewed) {
+            leaseRenewalFailures += 1;
+            continue;
+          }
 
           const [recordRefs, eventRefs] = await Promise.all([
             supabase.from("shoir_platform_records")
@@ -2305,6 +2317,17 @@ Deno.serve(async (req) => {
             continue;
           }
 
+          const deletionLeaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            candidate.dataset_id,
+            leaseToken,
+            "sweep",
+            String(row.username_lc || ""),
+          );
+          if (!deletionLeaseRenewed) {
+            leaseRenewalFailures += 1;
+            continue;
+          }
           const { error: removeError } = await bucket.remove([
             candidate.storage_key,
           ]);
@@ -2381,6 +2404,7 @@ Deno.serve(async (req) => {
         reference_check_failure_count: referenceCheckFailures,
         lease_busy_count: leaseBusyCount,
         lease_acquisition_failure_count: leaseAcquisitionFailures,
+        lease_renewal_failure_count: leaseRenewalFailures,
         lease_release_failure_count: leaseReleaseFailures,
         deferred_reference_check_count: deferredReferenceCheckCount,
         deferred_delete_candidate_count: deferredDeleteCandidateCount,
