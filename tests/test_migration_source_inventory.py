@@ -571,10 +571,10 @@ def test_dataset_storage_lease_fencing_migration_locks_live_tokens_for_metadata_
         MIGRATIONS
         / "20261120130000_shoir_dataset_storage_lease_fencing.sql"
     ).read_text(encoding="utf-8")
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
-    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+    normalized = re.sub(r"\s+", " ", executable_sql).casefold()
     for function_name in (
         "shoir_dataset_storage_lease_renew",
         "shoir_platform_register_dataset_version_with_storage_and_lease",
