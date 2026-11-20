@@ -1,0 +1,67 @@
+"""Static regression contracts for managed dataset object lifecycle ordering."""
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+EDGE = ROOT / "supabase" / "functions" / "shoir-persistence" / "index.ts"
+
+
+def dataset_finalize_source() -> str:
+    source = EDGE.read_text(encoding="utf-8")
+    start = source.index('if (action === "dataset_version_finalize")')
+    end = source.index('if (action === "dataset_version_register")', start)
+    return source[start:end]
+
+
+def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
+    source = dataset_finalize_source()
+    rpc = source.index('supabase.rpc(\n        "shoir_platform_register_dataset_version_with_storage"')
+    registration = source.index("const registration = Array.isArray(data)", rpc)
+    temp_cleanup = source.index("const { error: tempRemoveError } = await bucket.remove([uploadPath])", registration)
+
+    assert rpc < registration < temp_cleanup
+    assert "temporary_cleanup_pending: temporaryCleanupPending" in source
+
+
+def test_new_content_addressed_object_is_deleted_only_after_two_successful_no_reference_checks():
+    source = dataset_finalize_source()
+    assert "let createdFinalObject = false;" in source
+    assert "createdFinalObject = true;" in source
+    assert "if (createdFinalObject)" in source
+
+    record_query = source.index('supabase.from("shoir_platform_records")')
+    event_query = source.index('supabase.from("shoir_platform_events")')
+    record_refs = source.index("recordRefs.error || eventRefs.error")
+    no_references = source.index(
+        "(recordRefs.data || []).length === 0 &&\n              (eventRefs.data || []).length === 0"
+    )
+    delete_object = source.index("await bucket.remove([\n                storageKey,\n              ])")
+
+    assert record_query < event_query < record_refs < no_references < delete_object
+    assert '.contains("payload_json", { storage_key: storageKey })' in source
+    assert "uncertain reference check must never turn into a destructive" in source
+
+
+def test_metadata_rpc_failure_keeps_uncertain_object_and_cleans_only_temp_upload():
+    source = dataset_finalize_source()
+    rpc_error = source.index("if (error) {", source.index("shoir_platform_register_dataset_version_with_storage"))
+    reference_checks = source.index("const [recordRefs, eventRefs]", rpc_error)
+    temp_cleanup = source.index("await bucket.remove([uploadPath])", reference_checks)
+    throw_original_error = source.index("throw error;", temp_cleanup)
+
+    assert rpc_error < reference_checks < temp_cleanup < throw_original_error
+    assert "reference checks were unavailable, so the immutable object was retained" in source
+    assert "the immutable object was retained because reference status was uncertain" in source
+
+
+def test_temporary_object_cleanup_failure_does_not_report_registered_version_as_failed():
+    source = dataset_finalize_source()
+    registration = source.index("const registration = Array.isArray(data)")
+    cleanup_flag = source.index("let temporaryCleanupPending = false;", registration)
+    response = source.index("return sendResponse({", cleanup_flag)
+
+    assert "temporaryCleanupPending = Boolean(tempRemoveError)" in source
+    assert "temporaryCleanupPending = true" in source
+    assert response > cleanup_flag
+    assert "ok: true" in source[response:response + 250]
