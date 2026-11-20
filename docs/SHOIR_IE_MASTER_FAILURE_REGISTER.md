@@ -67,3 +67,18 @@ F-004 remains open until the exact final-head retest passes.
 | Retest | Edge formatting on the retired action was corrected in `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`; [Edge verification #44755607682](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607682) passed Deno formatting, type-checking, bounded request/security and OIDC tests. |
 | Closure rule | Keep the HTTP 410/static contract and verify it in the final exact-head Edge/Python suite; do not restore the old route. |
 
+
+
+## F-006 — security scans ran after a cancelled pre-checkout job (workflow guard defect)
+
+| Field | Evidence |
+|---|---|
+| Workflow/run | [Shoir-IE validation #44755607737](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607737), candidate head `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`. |
+| Job lifecycle | The disposable PostgreSQL service was still initializing. The job was cancelled before checkout; checkout, setup-python, dependency installation, compilation and test steps were skipped. |
+| Misleading downstream steps | `pip-audit -r requirements.txt` still ran under `if: always()` and reported invalid requirements input because the repository had not been checked out. The hard-coded credential scan also ran and failed with `FileNotFoundError: app.py`. |
+| Root cause | Missing `steps.checkout.outcome == 'success'` precondition on repository-file scans, combined with a cancelled pre-checkout job. This run does **not** establish a dependency vulnerability or credential leak. |
+| Correction | Validation workflow now gives the initial checkout an explicit `id: checkout` and both repository-file scans run only when checkout succeeded. The subsequent browser-smoke checkout remains separate. Real scanner findings still fail the job normally. |
+| Fix commit | Recorded by this workflow-guard correction commit; exact-head retest required. |
+| Closure rule | Run validation on the corrected exact HEAD. Confirm checkout/dependency install pass, pip-audit parses the real requirements file, credential scan runs against present files and reports no obvious literal secrets, and all other test/export/viewport stages complete with inspectable artifacts. |
+
+F-006 remains open until the corrected full validation passes.
