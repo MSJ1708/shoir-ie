@@ -151,7 +151,7 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT,owner TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL,dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE INDEX IF NOT EXISTS idx_exp_module_runs_owner ON experience_module_runs(owner,module,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,evidence_references_json TEXT NOT NULL DEFAULT '[]',protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
@@ -178,6 +178,19 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             ):
                 if column not in existing_columns:
                     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {definition}")
+
+        module_run_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(experience_module_runs)")
+        }
+        for column, definition in (
+            ("dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("dataset_dependency_status", "TEXT NOT NULL DEFAULT 'NOT_LINKED'"),
+            ("stale_dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ):
+            if column not in module_run_columns:
+                conn.execute(
+                    f"ALTER TABLE experience_module_runs ADD COLUMN {column} {definition}"
+                )
 
         research_columns = {
             str(row[1]) for row in conn.execute("PRAGMA table_info(experience_research_studies)")
@@ -1042,8 +1055,9 @@ def save_module_analysis_run(
     duration_ms: float = 0.0,
     status: str = "Completed",
     db_path: str = "enterprise_full_workspace.db",
+    dataset_dependencies: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Persist a user-scoped input/result snapshot, bounded to protect the app."""
+    """Persist a bounded module snapshot with an optional verified dataset lineage."""
     if not isinstance(input_frame, pd.DataFrame):
         raise TypeError("Module run inputs must be a pandas DataFrame.")
     ensure_experience_db(db_path)
@@ -1051,6 +1065,14 @@ def save_module_analysis_run(
     result_frame = analysis.get("result")
     if not isinstance(result_frame, pd.DataFrame):
         result_frame = pd.DataFrame()
+
+    declared_dependencies = (
+        dataset_dependencies
+        if dataset_dependencies is not None
+        else analysis.get("dataset_dependencies", [])
+    )
+    if isinstance(declared_dependencies, (str, bytes)) or not isinstance(declared_dependencies, Sequence):
+        raise ValueError("Module run dataset_dependencies must be a list of reference objects.")
 
     input_raw = input_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
     result_raw = result_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
@@ -1074,28 +1096,51 @@ def save_module_analysis_run(
     run_id = "MRUN-" + uuid.uuid4().hex[:16].upper()
     created_at = _now()
     elapsed = max(0.0, float(duration_ms or 0.0))
-    values = (
-        run_id, str(module), str(owner),
-        str(cleaned_profile.get("display_name") or module),
-        str(cleaned_profile.get("project_name") or ""),
-        str(cleaned_profile.get("site_name") or ""),
-        input_hash, int(len(input_frame)),
-        json.dumps([str(column) for column in input_frame.columns], ensure_ascii=False),
-        json.dumps([str(column) for column in result_frame.columns], ensure_ascii=False),
-        input_blob, result_blob,
-        json.dumps(cleaned_profile, ensure_ascii=False, default=str),
-        json.dumps(metrics, ensure_ascii=False, default=str),
-        str(analysis.get("method") or "Module analysis"),
-        str(analysis.get("guardrail") or "Verify the result against independent evidence before implementation."),
-        elapsed, str(status or "Completed")[:40], snapshot_status, created_at,
-    )
+
     with _db(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        dependencies: list[dict[str, Any]] = []
+        dependency_status = "NOT_LINKED"
+        if declared_dependencies:
+            from industrial_platform import _resolve_legacy_dataset_dependencies, init_platform_db
+
+            # The dataset registry is local-only in this code path. Its schema
+            # is initialized before resolving exact version/hash/fingerprint refs.
+            init_platform_db(db_path)
+            dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
+                conn, {"dataset_dependencies": declared_dependencies}
+            )
+            if dependency_status == "STALE":
+                raise ValueError(
+                    "Cannot save a module run against a stale dataset version. "
+                    "Reload the current dataset and rerun the module."
+                )
+        values = (
+            run_id, str(module), str(owner),
+            str(cleaned_profile.get("display_name") or module),
+            str(cleaned_profile.get("project_name") or ""),
+            str(cleaned_profile.get("site_name") or ""),
+            input_hash, int(len(input_frame)),
+            json.dumps([str(column) for column in input_frame.columns], ensure_ascii=False),
+            json.dumps([str(column) for column in result_frame.columns], ensure_ascii=False),
+            input_blob, result_blob,
+            json.dumps(cleaned_profile, ensure_ascii=False, default=str),
+            json.dumps(metrics, ensure_ascii=False, default=str),
+            str(analysis.get("method") or "Module analysis"),
+            str(analysis.get("guardrail") or "Verify the result against independent evidence before implementation."),
+            elapsed, str(status or "Completed")[:40], snapshot_status, created_at,
+            json.dumps(dependencies, ensure_ascii=False, sort_keys=True),
+            dependency_status,
+            "[]",
+        )
         conn.execute(
             """INSERT INTO experience_module_runs(
                 run_id,module,owner,display_name,project_name,site_name,input_hash,input_rows,
                 input_columns_json,result_columns_json,input_snapshot_gzip,result_snapshot_gzip,
-                profile_json,metrics_json,method,guardrail,duration_ms,status,snapshot_status,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                profile_json,metrics_json,method,guardrail,duration_ms,status,snapshot_status,
+                created_at,dataset_dependencies_json,dataset_dependency_status,
+                stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             values,
         )
         conn.commit()
@@ -1103,6 +1148,8 @@ def save_module_analysis_run(
         "run_id": run_id,
         "input_hash": input_hash,
         "snapshot_status": snapshot_status,
+        "dataset_dependencies": dependencies,
+        "dataset_dependency_status": dependency_status,
         "duration_ms": elapsed,
         "created_at": created_at,
     }
@@ -1114,13 +1161,14 @@ def list_module_analysis_runs(
     limit: int = 20,
     db_path: str = "enterprise_full_workspace.db",
 ) -> pd.DataFrame:
-    """List only the current owner's runs for the exact module identifier."""
+    """List only the current owner's runs and their dataset freshness state."""
     ensure_experience_db(db_path)
     safe_limit = max(1, min(50, int(limit)))
     with _db(db_path) as conn:
         rows = conn.execute(
             """SELECT run_id,display_name,project_name,site_name,input_rows,input_hash,
-                      method,status,snapshot_status,duration_ms,created_at
+                      method,status,snapshot_status,duration_ms,created_at,
+                      dataset_dependency_status
                FROM experience_module_runs
                WHERE module=? AND owner=?
                ORDER BY created_at DESC, rowid DESC LIMIT ?""",
@@ -1129,6 +1177,7 @@ def list_module_analysis_runs(
     return pd.DataFrame(rows, columns=[
         "Run ID", "Workspace name", "Project", "Site", "Input rows", "Input SHA-256",
         "Method", "Status", "Snapshot status", "Duration (ms)", "Created at",
+        "Dataset freshness",
     ])
 
 
@@ -1137,14 +1186,15 @@ def load_module_analysis_run(
     owner: str,
     db_path: str = "enterprise_full_workspace.db",
 ) -> dict[str, Any] | None:
-    """Load a saved run only for its owner, including whichever bounded snapshots exist."""
+    """Load an owner's run, preserving historical snapshots and dataset freshness."""
     ensure_experience_db(db_path)
     with _db(db_path) as conn:
         row = conn.execute(
             """SELECT run_id,module,owner,display_name,project_name,site_name,input_hash,
                       input_rows,input_columns_json,result_columns_json,input_snapshot_gzip,
                       result_snapshot_gzip,profile_json,metrics_json,method,guardrail,
-                      duration_ms,status,snapshot_status,created_at
+                      duration_ms,status,snapshot_status,created_at,dataset_dependencies_json,
+                      dataset_dependency_status,stale_dataset_dependencies_json
                FROM experience_module_runs WHERE run_id=? AND owner=?""",
             (str(run_id), str(owner)),
         ).fetchone()
@@ -1153,7 +1203,8 @@ def load_module_analysis_run(
     (
         saved_id,module,saved_owner,display_name,project_name,site_name,input_hash,
         input_rows,input_columns_json,result_columns_json,input_blob,result_blob,
-        raw_profile,raw_metrics,method,guardrail,duration_ms,status,snapshot_status,created_at,
+        raw_profile,raw_metrics,method,guardrail,duration_ms,status,snapshot_status,
+        created_at,raw_dependencies,dependency_status,raw_stale_markers,
     ) = row
 
     def decode_json(raw: Any, fallback: Any) -> Any:
@@ -1172,6 +1223,12 @@ def load_module_analysis_run(
         except Exception:
             return pd.DataFrame(columns=columns if isinstance(columns, list) else [])
 
+    dependencies = decode_json(raw_dependencies, [])
+    stale_markers = decode_json(raw_stale_markers, [])
+    if not isinstance(dependencies, list):
+        dependencies = []
+    if not isinstance(stale_markers, list):
+        stale_markers = []
     return {
         "run_id": saved_id, "module": module, "owner": saved_owner,
         "display_name": display_name, "project_name": project_name, "site_name": site_name,
@@ -1183,6 +1240,12 @@ def load_module_analysis_run(
         "method": method, "guardrail": guardrail,
         "duration_ms": float(duration_ms or 0.0), "status": status,
         "snapshot_status": snapshot_status, "created_at": created_at,
+        "dataset_dependencies": dependencies,
+        "dataset_dependency_status": str(dependency_status or "NOT_LINKED").upper(),
+        "stale_dataset_dependencies": stale_markers,
+        "is_stale": str(dependency_status or "NOT_LINKED").upper() in {
+            "STALE", "UNVERIFIED_REFERENCE"
+        },
     }
 
 
