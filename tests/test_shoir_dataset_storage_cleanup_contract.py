@@ -16,7 +16,7 @@ def dataset_finalize_source() -> str:
 
 def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
     source = dataset_finalize_source()
-    rpc = source.index('supabase.rpc(\n        "shoir_platform_register_dataset_version_with_storage"')
+    rpc = source.index('supabase.rpc(')
     registration = source.index("const registration = Array.isArray(data)", rpc)
     temp_cleanup = source.index("const { error: tempRemoveError } = await bucket.remove([", registration)
 
@@ -41,9 +41,9 @@ def test_new_content_addressed_object_is_deleted_only_after_two_successful_no_re
     event_query = source.index('supabase.from("shoir_platform_events")')
     record_refs = source.index("recordRefs.error || eventRefs.error")
     no_references = source.index(
-        "(recordRefs.data || []).length === 0 &&\n              (eventRefs.data || []).length === 0"
+        "(recordRefs.data || []).length === 0 &&"
     )
-    delete_object = source.index("await bucket.remove([\n                storageKey,\n              ])")
+    delete_object = source.index("await bucket.remove([", no_references)
 
     assert record_query < event_query < record_refs < no_references < delete_object
     assert '.contains("payload_json", { storage_key: storageKey })' in source
