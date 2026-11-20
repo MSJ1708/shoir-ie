@@ -136,3 +136,18 @@ The Edge finalizer now performs the atomic metadata registration before deleting
 The unit and static regression contracts are in `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. They require exact-head CI.
 
 The following remain open: scheduled reference-aware cleanup of older orphan objects and abandoned temporary objects; hosted staging validation of signed TUS creation, interrupted upload/resume, server hash/shape verification, fresh-session historical download, tenant isolation and retention; raw workbook preservation and end-to-end dataset-to-decision/export continuity. The old local SQLite dataset metadata registry still does not contain the original workbook bytes.
+
+
+## Candidate update — 2026-11-20: coordinated Storage lifecycle leases
+
+The current release-hardening candidate adds migration 20261120115000_shoir_dataset_storage_lifecycle_leases.sql and wires the resulting server-only RPCs into the dataset finalizer and T020 maintenance action.
+
+- A private RLS-enabled table serializes operations on each workspace/dataset pair. Browser roles and service_role have no direct table privileges; only the session-validated Edge Function service role can invoke the SECURITY DEFINER acquire/release RPCs.
+- Finalization acquires a 300-second lease before reading the temporary object, verifying its hash/CSV shape, creating or reusing the immutable content-addressed object, and committing dataset metadata. A finally block releases only the exact lease token acquired by that request.
+- Cleanup acquires the same workspace/dataset lease before checking both metadata ledgers, writing the deletion-intent event, removing the object and writing the completion event. Temporary and immutable objects use kind-specific append-only event types.
+- Live leases block competing finalization/cleanup. A crashed invocation leaves a bounded lease that can be reclaimed after expiry. Stale tokens cannot release a newer lease.
+- Preview remains non-destructive. The 48-hour newest-timestamp rule, workspace path validation, Owner/Admin shared-workspace manage gate, dual-ledger fail-closed reference checks, 500-object/200-directory scan cap, 100-reference-check cap and 50-deletion cap remain in force.
+
+The exact-head CI must verify clean PostgreSQL replay, server-only grants, lease exclusivity, token fencing, expiry reclamation, Edge type/security tests and the complete Python regression suite. This is source implementation only: the new migration and matching Edge Function have not been deployed to staging. Do not run the delete operation until exact-head CI, staging backup/rollback readiness, an independent review and authenticated disposable-workspace rehearsal are accepted.
+
+Original workbook bytes remain an Excel Intelligence responsibility. Hosted fresh-login, organization isolation, signed-object, end-to-end decision/export and independent engineering acceptance remain separate gates.
