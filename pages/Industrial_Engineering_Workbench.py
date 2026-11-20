@@ -1823,6 +1823,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "redactions_applied": safe_diagnostic["redactions_applied"],
                                 "raw_input_stored": False,
                             }
+                        elif selected_tool["tool_id"] == "T085":
+                            current_tool_inputs = {
+                                "effect_size_cohens_d": effect_size,
+                                "alpha": alpha,
+                                "target_power": target_power,
+                                "max_n_per_group": int(search_limit),
+                                "test_design": "BALANCED_INDEPENDENT_TWO_SIDED_EQUAL_VARIANCE_T_TEST",
+                            }
                         elif selected_tool["tool_id"] == "T009":
                             current_tool_inputs = {"status_filter": capability_status_filter, "row_limit": int(capability_status_limit)}
                         elif selected_tool["tool_id"] == "T010":
