@@ -95,13 +95,13 @@ BEGIN
     END IF;
 
     PERFORM 1
-      FROM public.shoir_dataset_storage_lifecycle_leases
-     WHERE workspace_key = p_workspace_key
-       AND dataset_id = p_dataset_id
-       AND lease_token = p_lease_token
-       AND lease_operation = 'finalize'
-       AND actor_username_lc = lower(btrim(p_actor))
-       AND expires_at > clock_timestamp()
+      FROM public.shoir_dataset_storage_lifecycle_leases AS lifecycle_lease
+     WHERE lifecycle_lease.workspace_key = p_workspace_key
+       AND lifecycle_lease.dataset_id = p_dataset_id
+       AND lifecycle_lease.lease_token = p_lease_token
+       AND lifecycle_lease.lease_operation = 'finalize'
+       AND lifecycle_lease.actor_username_lc = lower(btrim(p_actor))
+       AND lifecycle_lease.expires_at > clock_timestamp()
      FOR UPDATE;
 
     IF NOT FOUND THEN
@@ -177,13 +177,13 @@ BEGIN
     END IF;
 
     PERFORM 1
-      FROM public.shoir_dataset_storage_lifecycle_leases
-     WHERE workspace_key = p_workspace_key
-       AND dataset_id = p_dataset_id
-       AND lease_token = p_lease_token
-       AND lease_operation = 'register'
-       AND actor_username_lc = lower(btrim(p_actor))
-       AND expires_at > clock_timestamp()
+      FROM public.shoir_dataset_storage_lifecycle_leases AS lifecycle_lease
+     WHERE lifecycle_lease.workspace_key = p_workspace_key
+       AND lifecycle_lease.dataset_id = p_dataset_id
+       AND lifecycle_lease.lease_token = p_lease_token
+       AND lifecycle_lease.lease_operation = 'register'
+       AND lifecycle_lease.actor_username_lc = lower(btrim(p_actor))
+       AND lifecycle_lease.expires_at > clock_timestamp()
      FOR UPDATE;
 
     IF NOT FOUND THEN
