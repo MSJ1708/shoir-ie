@@ -251,12 +251,20 @@ def monitor_forecast_drift(
     max_mae: float,
     *,
     window: int | None = None,
+    model_id: str = "",
+    model_version: str = "",
+    dataset_id: str = "",
+    dataset_version: str = "",
+    source_label: str = "",
+    evaluation_period_start: str = "",
+    evaluation_period_end: str = "",
 ) -> dict[str, Any]:
     """Monitor forecast fit against later actuals using an absolute MAE threshold.
 
     This is a threshold check, not a self-training detector, causal explanation,
-    or automatic retraining service. Actual zero values are excluded from MAPE
-    and counted in the returned metadata.
+    or automatic retraining service. Optional model/dataset version labels and
+    evaluation dates are user-supplied lineage metadata, not registry-verified.
+    Actual zero values are excluded from MAPE and counted in the returned metadata.
     """
     if isinstance(predictions, (str, bytes)) or isinstance(actuals, (str, bytes)):
         raise ValueError("Predictions and actuals must be numeric sequences.")
@@ -278,6 +286,49 @@ def monitor_forecast_drift(
         if window > len(pred):
             raise ValueError("Window cannot exceed the number of aligned observations.")
         pred, obs = pred[-window:], obs[-window:]
+
+    metadata_values = {
+        "model_id": model_id,
+        "model_version": model_version,
+        "dataset_id": dataset_id,
+        "dataset_version": dataset_version,
+        "source_label": source_label,
+    }
+    normalized_metadata: dict[str, str] = {}
+    for field_name, raw_value in metadata_values.items():
+        value = str(raw_value or "").strip()
+        if len(value) > 160:
+            raise ValueError(f"{field_name} must not exceed 160 characters.")
+        normalized_metadata[field_name] = value
+    if bool(normalized_metadata["model_id"]) != bool(normalized_metadata["model_version"]):
+        raise ValueError("Model ID and model version must be supplied together.")
+    if bool(normalized_metadata["dataset_id"]) != bool(normalized_metadata["dataset_version"]):
+        raise ValueError("Dataset ID and dataset version must be supplied together.")
+
+    period_start = str(evaluation_period_start or "").strip()
+    period_end = str(evaluation_period_end or "").strip()
+    if bool(period_start) != bool(period_end):
+        raise ValueError("Evaluation period start and end must be supplied together.")
+    if period_start:
+        try:
+            parsed_start = _date.fromisoformat(period_start)
+            parsed_end = _date.fromisoformat(period_end)
+        except ValueError as exc:
+            raise ValueError("Evaluation period must use ISO YYYY-MM-DD dates.") from exc
+        if parsed_start.isoformat() != period_start or parsed_end.isoformat() != period_end:
+            raise ValueError("Evaluation period must use ISO YYYY-MM-DD dates.")
+        if parsed_end < parsed_start:
+            raise ValueError("Evaluation period end cannot be before its start.")
+
+    has_model_lineage = bool(normalized_metadata["model_id"] and normalized_metadata["model_version"])
+    has_dataset_lineage = bool(normalized_metadata["dataset_id"] and normalized_metadata["dataset_version"])
+    lineage_status = (
+        "USER_SUPPLIED_MODEL_AND_DATASET_VERSIONS"
+        if has_model_lineage and has_dataset_lineage
+        else "PARTIAL_USER_SUPPLIED_LINEAGE"
+        if has_model_lineage or has_dataset_lineage or period_start or normalized_metadata["source_label"]
+        else "NOT_PROVIDED"
+    )
     residuals = [a - p for p, a in zip(pred, obs)]
     absolute_errors = [abs(x) for x in residuals]
     mae = sum(absolute_errors) / len(residuals)
@@ -306,7 +357,16 @@ def monitor_forecast_drift(
         "zero_actuals_excluded_from_mape": len(obs) - len(nonzero),
         "max_mae_threshold": limit,
         "window": len(pred),
-        "warning": "Threshold alarms indicate degraded forecast fit; they do not identify cause or retrain a model.",
+        "model_id": normalized_metadata["model_id"] or None,
+        "model_version": normalized_metadata["model_version"] or None,
+        "dataset_id": normalized_metadata["dataset_id"] or None,
+        "dataset_version": normalized_metadata["dataset_version"] or None,
+        "source_label": normalized_metadata["source_label"] or None,
+        "evaluation_period_start": period_start or None,
+        "evaluation_period_end": period_end or None,
+        "lineage_status": lineage_status,
+        "lineage_verification": "USER_SUPPLIED_UNVERIFIED",
+        "warning": "Threshold alarms indicate degraded forecast fit; they do not identify cause or retrain a model. Model/dataset IDs and versions are user-supplied and not checked against a registry or source connector.",
         "series": frame,
     }
 
