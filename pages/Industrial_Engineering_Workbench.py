@@ -2139,11 +2139,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     st.session_state["shoir_t020_storage_sweep_result"] = sweep_result
                                     if delete_sweep:
                                         st.success(
-                                            f"Storage sweep completed: {int(sweep_result.get('deleted_count', 0))} temporary object(s) deleted."
+                                            f"Storage sweep completed: {int(sweep_result.get('deleted_count', 0))} dataset object(s) deleted (temporary and/or immutable)."
                                         )
                                     else:
                                         st.info(
-                                            f"Preview complete: {int(sweep_result.get('eligible_temporary_orphan_count', 0))} eligible temporary object(s); nothing was deleted."
+                                            f"Preview complete: {int(sweep_result.get('eligible_temporary_orphan_count', 0))} temporary and {int(sweep_result.get('eligible_immutable_orphan_count', 0))} immutable orphan object(s) are eligible; nothing was deleted."
                                         )
                                 except Exception as exc:
                                     st.error(f"Dataset storage maintenance could not be completed safely: {exc}")
