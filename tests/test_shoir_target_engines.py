@@ -2726,6 +2726,42 @@ def test_kpi_alerts_resolve_breaches_and_reject_duplicate_rules():
         )
 
 
+def test_kpi_alerts_do_not_resolve_an_existing_breach_from_stale_data():
+    rules = [{
+        "rule_id": "temperature-high",
+        "kpi": "Temperature",
+        "operator": "gt",
+        "threshold": 80,
+        "severity": "HIGH",
+    }]
+    active = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:01:00Z",
+    )
+    assert active["alert_records"][0]["severity"] == "CRITICAL"
+
+    stale = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-04T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:02:00Z",
+        previous_open_alert_ids=active["next_open_alert_ids"],
+    )
+    assert stale["resolved_alert_count"] == 0
+    assert stale["open_alert_count"] == 1
+    assert stale["breached_kpi_count"] == 0
+    assert stale["unverified_open_alert_count"] == 1
+    assert stale["alert_records"][0]["state"] == "OPEN_UNVERIFIED"
+    assert stale["alerts"].iloc[0]["Event"] == "UNVERIFIED"
+
+    recovered = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-06T17:03:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:04:00Z",
+        previous_open_alert_ids=stale["next_open_alert_ids"],
+    )
+    assert recovered["resolved_alert_count"] == 1
+    assert recovered["open_alert_count"] == 0
+    assert recovered["alerts"].iloc[0]["Event"] == "RESOLVED"
+
+
 def test_kpi_alerts_reject_empty_contracts_and_classify_unusable_readings():
     with pytest.raises(ValueError, match="at least one KPI alert rule"):
         evaluate_kpi_alerts([], [], as_of="2026-11-06T18:00:00Z")
