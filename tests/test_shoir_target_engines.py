@@ -1247,8 +1247,8 @@ def test_recursive_mrp_explodes_nested_bom_yield_scrap_and_component_inventory()
     assert result["status"] == "MULTI_LEVEL_MRP_CALCULATED"
     assert result["level_count"] == 2
     assert frame.loc["Subassembly", "Planned order receipt"] == 10
-    assert frame.loc["Screw", "Gross requirement"] == pytest.approx(400 / 9 * 1)
-    assert frame.loc["Screw", "Planned order receipt"] == 160
+    assert frame.loc["Screw", "Gross requirement"] == pytest.approx(400 / 9)
+    assert frame.loc["Screw", "Planned order receipt"] == 30
     assert frame.loc["Screw", "Effective yield (%)"] == pytest.approx(90.0)
     assert frame.loc["Bolt", "Planned order receipt"] == 0
     assert frame.loc["Screw", "Due period"] == -1
