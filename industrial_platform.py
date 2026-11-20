@@ -476,6 +476,7 @@ def _mark_legacy_dataset_artifacts_stale(
         "platform_decisions": ("decision_id",),
         "experience_decisions": ("decision_id",),
         "experience_decision_outcomes": ("outcome_id",),
+        "experience_module_runs": ("run_id",),
     }
     affected: dict[str, list[str]] = {table: [] for table in targets}
     for table, (id_column,) in targets.items():
