@@ -106,7 +106,7 @@ Create these **Actions variables**:
 | `SHOIR_E2E_ACTIVE_EXPECTED_TIER` | Optional; set only if the Active account should differ from default `Enterprise Plus Tier ($399)` |
 | `SHOIR_E2E_VERIFY_LOGIN_THROTTLE` | Optional; set `true` only for a deliberately planned synthetic-IP throttle test |
 
-Do not add the service-role key, DB password or any OIDC client secret to Actions for this gate. Its preflight validates the staging target and the presence of the variables before browser navigation.
+Do not add the service-role key, DB password or any OIDC client secret to Actions for this gate. Its preflight validates the staging target and the presence of the variables before browser navigation. The full validation workflow's hosted browser smoke now uses this exact variable as its sole target; it never falls back to the production Streamlit hostname. If it is missing or malformed, the job fails immediately with a configuration diagnostic rather than silently skipping or probing production.
 
 ## 5. Configure T098 OIDC and provider-backed MFA
 
@@ -181,30 +181,97 @@ Keep T098 unverified until the run evidence and independent security review are 
 
 ## 6. Configure and accept T096 — first real ERP/provider
 
-T096 is not made live by entering a URL. Select exactly one provider product/edition and an authorized read-only staging resource first. The current repository has a secure generic HTTPS GET-only REST path and product/resource contracts for SAP S/4HANA Public/Private, SAP ECC, Oracle Fusion ERP/SCM and Oracle EBS, but vendor-specific authentication/pagination transports still require a provider-specific implementation and review.
+T096 is not made live by entering a URL. Select exactly one provider product/edition and an authorized read-only staging resource first.
 
-Before a live test:
-1. Obtain a written staging-sandbox authorization and select the exact product, API version, resource, tenant and read-only scope.
-2. Implement/review the provider-specific OAuth/token and pagination adapter behind the existing GET-only contract. Do not add write verbs.
-3. Store the credential only in the staging server secret manager; configure an exact endpoint hostname/port allowlist and only the precise approved private CIDR if the approved architecture requires it.
-4. Confirm TLS verification, DNS/IP pinning, redirects denied, bounded timeout/response/page/rate limits, no import-time network activity and redacted errors.
-5. Use synthetic or approved non-personal records and test success, 401/403, expiry/revocation, schema drift, pagination, duplicate IDs, units/currency mapping and lineage.
-6. Attach exact source SHA, redacted profile, provider/API version, test report and provider owner sign-off.
+**Repository implementation now present:** the release candidate has a server-side OAuth 2.0 client-credentials transport for SAP S/4HANA Cloud Public/Private (OData pagination) and Oracle Fusion ERP/SCM (REST pagination). It uses an opaque server-side credential reference, bounded access-token caching, exact HTTPS host allowlisting, DNS/IP pinning, TLS verification, redirects denied, bounded response sizes/timeouts, and sanitized failures. The existing T096 Workbench now has an explicit provider-read action. It accepts only a connection ID and logical resource key; connection profiles, field mappings, credential values and host allowlists remain in server-side Streamlit configuration. It verifies the active Shoir-IE session using the staging Edge Function and, for a shared organization workspace, checks the Owner/Admin `manage` permission in the Edge/database path before making a provider request. The Workbench returns only status, record counts, mapping version and digest; it does not display or persist the provider's raw records.
 
-Do not mark a generic REST mock, configuration inspection or product catalogue row as a verified SAP/Oracle integration.
+The first supported scope is SAP S/4HANA Cloud Public/Private and Oracle Fusion ERP/SCM. **SAP ECC and Oracle E-Business Suite are deliberately refused** until their distinct legacy authentication/API adapters are implemented and reviewed. This is not a live provider acceptance or a scheduled integration.
+
+### 6.1 Select and authorize the first provider
+
+1. Obtain written authorization from the ERP tenant owner for a non-production sandbox, exact API version, read-only resource/scope, pagination contract and synthetic/non-personal test records.
+2. Select one of the currently implemented Cloud products above. Do not configure SAP ECC or Oracle EBS as a cloud-product substitute.
+3. Confirm the exact service root, token issuer URL and approved DNS hostnames/ports with the vendor/tenant owner. Do not guess public hostnames or use production ERP endpoints.
+
+### 6.2 Configure server-side staging settings
+
+Configure these **root-level Streamlit staging secrets** in the dedicated staging app only. They are read by the Streamlit server and are never returned to the browser or written to a workbook.
+
+```toml
+# Illustrative shape only. Replace every placeholder in Streamlit's secret editor.
+# Do not commit real values or paste credentials into chat or Actions.
+SHOIR_ERP_CONNECTIONS_JSON = '''
+{
+  "sap-plant-read": {
+    "connection": {
+      "product_id": "SAP_S4HANA_CLOUD_PUBLIC",
+      "workspace_id": "EXACT_ACTIVE_WORKSPACE_ID",
+      "tenant_ref": "OPAQUE_NON_SECRET_TENANT_REFERENCE",
+      "base_url": "https://APPROVED-ERP-HOST/APPROVED-SERVICE-ROOT",
+      "credential_ref": "vault://shoir/staging/sap-plant-read",
+      "enabled": true,
+      "read_only": true
+    },
+    "bindings": {
+      "production_orders": {
+        "source_path": "APPROVED_ODATA_SERVICE/APPROVED_PRODUCTION_ORDER_RESOURCE",
+        "records_path": "value",
+        "entity_type": "Order",
+        "id_path": "ProductionOrder",
+        "field_map": {"order_number": "ProductionOrder"},
+        "required_fields": ["order_number"],
+        "mapping_version": "1",
+        "max_records": 1000,
+        "max_pages": 10
+      }
+    }
+  }
+}
+'''
+SHOIR_ERP_CREDENTIALS_JSON = '''
+{
+  "vault://shoir/staging/sap-plant-read": {
+    "token_url": "https://APPROVED-IDP-HOST/APPROVED-TOKEN-PATH",
+    "client_id": "STAGING-OAUTH-CLIENT-ID",
+    "client_secret": "STAGING-OAUTH-CLIENT-SECRET",
+    "scope": "APPROVED_READ_ONLY_SCOPE"
+  }
+}
+'''
+SHOIR_ERP_ALLOWED_HOSTS = "APPROVED-ERP-HOST;APPROVED-IDP-HOST"
+SHOIR_ERP_APPROVED_PRIVATE_CIDRS = ""
+SHOIR_ERP_TIMEOUT_SECONDS = "8"
+```
+
+The example is a schema template, not a working vendor endpoint or OAuth scope. Create a separate connection entry and credential reference for each approved provider/resource. `workspace_id` must exactly match the active personal or organization workspace the operator is using. Only include exact host[:port] values required by the endpoint and token issuer. Leave the private CIDR setting empty unless the network/security owner has approved specific private ranges. The timeout must be between 0.5 and 10 seconds.
+
+Never place these secrets in GitHub Actions, repository files, the public API SDK, client-side JSON inputs or chat. The Workbench input contains only the opaque `connection_id` and `resource_key`.
+
+### 6.3 Hosted acceptance
+
+1. Verify configuration inspection makes no DNS/HTTP call; verify the explicit action is unavailable outside the staging environment.
+2. Test a successful read and negative cases: missing/expired session, inactive account, insufficient tier, wrong workspace, non-Owner/Admin shared workspace, disabled/write-enabled connection, unknown credential reference, unapproved hostname, DNS/private-IP policy violation, invalid token, 401/403, 429, redirect, oversized/malformed response and expired token.
+3. Validate provider pagination, source IDs, duplicate/conflicting IDs, field maps, required fields, units/currency, timezone and source timestamps against synthetic/approved records.
+4. Confirm the Workbench exposes no token/secret or raw provider records, and no provider data is persisted by the configuration-check action.
+5. If actual import is later required, design it as a separate reviewed workflow with explicit consent, dataset lineage, retention and deletion semantics. This T096 verification action is not an importer or continuous sync.
+6. Attach exact source SHA, redacted connection/resource profile, vendor/API version, logs, test outputs, DNS/TLS evidence and provider owner/security sign-off.
+
+Do not mark a generic REST mock, configuration inspection, synthetic transport test or product catalogue row as a verified SAP/Oracle integration. T096 remains `EXTERNAL_CONFIGURATION_REQUIRED` until an actual authorized provider sandbox test and independent review pass.
 
 ## 7. Configure and accept T097 — hosted API/SDK
 
-T097 is currently a local plugin registry/contract-inspection foundation, not a public hosted API or published SDK. Before claiming delivery, the owner must select the first use case/provider and authorize an external staging consumer. Then:
-1. provision an approved API hostname, DNS, TLS and gateway/runtime;
-2. approve an OpenAPI contract with stable errors/versioning;
-3. implement tenant-bound OAuth/OIDC or service identity, narrow scopes, expiry/revocation/key rotation, request/time/size limits, rate limits, idempotency and replay controls;
-4. implement the actual reviewed handler for the chosen resource (metadata-only plugins remain non-executable);
-5. publish a versioned SDK to a private/test channel and install it from an external test client;
+The repository now includes an initial typed JavaScript/TypeScript beta client under `sdk/typescript`, a v1 OpenAPI contract draft and a backward-compatible Edge API version guard. It supports three existing session-authenticated actions: platform record list, platform record save and workspace load. The package is not published and is not a public customer API. It reuses the existing Shoir-IE session and Supabase publishable key; it does not issue API keys or create a service-to-service identity.
+
+Before claiming delivery, the owner must select the first use case and authorize an external staging consumer. Then:
+1. provision an approved API hostname, DNS, TLS and hosted gateway/runtime;
+2. review the OpenAPI v1 contract against the hosted implementation and establish stable error/versioning and compatibility policy;
+3. implement tenant-bound OAuth/OIDC or service identity, narrow scopes, expiry/revocation/key rotation, request/time/size limits, per-tenant rate limits, idempotency and replay controls;
+4. implement the actual reviewed handler for the chosen external resource (metadata-only plugin manifests remain non-executable);
+5. publish the SDK to an approved private/test package channel and install/consume it from an external test client;
 6. test missing/expired/wrong-audience credentials, scope denial, cross-tenant denial, rate limiting, pagination, idempotency, audit/redaction and SDK compatibility;
 7. collect endpoint/TLS, OpenAPI checksum, redacted requests/responses, SDK checksum/client output and independent security review.
 
-The provider and public API design choice may trigger additional repository implementation after the first external integration is selected. Do not represent T097 as a configuration-only task.
+Do not represent the repository beta SDK or existing persistence Edge Function as a published public API. T097 remains `EXTERNAL_CONFIGURATION_REQUIRED` until hosted gateway, identities, quotas, external client use and independent review are accepted.
 
 ## 8. Configure and accept T099 — backup and disaster recovery
 
