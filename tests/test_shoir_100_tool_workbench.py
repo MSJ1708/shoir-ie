@@ -1023,6 +1023,7 @@ def test_workbench_exposes_and_runs_t096_and_t098_configuration_checks():
 def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
     """Exercise T094's real Workbench form, result key, and open-alert deduplication."""
     from streamlit.testing.v1 import AppTest
+    from workspace_persistence import _snapshot, _unpack
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
     at = AppTest.from_file(page, default_timeout=90)
@@ -1056,6 +1057,24 @@ def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
     assert first["alert_records"][0]["severity"] == "HIGH"
     assert first["alert_records"][0]["source"] == "Synthetic acceptance fixture"
     assert at.session_state["shoir_kpi_open_alert_records"][0]["state"] == "OPEN"
+
+    # The app persists the whole eligible workspace snapshot. Prove both the
+    # T094 result and its deduplication state survive the same serializer used
+    # by the fresh-session workspace loader, including DataFrame result values.
+    saved_workspace = _snapshot(at.session_state)
+    assert "shoir_tool_result_T094" in saved_workspace
+    assert "shoir_kpi_open_alert_records" in saved_workspace
+    restored_workspace = {
+        key: _unpack(value) for key, value in saved_workspace.items()
+    }
+    assert restored_workspace["shoir_kpi_open_alert_records"] == (
+        at.session_state["shoir_kpi_open_alert_records"]
+    )
+    restored_result = restored_workspace["shoir_tool_result_T094"]
+    assert restored_result["open_alert_count"] == 1
+    assert restored_result["alert_records"][0]["alert_id"] == (
+        first["alert_records"][0]["alert_id"]
+    )
 
     at.button(key="tool094_run").click()
     at.run(timeout=90)
