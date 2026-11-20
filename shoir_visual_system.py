@@ -265,6 +265,43 @@ div[data-testid="stAlert"] {
         grid-template-columns: 1fr;
     }
     .hero-title { font-size: 1.72rem !important; }
+
+    /* Keep native Streamlit tabs usable on narrow phones without horizontal scrolling. */
+    div[data-baseweb="tab-list"] {
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: stretch !important;
+        justify-content: stretch !important;
+        gap: 4px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow-x: hidden !important;
+    }
+    div[data-baseweb="tab-list"] > button[data-baseweb="tab"] {
+        box-sizing: border-box !important;
+        flex: 1 1 0 !important;
+        width: 0 !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: auto !important;
+        min-height: 42px !important;
+        padding: 6px 4px !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: normal !important;
+        text-align: center !important;
+    }
+    div[data-baseweb="tab-list"] > button[data-baseweb="tab"] * {
+        box-sizing: border-box !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: normal !important;
+        text-align: center !important;
+    }
 }
 </style>
 """
