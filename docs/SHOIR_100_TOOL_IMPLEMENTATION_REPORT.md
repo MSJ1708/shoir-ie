@@ -201,3 +201,19 @@ Before this may be considered for merge or deployment, the exact final head must
 ## Release position
 
 **DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the 96 validation-pending targets have passed their evidence gates, the four external capabilities are configured and tested, and the mandatory staging/production release checks are completed.
+
+
+---
+
+## 2026-11-20 candidate reconciliation — canonical routing and T098
+
+This addendum supersedes older tranche wording in this report where it conflicts with the current release-hardening branch.
+
+- The current source-level route audit is `docs/SHOIR_100_TOOL_EXECUTION_AUDIT.md` and its repeatable script/test. It now asserts 100 dedicated, canonical-ID-bound Workbench dispatch branches, zero launch-only IDs and zero IDs without a mapped route. This is source-level route accounting only; it does **not** establish numerical correctness, hosted persistence, authenticated browser acceptance, export round-trips or independent engineering approval.
+- The matrix remains **96 `IMPLEMENTED_NEEDS_VALIDATION`, 4 `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), and 0 `VERIFIED_WORKING`**. No target is promoted to verified from route presence or test references.
+- T098 is no longer only a configuration-inspection screen. PR #232 now contains optional Streamlit OIDC login on the existing sign-in page, independent Edge Function JWT verification (RS256/ES256, exact issuer/audience, token-age/expiry and verified-email checks), unique mapping to an existing active Shoir-IE account, optional provider-claim MFA enforcement, token replay protection, fail-closed append-only audit insertion, new-session revocation on audit failure, and logout that ends both sessions. The server-only audit migration is `20261118170000_shoir_oidc_audit_events.sql`.
+- The old standalone OIDC PR #223 is superseded/closed and must not be merged. PR #232 is the single release-hardening integration target. The updated T098 runbook is `docs/T098_OIDC_AUDIT_CONFIGURATION.md`.
+- T098 nevertheless remains `EXTERNAL_CONFIGURATION_REQUIRED`: no actual IdP tenant/client, Streamlit or staging Edge secrets, provider MFA claim evidence, staging audit migration/deployment, hosted disposable-account acceptance, or independent security review has been completed.
+- T096 remains a generic HTTPS GET-only adapter until a real provider-specific SAP/Oracle adapter and authorized staging endpoint/credential are accepted. T097 remains a local manifest/contract inspector until a hosted authenticated tenant-scoped gateway, published OpenAPI contract and externally consumed SDK are proven. T099's personal workspace export is not database PITR or independent Storage-object recovery; a full isolated restore and measured RPO/RTO remain required.
+
+Keep PR #232 draft, Shoir-IE BETA, and production NO-GO. A successful exact-head CI run is necessary but not sufficient for the hosted and external acceptance above.
