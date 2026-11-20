@@ -1,5 +1,7 @@
 import {
+  classifyDatasetStorageSweepPath,
   corsHeadersForOrigin,
+  isDatasetStorageSweepObjectOlderThan,
   hasCanonicalMasterAdminInvariant,
   inspectCsvShape,
   isAllowedApiMethod,
@@ -444,5 +446,82 @@ Deno.test("CORS origins are isolated by the exact Supabase project", () => {
   assert(
     deniedHeaders.get("Access-Control-Allow-Origin") === null,
     "Denied origin must not receive Access-Control-Allow-Origin.",
+  );
+});
+
+
+Deno.test("dataset storage sweep classifies only exact workspace-owned object paths", () => {
+  const workspace = "0123456789abcdef0123456789abcdef";
+  const dataset = "DS-ABCDEF012345";
+  const immutable = classifyDatasetStorageSweepPath(
+    workspace,
+    workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv",
+  );
+  assert(immutable?.kind === "immutable", "Immutable dataset object was not classified.");
+  assert(immutable.datasetId === dataset, "Immutable dataset identity was not preserved.");
+
+  const temporary = classifyDatasetStorageSweepPath(
+    workspace,
+    "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(32) + ".csv",
+  );
+  assert(temporary?.kind === "temporary", "Temporary upload object was not classified.");
+  assert(temporary.datasetId === dataset, "Temporary dataset identity was not preserved.");
+
+  const invalid = [
+    "tmp/" + workspace + "/" + dataset + "/../" + "b".repeat(32) + ".csv",
+    workspace + "/" + dataset + "/" + "A".repeat(64) + ".csv",
+    workspace + "/ds-ABCDEF012345/" + "a".repeat(64) + ".csv",
+    "fedcba9876543210fedcba9876543210/" + dataset + "/" + "a".repeat(64) + ".csv",
+    workspace + "/" + dataset + "/source.xlsx",
+    "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(31) + ".csv",
+  ];
+  for (const path of invalid) {
+    assert(
+      classifyDatasetStorageSweepPath(workspace, path) === null,
+      "Unsafe or foreign storage path was eligible for cleanup: " + path,
+    );
+  }
+  assert(
+    classifyDatasetStorageSweepPath("not-a-workspace-key", workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv") === null,
+    "Invalid workspace key must fail closed.",
+  );
+});
+
+Deno.test("dataset storage sweep requires the full minimum age after the newest storage timestamp", () => {
+  const now = Date.parse("2026-11-20T12:00:00Z");
+  const hour = 60 * 60 * 1000;
+  const minimumAge = 48 * hour;
+  const oldObject = {
+    created_at: "2026-11-15T00:00:00Z",
+    updated_at: "2026-11-17T12:00:00Z",
+    last_accessed_at: "2026-11-17T12:00:00Z",
+  };
+  assert(
+    isDatasetStorageSweepObjectOlderThan(oldObject, now, minimumAge),
+    "An object untouched for more than 48 hours should be eligible for review.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan(
+      { ...oldObject, last_accessed_at: "2026-11-20T11:30:00Z" },
+      now,
+      minimumAge,
+    ),
+    "Recent access must reset the cleanup age.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan(
+      { created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-21T00:00:00Z" },
+      now,
+      minimumAge,
+    ),
+    "Future storage timestamps must fail closed.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan({ created_at: "not-a-date" }, now, minimumAge),
+    "Unparseable storage timestamps must fail closed.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan({}, now, minimumAge),
+    "Objects without timestamp metadata must be retained.",
   );
 });

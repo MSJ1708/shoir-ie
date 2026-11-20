@@ -2054,6 +2054,70 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "target_power": target_power, "maximum_n_per_group": int(search_limit),
                             }
     
+                        if selected_tool["tool_id"] == "T020":
+                            st.markdown("**Managed dataset storage maintenance**")
+                            st.caption(
+                                "Scans only this personal/shared workspace. Temporary uploads must be untouched for at least 48 hours, "
+                                "both metadata ledgers must confirm no reference, and no more than 50 are deleted per confirmed run. "
+                                "Immutable dataset files are retained to avoid racing a version registration. Preview is the default; "
+                                "this control does not create a scheduled job."
+                            )
+                            preview_sweep = st.button(
+                                "Preview old unreferenced temporary uploads",
+                                key="tool020_storage_sweep_preview",
+                                use_container_width=True,
+                            )
+                            confirm_sweep = st.checkbox(
+                                "I reviewed the preview and explicitly authorize deleting eligible old temporary uploads in this workspace.",
+                                value=False,
+                                key="tool020_storage_sweep_confirm",
+                            )
+                            delete_sweep = st.button(
+                                "Delete confirmed temporary uploads",
+                                key="tool020_storage_sweep_delete",
+                                disabled=not confirm_sweep,
+                                use_container_width=True,
+                            )
+                            if preview_sweep or delete_sweep:
+                                try:
+                                    _require_focused_tool_actor()
+                                    dataset_token = str(
+                                        st.session_state.get("remote_session_token")
+                                        or st.session_state.get("access_token")
+                                        or ""
+                                    ).strip()
+                                    if not dataset_token:
+                                        raise PermissionError(
+                                            "An authenticated managed-session token is required for storage maintenance."
+                                        )
+                                    from durable_account_store import edge_sweep_dataset_storage
+                                    sweep_result = edge_sweep_dataset_storage(
+                                        USER,
+                                        dataset_token,
+                                        workspace=str(st.session_state.get("workspace") or "default"),
+                                        confirm_delete=bool(delete_sweep),
+                                        organization_id=str(
+                                            st.session_state.get("shoir_active_organization_id") or ""
+                                        ),
+                                        organization_workspace_id=str(
+                                            st.session_state.get("shoir_active_organization_workspace_id") or ""
+                                        ),
+                                    )
+                                    st.session_state["shoir_t020_storage_sweep_result"] = sweep_result
+                                    if delete_sweep:
+                                        st.success(
+                                            f"Storage sweep completed: {int(sweep_result.get('deleted_count', 0))} temporary object(s) deleted."
+                                        )
+                                    else:
+                                        st.info(
+                                            f"Preview complete: {int(sweep_result.get('eligible_temporary_orphan_count', 0))} eligible temporary object(s); nothing was deleted."
+                                        )
+                                except Exception as exc:
+                                    st.error(f"Dataset storage maintenance could not be completed safely: {exc}")
+                            prior_sweep = st.session_state.get("shoir_t020_storage_sweep_result")
+                            if isinstance(prior_sweep, dict):
+                                st.json(prior_sweep)
+
                         if run_method:
                             # Remove only the in-session output before a new run. The last
                             # successful saved workspace snapshot remains intact if this run fails.

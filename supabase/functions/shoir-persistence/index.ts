@@ -1,9 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
+  classifyDatasetStorageSweepPath,
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
   inspectCsvShape,
+  isDatasetStorageSweepObjectOlderThan,
   isAllowedApiMethod,
   isAllowedBrowserOrigin,
   normalizeWorkspaceStateJson,
@@ -2010,6 +2012,287 @@ Deno.serve(async (req) => {
         .limit(limit);
       if (error) throw error;
       return sendResponse({ ok: true, events: data || [] });
+    }
+
+    if (action === "dataset_storage_sweep_session") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+        row as unknown as Record<string, unknown>,
+        body,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      // Shared workspaces require Owner/Admin through the database resolver.
+      // Personal workspace keys are derived from the authenticated account.
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "manage",
+      );
+      if (
+        body.confirm_delete !== undefined &&
+        typeof body.confirm_delete !== "boolean"
+      ) {
+        return sendResponse(
+          { error: "confirm_delete must be a boolean." },
+          400,
+        );
+      }
+
+      const MINIMUM_AGE_HOURS = 48;
+      const MINIMUM_AGE_MS = MINIMUM_AGE_HOURS * 60 * 60 * 1000;
+      const PAGE_SIZE = 100;
+      const MAX_DIRECTORIES = 200;
+      const MAX_OBJECTS = 500;
+      const MAX_REFERENCE_CHECKS = 100;
+      const MAX_DELETES_PER_RUN = 50;
+      const bucket = supabase.storage.from("shoir-industrial-datasets");
+      const listedObjects: Array<
+        Record<string, unknown> & {
+          storage_key: string;
+          kind: "immutable" | "temporary";
+          dataset_id: string;
+        }
+      > = [];
+      const visitedDirectories = new Set<string>();
+
+      // Enumerate only T020 dataset-id folders below this workspace.
+      // Any listing failure aborts the complete operation before deletion.
+      const scanDirectory = async (prefix: string): Promise<void> => {
+        if (visitedDirectories.has(prefix)) return;
+        visitedDirectories.add(prefix);
+        if (visitedDirectories.size > MAX_DIRECTORIES) {
+          throw new Error(
+            "Dataset storage sweep exceeded its bounded directory scan; no objects were deleted.",
+          );
+        }
+        let offset = 0;
+        while (true) {
+          const { data, error: listError } = await bucket.list(prefix, {
+            limit: PAGE_SIZE,
+            offset,
+            sortBy: { column: "name", order: "asc" },
+          });
+          if (listError) {
+            throw new Error(
+              "Dataset storage listing could not be completed; no objects were deleted.",
+            );
+          }
+          const page = Array.isArray(data) ? data : [];
+          for (const rawEntry of page) {
+            const entry = rawEntry as Record<string, unknown>;
+            const name = String(entry.name || "");
+            if (
+              !name ||
+              name === "." ||
+              name === ".." ||
+              name.includes("/") ||
+              name.includes("\\")
+            ) {
+              continue;
+            }
+            const storageKey = prefix + "/" + name;
+            const isStoredFile = typeof entry.id === "string" &&
+              entry.id.length > 0;
+            if (!isStoredFile) {
+              if (/^DS-[A-F0-9]{12,32}$/.test(name)) {
+                await scanDirectory(storageKey);
+              }
+              continue;
+            }
+            const classified = classifyDatasetStorageSweepPath(
+              workspaceKey,
+              storageKey,
+            );
+            if (!classified) continue;
+            listedObjects.push({
+              ...entry,
+              storage_key: storageKey,
+              kind: classified.kind,
+              dataset_id: classified.datasetId,
+            });
+            if (listedObjects.length > MAX_OBJECTS) {
+              throw new Error(
+                "Dataset storage sweep exceeded its bounded object scan; no objects were deleted.",
+              );
+            }
+          }
+          if (page.length < PAGE_SIZE) break;
+          offset += page.length;
+        }
+      };
+
+      await scanDirectory(workspaceKey);
+      await scanDirectory("tmp/" + workspaceKey);
+
+      const nowMs = Date.now();
+      const oldObjects = listedObjects
+        .filter((entry) =>
+          isDatasetStorageSweepObjectOlderThan(entry, nowMs, MINIMUM_AGE_MS)
+        )
+        .map((entry) => {
+          const dateValues = [
+            entry.created_at,
+            entry.updated_at,
+            entry.last_accessed_at,
+          ].filter((value): value is string =>
+            typeof value === "string" && value.trim().length > 0
+          ).map((value) => Date.parse(value)).filter((value) =>
+            Number.isFinite(value)
+          );
+          const newest = Math.max(...dateValues);
+          return {
+            ...entry,
+            age_hours: Math.floor((nowMs - newest) / (60 * 60 * 1000)),
+          };
+        });
+      // Do not delete immutable content-addressed objects in this action:
+      // a concurrent version-finalize request could be between object read and
+      // metadata commit. A future leased/atomic cleanup protocol must coordinate
+      // with the dataset registration transaction before immutable-object deletion.
+      const oldTemporaryObjects = oldObjects
+        .filter((entry) => entry.kind === "temporary")
+        .sort((a, b) => b.age_hours - a.age_hours);
+      const retainedImmutableCount = oldObjects.filter((entry) =>
+        entry.kind === "immutable"
+      ).length;
+
+      const eligible: typeof oldTemporaryObjects = [];
+      let referencedCount = 0;
+      let referenceCheckFailures = 0;
+      const checkCount = Math.min(
+        oldTemporaryObjects.length,
+        MAX_REFERENCE_CHECKS,
+      );
+      for (const candidate of oldTemporaryObjects.slice(0, checkCount)) {
+        const [recordRefs, eventRefs] = await Promise.all([
+          supabase.from("shoir_platform_records")
+            .select("record_id")
+            .eq("workspace_key", workspaceKey)
+            .contains("payload_json", {
+              storage_key: candidate.storage_key,
+            })
+            .limit(1),
+          supabase.from("shoir_platform_events")
+            .select("event_id")
+            .eq("workspace_key", workspaceKey)
+            .contains("payload_json", {
+              storage_key: candidate.storage_key,
+            })
+            .limit(1),
+        ]);
+        if (recordRefs.error || eventRefs.error) {
+          // Uncertain metadata is never permission to delete.
+          referenceCheckFailures += 1;
+          continue;
+        }
+        if (
+          (recordRefs.data || []).length > 0 ||
+          (eventRefs.data || []).length > 0
+        ) {
+          referencedCount += 1;
+          continue;
+        }
+        eligible.push(candidate);
+      }
+
+      const dryRun = body.confirm_delete !== true;
+      let deletedCount = 0;
+      let deleteFailures = 0;
+      let auditFailures = 0;
+      let auditConfirmationFailures = 0;
+      const deletedPreview: string[] = [];
+      if (!dryRun) {
+        for (const candidate of eligible.slice(0, MAX_DELETES_PER_RUN)) {
+          const intentId = "SPE-" +
+            crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+          const auditTime = new Date().toISOString();
+          const auditIntent = await supabase.from("shoir_platform_events")
+            .insert({
+              event_id: intentId,
+              workspace_key: workspaceKey,
+              event_type: "dataset_temporary_delete_intent",
+              actor: String(row.username_lc || ""),
+              entity_key: candidate.dataset_id,
+              payload_json: {
+                action: "DELETE_INTENT",
+                storage_key: candidate.storage_key,
+                object_kind: candidate.kind,
+                age_hours: candidate.age_hours,
+                minimum_age_hours: MINIMUM_AGE_HOURS,
+                record_and_event_ledgers_confirmed_unreferenced: true,
+              },
+              created_at: auditTime,
+            });
+          if (auditIntent.error) {
+            auditFailures += 1;
+            continue;
+          }
+
+          const { error: removeError } = await bucket.remove([
+            candidate.storage_key,
+          ]);
+          if (removeError) {
+            deleteFailures += 1;
+            continue;
+          }
+          deletedCount += 1;
+          if (deletedPreview.length < 25) {
+            deletedPreview.push(candidate.dataset_id + " · temporary");
+          }
+
+          const completionId = "SPE-" +
+            crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+          const completionAudit = await supabase.from("shoir_platform_events")
+            .insert({
+              event_id: completionId,
+              workspace_key: workspaceKey,
+              event_type: "dataset_temporary_object_deleted",
+              actor: String(row.username_lc || ""),
+              entity_key: candidate.dataset_id,
+              payload_json: {
+                action: "DELETE_CONFIRMED",
+                storage_key: candidate.storage_key,
+                object_kind: candidate.kind,
+                age_hours: candidate.age_hours,
+                intent_event_id: intentId,
+              },
+              created_at: new Date().toISOString(),
+            });
+          if (completionAudit.error) auditConfirmationFailures += 1;
+        }
+      }
+
+      return sendResponse({
+        ok: true,
+        dry_run: dryRun,
+        minimum_age_hours: MINIMUM_AGE_HOURS,
+        scanned_object_count: listedObjects.length,
+        stale_object_count: oldObjects.length,
+        stale_temporary_object_count: oldTemporaryObjects.length,
+        retained_immutable_object_count: retainedImmutableCount,
+        reference_checks_completed: checkCount,
+        eligible_temporary_orphan_count: eligible.length,
+        referenced_temporary_object_count: referencedCount,
+        reference_check_failure_count: referenceCheckFailures,
+        deferred_reference_check_count: Math.max(
+          0,
+          oldTemporaryObjects.length - checkCount,
+        ),
+        deleted_count: deletedCount,
+        delete_failure_count: deleteFailures,
+        audit_intent_failure_count: auditFailures,
+        audit_confirmation_failure_count: auditConfirmationFailures,
+        maximum_deletions_per_run: MAX_DELETES_PER_RUN,
+        deleted_preview: deletedPreview,
+        next_step: dryRun
+          ? "Review the eligible temporary-object count. A separate explicit confirm_delete=true request is required to delete. Immutable objects are retained by design."
+          : "Review the append-only intent and deletion events. Repeat a bounded dry run/deletion for remaining temporary candidates.",
+      });
     }
 
     if (action === "dataset_download_url") {

@@ -456,6 +456,74 @@ export function inspectCsvShape(bytes: Uint8Array): CsvShape {
   return { rowCount, columnCount, headers };
 }
 
+export type DatasetStorageSweepObjectKind = "immutable" | "temporary";
+
+export interface DatasetStorageSweepPath {
+  kind: DatasetStorageSweepObjectKind;
+  datasetId: string;
+}
+
+/** Accept only the two exact object layouts emitted by the managed T020 uploader. */
+export function classifyDatasetStorageSweepPath(
+  workspaceKey: string,
+  storagePath: string,
+): DatasetStorageSweepPath | null {
+  if (!/^[0-9a-f]{32}$/.test(workspaceKey) || typeof storagePath !== "string") {
+    return null;
+  }
+  const parts = storagePath.split("/");
+  if (
+    parts.length === 3 &&
+    parts[0] === workspaceKey &&
+    /^DS-[A-F0-9]{12,32}$/.test(parts[1]) &&
+    /^[0-9a-f]{64}\\.csv$/.test(parts[2])
+  ) {
+    return { kind: "immutable", datasetId: parts[1] };
+  }
+  if (
+    parts.length === 4 &&
+    parts[0] === "tmp" &&
+    parts[1] === workspaceKey &&
+    /^DS-[A-F0-9]{12,32}$/.test(parts[2]) &&
+    /^[0-9a-f]{32}\\.csv$/.test(parts[3])
+  ) {
+    return { kind: "temporary", datasetId: parts[2] };
+  }
+  return null;
+}
+
+/**
+ * Use the newest storage timestamp so recently modified/accessed objects are
+ * retained. Missing, malformed and future timestamps fail closed.
+ */
+export function isDatasetStorageSweepObjectOlderThan(
+  object: Record<string, unknown>,
+  nowMs: number,
+  minimumAgeMs: number,
+): boolean {
+  if (
+    !Number.isFinite(nowMs) ||
+    !Number.isSafeInteger(minimumAgeMs) ||
+    minimumAgeMs <= 0
+  ) {
+    return false;
+  }
+  const timestamps = [
+    object.created_at,
+    object.updated_at,
+    object.last_accessed_at,
+  ]
+    .filter((value): value is string =>
+      typeof value === "string" && value.trim().length > 0
+    )
+    .map((value) => Date.parse(value))
+    .filter((value) => Number.isFinite(value));
+  if (!timestamps.length) return false;
+  const newestTimestamp = Math.max(...timestamps);
+  if (newestTimestamp > nowMs) return false;
+  return nowMs - newestTimestamp >= minimumAgeMs;
+}
+
 /** Only POST may dispatch API actions; OPTIONS is handled by the HTTP boundary. */
 export function isAllowedApiMethod(method: string): boolean {
   return method.toUpperCase() === "POST";

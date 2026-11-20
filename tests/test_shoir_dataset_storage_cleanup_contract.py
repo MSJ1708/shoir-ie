@@ -65,3 +65,57 @@ def test_temporary_object_cleanup_failure_does_not_report_registered_version_as_
     assert "temporaryCleanupPending = true" in source
     assert response > cleanup_flag
     assert "ok: true" in source[response:response + 250]
+
+
+
+def dataset_storage_sweep_source() -> str:
+    source = EDGE.read_text(encoding="utf-8")
+    start = source.index('if (action === "dataset_storage_sweep_session")')
+    end = source.index('if (action === "dataset_download_url")', start)
+    return source[start:end]
+
+
+def test_dataset_storage_sweep_is_workspace_scoped_authenticated_and_manage_gated():
+    source = dataset_storage_sweep_source()
+    assert "getSession(" in source
+    assert "datasetEntitlementDenialForRequest(" in source
+    assert "resolveManagedWorkspaceKey(" in source
+    assert 'body,\n        "manage",' in source
+    assert "body.confirm_delete !== true" in source
+    assert "const MINIMUM_AGE_HOURS = 48;" in source
+    assert "const MAX_DIRECTORIES = 200;" in source
+    assert "const MAX_OBJECTS = 500;" in source
+    assert "const MAX_REFERENCE_CHECKS = 100;" in source
+    assert "const MAX_DELETES_PER_RUN = 50;" in source
+    assert "no objects were deleted" in source
+
+
+def test_dataset_storage_sweep_requires_both_ledgers_and_audit_intent_before_delete():
+    source = dataset_storage_sweep_source()
+    record_query = source.index('supabase.from("shoir_platform_records")')
+    event_query = source.index('supabase.from("shoir_platform_events")')
+    uncertain_check = source.index("if (recordRefs.error || eventRefs.error)")
+    referenced_check = source.index("(eventRefs.data || []).length > 0")
+    audit_intent = source.index('event_type: "dataset_temporary_delete_intent"')
+    remove_object = source.index("await bucket.remove([\n            candidate.storage_key,\n          ])")
+    completion_event = source.index('event_type: "dataset_temporary_object_deleted"')
+    assert record_query < event_query < uncertain_check < referenced_check
+    assert referenced_check < audit_intent < remove_object < completion_event
+    assert "record_and_event_ledgers_confirmed_unreferenced: true" in source
+    assert 'entry.kind === "temporary"' in source
+    assert "Immutable content-addressed files are retained" in (ROOT / "durable_account_store.py").read_text(encoding="utf-8")
+
+
+def test_dataset_storage_maintenance_is_staging_only_and_has_separate_confirmation():
+    store_source = (ROOT / "durable_account_store.py").read_text(encoding="utf-8")
+    workbench_source = (ROOT / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
+    assert '"dataset_storage_sweep_session"' in store_source
+    helper_start = store_source.index("def edge_sweep_dataset_storage(")
+    helper_end = store_source.index("def edge_upload_and_register_dataset_version(", helper_start)
+    helper = store_source[helper_start:helper_end]
+    assert 'APP_ENVIRONMENT' in helper and '"staging"' in helper
+    assert '_edge_call("dataset_storage_sweep_session"' in helper
+    assert 'confirm_delete: bool = False' in helper
+    assert "Preview old unreferenced temporary uploads" in workbench_source
+    assert "Delete confirmed temporary uploads" in workbench_source
+    assert "disabled=not confirm_sweep" in workbench_source

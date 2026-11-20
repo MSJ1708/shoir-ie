@@ -26,3 +26,21 @@ Dataset finalization now keeps the temporary upload until the atomic metadata RP
 Regression coverage is added in `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. These are candidate source/test additions until the exact final SHA completes all required CI.
 
 **Still not implemented:** a scheduled, reference-aware sweep for pre-existing/aged orphan objects and abandoned temporary uploads. This must enumerate candidate objects, check all metadata references and tenant/workspace boundaries, retain objects whenever the metadata check fails, and produce a deletion audit. Do not delete objects based on age alone. Hosted staging upload/resume/download, fresh-login, cross-workspace, object-retention and original-workbook round-trip acceptance remain open.
+
+
+## Candidate update — 2026-11-20: bounded operator sweep for abandoned temporary uploads
+
+The current candidate adds a session-authenticated T020 storage-maintenance action and a separate operator control in the existing Industrial Engineering Workbench:
+
+- The action resolves the current personal workspace from the authenticated actor or resolves a shared organization workspace with database-enforced `manage` permission (Owner/Admin only).
+- Preview is the default. Deletion requires a separate explicit `confirm_delete=true` request and a Workbench confirmation checkbox.
+- Only exact T020 temporary-upload paths under the selected workspace can be deleted. Other workspaces, buckets, traversal paths, original XLSX files and immutable content-addressed dataset files are excluded.
+- A temporary object must have valid Storage timestamps and remain untouched for at least 48 hours. The newest of created, updated and last-accessed timestamps controls eligibility; missing, malformed or future timestamps are retained.
+- Both the managed-record and event ledgers must successfully confirm no reference to the exact temporary storage key. Any reference-query error retains the object.
+- A deletion-intent event is written before Storage removal; a separate deletion-confirmed event follows successful removal.
+- The scan is bounded to 500 objects/200 directories, 100 reference checks and 50 deletions per invocation. Operators can repeat preview/deletion to process remaining entries.
+- No automatic schedule is created. Scheduling this authenticated operation remains an external operational configuration.
+
+**Immutable content-addressed orphan objects are intentionally retained by this sweep.** Deleting one can race a concurrent dataset version-finalize request between its object read and metadata transaction. A safe immutable-object sweep needs an atomic lease/coordination protocol shared with dataset registration; age plus two reference reads alone is insufficient. This remains repository engineering work, not an external provider credential task.
+
+These source changes require exact-head Deno, Python, full regression and authenticated owner/member staging acceptance before an Edge deployment. Keep BETA / production NO-GO.

@@ -181,6 +181,7 @@ def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[st
     # independently revalidates membership and role for every request.
     shared_actions = {
         "dataset_download_url",
+        "dataset_storage_sweep_session",
         "dataset_upload_create",
         "dataset_version_finalize",
         "dataset_version_register",
@@ -1423,6 +1424,40 @@ def edge_download_dataset_version(
     if digest != str(result.get("data_hash") or "").lower():
         raise RuntimeError("Downloaded dataset failed its SHA-256 integrity check.")
     return content, result
+
+
+def edge_sweep_dataset_storage(
+    username: str,
+    token: str,
+    workspace: str = "default",
+    confirm_delete: bool = False,
+    organization_id: str = "",
+    organization_workspace_id: str = "",
+) -> dict[str, Any]:
+    """Preview or explicitly sweep aged temporary uploads in one staging workspace.
+
+    The Edge Function enforces the 48-hour minimum age, Owner/Admin shared-workspace
+    permission, dual-ledger reference checks, bounded scan/deletion limits and audit.
+    Immutable content-addressed files are deliberately retained until an atomic
+    registration/cleanup lease protocol exists.
+    """
+    actor = str(username or "").strip()
+    bearer = str(token or "")
+    scope = str(workspace or "default").strip()
+    if not actor or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Dataset storage maintenance is restricted to the staging environment.")
+    if not isinstance(confirm_delete, bool):
+        raise ValueError("confirm_delete must be a boolean.")
+    return _edge_call("dataset_storage_sweep_session", {
+        "username": actor,
+        "token": bearer,
+        "workspace": scope,
+        "organization_id": str(organization_id or "").strip(),
+        "organization_workspace_id": str(organization_workspace_id or "").strip(),
+        "confirm_delete": confirm_delete,
+    })
 
 
 def edge_upload_and_register_dataset_version(
