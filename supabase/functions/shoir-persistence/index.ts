@@ -3436,7 +3436,8 @@ Deno.serve(async (req) => {
       ).trim();
       if (!organizationId || !organizationWorkspaceId) {
         return sendResponse({
-          error: "Both organization_id and organization_workspace_id are required.",
+          error:
+            "Both organization_id and organization_workspace_id are required.",
         }, 400);
       }
       await resolveManagedWorkspaceKey(
