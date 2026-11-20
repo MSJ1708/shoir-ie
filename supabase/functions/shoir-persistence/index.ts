@@ -2635,11 +2635,22 @@ Deno.serve(async (req) => {
             "finalize",
             String(row.username_lc || ""),
           );
-          if (!leaseRenewed) return false;
+          if (!leaseRenewed) {
+            console.warn(
+              "Temporary dataset object was retained because its finalization lease could not be renewed; the bounded staging sweep may inspect it after the retention threshold.",
+            );
+            return false;
+          }
           const { error: cleanupError } = await supabase.storage
             .from("shoir-industrial-datasets")
             .remove([uploadPath]);
-          return !cleanupError;
+          if (cleanupError) {
+            console.warn(
+              "Temporary dataset object cleanup was not confirmed; the bounded staging sweep may inspect it after the retention threshold.",
+            );
+            return false;
+          }
+          return true;
         };
         const name = String(body.name || "").trim();
         const sourceName = String(body.source_name || "").trim();
@@ -2716,9 +2727,7 @@ Deno.serve(async (req) => {
         const bytes = new Uint8Array(await uploaded.arrayBuffer());
         const digest = await sha256Bytes(bytes);
         if (digest !== dataHash) {
-          await supabase.storage
-            .from("shoir-industrial-datasets")
-            .remove([uploadPath]);
+          await cleanupTemporaryUpload();
           return sendResponse(
             {
               error:
@@ -2731,9 +2740,7 @@ Deno.serve(async (req) => {
         try {
           csvShape = inspectCsvShape(bytes);
         } catch (shapeError) {
-          await supabase.storage
-            .from("shoir-industrial-datasets")
-            .remove([uploadPath]);
+          await cleanupTemporaryUpload();
           throw shapeError;
         }
         const schemaColumns = Object.keys(schema as Record<string, unknown>);
@@ -2743,9 +2750,7 @@ Deno.serve(async (req) => {
           schemaColumns.length !== csvShape.columnCount ||
           csvShape.headers.some((header) => !schemaColumns.includes(header))
         ) {
-          await supabase.storage
-            .from("shoir-industrial-datasets")
-            .remove([uploadPath]);
+          await cleanupTemporaryUpload();
           return sendResponse(
             {
               error:
