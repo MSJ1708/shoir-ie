@@ -168,7 +168,10 @@ def test_dataset_storage_fencing_migration_renews_and_locks_metadata_commits():
         ROOT / "supabase" / "migrations" /
         "20261120130000_shoir_dataset_storage_lease_fencing.sql"
     ).read_text(encoding="utf-8")
-    normalized = " ".join(migration.casefold().split())
+    executable_sql = "\n".join(
+        line.split("--", 1)[0] for line in migration.splitlines()
+    )
+    normalized = " ".join(executable_sql.casefold().split())
     assert "create or replace function public.shoir_dataset_storage_lease_renew" in normalized
     assert "create or replace function public.shoir_platform_register_dataset_version_with_storage_and_lease" in normalized
     assert "create or replace function public.shoir_platform_upsert_record_with_dataset_lease" in normalized
