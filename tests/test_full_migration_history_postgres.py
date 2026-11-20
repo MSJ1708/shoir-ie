@@ -674,6 +674,18 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     "shoir_dataset_storage_lease_release",
                     "p_workspace_key text, p_dataset_id text, p_lease_token uuid",
                 ),
+                (
+                    "shoir_dataset_storage_lease_renew",
+                    "p_workspace_key text, p_dataset_id text, p_lease_token uuid, p_lease_operation text, p_actor_username_lc text, p_lease_seconds integer",
+                ),
+                (
+                    "shoir_platform_register_dataset_version_with_storage_and_lease",
+                    "p_workspace_key text, p_dataset_id text, p_name text, p_source_name text, p_data_hash text, p_version_fingerprint text, p_row_count bigint, p_column_count integer, p_schema_json jsonb, p_transformations_json jsonb, p_actor text, p_version_record_id text, p_head_record_id text, p_event_id text, p_storage_key text, p_lease_token uuid",
+                ),
+                (
+                    "shoir_platform_upsert_record_with_dataset_lease",
+                    "p_record_id text, p_workspace_key text, p_record_type text, p_entity_key text, p_payload jsonb, p_content_hash text, p_actor text, p_event_id text, p_dataset_id text, p_lease_token uuid",
+                ),
             )
             for function_name, identity_args in lease_functions:
                 lease_acl = _fetchone(
@@ -860,13 +872,42 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 assert first_lease[0] is True
                 assert first_lease[1] > datetime.datetime.now(datetime.timezone.utc)
 
+                renew_sql = """
+                    SELECT public.shoir_dataset_storage_lease_renew(
+                        %s, %s, %s::uuid, %s, %s, %s
+                    );
+                """
+                renewed = _fetchone(
+                    target,
+                    renew_sql,
+                    (lease_workspace, lease_dataset, lease_token_a, "finalize", username, 600),
+                )[0]
+                assert renewed is True
+                renewed_expiry = _fetchone(
+                    target,
+                    """
+                    SELECT expires_at
+                    FROM public.shoir_dataset_storage_lifecycle_leases
+                    WHERE workspace_key=%s AND dataset_id=%s AND lease_token=%s::uuid;
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_a),
+                )[0]
+                assert renewed_expiry > first_lease[1]
+
+                stale_renewal = _fetchone(
+                    target,
+                    renew_sql,
+                    (lease_workspace, lease_dataset, lease_token_b, "finalize", username, 600),
+                )[0]
+                assert stale_renewal is False, "A stale token must not renew another lease."
+
                 blocked_lease = _fetchone(
                     target,
                     acquire_sql,
                     (lease_workspace, lease_dataset, lease_token_b, "sweep", username, 300),
                 )
                 assert blocked_lease[0] is False
-                assert blocked_lease[1] == first_lease[1]
+                assert blocked_lease[1] == renewed_expiry
 
                 wrong_release = _fetchone(
                     target,
@@ -902,9 +943,169 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 second_lease = _fetchone(
                     target,
                     acquire_sql,
-                    (lease_workspace, lease_dataset, lease_token_b, "register", username, 300),
+                    (lease_workspace, lease_dataset, lease_token_b, "register", username, 600),
                 )
                 assert second_lease[0] is True
+
+                # A generic platform-record Storage reference must be written
+                # through the SQL fence while the matching register lease is live.
+                generic_storage_key = (
+                    "tmp/" + lease_workspace + "/" + lease_dataset + "/" + "c" * 32 + ".csv"
+                )
+                fenced_record = _fetchone(
+                    target,
+                    """
+                    SELECT *
+                    FROM public.shoir_platform_upsert_record_with_dataset_lease(
+                        %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::uuid
+                    );
+                    """,
+                    (
+                        "SPR-" + "4" * 24,
+                        lease_workspace,
+                        "artifact",
+                        "T020-REFERENCE-TEST",
+                        json.dumps({"storage_key": generic_storage_key, "source": "migration-replay"}),
+                        "d" * 64,
+                        username,
+                        "SPE-" + "5" * 24,
+                        lease_dataset,
+                        lease_token_b,
+                    ),
+                )
+                assert fenced_record is not None
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT payload_json->>'storage_key'
+                    FROM public.shoir_platform_records
+                    WHERE workspace_key=%s AND record_type='artifact'
+                      AND entity_key='T020-REFERENCE-TEST';
+                    """,
+                    (lease_workspace,),
+                )[0] == generic_storage_key
+
+                # Releasing or expiring the lease prevents a stale token from
+                # creating another metadata reference.
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_dataset_storage_lease_release(%s, %s, %s::uuid);
+                    """,
+                    (lease_workspace, lease_dataset, lease_token_b),
+                )[0] is True
+
+                _execute(target, "SAVEPOINT stale_dataset_reference_lease;")
+                with pytest.raises(psycopg2.Error) as stale_reference_lease:
+                    _fetchone(
+                        target,
+                        """
+                        SELECT *
+                        FROM public.shoir_platform_upsert_record_with_dataset_lease(
+                            %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::uuid
+                        );
+                        """,
+                        (
+                            "SPR-" + "6" * 24,
+                            lease_workspace,
+                            "artifact",
+                            "T020-STALE-REFERENCE",
+                            json.dumps({"storage_key": generic_storage_key, "source": "stale-test"}),
+                            "e" * 64,
+                            username,
+                            "SPE-" + "7" * 24,
+                            lease_dataset,
+                            lease_token_b,
+                        ),
+                    )
+                assert stale_reference_lease.value.pgcode == "55P03"
+                _execute(target, "ROLLBACK TO SAVEPOINT stale_dataset_reference_lease;")
+
+                # Exercise the file-backed dataset metadata wrapper and ensure
+                # storage_key lands on both immutable version/head ledger rows.
+                fenced_dataset = "DS-ABCDEF123457"
+                fenced_token = "00000000-0000-4000-8000-000000000014"
+                assert _fetchone(
+                    target,
+                    acquire_sql,
+                    (lease_workspace, fenced_dataset, fenced_token, "finalize", username, 600),
+                )[0] is True
+                fenced_hash = "a" * 64
+                fenced_storage_key = lease_workspace + "/" + fenced_dataset + "/" + fenced_hash + ".csv"
+                fenced_registration = _fetchone(
+                    target,
+                    """
+                    SELECT *
+                    FROM public.shoir_platform_register_dataset_version_with_storage_and_lease(
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb,
+                        %s, %s, %s, %s, %s, %s::uuid
+                    );
+                    """,
+                    (
+                        lease_workspace,
+                        fenced_dataset,
+                        "Fenced replay dataset",
+                        "fenced.csv",
+                        fenced_hash,
+                        "b" * 64,
+                        1,
+                        1,
+                        json.dumps({"asset_id": {"dtype": "text"}}),
+                        "[]",
+                        username,
+                        "SPR-" + "8" * 24,
+                        "SPR-" + "9" * 24,
+                        "SPE-" + "A" * 24,
+                        fenced_storage_key,
+                        fenced_token,
+                    ),
+                )
+                assert fenced_registration[0] == fenced_dataset
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT payload_json->>'storage_key'
+                    FROM public.shoir_platform_records
+                    WHERE workspace_key=%s AND record_type='dataset_version'
+                      AND entity_key=%s;
+                    """,
+                    (lease_workspace, fenced_dataset + ":v1"),
+                )[0] == fenced_storage_key
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT payload_json->>'storage_key'
+                    FROM public.shoir_platform_records
+                    WHERE workspace_key=%s AND record_type='dataset'
+                      AND entity_key=%s;
+                    """,
+                    (lease_workspace, fenced_dataset),
+                )[0] == fenced_storage_key
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT payload_json->>'storage_key'
+                    FROM public.shoir_platform_events
+                    WHERE workspace_key=%s AND event_type='dataset_version_registered'
+                      AND entity_key=%s;
+                    """,
+                    (lease_workspace, fenced_dataset),
+                )[0] == fenced_storage_key
+                assert _fetchone(
+                    target,
+                    """
+                    SELECT public.shoir_dataset_storage_lease_release(%s, %s, %s::uuid);
+                    """,
+                    (lease_workspace, fenced_dataset, fenced_token),
+                )[0] is True
+
+                # Reclaim the original fixture with a fresh token for the expiry case.
+                second_lease_again = _fetchone(
+                    target,
+                    acquire_sql,
+                    (lease_workspace, lease_dataset, lease_token_b, "sweep", username, 300),
+                )
+                assert second_lease_again[0] is True
 
                 _execute(target, "SAVEPOINT invalid_dataset_lease_ttl;")
                 with pytest.raises(psycopg2.Error) as invalid_lease_ttl:
