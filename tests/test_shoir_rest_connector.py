@@ -598,8 +598,12 @@ def test_provider_erp_read_rejects_shared_workspace_without_server_manage_permis
 
 
 def test_t096_provider_session_and_workspace_manage_routes_are_server_authorized():
+    from pathlib import Path
+    import durable_account_store
+
+    root = Path(__file__).resolve().parents[1]
     edge = (
-        ROOT / "supabase/functions/shoir-persistence/index.ts"
+        root / "supabase/functions/shoir-persistence/index.ts"
     ).read_text(encoding="utf-8")
     session_start = edge.index('if (action === "session_verify")')
     session_end = edge.index('if (action === "workspace_manage_check")', session_start)
@@ -614,3 +618,4 @@ def test_t096_provider_session_and_workspace_manage_routes_are_server_authorized
     assert 'await getSession(' in manage_action
     assert 'resolveManagedWorkspaceKey(' in manage_action
     assert '"manage"' in manage_action
+    assert '"workspace_manage_check"' in durable_account_store._ORGANIZATION_EDGE_ACTIONS
