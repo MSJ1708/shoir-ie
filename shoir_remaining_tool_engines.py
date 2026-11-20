@@ -748,60 +748,122 @@ def validate_api_plugin_manifests(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Report OIDC/MFA/audit configuration readiness without revealing configured values."""
-    env_map = {
-        "issuer_url": "SHOIR_OIDC_ISSUER_URL",
-        "client_id": "SHOIR_OIDC_CLIENT_ID",
-        "client_secret": "SHOIR_OIDC_CLIENT_SECRET",
-        "redirect_uri": "SHOIR_OIDC_REDIRECT_URI",
-        "scopes": "SHOIR_OIDC_SCOPES",
-        "mfa_enforced": "SHOIR_MFA_ENFORCED",
-        "audit_log_enabled": "SHOIR_AUDIT_LOG_ENABLED",
+    """Inspect visible Streamlit OIDC settings without pretending to inspect Edge secrets."""
+    if isinstance(payload, Mapping):
+        root = payload
+    else:
+        try:
+            import streamlit as st
+            root = st.secrets
+        except Exception:
+            root = {}
+
+    auth = root.get("auth", {}) if isinstance(root, Mapping) else {}
+    auth = auth if isinstance(auth, Mapping) else {}
+    provider = auth.get("enterprise", {})
+    provider = provider if isinstance(provider, Mapping) else {}
+
+    raw_exposed = auth.get("expose_tokens")
+    if isinstance(raw_exposed, str):
+        exposed_tokens = {raw_exposed.strip().casefold()}
+    elif isinstance(raw_exposed, (list, tuple, set)):
+        exposed_tokens = {
+            str(value).strip().casefold()
+            for value in raw_exposed
+            if isinstance(value, str)
+        }
+    else:
+        exposed_tokens = set()
+
+    visible_settings = {
+        "redirect_uri": ("auth.redirect_uri", auth.get("redirect_uri")),
+        "cookie_secret": ("auth.cookie_secret", auth.get("cookie_secret")),
+        "expose_tokens_id": ("auth.expose_tokens includes id", "id" if "id" in exposed_tokens else ""),
+        "client_id": ("auth.enterprise.client_id", provider.get("client_id")),
+        "client_secret": ("auth.enterprise.client_secret", provider.get("client_secret")),
+        "server_metadata_url": ("auth.enterprise.server_metadata_url", provider.get("server_metadata_url")),
     }
-    configured_values = {key: _configuration_value(name) for key, name in env_map.items()}
-    present = {key: bool(value) for key, value in configured_values.items()}
-    issuer = configured_values["issuer_url"]
-    redirect = configured_values["redirect_uri"]
-    scopes = set(configured_values["scopes"].lower().split())
-    issuer_parsed = urlparse(issuer) if issuer else None
-    redirect_parsed = urlparse(redirect) if redirect else None
-    issuer_valid = bool(issuer_parsed and issuer_parsed.scheme == "https" and issuer_parsed.netloc)
-    redirect_valid = bool(redirect_parsed and redirect_parsed.scheme == "https" and redirect_parsed.netloc)
-    mfa_enforced = configured_values["mfa_enforced"].lower() in {"true", "1", "yes", "enforced"}
-    audit_enabled = configured_values["audit_log_enabled"].lower() in {"true", "1", "yes", "enabled"}
-    missing = [env_map[key] for key, value in present.items() if not value]
+    configured = {
+        key: isinstance(value, str) and bool(value.strip())
+        for key, (_, value) in visible_settings.items()
+    }
+    missing = [
+        visible_settings[key][0]
+        for key, is_present in configured.items()
+        if not is_present
+    ]
+
+    def public_https_url(value: Any) -> bool:
+        if not isinstance(value, str) or not value.strip():
+            return False
+        try:
+            parsed = urlparse(value.strip())
+            host = (parsed.hostname or "").casefold()
+            return (
+                parsed.scheme.casefold() == "https"
+                and bool(host)
+                and not parsed.username
+                and not parsed.password
+                and host not in {"localhost"}
+                and not host.endswith((".localhost", ".local", ".internal"))
+                and parsed.port in (None, 443)
+            )
+        except (TypeError, ValueError):
+            return False
+
+    redirect_valid = public_https_url(auth.get("redirect_uri"))
+    metadata_valid = public_https_url(provider.get("server_metadata_url"))
+    cookie_secret = auth.get("cookie_secret")
+    cookie_valid = isinstance(cookie_secret, str) and len(cookie_secret) >= 32
     problems = []
-    if present["issuer_url"] and not issuer_valid:
-        problems.append("OIDC issuer URL must use HTTPS and include a host.")
-    if present["redirect_uri"] and not redirect_valid:
-        problems.append("OIDC redirect URI must use HTTPS and include a host.")
-    if present["scopes"] and "openid" not in scopes:
-        problems.append("OIDC scopes must include openid.")
-    if present["mfa_enforced"] and not mfa_enforced:
-        problems.append("MFA enforcement is not explicitly enabled.")
-    if present["audit_log_enabled"] and not audit_enabled:
-        problems.append("Audit logging is not explicitly enabled.")
-    complete = not missing and not problems and issuer_valid and redirect_valid and "openid" in scopes and mfa_enforced and audit_enabled
+    if configured["redirect_uri"] and not redirect_valid:
+        problems.append("auth.redirect_uri must be a public HTTPS URL.")
+    if configured["cookie_secret"] and not cookie_valid:
+        problems.append("auth.cookie_secret must contain at least 32 characters.")
+    if configured["server_metadata_url"] and not metadata_valid:
+        problems.append("auth.enterprise.server_metadata_url must be a public HTTPS URL.")
+    complete = not missing and not problems and redirect_valid and cookie_valid and metadata_valid
     status = (
         "NOT_CONFIGURED" if missing
         else "CONFIGURATION_INVALID" if problems or not complete
-        else "READY_FOR_AUTHORIZED_IDP_TEST"
+        else "STREAMLIT_CONFIGURATION_READY_EDGE_SETTINGS_UNVERIFIED"
     )
+
+    setting_rows = [
+        {
+            "setting": key,
+            "configuration_path": path,
+            "configured": configured[key],
+            "value_exposed": False,
+        }
+        for key, (path, _) in visible_settings.items()
+    ]
+    expected_edge_secrets = [
+        "SHOIR_OIDC_ENABLED",
+        "SHOIR_OIDC_ISSUER",
+        "SHOIR_OIDC_CLIENT_ID",
+        "SHOIR_OIDC_JWKS_URL",
+        "SHOIR_OIDC_REQUIRE_MFA",
+        "SHOIR_OIDC_MFA_AMR_VALUES",
+        "SHOIR_OIDC_MFA_ACR_VALUES",
+    ]
     return {
         "tool_id": "T098",
         "status": status,
+        "streamlit_configuration_ready": complete,
         "provider": "OIDC-compatible identity provider (not detected/activated by this check)",
-        "environment_variables": pd.DataFrame([
-            {"setting": key, "environment_variable": env_name, "configured": present[key], "value_exposed": False}
-            for key, env_name in env_map.items()
-        ]),
+        "environment_variables": pd.DataFrame(setting_rows),
+        "missing_settings": missing,
         "missing_variables": missing,
         "configuration_problems": problems,
-        "oidc_issuer_syntax_valid": issuer_valid,
+        "oidc_issuer_syntax_valid": metadata_valid,
+        "provider_metadata_url_syntax_valid": metadata_valid,
         "redirect_uri_syntax_valid": redirect_valid,
-        "openid_scope_present": "openid" in scopes,
-        "mfa_enforced_flag": mfa_enforced,
-        "audit_logging_flag": audit_enabled,
+        "openid_scope_present": None,
+        "mfa_enforced_flag": False,
+        "audit_logging_flag": False,
+        "edge_configuration_visibility": "NOT_INSPECTABLE_FROM_STREAMLIT",
+        "expected_edge_secret_names": expected_edge_secrets,
         "sso_active": False,
         "mfa_active": False,
         "oidc_login_flow_implemented": True,
@@ -812,14 +874,18 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         "verified_at": None,
         "required_external_actions": [
             "Select an approved identity provider and configure its application/client and exact callback/logout URIs.",
-            "Configure and validate the existing Streamlit OIDC login/callback and Edge Function session-exchange path against the selected provider; do not introduce a second authentication architecture.",
-            "Validate issuer, audience, signature, state, nonce, expiry, redirect and logout/revocation behavior using a maintained protocol implementation.",
+            "Configure the named SHOIR_OIDC_* verifier secrets in the staging Supabase Edge Function secret manager; this Streamlit checker cannot read those remote secrets.",
+            "Verify issuer, audience, signature, state, nonce, expiry, redirect and logout/revocation behavior using the existing login and token-verification path.",
             "Map a validated provider identity to the existing application account, role, tier and workspace without privilege elevation.",
-            "Prove MFA from the provider's documented policy/result; environment flags alone are not evidence.",
-            "Configure a protected durable audit destination and verify representative events were written and can be read under authorized access.",
-            "Run authenticated staging allow/deny, cross-workspace, expired/revoked session and audit-failure tests."
+            "Prove provider-backed MFA from the actual amr/acr claims and the staging Edge verifier configuration; environment flags alone are not evidence.",
+            "Apply the reviewed staging OIDC audit migration and verify protected audit writes, reads and fail-closed behavior.",
+            "Run authenticated staging allow/deny, cross-workspace, expired/revoked session and audit-failure tests.",
         ],
-        "warning": "This is a readiness check only. The repository contains the Streamlit OIDC login and Edge Function token-verification/session-exchange path, but configuration is not authentication, provider policy is not verified MFA evidence, and an audit toggle is not proof of a durable audit write. Provider authentication, MFA claims and durable audit persistence remain unverified until accepted on authorized staging.",
+        "warning": (
+            "This is a readiness check only. It inspects Streamlit auth settings but cannot inspect Supabase Edge Function secrets or deployment state. "
+            "The repository contains the Streamlit OIDC login and Edge Function token-verification/session-exchange path; provider authentication, "
+            "MFA claims and durable audit persistence remain unverified until accepted on authorized staging."
+        ),
     }
 
 
