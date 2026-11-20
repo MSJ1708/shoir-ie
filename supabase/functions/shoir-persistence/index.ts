@@ -2814,56 +2814,93 @@ Deno.serve(async (req) => {
           },
         );
         if (error) {
-          // The RPC may have committed even if its response was lost. Only
-          // remove a file created by this request after both metadata ledgers
-          // have confirmed that no record or event references the object.
+          // The RPC may have committed even if its response was lost. Cleanup
+          // is allowed only while this exact lease token is still live and both
+          // metadata ledgers independently confirm no reference.
           if (createdFinalObject) {
             try {
-              const [recordRefs, eventRefs] = await Promise.all([
-                supabase.from("shoir_platform_records")
-                  .select("record_id")
-                  .eq("workspace_key", workspaceKey)
-                  .contains("payload_json", { storage_key: storageKey })
-                  .limit(1),
-                supabase.from("shoir_platform_events")
-                  .select("event_id")
-                  .eq("workspace_key", workspaceKey)
-                  .contains("payload_json", { storage_key: storageKey })
-                  .limit(1),
-              ]);
-              if (recordRefs.error || eventRefs.error) {
+              const cleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
+                workspaceKey,
+                datasetId,
+                leaseToken,
+                "finalize",
+                String(row.username_lc || ""),
+              );
+              if (!cleanupLeaseRenewed) {
                 console.warn(
-                  "Dataset metadata registration failed; reference checks were unavailable, so the immutable object was retained.",
+                  "Dataset metadata registration failed after the finalization lease expired; the immutable object was retained for the later reference-aware sweep.",
                 );
-              } else if (
-                (recordRefs.data || []).length === 0 &&
-                (eventRefs.data || []).length === 0
-              ) {
-                const { error: orphanRemoveError } = await bucket.remove([
-                  storageKey,
+              } else {
+                const [recordRefs, eventRefs] = await Promise.all([
+                  supabase.from("shoir_platform_records")
+                    .select("record_id")
+                    .eq("workspace_key", workspaceKey)
+                    .contains("payload_json", { storage_key: storageKey })
+                    .limit(1),
+                  supabase.from("shoir_platform_events")
+                    .select("event_id")
+                    .eq("workspace_key", workspaceKey)
+                    .contains("payload_json", { storage_key: storageKey })
+                    .limit(1),
                 ]);
-                if (orphanRemoveError) {
+                if (recordRefs.error || eventRefs.error) {
                   console.warn(
-                    "Dataset metadata registration failed; the confirmed-unreferenced object could not be removed.",
+                    "Dataset metadata registration failed; reference checks were unavailable, so the immutable object was retained.",
                   );
+                } else if (
+                  (recordRefs.data || []).length === 0 &&
+                  (eventRefs.data || []).length === 0
+                ) {
+                  const finalCleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
+                    workspaceKey,
+                    datasetId,
+                    leaseToken,
+                    "finalize",
+                    String(row.username_lc || ""),
+                  );
+                  if (finalCleanupLeaseRenewed) {
+                    const { error: orphanRemoveError } = await bucket.remove([
+                      storageKey,
+                    ]);
+                    if (orphanRemoveError) {
+                      console.warn(
+                        "Dataset metadata registration failed; the confirmed-unreferenced object could not be removed.",
+                      );
+                    }
+                  } else {
+                    console.warn(
+                      "Dataset metadata registration failed; the finalization lease expired before orphan cleanup, so the object was retained.",
+                    );
+                  }
                 }
               }
             } catch {
-              // An uncertain reference check must never turn into a destructive
-              // cleanup attempt. A later explicit, reference-aware sweep can
-              // reconcile the retained object.
+              // An uncertain lease/reference check must never authorize deletion.
               console.warn(
-                "Dataset metadata registration failed; the immutable object was retained because reference status was uncertain.",
+                "Dataset metadata registration failed; the immutable object was retained because lease or reference status was uncertain.",
               );
             }
           }
           try {
-            const { error: tempRemoveError } = await bucket.remove([
-              uploadPath,
-            ]);
-            if (tempRemoveError) {
+            const tempCleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
+              workspaceKey,
+              datasetId,
+              leaseToken,
+              "finalize",
+              String(row.username_lc || ""),
+            );
+            if (tempCleanupLeaseRenewed) {
+              const { error: tempRemoveError } = await bucket.remove([
+                uploadPath,
+              ]);
+              if (tempRemoveError) {
+                console.warn(
+                  "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
+                );
+              }
+            } else {
               console.warn(
-                "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
+                "Dataset metadata registration failed after lease expiry; the temporary upload was retained for the later bounded sweep.",
               );
             }
           } catch {
