@@ -2062,7 +2062,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "Immutable dataset files are retained to avoid racing a version registration. Preview is the default; "
                                 "this control does not create a scheduled job."
                             )
-                            preview_sweep = st.button(
+                            preview_sweep = st.form_submit_button(
                                 "Preview old unreferenced temporary uploads",
                                 key="tool020_storage_sweep_preview",
                                 use_container_width=True,
@@ -2072,7 +2072,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 value=False,
                                 key="tool020_storage_sweep_confirm",
                             )
-                            delete_sweep = st.button(
+                            delete_sweep = st.form_submit_button(
                                 "Delete confirmed temporary uploads",
                                 key="tool020_storage_sweep_delete",
                                 disabled=not confirm_sweep,
