@@ -2057,23 +2057,22 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         if selected_tool["tool_id"] == "T020":
                             st.markdown("**Managed dataset storage maintenance**")
                             st.caption(
-                                "Scans only this personal/shared workspace. Temporary uploads must be untouched for at least 48 hours, "
-                                "both metadata ledgers must confirm no reference, and no more than 50 are deleted per confirmed run. "
-                                "Immutable dataset files are retained to avoid racing a version registration. Preview is the default; "
-                                "this control does not create a scheduled job."
+                                "Scans only this personal/shared workspace. Temporary and immutable dataset objects must be untouched for at least 48 hours. "
+                                "Both metadata ledgers must confirm no reference while a shared per-dataset lifecycle lease is held. "
+                                "No more than 50 objects are deleted per confirmed run. Preview is the default; no scheduled job is created."
                             )
                             preview_sweep = st.form_submit_button(
-                                "Preview old unreferenced temporary uploads",
+                                "Preview old unreferenced dataset objects",
                                 key="tool020_storage_sweep_preview",
                                 use_container_width=True,
                             )
                             confirm_sweep = st.checkbox(
-                                "I reviewed the preview and explicitly authorize deleting eligible old temporary uploads in this workspace.",
+                                "I reviewed the preview and explicitly authorize deleting eligible old orphan dataset objects in this workspace.",
                                 value=False,
                                 key="tool020_storage_sweep_confirm",
                             )
                             delete_sweep = st.form_submit_button(
-                                "Delete confirmed temporary uploads",
+                                "Delete confirmed orphan dataset objects",
                                 key="tool020_storage_sweep_delete",
                                 disabled=not confirm_sweep,
                                 use_container_width=True,
