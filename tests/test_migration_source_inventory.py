@@ -564,3 +564,31 @@ def test_dataset_storage_lifecycle_lease_migration_is_private_and_token_fenced()
         "grant execute on function public.shoir_dataset_storage_lease_release"
         in normalized
     )
+
+
+def test_dataset_storage_lease_fencing_migration_locks_live_tokens_for_metadata_commits():
+    source = (
+        MIGRATIONS
+        / "20261120130000_shoir_dataset_storage_lease_fencing.sql"
+    ).read_text(encoding="utf-8")
+    executable_sql = "\\n".join(
+        line.split("--", 1)[0] for line in source.splitlines()
+    )
+    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+    for function_name in (
+        "shoir_dataset_storage_lease_renew",
+        "shoir_platform_register_dataset_version_with_storage_and_lease",
+        "shoir_platform_upsert_record_with_dataset_lease",
+    ):
+        assert f"create or replace function public.{function_name}" in normalized
+    assert "set search_path = pg_catalog, public" in normalized
+    assert normalized.count("security definer") == 3
+    assert "expires_at > clock_timestamp()" in normalized
+    assert normalized.count("for update") == 2
+    assert "lease_operation = 'finalize'" in normalized
+    assert "lease_operation = 'register'" in normalized
+    assert "using (p_payload->>'storage_key')" not in normalized
+    assert "revoke all on function public.shoir_platform_register_dataset_version_with_storage_and_lease" in normalized
+    assert "revoke all on function public.shoir_platform_upsert_record_with_dataset_lease" in normalized
+    assert "to service_role" in normalized
+
