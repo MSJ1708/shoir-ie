@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -799,12 +800,18 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         try:
             parsed = urlparse(value.strip())
             host = (parsed.hostname or "").casefold()
+            if not host:
+                return False
+            try:
+                ipaddress.ip_address(host)
+                return False
+            except ValueError:
+                pass
             return (
                 parsed.scheme.casefold() == "https"
-                and bool(host)
                 and not parsed.username
                 and not parsed.password
-                and host not in {"localhost"}
+                and host != "localhost"
                 and not host.endswith((".localhost", ".local", ".internal"))
                 and parsed.port in (None, 443)
             )
