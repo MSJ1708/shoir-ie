@@ -439,27 +439,46 @@ def test_all_target_examples_are_valid_json():
         out = run_additional_tool(tool_id, value)
         assert out["tool_id"] == tool_id
 
-def test_identity_config_separates_invalid_settings_from_missing_provider(monkeypatch):
+def test_identity_config_ignores_obsolete_flat_environment_contract(monkeypatch):
+    # The application reads Streamlit's nested [auth] settings. Legacy flat
+    # variables and client-secret values must never be used as a substitute.
     values = {
-        "SHOIR_OIDC_ISSUER_URL": "http://idp.example.test",
-        "SHOIR_OIDC_CLIENT_ID": "shoir-staging",
+        "SHOIR_OIDC_ISSUER_URL": "http://legacy-idp.example.test",
+        "SHOIR_OIDC_CLIENT_ID": "legacy-client",
         "SHOIR_OIDC_CLIENT_SECRET": "do-not-return",
-        "SHOIR_OIDC_REDIRECT_URI": "https://staging.example.test/auth/callback",
+        "SHOIR_OIDC_REDIRECT_URI": "https://legacy.example.test/auth/callback",
         "SHOIR_OIDC_SCOPES": "profile email",
-        "SHOIR_MFA_ENFORCED": "false",
-        "SHOIR_AUDIT_LOG_ENABLED": "false",
+        "SHOIR_MFA_ENFORCED": "true",
+        "SHOIR_AUDIT_LOG_ENABLED": "true",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
-    out = identity_audit_configuration_status()
-    assert out["status"] == "CONFIGURATION_INVALID"
+
+    out = identity_audit_configuration_status({
+        "auth": {
+            "redirect_uri": "https://staging.example.test/oauth2callback",
+            "cookie_secret": "x" * 48,
+            "expose_tokens": "id",
+            "enterprise": {
+                "client_id": "shoir-staging",
+                "client_secret": "streamlit-secret-not-returned",
+                "server_metadata_url": "https://idp.example.test/.well-known/openid-configuration",
+            },
+        }
+    })
+    assert out["status"] == "STREAMLIT_CONFIGURATION_READY_EDGE_SETTINGS_UNVERIFIED"
+    assert out["streamlit_configuration_ready"] is True
     assert out["sso_active"] is False
     assert out["mfa_active"] is False
     assert out["provider_mfa_evidence_verified"] is False
-    assert not out["oidc_issuer_syntax_valid"]
-    assert not out["openid_scope_present"]
-    assert len(out["configuration_problems"]) >= 3
-    assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
+    assert out["oidc_issuer_syntax_valid"] is None
+    assert out["openid_scope_present"] is None
+    assert out["mfa_enforced_flag"] is None
+    assert out["audit_logging_flag"] is None
+    assert out["edge_configuration_visibility"] == "NOT_INSPECTABLE_FROM_STREAMLIT"
+    serialized = json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
+    assert "do-not-return" not in serialized
+    assert "streamlit-secret-not-returned" not in serialized
 
 
 def test_t061_linear_mixed_integer_optimization_runs_and_checks_constraints():
