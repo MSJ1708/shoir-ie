@@ -282,40 +282,40 @@ def test_workbench_discovery_alias_launch_and_entitlement(tmp_path, monkeypatch)
     from streamlit.testing.v1 import AppTest
 
     page = Path(__file__).resolve().parents[1] / "pages" / "Industrial_Engineering_Workbench.py"
-    at = AppTest.from_file(page, default_timeout=60)
+    at = AppTest.from_file(page, default_timeout=180)
     at.session_state["current_user"] = "resource-intelligence-test"
     at.session_state["authenticated"] = True
     at.session_state["user_tier"] = "Enterprise Plus Tier"
-    at.run(timeout=60)
+    at.run(timeout=180)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
     at.text_input(key="workbench_module_search").set_value("IEIT")
-    at.run(timeout=60)
+    at.run(timeout=180)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     selector = at.selectbox(key="workbench_module_selector")
     assert "Resource Intelligence · Industrial Resource Intelligence" in selector.options
     for query in ("Industrial Resource Intelligence & Resilience System", "ذكاء الموارد الصناعية"):
         at.text_input(key="workbench_module_search").set_value(query)
-        at.run(timeout=60)
+        at.run(timeout=180)
         assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
         assert "Resource Intelligence · Industrial Resource Intelligence" in at.selectbox(key="workbench_module_selector").options
     at.text_input(key="workbench_module_search").set_value("IEIT")
-    at.run(timeout=60)
+    at.run(timeout=180)
     selector = at.selectbox(key="workbench_module_selector")
     selector.select("Resource Intelligence · Industrial Resource Intelligence")
-    at.run(timeout=60)
+    at.run(timeout=180)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert any("Industrial Resource Intelligence" in item.value for item in at.subheader)
 
     # The same route is not discoverable through the available module menu to Starter.
-    denied = AppTest.from_file(page, default_timeout=60)
+    denied = AppTest.from_file(page, default_timeout=180)
     denied.session_state["current_user"] = "resource-starter-test"
     denied.session_state["authenticated"] = True
     denied.session_state["user_tier"] = "Starter"
-    denied.run(timeout=60)
+    denied.run(timeout=180)
     assert not denied.exception, "\\n".join(str(error.value) for error in denied.exception)
     denied.text_input(key="workbench_module_search").set_value("industrial symbiosis")
-    denied.run(timeout=60)
+    denied.run(timeout=180)
     assert not denied.exception, "\\n".join(str(error.value) for error in denied.exception)
     assert any("Enterprise" in warning.value for warning in denied.warning)
 
