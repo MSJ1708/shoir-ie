@@ -1252,6 +1252,7 @@ def test_recursive_mrp_explodes_nested_bom_yield_scrap_and_component_inventory()
     assert frame.loc["Screw", "Effective yield (%)"] == pytest.approx(90.0)
     assert frame.loc["Bolt", "Planned order receipt"] == 0
     assert frame.loc["Screw", "Due period"] == -1
+    assert "different units of measure" in result["total_planned_order_receipt_units_note"]
 
 
 def test_recursive_mrp_aggregates_repeated_components_once_and_rejects_cycles():
