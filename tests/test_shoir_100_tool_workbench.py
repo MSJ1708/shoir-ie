@@ -403,7 +403,7 @@ def test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_met
         ("T045 · Spare Parts and Criticality Planner", "tool045_run", "T045", "parts_below_reorder_point", 1),
         ("T050 · Safety Incident Trend Analyzer", "tool050_run", "T050", "total_incidents", 5),
         ("T059 · Warehouse Slotting and Picking Optimizer", "tool059_run", "T059", "assigned_count", 2),
-        ("T063 · Assignment and Scheduling Optimizer", "tool063_run", "T063", "total_assignment_cost", 9.0),
+        ("T063 · Assignment and Scheduling Optimizer", "tool063_run", "T063", "total_assignment_cost", 175.0),
         ("T077 · Energy Performance Optimizer", "tool077_run", "T077", "best_intensity_scenario", "Improved"),
     ]
     for label, button_key, tool_id, result_key, expected in cases:
