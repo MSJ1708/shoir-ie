@@ -18,6 +18,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+from shoir_tool_registry import require_tool_access
 from shoir_upgrade import literalize_untrusted_formula_cells
 
 
@@ -1022,7 +1024,52 @@ def _export_workbook(
     return out.getvalue()
 
 
+
+# The Facility Layout route is a Starter-tier capability (canonical ID T065).
+# Keep authentication, account ownership, and tier enforcement at the renderer
+# boundary as well as at the Workbench dispatcher so direct calls cannot bypass it.
+_FACILITY_VALID_TIER_LABELS = frozenset(
+    {
+        "starter",
+        "starter tier",
+        "mid-tier pro",
+        "mid-tier pro tier",
+        "professional",
+        "professional tier",
+        "enterprise",
+        "enterprise tier",
+        "enterprise plus",
+        "enterprise plus tier",
+        "research pack",
+        "research pack tier",
+    }
+)
+
+
+def _require_facility_tool_access(tier: str, username: str) -> dict[str, Any]:
+    """Authenticate the caller and enforce the canonical T065 entitlement."""
+    session = st.session_state
+    if session.get("authenticated") is not True:
+        raise PermissionError("Sign in to access the Facility Layout workspace.")
+
+    session_user = str(session.get("current_user") or "").strip()
+    requested_user = str(username or "").strip()
+    if not session_user or not requested_user or session_user.casefold() != requested_user.casefold():
+        raise PermissionError(
+            "Facility workspace access is limited to your own active account."
+        )
+
+    tier_label = re.sub(r"\\s+", " ", str(tier or "").strip()).casefold()
+    if tier_label not in _FACILITY_VALID_TIER_LABELS:
+        raise PermissionError(
+            "Unable to verify your Shoir-IE subscription tier; Facility access is denied."
+        )
+
+    return require_tool_access(tier, "T065")
+
+
 def render_facility_layout(tier: str, username: str) -> None:
+    _require_facility_tool_access(tier, username)
     owner, workspace = str(username), _workspace(username)
     depts, flows = _seed_or_migrate(owner, workspace)
     data_origin = _get_data_origin(owner, workspace)
