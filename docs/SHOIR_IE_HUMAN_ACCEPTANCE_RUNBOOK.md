@@ -282,3 +282,20 @@ No staging migration, Edge Function deployment, production write, account mutati
 ## CI execution update — 2026-11-18
 
 The previous exact-head full validation run was cancelled at the 120-minute job limit after reaching approximately 40% pytest progress; three failure markers appeared before cancellation, but no JUnit file or traceback was produced. The new PR candidate updates the workflow to use four pytest workers with file-level distribution, keeps the two PostgreSQL integration modules serial, adds a 10-minute per-test timeout and verbose output, emits separate JUnit reports, and runs independent PostgreSQL/Node checks even when the parallel test step fails. It also uses Node 24 and setup-node v7. Always inspect both JUnit artifacts and resolve all failures; a workflow change alone is not acceptance. See docs/SHOIR_IE_TECHNICAL_HANDOFF_20261118.md.
+
+
+## T020 — Managed dataset storage maintenance acceptance
+
+The candidate contains a staging-only, authenticated maintenance action in the existing T020 Workbench. It is not an automatic cleanup schedule and must not be used against production.
+
+Run this only after the current candidate has passed exact-head CI, the reviewed staging migrations and matching Edge Function have been deployed in an approved staging window, backup/rollback evidence exists, and you have a dedicated disposable Enterprise account:
+
+1. Sign in using a disposable Enterprise Owner/Admin account. Never use the protected administrator or a customer identity. Select the personal or shared organization workspace whose temporary uploads are to be reviewed.
+2. Open **Data & Excel Intelligence → T020 Dataset Versioning and Lineage**. Use **Preview old unreferenced temporary uploads** first. A preview must delete nothing.
+3. Verify the workspace scope, 48-hour minimum inactivity, scanned/stale counts, reference-check counts, eligible orphan count, deferred count and audit limitations shown in the result. Confirm that immutable content-addressed dataset files are reported as retained.
+4. For a deletion rehearsal, use only synthetic abandoned uploads in the disposable workspace. Check the explicit authorization box, then use **Delete confirmed temporary uploads**. The API revalidates the session, entitlement, workspace scope and Owner/Admin manage permission; it checks both metadata ledgers; writes a deletion-intent event before Storage removal; and writes a completion event after successful removal. At most 50 temporary objects are deleted per invocation.
+5. Verify the corresponding append-only events, confirm the exact temporary objects disappeared, confirm referenced objects remain, and rerun preview to reconcile remaining entries. The scan and reference-check caps intentionally defer excess candidates to a later bounded run.
+6. Repeat with a non-admin shared-workspace member and a different organization. The member must be denied the manage action, and no object in another workspace may be listed or deleted.
+7. Do not treat an absent scheduled job as a completed operational schedule. Scheduling requires a separately reviewed staging runner/service identity and secret-management configuration. Do not schedule a production invocation.
+
+**Immutable orphan limitation:** this action does not delete old content-addressed dataset objects. Age and reference reads alone can race an in-flight version registration. Do not add immutable-object deletion until registration and cleanup share an atomic database lease/coordination protocol and its concurrent-registration tests pass.
