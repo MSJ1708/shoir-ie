@@ -633,6 +633,8 @@ def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
     research.session_state["current_user"] = "research-power-checker"
     research.session_state["authenticated"] = True
     research.session_state["user_tier"] = "Research Pack"
+    from shoir_tool_registry import tier_allows_tool
+    assert tier_allows_tool("Research Pack", "T085")
     research.run(timeout=90)
     assert not research.exception, "\\n".join(
         str(error.value) for error in research.exception
@@ -691,12 +693,14 @@ def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
     assert not professional.exception, "\\n".join(
         str(error.value) for error in professional.exception
     )
-    professional.button(key="tool085_run").click()
-    professional.run(timeout=90)
+    professional_button_keys = {item.key for item in professional.button}
+    assert "tool085_run" not in professional_button_keys, (
+        "A Professional-only account must not receive the Research Pack run control."
+    )
     assert professional.session_state.get("shoir_tool_result_T085") is None
     assert any(
         "Research Pack" in str(item.value) or "tier" in str(item.value).casefold()
-        for item in professional.error
+        for item in professional.warning
     )
 
 
