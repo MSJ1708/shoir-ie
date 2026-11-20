@@ -186,3 +186,66 @@ The T020 cleanup remains manual; no scheduler or service identity has been confi
 T096–T099 still require real provider/identity/infrastructure configuration and acceptance. The exact configurations and evidence lists remain in the T096, T097, T098 and T099 acceptance documents. After those are configured, run the authenticated release gate and full browser/module/workbook/export journey with disposable staging identities. Independent Industrial Engineering, security, infrastructure and Saudi privacy/legal review is still required.
 
 **Release position is unchanged: PR #232 remains draft; Shoir-IE remains BETA; production remains NO-GO.** No staging/prod migration, Edge deployment, secret change, Streamlit deploy, merge, customer/account mutation or protected-administrator use is claimed by this repository pass.
+
+
+---
+
+## Latest repository engineering refresh — 2026-11-20 14:04 UTC
+
+This addendum supersedes the earlier candidate SHA, CI run links, 300-second lease description and any statement that immutable orphan cleanup is disabled.
+
+### Exact current candidate at this refresh
+
+- PR: [#232 — Release hardening and staging security acceptance](https://github.com/MSJ1708/shoir-ie/pull/232).
+- Head SHA: `d4955d165b0f59b5c160971f53cd6236bc65f140`.
+- Base: `staging-e2e-20261019`.
+- PR is open and draft, with no independent review approvals recorded and no review threads recorded at this check.
+- Canonical 100-tool readiness remains 96 `IMPLEMENTED_NEEDS_VALIDATION`, four `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), zero `VERIFIED_WORKING`.
+
+### T020 lifecycle/fencing implementation
+
+The candidate contains two additive migrations and the matching Edge Function:
+
+1. `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` — private RLS-enabled per-workspace/dataset lease table; server-only acquire/renew/release RPCs; 30–600-second bound; token-matched renewal/release.
+2. `20261120130000_shoir_dataset_storage_lease_fencing.sql` — token/operation/actor-checked, `FOR UPDATE`-fenced metadata wrappers for dataset-version finalization and generic platform-record Storage references.
+
+Finalization, generic record reference creation and the temporary/immutable orphan sweep now share the lease. The Edge cleanup paths renew the exact still-live finalization token before removing an early temporary upload; if renewal or removal cannot be confirmed, the object is retained for bounded later inspection. The operator sweep remains dry-run by default, requires separate explicit confirmation, uses a 48-hour newest-timestamp threshold, checks both metadata ledgers while holding the lease, writes kind-specific intent/completion events and deletes no more than 50 objects per run. It remains manual, staging-only and unscheduled.
+
+The PostgreSQL replay on this exact head passed with both migrations, the RLS/privilege and RPC-grant contracts, active-lease conflict, token fencing, expiry reclamation and metadata wrapper tests. The direct database migration-history read against the connected staging project remains unauthenticated; the deployed migration ledger still needs the authorized operator check before staging deployment.
+
+### Exact-head GitHub workflow state at this refresh
+
+| Workflow | Run | State at refresh |
+|---|---|---|
+| Edge Function verification | [44750010934](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010934) | Passed |
+| Clean PostgreSQL migration-history replay | [44750010753](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010753) | Passed |
+| Production v9 compatibility | [44750010797](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010797) | Passed |
+| Engine Regression | [44750010759](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010759) | In progress |
+| Shoir-IE full validation | [44750010757](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010757) | Pending/queued |
+| Security and quality | [44750010763](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010763) | In progress |
+| Excel Intelligence | [44750010748](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010748) | In progress |
+| Subscription transaction integration | [44750010749](https://github.com/MSJ1708/shoir-ie/actions/runs/44750010749) | In progress |
+
+The preceding validation attempt on SHA `d1fdd47e12a0e1ef65e38413100c1e776092f8e8` had a failed parallel regression step; its job-log download was unavailable through the connected GitHub log endpoint and the run did not complete. It is not counted as fixed. The newer SHA above has a fresh full regression/validation cycle; only the exact-head completion can clear this blocker. The hosted `live-deployment-smoke` step is skipped when staging E2E secrets are absent, so it cannot substitute for later authenticated staging acceptance.
+
+### Latest deployed-state inspection
+
+A read-only Supabase Edge Function inventory still reports:
+- Staging project `hfhrosthswcybccepmak`: `shoir-persistence` v14, ACTIVE.
+- Production project `gcsamrdaeraxieaagsta`: `shoir-persistence` v10, ACTIVE.
+
+Neither project received a migration or Edge Function deployment during this pass. The connected migration-history read rejected database authentication, so do not infer the applied migration ledger from the Edge Function version. Verify the ledger with the authorized operator before staging deployment.
+
+### Other repository engineering additions reconciled in this candidate
+
+- T028: six-category fishbone input, validation and Ishikawa hypothesis chart; user-entered labels are escaped; causes are clearly marked as hypotheses.
+- T041: right-censored Weibull likelihood, approximate log-parameter intervals when stable and descriptive Kaplan–Meier comparison without an uncalibrated p-value.
+- T054: recursive multi-level BOM explosion, yield/scrap, lot sizing, parent release propagation and cycle/revision/ambiguous-level checks.
+- T063: one-day 30-minute time-indexed resource scheduling with skills, shifts, capacity and precedence constraints; the original Hungarian assignment remains separately available.
+- T075: canonical Workbench form and persistence of user-supplied model/dataset lineage inputs; lineage verification remains explicitly unverified.
+- T085: Research Pack execution gate, lower-tier denial and persistence of statistical design assumptions.
+- T020's early temporary cleanup now renews the current lease token before deletion.
+
+The five method changes and other tool foundations remain `IMPLEMENTED_NEEDS_VALIDATION`; exact-head tests and independent domain review are still required. T096–T099 still require external provider/infrastructure setup and evidence. The consolidated owner instructions are in `docs/SHOIR_IE_EXTERNAL_CONFIGURATION_AND_RELEASE_APPROVAL_RUNBOOK.md`.
+
+**Release decision remains BETA / NO-GO.** Do not deploy staging or production, merge PR #232, or enable the destructive cleanup action until the exact-head CI, independent approval, staging backup/rollback readiness, authorized migration reconciliation and authenticated disposable-account acceptance have passed. Production requires its own separate approval and release PR.
