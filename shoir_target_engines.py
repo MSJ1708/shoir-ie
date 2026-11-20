@@ -578,7 +578,7 @@ def analyze_pareto_root_cause(
             )
             if canonical is None:
                 raise ValueError(
-                    "Fishbone categories must be Manpower, Machine, Method, Material, Measurement or Environment."
+                    "Fishbone categories must be one of the six M categories: Manpower, Machine, Method, Material, Measurement or Environment."
                 )
             if canonical in seen_fishbone_categories:
                 raise ValueError(f"Fishbone category {canonical} was supplied more than once.")
@@ -3217,8 +3217,8 @@ def analyze_weibull_reliability(
             raise ValueError("event_observed must be a boolean/0-or-1 list matching the time observations.")
         flags: list[bool] = []
         for index, flag in enumerate(event_observed, start=1):
-            if isinstance(flag, bool):
-                flags.append(flag)
+            if isinstance(flag, (bool, np.bool_)):
+                flags.append(bool(flag))
             elif isinstance(flag, (int, np.integer)) and flag in (0, 1):
                 flags.append(bool(flag))
             else:
@@ -3446,7 +3446,7 @@ def analyze_weibull_reliability(
         },
         "assumptions": "Independent observations; two-parameter Weibull distribution with fixed zero location; consistent time units; event_observed=false denotes independent right censoring.",
         "warning": (
-            "Confidence intervals are approximate Wald intervals on log parameters using numerical observed information. Kaplan-Meier versus fitted survival is descriptive and has no calibrated p-value; formal goodness-of-fit, bootstrap intervals, competing risks and interval censoring still require specialist review. This fit is not a maintenance guarantee; inspect failure-mode consistency and sample quality with a reliability engineer."
+            "Right-censored observations are supported under the independent-censoring assumption. Confidence intervals are approximate Wald intervals on log parameters using numerical observed information. Kaplan-Meier versus fitted survival is descriptive and has no calibrated p-value; formal goodness-of-fit, bootstrap intervals, competing risks and interval censoring still require specialist review. This fit is not a maintenance guarantee; inspect failure-mode consistency and sample quality with a reliability engineer."
         ),
     }
 
@@ -3893,14 +3893,25 @@ def optimize_task_resource_schedule(
     model = pulp.LpProblem("shoir_task_resource_schedule", pulp.LpMinimize)
     variables: dict[tuple[str, int, int], Any] = {}
     by_task: dict[str, list[Any]] = {task["key"]: [] for task in task_rows}
+    add_model_variable = getattr(model, "add_variable", None)
     for task in task_rows:
         for resource_index, start_slot in candidates[task["key"]]:
-            variable = pulp.LpVariable(
-                f"x_{task_index[task['key']]}_{resource_index}_{start_slot}",
-                lowBound=0,
-                upBound=1,
-                cat=pulp.LpBinary,
-            )
+            variable_name = f"x_{task_index[task['key']]}_{resource_index}_{start_slot}"
+            if callable(add_model_variable):
+                variable = add_model_variable(
+                    name=variable_name,
+                    lowBound=0,
+                    upBound=1,
+                    cat=pulp.LpBinary,
+                )
+            else:
+                # Compatibility with PuLP versions predating LpProblem.add_variable.
+                variable = pulp.LpVariable(
+                    variable_name,
+                    lowBound=0,
+                    upBound=1,
+                    cat=pulp.LpBinary,
+                )
             variables[(task["key"], resource_index, start_slot)] = variable
             by_task[task["key"]].append(variable)
         model += pulp.lpSum(by_task[task["key"]]) == 1
@@ -3940,11 +3951,19 @@ def optimize_task_resource_schedule(
         # due hours as soft weighted-tardiness targets when supplied.
         objective_terms.append(task["priority_weight"] * 0.1 * finish_expr[task["key"]])
         if task["due_hour"] is not None:
-            tardiness = pulp.LpVariable(
-                f"tardiness_{task_index[task['key']]}",
-                lowBound=0,
-                cat=pulp.LpContinuous,
-            )
+            tardiness_name = f"tardiness_{task_index[task['key']]}"
+            if callable(add_model_variable):
+                tardiness = add_model_variable(
+                    name=tardiness_name,
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
+                )
+            else:
+                tardiness = pulp.LpVariable(
+                    tardiness_name,
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
+                )
             model += tardiness >= finish_expr[task["key"]] - task["due_hour"]
             objective_terms.append(100.0 * task["priority_weight"] * tardiness)
         for resource_index, _start_slot, variable in options:
