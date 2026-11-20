@@ -230,7 +230,7 @@ Only after sections 1–8 prerequisites that apply to the selected features have
 6. confirm staging banner, candidate build marker and E2E secrets;
 7. run GitHub Actions → **Authenticated release gate**, selecting branch `feat/shoir-ie-release-hardening-20261105` (the workflow code must come from the candidate branch; target URLs/keys must remain staging-only);
 8. download `shoir-ie-authenticated-release-evidence` and review exact SHA, browser diagnostics and all role/tier/session/workspace cases;
-9. complete the T020 owner/admin lease acceptance: preview first, use only synthetic 48-hour-old orphan objects, test competing lease/expiry/release, dual-ledger no-reference, intent/completion events, 50-delete cap and cross-workspace denial. Do not run deletion until this operator rehearsal is explicitly approved;
+9. complete the T020 owner/admin lease acceptance: preview first, use only synthetic 48-hour-old orphan objects, test finalizer/sweeper/reference-writer lease conflicts, expiry and token-matched release, dual-ledger no-reference, intent/completion events, generic platform-record rejection of cross-workspace T020 paths, the 50-delete cap and cross-workspace denial. Do not run deletion until this operator rehearsal is explicitly approved;
 10. complete data import → validate → calculate → simulate → optimize → decide → compare → export → reopen/verify journeys, including fresh login and tenant isolation; verify workbook/XLSX, PDF and PPTX artifacts; visually inspect authenticated desktop 1440px, tablet 768px and mobile 390px, including Arabic/RTL where supported;
 11. retain redacted evidence and have qualified reviewers sign the tool-specific calculations, Industrial Engineering methods, security and export results.
 
