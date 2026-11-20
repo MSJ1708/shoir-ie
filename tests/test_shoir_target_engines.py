@@ -71,6 +71,43 @@ def test_forecast_drift_monitor_has_hand_calculated_error_values():
     )
 
 
+def test_forecast_drift_monitor_records_user_supplied_model_and_dataset_lineage():
+    result = monitor_forecast_drift(
+        [10, 20, 30],
+        [12, 18, 33],
+        max_mae=2,
+        model_id="FORECAST-MODEL-01",
+        model_version="v3.2",
+        dataset_id="DS-ABCDEF123456",
+        dataset_version="2026-11-01",
+        source_label="Staging forecast evaluation",
+        evaluation_period_start="2026-10-01",
+        evaluation_period_end="2026-10-31",
+    )
+    assert result["lineage_status"] == "USER_SUPPLIED_MODEL_AND_DATASET_VERSIONS"
+    assert result["lineage_verification"] == "USER_SUPPLIED_UNVERIFIED"
+    assert result["model_version"] == "v3.2"
+    assert result["dataset_version"] == "2026-11-01"
+    assert result["evaluation_period_start"] == "2026-10-01"
+    assert result["evaluation_period_end"] == "2026-10-31"
+    assert "not checked against a registry" in result["warning"]
+
+
+def test_forecast_drift_monitor_rejects_partial_or_invalid_lineage_metadata():
+    with pytest.raises(ValueError, match="Model ID and model version"):
+        monitor_forecast_drift([1, 2], [1, 2], 1, model_id="MODEL-01")
+    with pytest.raises(ValueError, match="Dataset ID and dataset version"):
+        monitor_forecast_drift([1, 2], [1, 2], 1, dataset_version="v1")
+    with pytest.raises(ValueError, match="supplied together"):
+        monitor_forecast_drift([1, 2], [1, 2], 1, evaluation_period_start="2026-01-01")
+    with pytest.raises(ValueError, match="cannot be before"):
+        monitor_forecast_drift(
+            [1, 2], [1, 2], 1,
+            evaluation_period_start="2026-02-01",
+            evaluation_period_end="2026-01-01",
+        )
+
+
 def test_forecast_drift_monitor_window_and_invalid_inputs():
     result = monitor_forecast_drift([1, 100, 100], [1, 105, 101], max_mae=10, window=2)
     assert result["observations"] == 2
