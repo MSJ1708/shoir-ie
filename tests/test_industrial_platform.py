@@ -677,6 +677,135 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
     assert reverted_versions == [(1, first_hash), (2, second_hash), (3, first_hash)]
 
 
+def test_dataset_registration_migrates_legacy_outcome_schema_and_inherits_parent_lineage(tmp_path, monkeypatch):
+    import json
+    import durable_account_store
+    import industrial_platform as platform
+
+    db = str(tmp_path / "legacy-experience-outcomes.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    original = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 4.5]})
+    dataset_id = platform.register_dataset(
+        "Legacy outcome source", "legacy-outcome.csv", original,
+        db_path=db, username="legacy-engineer",
+    )
+    with sqlite_connection(db) as conn:
+        registered = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint "
+            "FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        conn.commit()
+
+    dependencies = json.dumps([{
+        "dataset_id": dataset_id,
+        "version": int(registered[0]),
+        "data_hash": registered[1],
+        "version_fingerprint": registered[2],
+    }], sort_keys=True)
+
+    # Simulate an older experience database: the parent decision has explicit
+    # lineage metadata, while outcomes predate the three additive lineage columns.
+    with sqlite_connection(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE experience_decisions(
+                decision_id TEXT PRIMARY KEY,
+                title TEXT,
+                module TEXT,
+                status TEXT,
+                metrics_json TEXT,
+                assumptions_json TEXT,
+                uncertainty_json TEXT,
+                owner TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',
+                dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',
+                stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE experience_decision_outcomes(
+                outcome_id TEXT PRIMARY KEY,
+                decision_id TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                implementation_status TEXT NOT NULL,
+                predicted_json TEXT NOT NULL,
+                actual_json TEXT NOT NULL,
+                variance_json TEXT NOT NULL,
+                lesson TEXT,
+                verified_at TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO experience_decisions(
+                decision_id,title,module,status,metrics_json,assumptions_json,
+                uncertainty_json,owner,created_at,updated_at,dataset_dependencies_json,
+                dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "DEC-LEGACY-1", "Legacy linked decision", "Engineering",
+                "Implemented", '{"Energy":4.5}', '{}', '{}', "legacy-engineer",
+                "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z",
+                dependencies, "CURRENT", "[]",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO experience_decision_outcomes(
+                outcome_id,decision_id,owner,implementation_status,predicted_json,
+                actual_json,variance_json,lesson,verified_at,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "OUT-LEGACY-1", "DEC-LEGACY-1", "legacy-engineer",
+                "Implemented", '{"Energy":4.25}', '{"Energy":4.5}', '[]',
+                "Existing historical outcome", None, "2026-10-02T00:00:00Z",
+            ),
+        )
+        conn.commit()
+
+    revised = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 5.0]})
+    platform.register_dataset(
+        "Legacy outcome source", "legacy-outcome.csv", revised,
+        db_path=db, username="legacy-engineer",
+    )
+
+    with sqlite_connection(db) as conn:
+        decision = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json "
+            "FROM experience_decisions WHERE decision_id='DEC-LEGACY-1'"
+        ).fetchone()
+        outcome_columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(experience_decision_outcomes)"
+            ).fetchall()
+        }
+        outcome = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json "
+            "FROM experience_decision_outcomes WHERE outcome_id='OUT-LEGACY-1'"
+        ).fetchone()
+
+    assert {"dataset_dependencies_json", "dataset_dependency_status", "stale_dataset_dependencies_json"} <= outcome_columns
+    assert decision[0] == "STALE"
+    assert outcome[0] == "STALE"
+    decision_markers = json.loads(decision[1])
+    outcome_markers = json.loads(outcome[1])
+    assert decision_markers[0]["dataset_id"] == dataset_id
+    assert outcome_markers[0]["dataset_id"] == dataset_id
+    assert "parent decision" in outcome_markers[0]["reason"]
+
+
 def test_platform_database_migrates_existing_dataset_and_artifact_tables_without_claiming_old_lineage(tmp_path):
     import sqlite3
     import re
