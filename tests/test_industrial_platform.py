@@ -565,6 +565,27 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
         db,
     )
 
+    # An outcome created by an older release may not carry its own dependency
+    # snapshot. The parent decision remains the authoritative lineage source.
+    from industrial_experience import record_decision_outcome
+    outcome_id = record_decision_outcome(
+        decision_id,
+        "engineer-a",
+        "Implemented",
+        predicted={"Energy": 4.25},
+        actual={"Energy": 4.5},
+        lesson="Synthetic validation outcome.",
+        db_path=db,
+    )
+    with sqlite_connection(db) as conn:
+        conn.execute(
+            "UPDATE experience_decision_outcomes "
+            "SET dataset_dependencies_json='[]', dataset_dependency_status='NOT_LINKED', "
+            "stale_dataset_dependencies_json='[]' WHERE outcome_id=?",
+            (outcome_id,),
+        )
+        conn.commit()
+
     # Re-registering identical content must not create a new version or stale
     # artifacts. Changing content under the same logical dataset identity must.
     assert platform.register_dataset(
@@ -609,16 +630,28 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
             "SELECT dataset_dependency_status,metrics_json,stale_dataset_dependencies_json FROM platform_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
+        experience_decision = conn.execute(
+            "SELECT dataset_dependency_status,metrics_json,stale_dataset_dependencies_json "
+            "FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        outcome = conn.execute(
+            "SELECT dataset_dependency_status,predicted_json,stale_dataset_dependencies_json "
+            "FROM experience_decision_outcomes WHERE outcome_id=?",
+            (outcome_id,),
+        ).fetchone()
 
     assert head == (2, second_hash)
     assert versions == [(1, first_hash), (2, second_hash)]
-    for artifact in (model, scenario, experiment, decision):
+    for artifact in (model, scenario, experiment, decision, experience_decision, outcome):
         assert artifact[0] == "STALE"
         stale_markers = json.loads(artifact[2])
         assert len(stale_markers) == 1
         assert stale_markers[0]["previous_version"] == 1
         assert stale_markers[0]["current_version"] == 2
         assert stale_markers[0]["current_data_hash"] == second_hash
+    assert json.loads(outcome[1])["Energy"] == 4.5
+    assert "parent decision" in json.loads(outcome[2])[0]["reason"]
     # Historical model/scenario/experiment/decision content remains unchanged.
     assert json.loads(scenario[1])["period"] == "2026-10"
     assert json.loads(experiment[1])[0]["Scenario"] == "Baseline"
