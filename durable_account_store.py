@@ -17,7 +17,7 @@ import os
 import sqlite3
 from shoir_sqlite import ClosingSQLiteConnection
 from typing import Any, Mapping, Optional
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 try:
     import streamlit as st
@@ -1554,7 +1554,7 @@ def edge_upload_and_register_dataset_version(
         if (
             parsed.scheme != "https"
             or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
-            or parsed.path != "/storage/v1/object/upload/sign/shoir-industrial-datasets/" + str(upload.get("upload_path") or "").lstrip("/")
+            or unquote(parsed.path) != "/storage/v1/object/upload/sign/shoir-industrial-datasets/" + str(upload.get("upload_path") or "").lstrip("/")
             or not parsed.query
             or parsed.username
             or parsed.password
