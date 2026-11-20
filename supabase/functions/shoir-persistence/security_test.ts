@@ -1,7 +1,6 @@
 import {
   classifyDatasetStorageSweepPath,
   corsHeadersForOrigin,
-  isDatasetStorageSweepObjectOlderThan,
   hasCanonicalMasterAdminInvariant,
   inspectCsvShape,
   isAllowedApiMethod,
@@ -15,6 +14,7 @@ import {
   PublicRequestError,
   readBoundedJsonObject,
   sessionEntitlementFields,
+  isDatasetStorageSweepObjectOlderThan,
 } from "./security.ts";
 
 Deno.test("only POST may dispatch persistence API actions", () => {
@@ -449,7 +449,6 @@ Deno.test("CORS origins are isolated by the exact Supabase project", () => {
   );
 });
 
-
 Deno.test("dataset storage sweep classifies only exact workspace-owned object paths", () => {
   const workspace = "0123456789abcdef0123456789abcdef";
   const dataset = "DS-ABCDEF012345";
@@ -457,21 +456,34 @@ Deno.test("dataset storage sweep classifies only exact workspace-owned object pa
     workspace,
     workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv",
   );
-  assert(immutable?.kind === "immutable", "Immutable dataset object was not classified.");
-  assert(immutable.datasetId === dataset, "Immutable dataset identity was not preserved.");
+  assert(
+    immutable?.kind === "immutable",
+    "Immutable dataset object was not classified.",
+  );
+  assert(
+    immutable.datasetId === dataset,
+    "Immutable dataset identity was not preserved.",
+  );
 
   const temporary = classifyDatasetStorageSweepPath(
     workspace,
     "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(32) + ".csv",
   );
-  assert(temporary?.kind === "temporary", "Temporary upload object was not classified.");
-  assert(temporary.datasetId === dataset, "Temporary dataset identity was not preserved.");
+  assert(
+    temporary?.kind === "temporary",
+    "Temporary upload object was not classified.",
+  );
+  assert(
+    temporary.datasetId === dataset,
+    "Temporary dataset identity was not preserved.",
+  );
 
   const invalid = [
     "tmp/" + workspace + "/" + dataset + "/../" + "b".repeat(32) + ".csv",
     workspace + "/" + dataset + "/" + "A".repeat(64) + ".csv",
     workspace + "/ds-ABCDEF012345/" + "a".repeat(64) + ".csv",
-    "fedcba9876543210fedcba9876543210/" + dataset + "/" + "a".repeat(64) + ".csv",
+    "fedcba9876543210fedcba9876543210/" + dataset + "/" + "a".repeat(64) +
+      ".csv",
     workspace + "/" + dataset + "/source.xlsx",
     "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(31) + ".csv",
   ];
@@ -482,7 +494,10 @@ Deno.test("dataset storage sweep classifies only exact workspace-owned object pa
     );
   }
   assert(
-    classifyDatasetStorageSweepPath("not-a-workspace-key", workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv") === null,
+    classifyDatasetStorageSweepPath(
+      "not-a-workspace-key",
+      workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv",
+    ) === null,
     "Invalid workspace key must fail closed.",
   );
 });
@@ -510,14 +525,21 @@ Deno.test("dataset storage sweep requires the full minimum age after the newest 
   );
   assert(
     !isDatasetStorageSweepObjectOlderThan(
-      { created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-21T00:00:00Z" },
+      {
+        created_at: "2026-11-10T00:00:00Z",
+        updated_at: "2026-11-21T00:00:00Z",
+      },
       now,
       minimumAge,
     ),
     "Future storage timestamps must fail closed.",
   );
   assert(
-    !isDatasetStorageSweepObjectOlderThan({ created_at: "not-a-date" }, now, minimumAge),
+    !isDatasetStorageSweepObjectOlderThan(
+      { created_at: "not-a-date" },
+      now,
+      minimumAge,
+    ),
     "Unparseable storage timestamps must fail closed.",
   );
   assert(

@@ -476,7 +476,7 @@ export function classifyDatasetStorageSweepPath(
     parts.length === 3 &&
     parts[0] === workspaceKey &&
     /^DS-[A-F0-9]{12,32}$/.test(parts[1]) &&
-    /^[0-9a-f]{64}\\.csv$/.test(parts[2])
+    /^[0-9a-f]{64}\.csv$/.test(parts[2])
   ) {
     return { kind: "immutable", datasetId: parts[1] };
   }
@@ -485,7 +485,7 @@ export function classifyDatasetStorageSweepPath(
     parts[0] === "tmp" &&
     parts[1] === workspaceKey &&
     /^DS-[A-F0-9]{12,32}$/.test(parts[2]) &&
-    /^[0-9a-f]{32}\\.csv$/.test(parts[3])
+    /^[0-9a-f]{32}\.csv$/.test(parts[3])
   ) {
     return { kind: "temporary", datasetId: parts[2] };
   }
