@@ -17,7 +17,7 @@ import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
