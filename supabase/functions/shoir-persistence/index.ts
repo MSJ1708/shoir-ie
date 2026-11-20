@@ -2162,60 +2162,99 @@ Deno.serve(async (req) => {
       // a concurrent version-finalize request could be between object read and
       // metadata commit. A future leased/atomic cleanup protocol must coordinate
       // with the dataset registration transaction before immutable-object deletion.
-      const oldTemporaryObjects = oldObjects
-        .filter((entry) => entry.kind === "temporary")
+      const sweepCandidates = oldObjects
         .sort((a, b) => b.age_hours - a.age_hours);
-      const retainedImmutableCount = oldObjects.filter((entry) =>
-        entry.kind === "immutable"
-      ).length;
-
-      const eligible: typeof oldTemporaryObjects = [];
-      let referencedCount = 0;
-      let referenceCheckFailures = 0;
-      const checkCount = Math.min(
-        oldTemporaryObjects.length,
-        MAX_REFERENCE_CHECKS,
-      );
-      for (const candidate of oldTemporaryObjects.slice(0, checkCount)) {
-        const [recordRefs, eventRefs] = await Promise.all([
-          supabase.from("shoir_platform_records")
-            .select("record_id")
-            .eq("workspace_key", workspaceKey)
-            .contains("payload_json", {
-              storage_key: candidate.storage_key,
-            })
-            .limit(1),
-          supabase.from("shoir_platform_events")
-            .select("event_id")
-            .eq("workspace_key", workspaceKey)
-            .contains("payload_json", {
-              storage_key: candidate.storage_key,
-            })
-            .limit(1),
-        ]);
-        if (recordRefs.error || eventRefs.error) {
-          // Uncertain metadata is never permission to delete.
-          referenceCheckFailures += 1;
-          continue;
-        }
-        if (
-          (recordRefs.data || []).length > 0 ||
-          (eventRefs.data || []).length > 0
-        ) {
-          referencedCount += 1;
-          continue;
-        }
-        eligible.push(candidate);
-      }
-
       const dryRun = body.confirm_delete !== true;
       let deletedCount = 0;
       let deleteFailures = 0;
       let auditFailures = 0;
       let auditConfirmationFailures = 0;
+      let referenceCheckFailures = 0;
+      let referencedCount = 0;
+      let referenceChecksCompleted = 0;
+      let leaseBusyCount = 0;
+      let leaseAcquisitionFailures = 0;
+      let leaseReleaseFailures = 0;
+      let deferredDeleteCandidateCount = 0;
+      let eligibleTemporaryCount = 0;
+      let eligibleImmutableCount = 0;
       const deletedPreview: string[] = [];
-      if (!dryRun) {
-        for (const candidate of eligible.slice(0, MAX_DELETES_PER_RUN)) {
+
+      // A finalizer and a sweeper must never decide object liveness concurrently.
+      // Hold the same workspace/dataset lease across the no-reference checks,
+      // intent event, Storage removal and completion event. Lease acquisition
+      // uncertainty fails closed; expired leases are reclaimed by the SQL RPC.
+      const candidatesToCheck = sweepCandidates.slice(0, MAX_REFERENCE_CHECKS);
+      for (const candidate of candidatesToCheck) {
+        const leaseToken = crypto.randomUUID();
+        let leaseAcquired = false;
+        try {
+          const { data: leaseRows, error: leaseError } = await supabase.rpc(
+            "shoir_dataset_storage_lease_acquire",
+            {
+              p_workspace_key: workspaceKey,
+              p_dataset_id: candidate.dataset_id,
+              p_lease_token: leaseToken,
+              p_lease_operation: "sweep",
+              p_actor_username_lc: String(row.username_lc || ""),
+              p_lease_seconds: 300,
+            },
+          );
+          if (leaseError) {
+            leaseAcquisitionFailures += 1;
+            continue;
+          }
+          const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
+          if (lease?.acquired !== true) {
+            leaseBusyCount += 1;
+            continue;
+          }
+          leaseAcquired = true;
+
+          const [recordRefs, eventRefs] = await Promise.all([
+            supabase.from("shoir_platform_records")
+              .select("record_id")
+              .eq("workspace_key", workspaceKey)
+              .contains("payload_json", {
+                storage_key: candidate.storage_key,
+              })
+              .limit(1),
+            supabase.from("shoir_platform_events")
+              .select("event_id")
+              .eq("workspace_key", workspaceKey)
+              .contains("payload_json", {
+                storage_key: candidate.storage_key,
+              })
+              .limit(1),
+          ]);
+          referenceChecksCompleted += 1;
+          if (recordRefs.error || eventRefs.error) {
+            // Uncertain metadata is never permission to delete.
+            referenceCheckFailures += 1;
+            continue;
+          }
+          if (
+            (recordRefs.data || []).length > 0 ||
+            (eventRefs.data || []).length > 0
+          ) {
+            referencedCount += 1;
+            continue;
+          }
+
+          if (candidate.kind === "temporary") {
+            eligibleTemporaryCount += 1;
+          } else {
+            eligibleImmutableCount += 1;
+          }
+          if (dryRun) continue;
+          if (deletedCount >= MAX_DELETES_PER_RUN) {
+            deferredDeleteCandidateCount += 1;
+            continue;
+          }
+
+          const eventPrefix = candidate.kind === "temporary"
+            ? "dataset_temporary"
+            : "dataset_immutable";
           const intentId = "SPE-" +
             crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
           const auditTime = new Date().toISOString();
@@ -2223,7 +2262,7 @@ Deno.serve(async (req) => {
             .insert({
               event_id: intentId,
               workspace_key: workspaceKey,
-              event_type: "dataset_temporary_delete_intent",
+              event_type: eventPrefix + "_delete_intent",
               actor: String(row.username_lc || ""),
               entity_key: candidate.dataset_id,
               payload_json: {
@@ -2233,6 +2272,7 @@ Deno.serve(async (req) => {
                 age_hours: candidate.age_hours,
                 minimum_age_hours: MINIMUM_AGE_HOURS,
                 record_and_event_ledgers_confirmed_unreferenced: true,
+                lifecycle_lease_held: true,
               },
               created_at: auditTime,
             });
@@ -2250,7 +2290,7 @@ Deno.serve(async (req) => {
           }
           deletedCount += 1;
           if (deletedPreview.length < 25) {
-            deletedPreview.push(candidate.dataset_id + " · temporary");
+            deletedPreview.push(candidate.dataset_id + " · " + candidate.kind);
           }
 
           const completionId = "SPE-" +
@@ -2259,7 +2299,7 @@ Deno.serve(async (req) => {
             .insert({
               event_id: completionId,
               workspace_key: workspaceKey,
-              event_type: "dataset_temporary_object_deleted",
+              event_type: eventPrefix + "_object_deleted",
               actor: String(row.username_lc || ""),
               entity_key: candidate.dataset_id,
               payload_json: {
@@ -2268,29 +2308,57 @@ Deno.serve(async (req) => {
                 object_kind: candidate.kind,
                 age_hours: candidate.age_hours,
                 intent_event_id: intentId,
+                lifecycle_lease_held: true,
               },
               created_at: new Date().toISOString(),
             });
           if (completionAudit.error) auditConfirmationFailures += 1;
+        } finally {
+          if (leaseAcquired) {
+            try {
+              const { data: released, error: releaseError } = await supabase.rpc(
+                "shoir_dataset_storage_lease_release",
+                {
+                  p_workspace_key: workspaceKey,
+                  p_dataset_id: candidate.dataset_id,
+                  p_lease_token: leaseToken,
+                },
+              );
+              if (releaseError || released !== true) {
+                leaseReleaseFailures += 1;
+              }
+            } catch {
+              leaseReleaseFailures += 1;
+            }
+          }
         }
       }
-
+      const deferredReferenceCheckCount = Math.max(
+        0,
+        sweepCandidates.length - candidatesToCheck.length,
+      );
       return sendResponse({
         ok: true,
         dry_run: dryRun,
         minimum_age_hours: MINIMUM_AGE_HOURS,
         scanned_object_count: listedObjects.length,
         stale_object_count: oldObjects.length,
-        stale_temporary_object_count: oldTemporaryObjects.length,
-        retained_immutable_object_count: retainedImmutableCount,
-        reference_checks_completed: checkCount,
-        eligible_temporary_orphan_count: eligible.length,
-        referenced_temporary_object_count: referencedCount,
+        stale_temporary_object_count: oldObjects.filter((entry) =>
+          entry.kind === "temporary"
+        ).length,
+        stale_immutable_object_count: oldObjects.filter((entry) =>
+          entry.kind === "immutable"
+        ).length,
+        reference_checks_completed: referenceChecksCompleted,
+        eligible_temporary_orphan_count: eligibleTemporaryCount,
+        eligible_immutable_orphan_count: eligibleImmutableCount,
+        referenced_object_count: referencedCount,
         reference_check_failure_count: referenceCheckFailures,
-        deferred_reference_check_count: Math.max(
-          0,
-          oldTemporaryObjects.length - checkCount,
-        ),
+        lease_busy_count: leaseBusyCount,
+        lease_acquisition_failure_count: leaseAcquisitionFailures,
+        lease_release_failure_count: leaseReleaseFailures,
+        deferred_reference_check_count: deferredReferenceCheckCount,
+        deferred_delete_candidate_count: deferredDeleteCandidateCount,
         deleted_count: deletedCount,
         delete_failure_count: deleteFailures,
         audit_intent_failure_count: auditFailures,
@@ -2298,9 +2366,9 @@ Deno.serve(async (req) => {
         maximum_deletions_per_run: MAX_DELETES_PER_RUN,
         deleted_preview: deletedPreview,
         next_step: dryRun
-          ? "Review the eligible temporary-object count. A separate explicit confirm_delete=true request is required to delete. Immutable objects are retained by design."
-          : "Review the append-only intent and deletion events. Repeat a bounded dry run/deletion for remaining temporary candidates.",
-      });
+          ? "Preview only. Both temporary and immutable objects are eligible only after the 48-hour age check, successful dual-ledger no-reference checks and an acquired dataset lifecycle lease. A separate explicit confirm_delete=true request is required to delete."
+          : "Review append-only intent and completion events, lease/release failures and deletion counts. Repeat a bounded dry run/deletion for remaining candidates.",
+      });;
     }
 
     if (action === "dataset_download_url") {
@@ -2481,6 +2549,31 @@ Deno.serve(async (req) => {
         "write",
       );
       const datasetId = String(body.dataset_id || "").trim();
+      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId)) {
+        return sendResponse({ error: "Dataset identifier is invalid." }, 400);
+      }
+      const leaseToken = crypto.randomUUID();
+      const { data: leaseRows, error: leaseError } = await supabase.rpc(
+        "shoir_dataset_storage_lease_acquire",
+        {
+          p_workspace_key: workspaceKey,
+          p_dataset_id: datasetId,
+          p_lease_token: leaseToken,
+          p_lease_operation: "finalize",
+          p_actor_username_lc: String(row.username_lc || ""),
+          p_lease_seconds: 300,
+        },
+      );
+      if (leaseError) throw leaseError;
+      const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
+      if (lease?.acquired !== true) {
+        return sendResponse(
+          { error: "This dataset is busy with another storage operation. Retry shortly." },
+          409,
+        );
+      }
+
+      try {
       const uploadPath = String(body.upload_path || "").trim();
       const name = String(body.name || "").trim();
       const sourceName = String(body.source_name || "").trim();
@@ -2742,6 +2835,27 @@ Deno.serve(async (req) => {
         registration,
         temporary_cleanup_pending: temporaryCleanupPending,
       });
+      } finally {
+        try {
+          const { data: released, error: releaseError } = await supabase.rpc(
+            "shoir_dataset_storage_lease_release",
+            {
+              p_workspace_key: workspaceKey,
+              p_dataset_id: datasetId,
+              p_lease_token: leaseToken,
+            },
+          );
+          if (releaseError || released !== true) {
+            console.warn(
+              "Dataset finalization lease release was not confirmed; its bounded expiry remains the recovery path.",
+            );
+          }
+        } catch {
+          console.warn(
+            "Dataset finalization lease release could not be confirmed; its bounded expiry remains the recovery path.",
+          );
+        }
+      }
     }
 
     if (action === "dataset_version_register") {
