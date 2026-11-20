@@ -561,18 +561,6 @@ def test_dataset_storage_lifecycle_lease_migration_is_private_and_token_fenced()
         in normalized
     )
     assert (
-        "create or replace function public.shoir_dataset_storage_lease_renew"
-        in normalized
-    )
-    assert "and lease_token = p_lease_token" in normalized
-    assert "and lease_operation = p_lease_operation" in normalized
-    assert "and actor_username_lc = lower(btrim(p_actor_username_lc))" in normalized
-    assert "and expires_at > clock_timestamp()" in normalized
-    assert (
-        "grant execute on function public.shoir_dataset_storage_lease_renew"
-        in normalized
-    )
-    assert (
         "grant execute on function public.shoir_dataset_storage_lease_release"
         in normalized
     )
@@ -596,6 +584,17 @@ def test_dataset_storage_lease_fencing_migration_locks_live_tokens_for_metadata_
     assert "set search_path = pg_catalog, public" in normalized
     assert normalized.count("security definer") == 3
     assert "expires_at > clock_timestamp()" in normalized
+    assert "and lease_token = p_lease_token" in normalized
+    assert "and lease_operation = p_lease_operation" in normalized
+    assert "and actor_username_lc = lower(btrim(p_actor_username_lc))" in normalized
+    assert (
+        "revoke all on function public.shoir_dataset_storage_lease_renew"
+        in normalized
+    )
+    assert (
+        "grant execute on function public.shoir_dataset_storage_lease_renew"
+        in normalized
+    )
     assert normalized.count("for update") == 2
     assert "lease_operation = 'finalize'" in normalized
     assert "lease_operation = 'register'" in normalized
