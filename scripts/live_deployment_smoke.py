@@ -180,6 +180,39 @@ def main() -> int:
                         # text as readiness: wait for a real sign-in/welcome surface, and
                         # require the same frame to expose it in consecutive polls.
                         item["page_title"] = page.title()
+                        # Dedicated staging apps may be asleep before acceptance.
+                        # Use Streamlit's explicit wake action once, then wait for the
+                        # real Shoir-IE entry surface. Never treat the sleep page as app readiness.
+                        sleep_marker = re.compile(
+                            r"app has gone to sleep due to inactivity", re.I
+                        )
+                        wake_button = page.get_by_role(
+                            "button",
+                            name=re.compile(r"Yes, get this app back up", re.I),
+                        ).first
+                        item["wake_recovery_attempted"] = False
+                        item["wake_recovery_succeeded"] = False
+                        initial_body = page.locator("body").inner_text(timeout=5_000)
+                        if sleep_marker.search(initial_body):
+                            if wake_button.count() and wake_button.is_visible():
+                                item["wake_recovery_attempted"] = True
+                                wake_button.click(timeout=8_000)
+                                wake_deadline = time.monotonic() + 90
+                                while time.monotonic() < wake_deadline:
+                                    try:
+                                        awakened_body = page.locator("body").inner_text(
+                                            timeout=2_000
+                                        )
+                                    except Exception:
+                                        awakened_body = ""
+                                    if not sleep_marker.search(awakened_body):
+                                        item["wake_recovery_succeeded"] = True
+                                        break
+                                    page.wait_for_timeout(1_000)
+                            else:
+                                item["failure_reasons"].append(
+                                    "Staging app is asleep and its explicit wake control was not available."
+                                )
                         frame_records = []
                         rendered_bodies = []
                         app_frame = None
