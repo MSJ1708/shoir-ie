@@ -529,6 +529,68 @@ def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
     assert "not verified ROI" in simulation["warning"]
 
 
+def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    research = AppTest.from_file(page, default_timeout=90)
+    research.session_state["current_user"] = "research-power-checker"
+    research.session_state["authenticated"] = True
+    research.session_state["user_tier"] = "Research Pack ($30 add-on)"
+    research.run(timeout=90)
+    assert not research.exception, "\\n".join(
+        str(error.value) for error in research.exception
+    )
+
+    research.selectbox(key="shoir_100_tool_inspector").select(
+        "T085 · Statistical Power and Sample-Size Planner"
+    )
+    research.run(timeout=90)
+    assert not research.exception, "\\n".join(
+        str(error.value) for error in research.exception
+    )
+    research.button(key="tool085_run").click()
+    research.run(timeout=90)
+    assert not research.exception, "\\n".join(
+        str(error.value) for error in research.exception
+    )
+    result = research.session_state.get("shoir_tool_result_T085")
+    assert result is not None
+    assert result["status"] == "CALCULATED"
+    assert result["effect_size_cohens_d"] == pytest.approx(0.5)
+    assert result["alpha"] == pytest.approx(0.05)
+    assert result["target_power"] == pytest.approx(0.80)
+    assert result["required_n_per_group"] >= 2
+    assert result["achieved_power"] >= result["target_power"]
+    assert result.get("_workspace_persistence") in {
+        "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+        "SAVE_FAILED", "SAVE_PENDING",
+    }
+
+    professional = AppTest.from_file(page, default_timeout=90)
+    professional.session_state["current_user"] = "professional-power-checker"
+    professional.session_state["authenticated"] = True
+    professional.session_state["user_tier"] = "Professional Tier"
+    professional.run(timeout=90)
+    assert not professional.exception, "\\n".join(
+        str(error.value) for error in professional.exception
+    )
+    professional.selectbox(key="shoir_100_tool_inspector").select(
+        "T085 · Statistical Power and Sample-Size Planner"
+    )
+    professional.run(timeout=90)
+    assert not professional.exception, "\\n".join(
+        str(error.value) for error in professional.exception
+    )
+    professional.button(key="tool085_run").click()
+    professional.run(timeout=90)
+    assert professional.session_state.get("shoir_tool_result_T085") is None
+    assert any(
+        "Research Pack" in str(item.value) or "tier" in str(item.value).casefold()
+        for item in professional.error
+    )
+
+
 def test_workbench_runs_crossed_msa_and_factorial_doe():
     from streamlit.testing.v1 import AppTest
 
