@@ -22,6 +22,13 @@ def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
 
     assert rpc < registration < temp_cleanup
     assert "temporary_cleanup_pending: temporaryCleanupPending" in source
+    lease_acquire = source.index('"shoir_dataset_storage_lease_acquire"')
+    storage_read = source.index(".download(uploadPath)")
+    lease_release = source.index('"shoir_dataset_storage_lease_release"')
+    release_finally = source.index("} finally {", lease_release)
+    assert lease_acquire < storage_read < lease_release < release_finally
+    assert 'p_lease_operation: "finalize"' in source
+    assert "p_lease_seconds: 300" in source
 
 
 def test_new_content_addressed_object_is_deleted_only_after_two_successful_no_reference_checks():
@@ -90,20 +97,46 @@ def test_dataset_storage_sweep_is_workspace_scoped_authenticated_and_manage_gate
     assert "no objects were deleted" in source
 
 
-def test_dataset_storage_sweep_requires_both_ledgers_and_audit_intent_before_delete():
+def test_dataset_storage_sweep_requires_a_dataset_lease_and_both_ledgers_before_delete():
     source = dataset_storage_sweep_source()
+    lease_acquire = source.index('"shoir_dataset_storage_lease_acquire"')
     record_query = source.index('supabase.from("shoir_platform_records")')
     event_query = source.index('supabase.from("shoir_platform_events")')
     uncertain_check = source.index("if (recordRefs.error || eventRefs.error)")
     referenced_check = source.index("(eventRefs.data || []).length > 0")
-    audit_intent = source.index('event_type: "dataset_temporary_delete_intent"')
-    remove_object = source.index("await bucket.remove([\n            candidate.storage_key,\n          ])")
-    completion_event = source.index('event_type: "dataset_temporary_object_deleted"')
-    assert record_query < event_query < uncertain_check < referenced_check
-    assert referenced_check < audit_intent < remove_object < completion_event
+    audit_intent = source.index('event_type: eventPrefix + "_delete_intent"')
+    remove_object = source.index("await bucket.remove([")
+    completion_event = source.index('event_type: eventPrefix + "_object_deleted"')
+    lease_release = source.index('"shoir_dataset_storage_lease_release"')
+    assert lease_acquire < record_query < event_query < uncertain_check
+    assert referenced_check < audit_intent < remove_object < completion_event < lease_release
     assert "record_and_event_ledgers_confirmed_unreferenced: true" in source
-    assert 'entry.kind === "temporary"' in source
-    assert "Immutable content-addressed files are retained" in (ROOT / "durable_account_store.py").read_text(encoding="utf-8")
+    assert "lifecycle_lease_held: true" in source
+    assert 'candidate.kind === "temporary"' in source
+    assert 'candidate.kind === "immutable"' in source
+    assert "leaseBusyCount" in source
+    assert "leaseAcquisitionFailures" in source
+    assert "leaseReleaseFailures" in source
+
+
+def test_dataset_storage_lifecycle_migration_is_server_only_and_expiring():
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261120115000_shoir_dataset_storage_lifecycle_leases.sql"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(migration.casefold().split())
+    assert "create table public.shoir_dataset_storage_lifecycle_leases" in normalized
+    assert "primary key (workspace_key, dataset_id)" in normalized
+    assert "enable row level security" in normalized
+    assert "revoke all on table public.shoir_dataset_storage_lifecycle_leases from public, anon, authenticated, service_role" in normalized
+    assert "security definer" in normalized
+    assert "set search_path = pg_catalog, public" in normalized
+    assert "where current_lease.expires_at <= clock_timestamp()" in normalized
+    assert "p_lease_seconds not between 30 and 600" in normalized
+    assert "lease_token = p_lease_token" in normalized
+    assert "grant execute on function public.shoir_dataset_storage_lease_acquire" in normalized
+    assert "grant execute on function public.shoir_dataset_storage_lease_release" in normalized
+    assert "to service_role" in normalized
 
 
 def test_dataset_storage_maintenance_is_staging_only_and_has_separate_confirmation():
@@ -116,6 +149,6 @@ def test_dataset_storage_maintenance_is_staging_only_and_has_separate_confirmati
     assert 'APP_ENVIRONMENT' in helper and '"staging"' in helper
     assert '_edge_call("dataset_storage_sweep_session"' in helper
     assert 'confirm_delete: bool = False' in helper
-    assert "Preview old unreferenced temporary uploads" in workbench_source
-    assert "Delete confirmed temporary uploads" in workbench_source
+    assert "Preview old unreferenced dataset objects" in workbench_source
+    assert "Delete confirmed orphan dataset objects" in workbench_source
     assert "disabled=not confirm_sweep" in workbench_source
