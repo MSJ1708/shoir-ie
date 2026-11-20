@@ -18,7 +18,7 @@ def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
     source = dataset_finalize_source()
     rpc = source.index('supabase.rpc(\n        "shoir_platform_register_dataset_version_with_storage"')
     registration = source.index("const registration = Array.isArray(data)", rpc)
-    temp_cleanup = source.index("const { error: tempRemoveError } = await bucket.remove([uploadPath])", registration)
+    temp_cleanup = source.index("const { error: tempRemoveError } = await bucket.remove([", registration)
 
     assert rpc < registration < temp_cleanup
     assert "temporary_cleanup_pending: temporaryCleanupPending" in source
@@ -54,7 +54,9 @@ def test_metadata_rpc_failure_keeps_uncertain_object_and_cleans_only_temp_upload
     source = dataset_finalize_source()
     rpc_error = source.index("if (error) {", source.index("shoir_platform_register_dataset_version_with_storage"))
     reference_checks = source.index("const [recordRefs, eventRefs]", rpc_error)
-    temp_cleanup = source.index("await bucket.remove([uploadPath])", reference_checks)
+    temp_upload_path = source.index("uploadPath,", reference_checks)
+    temp_cleanup = source.rfind("await bucket.remove([", reference_checks, temp_upload_path)
+    assert temp_cleanup >= reference_checks
     throw_original_error = source.index("throw error;", temp_cleanup)
 
     assert rpc_error < reference_checks < temp_cleanup < throw_original_error
