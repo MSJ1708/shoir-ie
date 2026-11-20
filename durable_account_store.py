@@ -1437,9 +1437,10 @@ def edge_sweep_dataset_storage(
     """Preview or explicitly sweep aged temporary uploads in one staging workspace.
 
     The Edge Function enforces the 48-hour minimum age, Owner/Admin shared-workspace
-    permission, dual-ledger reference checks, bounded scan/deletion limits and audit.
-    Immutable content-addressed files are deliberately retained until an atomic
-    registration/cleanup lease protocol exists.
+    permission, per-dataset lifecycle leases, dual-ledger reference checks, bounded
+    scan/deletion limits and append-only deletion intent/completion events. Both
+    temporary and immutable orphan objects are eligible only while the shared
+    finalization/cleanup lease is held.
     """
     actor = str(username or "").strip()
     bearer = str(token or "")
