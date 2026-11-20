@@ -151,6 +151,9 @@ def test_dataset_storage_maintenance_is_staging_only_and_has_separate_confirmati
     assert 'APP_ENVIRONMENT' in helper and '"staging"' in helper
     assert '_edge_call("dataset_storage_sweep_session"' in helper
     assert 'confirm_delete: bool = False' in helper
+    assert "Preview complete:" in workbench_source
+    assert "immutable orphan object(s)" in workbench_source
+    assert "dataset object(s) deleted (temporary and/or immutable)" in workbench_source
     assert "Preview old unreferenced dataset objects" in workbench_source
     assert "Delete confirmed orphan dataset objects" in workbench_source
     assert "disabled=not confirm_sweep" in workbench_source
