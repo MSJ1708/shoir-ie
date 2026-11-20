@@ -619,3 +619,70 @@ def test_t096_provider_session_and_workspace_manage_routes_are_server_authorized
     assert 'resolveManagedWorkspaceKey(' in manage_action
     assert '"manage"' in manage_action
     assert '"workspace_manage_check"' in durable_account_store._ORGANIZATION_EDGE_ACTIONS
+
+
+def test_provider_erp_read_rejects_non_admin_server_role_before_provider_config(monkeypatch):
+    import durable_account_store
+    import shoir_remaining_tool_engines as engines
+    import streamlit as st
+    import shoir_erp_provider_transport as provider_transport
+
+    # The visible Streamlit state claims an administrator, but the Edge session
+    # verification returns a lower-privilege account. The server result wins.
+    state = {
+        "authenticated": True,
+        "current_user": "provider-engineer",
+        "remote_session_token": "synthetic-session-token",
+        "user_role": "Enterprise Admin",
+        "user_tier": "Enterprise Plus Tier",
+    }
+    monkeypatch.setattr(st, "session_state", state, raising=True)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(durable_account_store, "_active_organization_workspace_context", lambda: None)
+    monkeypatch.setattr(durable_account_store, "_edge_call", lambda action, payload: {
+        "ok": True, "username": "provider-engineer", "role": "Engineer",
+        "tier": "Enterprise Plus Tier", "active": True,
+    })
+    monkeypatch.setattr(
+        engines,
+        "_configuration_value",
+        lambda key: pytest.fail("Provider configuration must not be read for a non-admin server account."),
+    )
+    monkeypatch.setattr(
+        provider_transport,
+        "read_provider_resource",
+        lambda *args, **kwargs: pytest.fail("No ERP request may be sent for a non-admin account."),
+    )
+    with pytest.raises(PermissionError, match="server-side account role"):
+        engines.integration_configuration_status({
+            "action": "verify_provider_read",
+            "profile": {"connection_id": "sap-plant", "resource_key": "production_orders"},
+        })
+
+
+def test_provider_erp_read_requires_a_remote_session_token(monkeypatch):
+    import durable_account_store
+    import shoir_remaining_tool_engines as engines
+    import streamlit as st
+
+    state = {
+        "authenticated": True,
+        "current_user": "provider-admin",
+        "user_role": "Enterprise Admin",
+        "user_tier": "Enterprise Plus Tier",
+    }
+    monkeypatch.setattr(st, "session_state", state, raising=True)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(
+        durable_account_store,
+        "_edge_call",
+        lambda *args, **kwargs: pytest.fail("No Edge request should occur without a Shoir-IE session token."),
+    )
+    with pytest.raises(PermissionError, match="active Shoir-IE session"):
+        engines.integration_configuration_status({
+            "action": "verify_provider_read",
+            "profile": {"connection_id": "sap-plant", "resource_key": "production_orders"},
+        })
+
