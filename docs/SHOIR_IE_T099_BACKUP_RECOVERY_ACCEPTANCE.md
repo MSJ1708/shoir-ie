@@ -10,6 +10,22 @@ The application contains an owner-scoped personal workspace export/restore path 
 
 A locally generated checksum detects accidental changes; it is not encryption, a digital signature, or proof of authenticity.
 
+The candidate also includes `scripts/shoir_storage_recovery_manifest.py`, a standard-library-only helper for hashing a directory of already-exported Storage object bytes and verifying a restored directory. It detects missing, extra, size-changed and content-changed objects; rejects symlinks, unsafe paths and incomplete directory traversal; and prints only manifest metadata and mismatch paths. It does **not** connect to Supabase, export objects, encrypt files, sign the manifest, or establish that the export is complete. An authorized operator must perform and independently reconcile the Storage export first.
+
+Example after downloading the Storage object bodies into a protected local export directory:
+
+```bash
+python scripts/shoir_storage_recovery_manifest.py create \
+  --root ./protected-storage-export \
+  --manifest ./protected-recovery-evidence/storage-manifest.json
+
+python scripts/shoir_storage_recovery_manifest.py verify \
+  --root ./isolated-restored-storage \
+  --manifest ./protected-recovery-evidence/storage-manifest.json
+```
+
+The verify command exits with code `0` only when every object path, byte count and SHA-256 matches and there are no extra files; it returns code `1` for content/path mismatch and code `2` for an invalid or unsafe manifest/export input. Keep exports and manifests outside Git, chat and public artifacts.
+
 ## 2. Infrastructure prerequisites
 
 - Confirm the actual Supabase plan and project configuration support the selected backup/PITR schedule and retention. Do not infer capability from a plan name or assume it is enabled.
