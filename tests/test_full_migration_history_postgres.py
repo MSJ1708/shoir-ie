@@ -901,7 +901,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 second_lease = _fetchone(
                     target,
                     acquire_sql,
-                    (lease_workspace, lease_dataset, lease_token_b, "sweep", username, 300),
+                    (lease_workspace, lease_dataset, lease_token_b, "register", username, 300),
                 )
                 assert second_lease[0] is True
 
