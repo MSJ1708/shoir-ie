@@ -82,3 +82,17 @@ F-004 remains open until the exact final-head retest passes.
 | Closure rule | Run validation on the corrected exact HEAD. Confirm checkout/dependency install pass, pip-audit parses the real requirements file, credential scan runs against present files and reports no obvious literal secrets, and all other test/export/viewport stages complete with inspectable artifacts. |
 
 F-006 remains open until the corrected full validation passes.
+
+
+## F-007 — cancelled validation runs continued expensive AppTest and browser stages
+
+| Field | Evidence |
+|---|---|
+| Observed run | [Shoir-IE validation #44756017414](https://github.com/MSJ1708/shoir-ie/actions/runs/44756017414), candidate SHA `6b83b2a97823b400f6e38b67719e06334b95f2a3`. |
+| Run behaviour | A newer PR push cancelled the parallel regression step, but the serial Streamlit AppTest stage continued under `if: always() && steps.compile.outcome == 'success'`. This held the single validation job in progress and left later exact-head validation runs queued. |
+| Root cause | Heavy diagnostic steps used `always()` without `!cancelled()`; GitHub correctly cancelled the prior test step but downstream stages deliberately continued. |
+| Correction | The validation workflow now guards expensive test, dependency, Deno, export-render, import-smoke and browser-smoke stages with `!cancelled()`. Artifact uploads and container cleanup remain unconditional to preserve evidence and release resources. |
+| Fix commit | Recorded by the workflow cancellation-guard correction commit; exact-head retest required. |
+| Closure rule | Confirm a cancelled superseded run does not start another long test/render/browser stage; confirm the new exact-head validation completes all stages normally and uploads JUnit/export/browser evidence. |
+
+F-007 remains open until the workflow retest confirms cancellation propagation and exact-head full validation passes.
