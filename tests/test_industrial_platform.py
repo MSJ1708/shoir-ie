@@ -576,6 +576,7 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
         actual={"Energy": 4.5},
         lesson="Synthetic validation outcome.",
         db_path=db,
+        persist_artifact=False,
     )
     with sqlite_connection(db) as conn:
         conn.execute(
@@ -675,6 +676,154 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
         ).fetchall()
     assert reverted_head == (3, first_hash)
     assert reverted_versions == [(1, first_hash), (2, second_hash), (3, first_hash)]
+
+
+def test_module_run_snapshots_are_version_linked_and_invalidated(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+    from industrial_experience import load_module_analysis_run, save_module_analysis_run
+
+    db = str(tmp_path / "module-run-lineage.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    first = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 4.5]})
+    dataset_id = platform.register_dataset(
+        "Module run source", "module-run.csv", first,
+        db_path=db, username="module-run-owner",
+    )
+    with sqlite_connection(db) as conn:
+        version = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint "
+            "FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    dependency = {
+        "dataset_id": dataset_id,
+        "version": int(version[0]),
+        "data_hash": version[1],
+        "version_fingerprint": version[2],
+        "current_version_verified": True,
+    }
+    profile = {"display_name": "Energy analysis", "project_name": "Line A"}
+    analysis = {
+        "result": first.assign(Energy_Index=[0.4, 0.375]),
+        "metrics": {"Mean energy": 4.25},
+        "method": "Synthetic module-run fixture",
+        "guardrail": "Synthetic evidence only.",
+    }
+    saved = save_module_analysis_run(
+        "Energy Performance",
+        "module-run-owner",
+        profile,
+        first,
+        analysis,
+        db_path=db,
+        dataset_dependencies=[dependency],
+    )
+    loaded = load_module_analysis_run(saved["run_id"], "module-run-owner", db_path=db)
+    assert loaded is not None
+    assert loaded["dataset_dependency_status"] == "CURRENT"
+    assert loaded["is_stale"] is False
+    assert loaded["dataset_dependencies"][0]["version"] == 1
+
+    second = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 5.0]})
+    platform.register_dataset(
+        "Module run source", "module-run.csv", second,
+        db_path=db, username="module-run-owner",
+    )
+    stale = load_module_analysis_run(saved["run_id"], "module-run-owner", db_path=db)
+    assert stale is not None
+    assert stale["dataset_dependency_status"] == "STALE"
+    assert stale["is_stale"] is True
+    assert stale["stale_dataset_dependencies"][0]["previous_version"] == 1
+    assert "input_df" in stale and "result_df" in stale
+    assert stale["input_df"]["Energy"].tolist() == [4.0, 4.5]
+
+    with pytest.raises(ValueError, match="stale dataset version"):
+        save_module_analysis_run(
+            "Energy Performance",
+            "module-run-owner",
+            profile,
+            first,
+            analysis,
+            db_path=db,
+            dataset_dependencies=[dependency],
+        )
+
+    unlinked = save_module_analysis_run(
+        "Energy Performance",
+        "module-run-owner",
+        profile,
+        second,
+        analysis,
+        db_path=db,
+    )
+    unlinked_loaded = load_module_analysis_run(
+        unlinked["run_id"], "module-run-owner", db_path=db
+    )
+    assert unlinked_loaded is not None
+    assert unlinked_loaded["dataset_dependency_status"] == "NOT_LINKED"
+    assert unlinked_loaded["is_stale"] is False
+
+
+def test_module_run_schema_migrates_legacy_snapshots_to_not_linked(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from industrial_experience import ensure_experience_db, load_module_analysis_run
+
+    db = str(tmp_path / "legacy-module-runs.db")
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE experience_module_runs(
+                run_id TEXT PRIMARY KEY,
+                module TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                project_name TEXT,
+                site_name TEXT,
+                input_hash TEXT NOT NULL,
+                input_rows INTEGER NOT NULL,
+                input_columns_json TEXT NOT NULL,
+                result_columns_json TEXT NOT NULL,
+                input_snapshot_gzip BLOB,
+                result_snapshot_gzip BLOB,
+                profile_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                method TEXT,
+                guardrail TEXT,
+                duration_ms REAL NOT NULL,
+                status TEXT NOT NULL,
+                snapshot_status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO experience_module_runs(
+                run_id,module,owner,display_name,input_hash,input_rows,
+                input_columns_json,result_columns_json,profile_json,metrics_json,
+                duration_ms,status,snapshot_status,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "MRUN-LEGACY-001", "Quality", "legacy-owner", "Legacy quality run",
+                "a" * 64, 0, "[]", "[]", "{}", "{}", 0.0, "Completed",
+                "Input and result snapshots omitted (size limit)", "2026-10-01T00:00:00Z",
+            ),
+        )
+        conn.commit()
+
+    ensure_experience_db(db)
+    loaded = load_module_analysis_run("MRUN-LEGACY-001", "legacy-owner", db_path=db)
+    assert loaded is not None
+    assert loaded["dataset_dependencies"] == []
+    assert loaded["dataset_dependency_status"] == "NOT_LINKED"
+    assert loaded["stale_dataset_dependencies"] == []
+    assert loaded["is_stale"] is False
 
 
 def test_dataset_registration_migrates_legacy_outcome_schema_and_inherits_parent_lineage(tmp_path, monkeypatch):
