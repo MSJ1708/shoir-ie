@@ -1,4 +1,5 @@
 """App-level regression checks for the preserved Workbench and a real target action."""
+import json
 from pathlib import Path
 
 import pytest
