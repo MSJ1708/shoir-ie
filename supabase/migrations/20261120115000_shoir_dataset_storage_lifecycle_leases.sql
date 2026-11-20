@@ -98,51 +98,6 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.shoir_dataset_storage_lease_renew(
-    p_workspace_key text,
-    p_dataset_id text,
-    p_lease_token uuid,
-    p_lease_operation text,
-    p_actor_username_lc text,
-    p_lease_seconds integer
-)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $function$
-DECLARE
-    v_updated integer;
-BEGIN
-    IF p_workspace_key IS NULL
-       OR p_workspace_key !~ '^[0-9a-f]{32}$'
-       OR p_dataset_id IS NULL
-       OR p_dataset_id !~ '^DS-[A-F0-9]{12,32}$'
-       OR p_lease_token IS NULL
-       OR p_lease_operation IS NULL
-       OR p_lease_operation NOT IN ('finalize', 'register', 'sweep')
-       OR p_actor_username_lc IS NULL
-       OR length(btrim(p_actor_username_lc)) NOT BETWEEN 1 AND 128
-       OR p_lease_seconds IS NULL
-       OR p_lease_seconds NOT BETWEEN 30 AND 600 THEN
-        RAISE EXCEPTION 'Invalid dataset storage lifecycle lease renewal input.'
-            USING ERRCODE = '22023';
-    END IF;
-
-    UPDATE public.shoir_dataset_storage_lifecycle_leases
-       SET expires_at = clock_timestamp() + make_interval(secs => p_lease_seconds)
-     WHERE workspace_key = p_workspace_key
-       AND dataset_id = p_dataset_id
-       AND lease_token = p_lease_token
-       AND lease_operation = p_lease_operation
-       AND actor_username_lc = lower(btrim(p_actor_username_lc))
-       AND expires_at > clock_timestamp();
-
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    RETURN v_updated = 1;
-END;
-$function$;
-
 CREATE OR REPLACE FUNCTION public.shoir_dataset_storage_lease_release(
     p_workspace_key text,
     p_dataset_id text,
@@ -182,13 +137,6 @@ GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_acquire(
     text, text, uuid, text, text, integer
 ) TO service_role;
 
-REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_renew(
-    text, text, uuid, text, text, integer
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_renew(
-    text, text, uuid, text, text, integer
-) TO service_role;
-
 REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_release(
     text, text, uuid
 ) FROM PUBLIC, anon, authenticated;
@@ -202,10 +150,6 @@ COMMENT ON FUNCTION public.shoir_dataset_storage_lease_acquire(
     text, text, uuid, text, text, integer
 ) IS
     'Atomically acquire a workspace/dataset Storage lifecycle lease for finalization, reference registration or cleanup; otherwise report the active lease expiry. Only the session-validated Edge Function service role may execute.';
-COMMENT ON FUNCTION public.shoir_dataset_storage_lease_renew(
-    text, text, uuid, text, text, integer
-) IS
-    'Renew only a live lease held by the matching workspace/dataset, token, operation and actor; stale or expired lease holders cannot renew it.';
 COMMENT ON FUNCTION public.shoir_dataset_storage_lease_release(
     text, text, uuid
 ) IS
