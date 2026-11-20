@@ -186,17 +186,31 @@ def main() -> int:
                         sleep_marker = re.compile(
                             r"app has gone to sleep due to inactivity", re.I
                         )
-                        wake_button = page.get_by_role(
-                            "button",
-                            name=re.compile(r"Yes, get this app back up", re.I),
-                        ).first
+                        wake_pattern = re.compile(
+                            r"^Yes,\\s*get this app back up!?$", re.I
+                        )
+                        # The Streamlit sleep page can expose the wake control as
+                        # an accessible button, link, or a clickable text wrapper
+                        # depending on the hosting shell version.
+                        wake_button = page.locator(
+                            "button, a, [role='button']"
+                        ).filter(has_text=re.compile(r"Yes,\\s*get this app back up", re.I)).first
+                        wake_text = page.get_by_text(wake_pattern, exact=True).first
                         item["wake_recovery_attempted"] = False
                         item["wake_recovery_succeeded"] = False
+                        item["wake_recovery_strategy"] = None
                         initial_body = page.locator("body").inner_text(timeout=5_000)
                         if sleep_marker.search(initial_body):
+                            wake_target = None
                             if wake_button.count() and wake_button.is_visible():
+                                wake_target = wake_button
+                                item["wake_recovery_strategy"] = "interactive-element"
+                            elif wake_text.count() and wake_text.is_visible():
+                                wake_target = wake_text
+                                item["wake_recovery_strategy"] = "visible-text"
+                            if wake_target is not None:
                                 item["wake_recovery_attempted"] = True
-                                wake_button.click(timeout=8_000)
+                                wake_target.click(timeout=8_000)
                                 wake_deadline = time.monotonic() + 90
                                 while time.monotonic() < wake_deadline:
                                     try:
@@ -211,7 +225,7 @@ def main() -> int:
                                     page.wait_for_timeout(1_000)
                             else:
                                 item["failure_reasons"].append(
-                                    "Staging app is asleep and its explicit wake control was not available."
+                                    "Staging app is asleep and its explicit wake control was not available as an actionable element or visible text."
                                 )
                         frame_records = []
                         rendered_bodies = []
