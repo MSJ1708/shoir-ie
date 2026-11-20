@@ -199,17 +199,35 @@ def main() -> int:
                         # inside the exact frame that contains the sleep message.
                         sleeping_frame = None
                         initial_sleep_body = ""
-                        for candidate_frame in list(page.frames):
-                            try:
-                                candidate_body = candidate_frame.locator("body").inner_text(
-                                    timeout=2_000
-                                )
-                            except Exception:
-                                continue
-                            if sleep_marker.search(candidate_body):
-                                sleeping_frame = candidate_frame
-                                initial_sleep_body = candidate_body
+                        item["sleep_detection_attempts"] = 0
+                        # Do not inspect only the first DOMContentLoaded snapshot:
+                        # Streamlit injects its hosted sleep page asynchronously.
+                        # Poll actual frame bodies until either the sleep notice or
+                        # a real Shoir-IE readiness marker appears.
+                        sleep_detection_deadline = time.monotonic() + 20
+                        ready_surface_seen = False
+                        while time.monotonic() < sleep_detection_deadline:
+                            item["sleep_detection_attempts"] += 1
+                            for candidate_frame in list(page.frames):
+                                try:
+                                    candidate_body = candidate_frame.locator("body").inner_text(
+                                        timeout=750
+                                    )
+                                except Exception:
+                                    continue
+                                if sleep_marker.search(candidate_body):
+                                    sleeping_frame = candidate_frame
+                                    initial_sleep_body = candidate_body
+                                    break
+                                folded_body = candidate_body.casefold()
+                                if any(
+                                    marker.casefold() in folded_body
+                                    for marker in APP_READY_MARKERS
+                                ):
+                                    ready_surface_seen = True
+                            if sleeping_frame is not None or ready_surface_seen:
                                 break
+                            page.wait_for_timeout(500)
 
                         item["wake_recovery_frame_count"] = len(page.frames)
                         item["sleeping_frame_detected"] = sleeping_frame is not None
