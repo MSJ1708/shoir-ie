@@ -1,17 +1,43 @@
 # Shoir-IE Visual Acceptance Report
 
-Assessment date: 2026-11-06. Status: **not accepted; full browser matrix not evidenced**.
+Assessment date: 2026-11-20. Status: **local public-entry viewport smoke is implemented; full authenticated visual acceptance remains NOT ACCEPTED / NOT VERIFIED**.
 
-The validation workflow contains local Streamlit and Playwright desktop/mobile smoke steps and required screenshots. The current exact-head validation was still in regression testing when inspected. The hosted `live-deployment-smoke` job was skipped on this feature PR by its branch/event condition; this is not authenticated staging acceptance.
+## What repository CI can verify
 
-The full 25-screen inventory is not evidenced across desktop 1440px, tablet 768px and mobile 390px. Arabic/RTL, authenticated tier/role variants, every Plotly figure and all important interactions need a screenshot/trace package.
+The full validation workflow contains a local Streamlit + Chromium/Playwright smoke run. It starts the exact checked-out application locally with no account credentials and checks three viewport sizes:
 
-Complete by:
-1. Finish local screenshot smoke and inspect screenshots rather than just file existence.
-2. Verify deployed staging marker and exact SHA before entering disposable credentials.
-3. Walk landing, auth, shell, Industrial Control Center, Workbench tabs, dataset catalogue/history, Digital Thread, Inspector, Copilot, Facility Layout, Platform Excellence, Team Workspaces, Security and Executive Report Center.
-4. Test all 3 viewport sizes and RTL where supported.
-5. Verify charts' data, units, axes, legend, tooltips, empty states and clipping.
-6. Record before/after screenshots and browser traces for each defect.
-7. Confirm no broken navigation, horizontal overflow, clipped controls or inaccessible interactive controls.
-8. Attach evidence to the exact candidate SHA. Preserve the existing Shoir-IE design.
+| Viewport | Size |
+|---|---:|
+| Desktop | 1440 × 1000 |
+| Tablet | 768 × 1024 |
+| Mobile | 390 × 844 |
+
+At each viewport it waits for stable application readiness, detects known startup/runtime error markers, records uncaught browser and console errors, checks horizontal overflow, and exercises the public sign-in, subscription/registration and module-explorer tabs. It captures screenshots of those public surfaces and a deeper module-explorer section. The generated `shoir-ie-local-runtime-smoke` artifact contains the public-entry screenshots and redacted JSON results when that stage completes.
+
+The validation workflow separately generates synthetic PDF/PPTX evidence, renders each PowerPoint slide to PDF/PNG, and uploads report-export artifacts. These are file-generation/rendering checks, not proof that every authenticated report in every module is visually correct.
+
+The feature-PR `live-deployment-smoke` job is skipped by its workflow event/branch condition. That does not invalidate the local smoke test, but it is not a hosted staging test. The local smoke test intentionally does not sign in, register accounts, submit forms or mutate production data.
+
+## What is not yet evidenced
+
+The complete authenticated 25-screen inventory has not been inspected across the three viewports. In particular, the following remain staging acceptance tasks:
+
+- Arabic/RTL layouts, navigation, field alignment and bidirectional text at all three viewport sizes.
+- Authenticated shell, Workbench tabs, Inspector, Industrial Control Center and each major module's empty, error and populated states.
+- Team Workspaces and all role/tier variants, including suspended/removed users and cross-organization denial.
+- Dataset catalogue/history, upload progress, lease conflicts, Digital Thread graph and relationship details.
+- Copilot approval gates, KPI alert tables, subscription/account states, Security/Trust Center and Executive Report Center.
+- Every critical Plotly figure's labels, units, axes, legends, hover text, accessibility and clipping.
+- Authenticated XLSX/PDF/PPTX export, actual browser downloads, open/reopen and content correctness.
+
+## Required staging visual acceptance
+
+1. Confirm staging banner and exact deployed candidate SHA before entering any test credentials.
+2. Use only the dedicated disposable `shoir-e2e-*` accounts; never use `sho`, production identities or customer data.
+3. Capture screenshots and browser traces for the authenticated 25-screen inventory at 1440px, 768px and 390px, including Arabic/RTL where supported.
+4. Inspect every critical chart, table, modal, drawer, tab, form and download; verify keyboard focus, readable labels, units, empty/error states and no clipping/overflow.
+5. Exercise the full import → validate → model → run → visualize → compare → explain → decide → export → reopen/verify workflow.
+6. Attach redacted screenshots, traces, viewport metadata, the exact source SHA and defect fixes to the staging acceptance evidence.
+7. Obtain independent product, engineering and accessibility/visual review. Preserve the existing Shoir-IE design and navigation.
+
+A screenshot file existing is not proof that the screen is correct. Do not mark the visual gate passed until the complete authenticated evidence bundle has been reviewed on the exact staging candidate.
