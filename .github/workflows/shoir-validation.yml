@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  test-core:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     services:
@@ -73,17 +73,6 @@ jobs:
             artifacts/test-results/pytest-parallel.log
           if-no-files-found: warn
           retention-days: 14
-      - name: Run serial Streamlit AppTest regression modules
-        id: regression_streamlit
-        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
-        env:
-          PYTHONTRACEMALLOC: "5"
-        run: |
-          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -ra --timeout=1800 \
-            tests/test_shoir_resource_intelligence.py \
-            tests/test_shoir_100_tool_workbench.py \
-            tests/test_shoir_tool_trust_center_workbench.py \
-            --junitxml=artifacts/test-results/junit-streamlit.xml
       - name: Verify local PostgreSQL integration service
         id: postgres_service
         if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
@@ -318,13 +307,74 @@ jobs:
           path: artifacts/live-deployment-smoke/
           if-no-files-found: ignore
 
+  streamlit-app-tests:
+    name: streamlit-app-tests (${{ matrix.test_file }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file:
+          - tests/test_shoir_resource_intelligence.py
+          - tests/test_shoir_100_tool_workbench.py
+          - tests/test_shoir_tool_trust_center_workbench.py
+    env:
+      PYTHONPATH: .
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pip install "pytest-timeout>=2.3,<3"
+      - name: Compile selected Streamlit regression module
+        env:
+          TEST_FILE: ${{ matrix.test_file }}
+        run: python -m py_compile "$TEST_FILE"
+      - name: Run isolated Streamlit AppTest module
+        env:
+          TEST_FILE: ${{ matrix.test_file }}
+          PYTHONTRACEMALLOC: "5"
+        run: |
+          mkdir -p artifacts/test-results
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -ra --timeout=1800 "$TEST_FILE" --junitxml="artifacts/test-results/junit-streamlit-${{ strategy.job-index }}.xml"
+      - name: Upload isolated Streamlit AppTest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-streamlit-apptests-${{ strategy.job-index }}
+          path: artifacts/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Preserve the historical required status context "test" as an aggregate.
+  # It cannot go green unless the core suite AND all isolated Streamlit AppTests pass.
+  test:
+    name: test
+    if: ${{ always() }}
+    needs: [test-core, streamlit-app-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all regression lanes to pass
+        env:
+          CORE_RESULT: ${{ needs.test-core.result }}
+          STREAMLIT_RESULT: ${{ needs.streamlit-app-tests.result }}
+        run: |
+          test "$CORE_RESULT" = "success"
+          test "$STREAMLIT_RESULT" = "success"
+
   live-deployment-smoke:
     # Probe the currently hosted, anonymous shell for audit PRs and after
     # every main push. This is a service-availability/rendering check, not proof
     # that the hosted app has deployed the triggering Git SHA. Manual runs on
     # main allow an explicit post-deployment check without account credentials.
     if: >-
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
+      github.event_name == 'pull_request' ||
       (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
       (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
     runs-on: ubuntu-latest
