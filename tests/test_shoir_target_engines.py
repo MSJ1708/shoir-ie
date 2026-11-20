@@ -1164,6 +1164,49 @@ def test_weibull_fit_reports_shape_scale_percentiles_and_censoring_limit():
         analyze_weibull_reliability([1, 2, 3, 4])
 
 
+def test_weibull_fit_supports_right_censoring_confidence_intervals_and_km_diagnostic():
+    from shoir_target_engines import analyze_weibull_reliability
+
+    probabilities = np.linspace(0.03, 0.97, 50)
+    true_times = [900 * (-np.log(1 - p)) ** (1 / 1.8) for p in probabilities]
+    cutoff = 600.0
+    observed = [time <= cutoff for time in true_times]
+    recorded = [time if event else cutoff for time, event in zip(true_times, observed)]
+
+    result = analyze_weibull_reliability(recorded, event_observed=observed)
+    assert result["status"] == "WEIBULL_FIT_RIGHT_CENSORED_MLE"
+    assert result["sample_size"] == 50
+    assert result["failure_count"] == sum(observed)
+    assert result["censored_count"] == 50 - sum(observed)
+    assert result["shape_beta"] > 0
+    assert result["scale_eta"] > 0
+    assert result["AICc"] is not None
+    assert result["BIC"] > 0
+    assert result["goodness_of_fit"]["comparison_points"] >= 3
+    assert result["goodness_of_fit"]["km_max_absolute_difference"] is not None
+    assert result["goodness_of_fit"]["formal_p_value"] is None
+    if result["confidence_intervals"] is not None:
+        assert result["confidence_intervals"]["shape_beta"]["lower"] > 0
+        assert result["confidence_intervals"]["shape_beta"]["upper"] >= result["confidence_intervals"]["shape_beta"]["lower"]
+        assert result["confidence_intervals"]["scale_eta"]["lower"] > 0
+        assert result["confidence_intervals"]["scale_eta"]["upper"] >= result["confidence_intervals"]["scale_eta"]["lower"]
+    assert "approximate Wald" in result["warning"]
+
+
+def test_weibull_fit_rejects_invalid_event_flags_and_insufficient_failures():
+    from shoir_target_engines import analyze_weibull_reliability
+
+    times = [10, 20, 30, 40, 50, 60]
+    with pytest.raises(ValueError, match="matching the time observations"):
+        analyze_weibull_reliability(times, event_observed=[True, False])
+    with pytest.raises(ValueError, match="0/1"):
+        analyze_weibull_reliability(times, event_observed=[1, 1, 1, 1, 1, 2])
+    with pytest.raises(ValueError, match="three observed failures"):
+        analyze_weibull_reliability(times, event_observed=[True, False, False, False, False, False])
+    with pytest.raises(ValueError, match="Confidence level"):
+        analyze_weibull_reliability(times, confidence_level=0.2)
+
+
 def test_spare_parts_criticality_reorder_screen_reconciles_stock_and_lead_time():
     from shoir_target_engines import analyze_spare_parts_criticality
 
