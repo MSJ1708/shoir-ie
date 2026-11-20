@@ -1083,11 +1083,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 slotting_slots_json = st.text_area("Slots (JSON list: slot_id, distance_m, capacity_units, compatibility_group)", value='[{"slot_id":"near-food","distance_m":2,"capacity_units":5,"compatibility_group":"food"},{"slot_id":"near-chemical","distance_m":3,"capacity_units":10,"compatibility_group":"chemical"},{"slot_id":"far-general","distance_m":8,"capacity_units":10,"compatibility_group":"*"}]', key="tool059_slots")
                                 run_method = st.form_submit_button("Assign nearest compatible slots", type="primary", use_container_width=True, key="tool059_run")
                             elif selected_tool["tool_id"] == "T063":
-                                st.caption("One-to-one minimum-cost assignment only; no calendars, precedence, multi-period or skill constraints.")
-                                assignment_tasks_json = st.text_area("Task names (JSON list)", '["Task A","Task B","Task C"]', key="tool063_tasks")
-                                assignment_resources_json = st.text_area("Resource names (JSON list)", '["Worker 1","Worker 2","Worker 3"]', key="tool063_resources")
-                                assignment_costs_json = st.text_area("Cost matrix (JSON list of rows; task rows × resource columns)", '[[9,2,7],[6,4,3],[5,8,1]]', key="tool063_costs")
-                                run_method = st.form_submit_button("Solve assignment", type="primary", use_container_width=True, key="tool063_run")
+                                st.caption("One-day constrained schedule with skills, single-resource capacity, shift windows and task precedence. Durations are rounded up to 30-minute slots; due hours are soft targets.")
+                                assignment_tasks_json = st.text_area(
+                                    "Tasks (JSON list: task_id, duration_hours, required_skills, predecessors, earliest_start_hour, latest_finish_hour, due_hour, priority_weight)",
+                                    value='[{"task_id":"Task A","duration_hours":2,"required_skills":["Mechanical"],"predecessors":[],"earliest_start_hour":0,"latest_finish_hour":8,"due_hour":2,"priority_weight":2},{"task_id":"Task B","duration_hours":1,"required_skills":["Electrical"],"predecessors":["Task A"],"earliest_start_hour":0,"latest_finish_hour":8,"due_hour":3,"priority_weight":1},{"task_id":"Task C","duration_hours":1,"required_skills":["Quality"],"predecessors":[],"earliest_start_hour":0,"latest_finish_hour":8,"due_hour":4,"priority_weight":1}]',
+                                    key="tool063_tasks",
+                                )
+                                assignment_resources_json = st.text_area(
+                                    "Resources (JSON list: resource, skills, shift_start_hour, shift_end_hour, hourly_cost)",
+                                    value='[{"resource":"Mechanical Tech","skills":["Mechanical"],"shift_start_hour":0,"shift_end_hour":8,"hourly_cost":50},{"resource":"Electrical Tech","skills":["Electrical"],"shift_start_hour":0,"shift_end_hour":8,"hourly_cost":40},{"resource":"Quality Tech","skills":["Quality"],"shift_start_hour":0,"shift_end_hour":8,"hourly_cost":35}]',
+                                    key="tool063_resources",
+                                )
+                                run_method = st.form_submit_button("Optimize constrained schedule", type="primary", use_container_width=True, key="tool063_run")
                             elif selected_tool["tool_id"] == "T066":
                                 st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
                                 stock_len = st.number_input(
@@ -1994,7 +2001,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         elif selected_tool["tool_id"] == "T059":
                             current_tool_inputs = {"items_json": slotting_items_json, "slots_json": slotting_slots_json}
                         elif selected_tool["tool_id"] == "T063":
-                            current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "costs_json": assignment_costs_json}
+                            current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "slot_minutes": 30}
                         elif selected_tool["tool_id"] == "T077":
                             current_tool_inputs = {"baseline_json": energy_baseline_json, "alternatives_json": energy_alternatives_json}
                         elif selected_tool["tool_id"] == "T084":
@@ -2361,7 +2368,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         analyze_process_mining, analyze_water_waste_efficiency,
                                         analyze_weibull_reliability, analyze_spare_parts_criticality,
                                         analyze_safety_incident_trends, optimize_warehouse_slotting,
-                                        optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                        optimize_task_resource_assignment, optimize_task_resource_schedule, compare_energy_performance_scenarios,
                                         fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
                                         forecast_demand_baselines, simulate_monte_carlo_net_value,
                                         map_industrial_fields, prioritize_maintenance_backlog,
@@ -2578,10 +2585,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     elif selected_tool["tool_id"] == "T063":
                                         parsed_assignment_tasks = json.loads(assignment_tasks_json)
                                         parsed_assignment_resources = json.loads(assignment_resources_json)
-                                        parsed_assignment_costs = json.loads(assignment_costs_json)
-                                        if not isinstance(parsed_assignment_tasks, list) or not isinstance(parsed_assignment_resources, list) or not isinstance(parsed_assignment_costs, list):
-                                            raise ValueError("Task names, resource names and cost matrix must each be JSON lists.")
-                                        result = optimize_task_resource_assignment(parsed_assignment_tasks, parsed_assignment_resources, parsed_assignment_costs)
+                                        if not isinstance(parsed_assignment_tasks, list) or not isinstance(parsed_assignment_resources, list):
+                                            raise ValueError("Tasks and resources must each be JSON lists of objects.")
+                                        result = optimize_task_resource_schedule(
+                                            parsed_assignment_tasks,
+                                            parsed_assignment_resources,
+                                            slot_minutes=30,
+                                        )
                                     elif selected_tool["tool_id"] == "T066":
                                         parsed_parts = json.loads(parts_json)
                                         if not isinstance(parsed_parts, list):
