@@ -399,7 +399,7 @@ def test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_met
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     cases = [
-        ("T041 · Weibull Reliability Analyzer", "tool041_run", "T041", "status", "WEIBULL_FIT_UNCENSORED_DATA"),
+        ("T041 · Weibull Reliability Analyzer", "tool041_run", "T041", "status", "WEIBULL_FIT_RIGHT_CENSORED_MLE"),
         ("T045 · Spare Parts and Criticality Planner", "tool045_run", "T045", "parts_below_reorder_point", 1),
         ("T050 · Safety Incident Trend Analyzer", "tool050_run", "T050", "total_incidents", 5),
         ("T059 · Warehouse Slotting and Picking Optimizer", "tool059_run", "T059", "assigned_count", 2),
@@ -410,11 +410,23 @@ def test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_met
         at.selectbox(key="shoir_100_tool_inspector").select(label)
         at.run(timeout=90)
         assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        if tool_id == "T041":
+            at.text_area(key="tool041_events").set_value(
+                "[true,true,false,true,false,true,true,false,true,true]"
+            )
+            at.run(timeout=90)
+            assert not at.exception, "T041 censored-input form raised: " + "\\n".join(
+                str(error.value) for error in at.exception
+            )
         at.button(key=button_key).click()
         at.run(timeout=90)
         assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
         assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+        if tool_id == "T041":
+            assert result["censored_count"] == 3
+            assert result["failure_count"] == 7
+            assert result["goodness_of_fit"]["formal_p_value"] is None
         if isinstance(expected, (int, float)) and not isinstance(expected, bool):
             assert result[result_key] == pytest.approx(expected)
         else:
