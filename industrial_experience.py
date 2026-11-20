@@ -1097,16 +1097,19 @@ def save_module_analysis_run(
     created_at = _now()
     elapsed = max(0.0, float(duration_ms or 0.0))
 
+    if declared_dependencies:
+        from industrial_platform import init_platform_db
+        # Initialize the local immutable-version registry before opening the
+        # write transaction used to persist this run.
+        init_platform_db(db_path)
+
     with _db(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         dependencies: list[dict[str, Any]] = []
         dependency_status = "NOT_LINKED"
         if declared_dependencies:
-            from industrial_platform import _resolve_legacy_dataset_dependencies, init_platform_db
+            from industrial_platform import _resolve_legacy_dataset_dependencies
 
-            # The dataset registry is local-only in this code path. Its schema
-            # is initialized before resolving exact version/hash/fingerprint refs.
-            init_platform_db(db_path)
             dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
                 conn, {"dataset_dependencies": declared_dependencies}
             )
