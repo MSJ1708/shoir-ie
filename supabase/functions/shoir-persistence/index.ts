@@ -34,6 +34,28 @@ const REFUND_POLICY_VERSION = "2026-10-23-v2";
 const COOKIE_POLICY_VERSION = "2026-10-21-v1";
 // Keep these values aligned with the public notices and the matching SQL migration.
 
+async function renewDatasetStorageLifecycleLease(
+  workspaceKey: string,
+  datasetId: string,
+  leaseToken: string,
+  leaseOperation: "finalize" | "register" | "sweep",
+  actorUsernameLc: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc(
+    "shoir_dataset_storage_lease_renew",
+    {
+      p_workspace_key: workspaceKey,
+      p_dataset_id: datasetId,
+      p_lease_token: leaseToken,
+      p_lease_operation: leaseOperation,
+      p_actor_username_lc: actorUsernameLc,
+      p_lease_seconds: 600,
+    },
+  );
+  if (error) throw error;
+  return data === true;
+}
+
 async function ensurePaymentProofBucket() {
   const { data, error } = await supabase.storage.getBucket(
     PAYMENT_PROOF_BUCKET,
