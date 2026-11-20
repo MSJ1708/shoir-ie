@@ -2586,7 +2586,7 @@ Deno.serve(async (req) => {
           p_lease_token: leaseToken,
           p_lease_operation: "finalize",
           p_actor_username_lc: String(row.username_lc || ""),
-          p_lease_seconds: 300,
+          p_lease_seconds: 600,
         },
       );
       if (leaseError) throw leaseError;
@@ -2718,6 +2718,19 @@ Deno.serve(async (req) => {
             422,
           );
         }
+        const leaseRenewedBeforeStorage = await renewDatasetStorageLifecycleLease(
+          workspaceKey,
+          datasetId,
+          leaseToken,
+          "finalize",
+          String(row.username_lc || ""),
+        );
+        if (!leaseRenewedBeforeStorage) {
+          return sendResponse(
+            { error: "Dataset finalization lease expired; retry the operation." },
+            409,
+          );
+        }
         const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
           ".csv";
         const bucket = supabase.storage.from("shoir-industrial-datasets");
@@ -2766,8 +2779,21 @@ Deno.serve(async (req) => {
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
         const eventId = "SPE-" +
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const leaseRenewedBeforeRegistration = await renewDatasetStorageLifecycleLease(
+          workspaceKey,
+          datasetId,
+          leaseToken,
+          "finalize",
+          String(row.username_lc || ""),
+        );
+        if (!leaseRenewedBeforeRegistration) {
+          return sendResponse(
+            { error: "Dataset finalization lease expired before metadata registration; retry the operation." },
+            409,
+          );
+        }
         const { data, error } = await supabase.rpc(
-          "shoir_platform_register_dataset_version_with_storage",
+          "shoir_platform_register_dataset_version_with_storage_and_lease",
           {
             p_workspace_key: workspaceKey,
             p_dataset_id: datasetId,
@@ -2784,6 +2810,7 @@ Deno.serve(async (req) => {
             p_head_record_id: headRecordId,
             p_event_id: eventId,
             p_storage_key: storageKey,
+            p_lease_token: leaseToken,
           },
         );
         if (error) {
@@ -2853,8 +2880,19 @@ Deno.serve(async (req) => {
         // must not tell the caller that an already-registered version failed.
         let temporaryCleanupPending = false;
         try {
-          const { error: tempRemoveError } = await bucket.remove([uploadPath]);
-          temporaryCleanupPending = Boolean(tempRemoveError);
+          const tempCleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
+          if (!tempCleanupLeaseRenewed) {
+            temporaryCleanupPending = true;
+          } else {
+            const { error: tempRemoveError } = await bucket.remove([uploadPath]);
+            temporaryCleanupPending = Boolean(tempRemoveError);
+          }
         } catch {
           temporaryCleanupPending = true;
         }
