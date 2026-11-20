@@ -408,13 +408,38 @@ def test_provider_erp_read_uses_server_configuration_and_returns_metadata_only(m
     state = {
         "authenticated": True,
         "current_user": "provider-admin",
+        "remote_session_token": "synthetic-session-token",
         "user_role": "Enterprise Admin",
         "user_tier": "Enterprise Plus Tier",
-        "shoir_active_organization_workspace_id": "workspace-a",
     }
     monkeypatch.setattr(st, "session_state", state, raising=True)
     monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(
+        durable_account_store,
+        "_active_organization_workspace_context",
+        lambda: {"organization_id": "org-a", "organization_workspace_id": "workspace-a"},
+    )
+    edge_actions = []
+    def fake_edge_call(action, payload):
+        edge_actions.append(action)
+        if action != "session_verify":
+            pytest.fail("The server-side session verifier should be the only direct Edge call.")
+        assert payload["username"] == "provider-admin"
+        assert payload["token"] == "synthetic-session-token"
+        return {
+            "ok": True, "username": "provider-admin", "role": "Enterprise Admin",
+            "tier": "Enterprise Plus Tier", "active": True,
+        }
+    monkeypatch.setattr(durable_account_store, "_edge_call", fake_edge_call)
+    def fake_org_action(action, username, token, **payload):
+        edge_actions.append(action)
+        assert action == "workspace_manage_check"
+        assert username == "provider-admin"
+        assert token == "synthetic-session-token"
+        assert payload == {"organization_id": "org-a", "organization_workspace_id": "workspace-a"}
+        return {"ok": True}
+    monkeypatch.setattr(durable_account_store, "edge_organization_action", fake_org_action)
     connection_catalog = {
         "sap-plant": {
             "connection": {
@@ -501,6 +526,7 @@ def test_provider_erp_read_uses_server_configuration_and_returns_metadata_only(m
     assert captured["connection"].read_only is True
     assert captured["binding"].resource_key == "production_orders"
     assert captured["credential"]["client_secret"] == "synthetic-provider-secret"
+    assert edge_actions == ["session_verify", "workspace_manage_check"]
 
 
 def test_provider_erp_read_fails_closed_without_server_allowlist(monkeypatch):
@@ -511,13 +537,18 @@ def test_provider_erp_read_fails_closed_without_server_allowlist(monkeypatch):
     state = {
         "authenticated": True,
         "current_user": "provider-admin",
+        "remote_session_token": "synthetic-session-token",
         "user_role": "Enterprise Admin",
         "user_tier": "Enterprise Plus Tier",
-        "shoir_active_organization_workspace_id": "workspace-a",
     }
     monkeypatch.setattr(st, "session_state", state, raising=True)
     monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
     monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(durable_account_store, "_active_organization_workspace_context", lambda: None)
+    monkeypatch.setattr(durable_account_store, "_edge_call", lambda action, payload: {
+        "ok": True, "username": "provider-admin", "role": "Enterprise Admin",
+        "tier": "Enterprise Plus Tier", "active": True,
+    })
     monkeypatch.setattr(engines, "_configuration_value", lambda key: "")
     with pytest.raises(PermissionError, match="SHOIR_ERP_CONNECTIONS_JSON"):
         engines.integration_configuration_status({
@@ -525,3 +556,61 @@ def test_provider_erp_read_fails_closed_without_server_allowlist(monkeypatch):
             "profile": {"connection_id": "missing", "resource_key": "production_orders"},
         })
 
+
+def test_provider_erp_read_rejects_shared_workspace_without_server_manage_permission(monkeypatch):
+    import durable_account_store
+    import shoir_remaining_tool_engines as engines
+    import streamlit as st
+    import shoir_erp_provider_transport as provider_transport
+
+    state = {
+        "authenticated": True,
+        "current_user": "provider-admin",
+        "remote_session_token": "synthetic-session-token",
+        "user_role": "Enterprise Admin",
+        "user_tier": "Enterprise Plus Tier",
+    }
+    monkeypatch.setattr(st, "session_state", state, raising=True)
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+    monkeypatch.setattr(
+        durable_account_store, "_active_organization_workspace_context",
+        lambda: {"organization_id": "org-a", "organization_workspace_id": "workspace-a"},
+    )
+    monkeypatch.setattr(
+        durable_account_store, "_edge_call",
+        lambda action, payload: {
+            "ok": True, "username": "provider-admin", "role": "Enterprise Admin",
+            "tier": "Enterprise Plus Tier", "active": True,
+        } if action == "session_verify" else pytest.fail("unexpected direct Edge call"),
+    )
+    monkeypatch.setattr(
+        durable_account_store, "edge_organization_action",
+        lambda *args, **kwargs: {"error": "ORGANIZATION_WORKSPACE_ACCESS_DENIED"},
+    )
+    monkeypatch.setattr(engines, "_configuration_value", lambda key: pytest.fail("Provider config must not be read before workspace authorization."))
+    monkeypatch.setattr(provider_transport, "read_provider_resource", lambda *args, **kwargs: pytest.fail("Provider request must not be sent without workspace manage permission."))
+    with pytest.raises(PermissionError, match="Owner/Admin permission"):
+        engines.integration_configuration_status({
+            "action": "verify_provider_read",
+            "profile": {"connection_id": "sap-plant", "resource_key": "production_orders"},
+        })
+
+
+def test_t096_provider_session_and_workspace_manage_routes_are_server_authorized():
+    edge = (
+        ROOT / "supabase/functions/shoir-persistence/index.ts"
+    ).read_text(encoding="utf-8")
+    session_start = edge.index('if (action === "session_verify")')
+    session_end = edge.index('if (action === "workspace_manage_check")', session_start)
+    session_action = edge[session_start:session_end]
+    assert 'await getSession(' in session_action
+    assert 'String(body.token || "")' in session_action
+    assert 'String(body.username || "")' in session_action
+    assert 'active: actor.active === true' in session_action
+    manage_start = edge.index('if (action === "workspace_manage_check")')
+    manage_end = edge.index('if (action === "workspace_access_check")', manage_start)
+    manage_action = edge[manage_start:manage_end]
+    assert 'await getSession(' in manage_action
+    assert 'resolveManagedWorkspaceKey(' in manage_action
+    assert '"manage"' in manage_action

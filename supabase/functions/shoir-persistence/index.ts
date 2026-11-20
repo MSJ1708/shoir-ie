@@ -3410,6 +3410,42 @@ Deno.serve(async (req) => {
       if (error) throw error;
       return sendResponse({ ok: true });
     }
+    if (action === "session_verify") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      return sendResponse({
+        ok: true,
+        username: String(actor.username_lc || ""),
+        role: String(actor.role || ""),
+        tier: String(actor.tier || "Starter"),
+        active: actor.active === true,
+      });
+    }
+    if (action === "workspace_manage_check") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
+      if (!organizationId || !organizationWorkspaceId) {
+        return sendResponse({
+          error: "Both organization_id and organization_workspace_id are required.",
+        }, 400);
+      }
+      await resolveManagedWorkspaceKey(
+        actor as Record<string, unknown>,
+        body,
+        "manage",
+      );
+      return sendResponse({ ok: true });
+    }
     if (action === "workspace_access_check") {
       const actor = await getSession(
         String(body.token),

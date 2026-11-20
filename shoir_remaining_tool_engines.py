@@ -662,17 +662,55 @@ def _verify_provider_erp_read(payload: Mapping[str, Any]) -> dict[str, Any]:
         import streamlit as st
         state = st.session_state
         actor = str(state.get("current_user") or "").strip()
+        session_token = str(state.get("remote_session_token") or "").strip()
+    except Exception as exc:
+        raise PermissionError("The active user and session could not be verified; no provider request was sent.") from exc
+    if not actor or not session_token:
+        raise PermissionError("An active Shoir-IE session is required for provider reads.")
+
+    # Verify the actual server-side account/session and entitlement. The UI's
+    # role/tier values are only a preliminary gate; they are not authoritative.
+    server_session = durable_account_store._edge_call(
+        "session_verify",
+        {"username": actor, "token": session_token},
+    )
+    if (
+        not isinstance(server_session, dict)
+        or server_session.get("ok") is not True
+        or str(server_session.get("username") or "").casefold() != actor.casefold()
+        or server_session.get("active") is not True
+    ):
+        raise PermissionError("The server could not verify an active Shoir-IE session.")
+    server_role = str(server_session.get("role") or "").strip().casefold().replace("_", " ").replace("-", " ")
+    if server_role not in {"owner", "admin", "enterprise admin"}:
+        raise PermissionError("The server-side account role does not permit an ERP integration read.")
+    from shoir_tool_registry import tier_allows_tool
+    server_tier = server_session.get("tier")
+    if not tier_allows_tool(server_tier, "T096"):
+        raise PermissionError("The server-side subscription tier does not permit Integration Management Center operations.")
+
+    # Resolve shared workspace context from the canonical account-store helper,
+    # then ask the Edge Function to enforce the Owner/Admin manage permission.
+    shared_context = durable_account_store._active_organization_workspace_context()
+    if shared_context is not None:
+        manage_result = durable_account_store.edge_organization_action(
+            "workspace_manage_check",
+            actor,
+            session_token,
+            organization_id=shared_context["organization_id"],
+            organization_workspace_id=shared_context["organization_workspace_id"],
+        )
+        if not isinstance(manage_result, dict) or manage_result.get("ok") is not True:
+            raise PermissionError("Owner/Admin permission for the selected organization workspace could not be verified.")
+        active_workspace_id = shared_context["organization_workspace_id"]
+    else:
         active_workspace_id = str(
-            state.get("shoir_active_organization_workspace_id")
-            or state.get("shoir_active_workspace_id")
-            or state.get("active_workspace_id")
+            state.get("active_workspace_id")
             or state.get("workspace_id")
             or "default"
         ).strip()
-    except Exception as exc:
-        raise PermissionError("The active user and workspace could not be verified; no provider request was sent.") from exc
-    if not actor or not active_workspace_id:
-        raise PermissionError("An authenticated actor and active workspace are required for provider reads.")
+    if not active_workspace_id:
+        raise PermissionError("An active workspace is required for provider reads.")
 
     def load_server_json(setting: str) -> dict[str, Any]:
         raw = _configuration_value(setting)
