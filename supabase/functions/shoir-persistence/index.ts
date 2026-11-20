@@ -2754,16 +2754,19 @@ Deno.serve(async (req) => {
             422,
           );
         }
-        const leaseRenewedBeforeStorage = await renewDatasetStorageLifecycleLease(
-          workspaceKey,
-          datasetId,
-          leaseToken,
-          "finalize",
-          String(row.username_lc || ""),
-        );
+        const leaseRenewedBeforeStorage =
+          await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
         if (!leaseRenewedBeforeStorage) {
           return sendResponse(
-            { error: "Dataset finalization lease expired; retry the operation." },
+            {
+              error: "Dataset finalization lease expired; retry the operation.",
+            },
             409,
           );
         }
@@ -2815,16 +2818,20 @@ Deno.serve(async (req) => {
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
         const eventId = "SPE-" +
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-        const leaseRenewedBeforeRegistration = await renewDatasetStorageLifecycleLease(
-          workspaceKey,
-          datasetId,
-          leaseToken,
-          "finalize",
-          String(row.username_lc || ""),
-        );
+        const leaseRenewedBeforeRegistration =
+          await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
         if (!leaseRenewedBeforeRegistration) {
           return sendResponse(
-            { error: "Dataset finalization lease expired before metadata registration; retry the operation." },
+            {
+              error:
+                "Dataset finalization lease expired before metadata registration; retry the operation.",
+            },
             409,
           );
         }
@@ -2855,13 +2862,14 @@ Deno.serve(async (req) => {
           // metadata ledgers independently confirm no reference.
           if (createdFinalObject) {
             try {
-              const cleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
-                workspaceKey,
-                datasetId,
-                leaseToken,
-                "finalize",
-                String(row.username_lc || ""),
-              );
+              const cleanupLeaseRenewed =
+                await renewDatasetStorageLifecycleLease(
+                  workspaceKey,
+                  datasetId,
+                  leaseToken,
+                  "finalize",
+                  String(row.username_lc || ""),
+                );
               if (!cleanupLeaseRenewed) {
                 console.warn(
                   "Dataset metadata registration failed after the finalization lease expired; the immutable object was retained for the later reference-aware sweep.",
@@ -2887,13 +2895,14 @@ Deno.serve(async (req) => {
                   (recordRefs.data || []).length === 0 &&
                   (eventRefs.data || []).length === 0
                 ) {
-                  const finalCleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
-                    workspaceKey,
-                    datasetId,
-                    leaseToken,
-                    "finalize",
-                    String(row.username_lc || ""),
-                  );
+                  const finalCleanupLeaseRenewed =
+                    await renewDatasetStorageLifecycleLease(
+                      workspaceKey,
+                      datasetId,
+                      leaseToken,
+                      "finalize",
+                      String(row.username_lc || ""),
+                    );
                   if (finalCleanupLeaseRenewed) {
                     const { error: orphanRemoveError } = await bucket.remove([
                       storageKey,
@@ -2918,13 +2927,14 @@ Deno.serve(async (req) => {
             }
           }
           try {
-            const tempCleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
-              workspaceKey,
-              datasetId,
-              leaseToken,
-              "finalize",
-              String(row.username_lc || ""),
-            );
+            const tempCleanupLeaseRenewed =
+              await renewDatasetStorageLifecycleLease(
+                workspaceKey,
+                datasetId,
+                leaseToken,
+                "finalize",
+                String(row.username_lc || ""),
+              );
             if (tempCleanupLeaseRenewed) {
               const { error: tempRemoveError } = await bucket.remove([
                 uploadPath,
@@ -2953,17 +2963,20 @@ Deno.serve(async (req) => {
         // must not tell the caller that an already-registered version failed.
         let temporaryCleanupPending = false;
         try {
-          const tempCleanupLeaseRenewed = await renewDatasetStorageLifecycleLease(
-            workspaceKey,
-            datasetId,
-            leaseToken,
-            "finalize",
-            String(row.username_lc || ""),
-          );
+          const tempCleanupLeaseRenewed =
+            await renewDatasetStorageLifecycleLease(
+              workspaceKey,
+              datasetId,
+              leaseToken,
+              "finalize",
+              String(row.username_lc || ""),
+            );
           if (!tempCleanupLeaseRenewed) {
             temporaryCleanupPending = true;
           } else {
-            const { error: tempRemoveError } = await bucket.remove([uploadPath]);
+            const { error: tempRemoveError } = await bucket.remove([
+              uploadPath,
+            ]);
             temporaryCleanupPending = Boolean(tempRemoveError);
           }
         } catch {
@@ -3176,7 +3189,10 @@ Deno.serve(async (req) => {
           );
           if (!stillOwned) {
             return sendResponse(
-              { error: "Dataset reference registration lease expired; retry the write." },
+              {
+                error:
+                  "Dataset reference registration lease expired; retry the write.",
+              },
               409,
             );
           }
