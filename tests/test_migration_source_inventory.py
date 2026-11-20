@@ -536,10 +536,10 @@ def test_dataset_storage_lifecycle_lease_migration_is_private_and_token_fenced()
         MIGRATIONS
         / "20261120115000_shoir_dataset_storage_lifecycle_leases.sql"
     ).read_text(encoding="utf-8")
-    executable_sql = "\\n".join(
+    executable_sql = "\n".join(
         line.split("--", 1)[0] for line in source.splitlines()
     )
-    normalized = re.sub(r"\\s+", " ", executable_sql).casefold()
+    normalized = re.sub(r"\s+", " ", executable_sql).casefold()
 
     assert "create table public.shoir_dataset_storage_lifecycle_leases" in normalized
     assert "primary key (workspace_key, dataset_id)" in normalized
