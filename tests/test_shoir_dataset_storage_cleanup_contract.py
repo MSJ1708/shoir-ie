@@ -121,6 +121,21 @@ def test_dataset_storage_sweep_requires_a_dataset_lease_and_both_ledgers_before_
     assert "leaseReleaseFailures" in source
 
 
+def test_generic_platform_record_storage_reference_uses_dataset_lifecycle_lease():
+    source = EDGE.read_text(encoding="utf-8")
+    start = source.index('if (action === "platform_record_save") {')
+    end = source.index('if (action === "platform_record_list") {', start)
+    save = source[start:end]
+    classification = save.index("classifyDatasetStorageSweepPath")
+    lease_acquire = save.index('"shoir_dataset_storage_lease_acquire"')
+    record_upsert = save.index('"shoir_platform_upsert_record"')
+    lease_release = save.index('"shoir_dataset_storage_lease_release"')
+    assert classification < lease_acquire < record_upsert < lease_release
+    assert 'p_lease_operation: "register"' in save
+    assert "looksLikeDatasetStoragePath && !classifiedStoragePath" in save
+    assert "recordLeaseToken" in save
+
+
 def test_dataset_storage_lifecycle_migration_is_server_only_and_expiring():
     migration = (
         ROOT / "supabase" / "migrations" /
@@ -134,6 +149,8 @@ def test_dataset_storage_lifecycle_migration_is_server_only_and_expiring():
     assert "security definer" in normalized
     assert "set search_path = pg_catalog, public" in normalized
     assert "where current_lease.expires_at <= clock_timestamp()" in normalized
+    assert "lease_operation in ('finalize', 'register', 'sweep')" in normalized
+    assert "p_lease_operation not in ('finalize', 'register', 'sweep')" in normalized
     assert "p_lease_seconds not between 30 and 600" in normalized
     assert "lease_token = p_lease_token" in normalized
     assert "grant execute on function public.shoir_dataset_storage_lease_acquire" in normalized
