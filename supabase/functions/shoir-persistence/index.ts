@@ -3165,8 +3165,7 @@ Deno.serve(async (req) => {
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
         const eventId = "SPE-" +
           crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-        let data;
-        let error;
+        let savedRecord: unknown;
         if (classifiedStoragePath && recordLeaseToken) {
           const stillOwned = await renewDatasetStorageLifecycleLease(
             workspaceKey,
@@ -3196,8 +3195,10 @@ Deno.serve(async (req) => {
               p_lease_token: recordLeaseToken,
             },
           );
-          data = fencedWrite.data;
-          error = fencedWrite.error;
+          if (fencedWrite.error) throw fencedWrite.error;
+          savedRecord = Array.isArray(fencedWrite.data)
+            ? fencedWrite.data[0]
+            : fencedWrite.data;
         } else {
           const ordinaryWrite = await supabase.rpc(
             "shoir_platform_upsert_record",
@@ -3212,12 +3213,12 @@ Deno.serve(async (req) => {
               p_event_id: eventId,
             },
           );
-          data = ordinaryWrite.data;
-          error = ordinaryWrite.error;
+          if (ordinaryWrite.error) throw ordinaryWrite.error;
+          savedRecord = Array.isArray(ordinaryWrite.data)
+            ? ordinaryWrite.data[0]
+            : ordinaryWrite.data;
         }
-        if (error) throw error;
-        const saved = Array.isArray(data) ? data[0] : data;
-        return sendResponse({ ok: true, record: saved });
+        return sendResponse({ ok: true, record: savedRecord });
       } finally {
         if (classifiedStoragePath && recordLeaseToken) {
           try {
