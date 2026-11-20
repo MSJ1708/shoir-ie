@@ -2084,7 +2084,15 @@ Deno.serve(async (req) => {
           }
           const page = Array.isArray(data) ? data : [];
           for (const rawEntry of page) {
-            const entry = rawEntry as Record<string, unknown>;
+            // Copy only the Storage fields used by the sweep into a plain record.
+            // Supabase's FileObject is a typed object, not an index-signature map.
+            const entry: Record<string, unknown> = {
+              name: rawEntry.name,
+              id: rawEntry.id,
+              created_at: rawEntry.created_at,
+              updated_at: rawEntry.updated_at,
+              last_accessed_at: rawEntry.last_accessed_at,
+            };
             const name = String(entry.name || "");
             if (
               !name ||
