@@ -87,17 +87,44 @@ Do not put passwords or tokens in workflow inputs, source files, issues, pull re
 
 ## Recovery when dedicated test-account logins return HTTP 401
 
-The initial workflow preflight confirms that all required Actions secrets are present; it cannot prove that a password stored in GitHub matches the hash in the staging account database. If `active_login`, `second_login`, `starter_tier`, or `expired_login_renewal_only` fails with HTTP 401, do not keep retrying and do not create duplicate identities.
+The workflow preflight confirms that required Actions secrets exist; it cannot prove that a GitHub Actions password matches the hash in the staging account database. If a disposable account login fails with HTTP 401, do not keep retrying and do not create duplicate identities.
 
-On the trusted Windows workstation where this repository is checked out and `gh auth status` succeeds, run:
+The repository contains the Python recovery helper `scripts/recover_staging_e2e_credentials.py`. There is no separate PowerShell `.ps1` wrapper. Use a trusted Windows workstation with this repository checked out, Python installed, GitHub CLI installed, and `gh auth status` succeeding for an account allowed to update repository Actions secrets.
+
+The helper requires two values from the **staging Supabase project only**:
+- the staging service-role/server secret key;
+- the staging publishable key (or supported legacy anon key).
+
+Do not type either key in a normal PowerShell command, save it in a script, or paste it into chat. The following PowerShell sequence reads them through secure prompts, passes them only to the current process environment, invokes the helper, and clears the environment values afterwards:
 
 ```powershell
-.\scripts\Recover-StagingE2ECredentials.ps1
+$serviceSecure = Read-Host "Staging Supabase service-role/server secret key" -AsSecureString
+$publishableSecure = Read-Host "Staging Supabase publishable/anon key" -AsSecureString
+$serviceBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($serviceSecure)
+$publishableBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($publishableSecure)
+try {
+    $env:SHOIR_STAGING_SERVICE_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($serviceBstr)
+    $env:SHOIR_STAGING_PUBLISHABLE_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($publishableBstr)
+    python .\scripts\recover_staging_e2e_credentials.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Staging E2E credential recovery failed. Review the non-secret error and do not create duplicate accounts."
+    }
+}
+finally {
+    Remove-Item Env:SHOIR_STAGING_SERVICE_KEY -ErrorAction SilentlyContinue
+    Remove-Item Env:SHOIR_STAGING_PUBLISHABLE_KEY -ErrorAction SilentlyContinue
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($serviceBstr)
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($publishableBstr)
+    $serviceSecure.Dispose()
+    $publishableSecure.Dispose()
+}
 ```
 
-The wrapper reads the **staging** Supabase server key and publishable/anon key directly from the Windows clipboard without displaying them, then clears the clipboard. For each prompt, copy the complete key from the staging Supabase dashboard, return to the terminal, and press Enter—do not paste the key into the terminal. A single asterisk in the older hidden-input prompt did not necessarily mean the key was truncated. The recovery helper is hard-pinned to staging project `hfhrosthswcybccepmak`, checks that all seven expected test-account rows already exist and have the expected roles, tiers, active states, and expiry states, then resets only those seven disposable passwords and synchronizes their matching `SHOIR_E2E_*_USERNAME` / `SHOIR_E2E_*_PASSWORD` GitHub Actions secrets. It verifies login through the staging Edge Function and revokes temporary sessions. It does not create or delete accounts, modify the `sho` administrator, target production, print secrets, or write new passwords to disk.
+The helper is hard-pinned to staging project `hfhrosthswcybccepmak`. It checks that all seven expected `shoir-e2e-*` account rows already exist and have the expected roles, tiers, active states and expiry states before changing any password. It resets only those seven disposable passwords, synchronizes the matching `SHOIR_E2E_*_USERNAME` / `SHOIR_E2E_*_PASSWORD` GitHub Actions secrets using the authenticated GitHub CLI, verifies login/tier/expiry through the staging Edge Function, and revokes temporary sessions. It does not create or delete accounts, modify the `sho` administrator, target production, print secrets or save the newly generated passwords to disk.
 
-Use only the current workflow-managed secrets for automated testing. The E2E accounts are disposable automation identities; do not treat a previously copied password or an old `.staging-e2e-credentials.json` file as current after recovery. Once recovery succeeds, rerun this workflow on `feat/shoir-ie-release-hardening-20261105`.
+The helper also synchronizes `SHOIR_E2E_PUBLISHABLE_KEY` to the key validated by its staging preflight. It never stores the service-role key in GitHub Actions. Recovery is a state-changing operation on the seven existing disposable staging accounts; run it only during a coordinated staging test window.
+
+After it reports success, confirm that the workflow is using the current secrets, then launch a new authenticated release gate from GitHub Actions. Do not reuse a previous password or old `.staging-e2e-credentials.json` file.
 
 ## Running and evidence
 
