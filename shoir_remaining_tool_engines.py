@@ -485,92 +485,129 @@ def simulate_industrial_disruptions(payload: Mapping[str, Any]) -> dict[str, Any
 
 
 def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Evaluate threshold, freshness and duplicate-suppression states for KPI records."""
-    kpis = _records(payload.get("kpis"), "kpis", maximum=5000)
-    as_of = _utc_timestamp(payload.get("as_of"), "as_of", allow_missing=True) or datetime.now(timezone.utc)
+    """Backward-compatible T094 adapter to the single canonical KPI alert engine.
+
+    Older callers provide one threshold per KPI record and use measured_at /
+    max_age_minutes. Normalize that contract here; do not maintain a second alert
+    identity or freshness implementation.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError("KPI alert input must be a JSON object.")
+    raw_kpis = _records(payload.get("kpis"), "kpis", maximum=5000)
+    if not raw_kpis:
+        raise ValueError("Provide at least one KPI record.")
     history = payload.get("existing_alerts", [])
     if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
         raise ValueError("existing_alerts must be a list of prior alert objects.")
-    seen = {
-        str(item.get("fingerprint"))
-        for item in history
-        if str(item.get("state", "OPEN")).upper() == "OPEN" and item.get("fingerprint")
-    }
-    results, alerts, stale_count, future_count = [], [], 0, 0
-    valid_ops = {"gt": lambda v, t: v > t, "gte": lambda v, t: v >= t, "lt": lambda v, t: v < t, "lte": lambda v, t: v <= t}
-    for item in kpis:
-        name = _nonempty_text(item.get("name"), "KPI name", 200)
-        val = _number(item.get("value"), f"{name}.value")
+
+    normalized_records: list[dict[str, Any]] = []
+    rules: list[dict[str, Any]] = []
+    canonical_id_by_legacy_fingerprint: dict[str, str] = {}
+    canonical_id_by_legacy_alert_id: dict[str, str] = {}
+    canonical_id_by_rule_name: dict[tuple[str, str], str] = {}
+
+    for index, item in enumerate(raw_kpis, start=1):
+        name = _nonempty_text(item.get("name", item.get("kpi", "")), f"kpis[{index}].name", 200)
+        value = _number(item.get("value"), f"{name}.value")
         threshold = _number(item.get("threshold"), f"{name}.threshold")
-        raw_op = str(item.get("operator", "gt")).strip().lower()
-        operator_aliases = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}
-        op = operator_aliases.get(raw_op, raw_op)
-        if op not in valid_ops:
-            raise ValueError(f"{name}.operator must be one of gt, gte, lt, lte, >, >=, <, <=.")
-        measured_at = _utc_timestamp(item.get("measured_at"), f"{name}.measured_at")
-        max_age = _number(item.get("max_age_minutes", 60), f"{name}.max_age_minutes", minimum=0)
-        delta_minutes = (as_of - measured_at).total_seconds() / 60.0
-        future = delta_minutes < 0
-        age_minutes = max(0.0, delta_minutes)
-        minutes_until_observation = max(0.0, -delta_minutes)
-        stale = not future and age_minutes > max_age
-        breached = bool(valid_ops[op](val, threshold))
-        state = "FUTURE_TIMESTAMP" if future else ("STALE" if stale else ("BREACHED" if breached else "OK"))
-        if stale:
-            stale_count += 1
-        if future:
-            future_count += 1
-        rule_id = str(item.get("rule_id") or "").strip()
-        severity = str(item.get("severity") or "").strip()
-        source = str(item.get("source") or "").strip()
-        freshness = "FUTURE" if future else ("STALE" if stale else "FRESH")
-        row = {
-            "name": name, "value": val, "threshold": threshold, "operator": op,
-            "unit": str(item.get("unit") or ""), "measured_at": measured_at.isoformat(),
-            "age_minutes": age_minutes, "minutes_until_observation": minutes_until_observation,
-            "max_age_minutes": max_age, "freshness": freshness, "status": state,
+        operator = str(item.get("operator", "gt")).strip().lower()
+        operator = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}.get(operator, operator)
+        if operator not in {"gt", "gte", "lt", "lte", "=="}:
+            raise ValueError(f"{name}.operator must be one of gt, gte, lt, lte, >, >=, <, <=, ==.")
+        supplied_rule_id = str(item.get("rule_id") or "").strip()
+        legacy_fingerprint_payload: dict[str, Any] = {
+            "name": name.casefold(),
+            "operator": operator,
+            "threshold": threshold,
         }
-        if rule_id:
-            row["rule_id"] = rule_id
-        if severity:
-            row["severity"] = severity
-        if source:
-            row["source"] = source
-        results.append(row)
-        if not stale and not future and breached:
-            fingerprint_input = {
+        if supplied_rule_id:
+            legacy_fingerprint_payload["rule_id"] = supplied_rule_id
+        legacy_fingerprint = _canonical_hash(legacy_fingerprint_payload)
+        rule_id = supplied_rule_id or (
+            "KPI-" + _canonical_hash({
                 "name": name.casefold(),
-                "operator": op,
+                "operator": operator,
                 "threshold": threshold,
-            }
-            if rule_id:
-                fingerprint_input["rule_id"] = rule_id
-            fp = _canonical_hash(fingerprint_input)
-            is_new_alert = fp not in seen
-            alert = {
-                **row,
-                "fingerprint": fp,
-                "alert_id": "alert-" + fp[:16],
-                "new_alert": is_new_alert,
-                "Event": "NEW" if is_new_alert else "EXISTING",
-            }
-            alerts.append(alert)
-            seen.add(fp)
-    return {
-        "tool_id": "T094",
+            })[:24].upper()
+        )
+        canonical_identity = rule_id + "::" + name.casefold()
+        canonical_id = "ALT-" + hashlib.sha256(canonical_identity.encode("utf-8")).hexdigest()[:20].upper()
+        canonical_id_by_legacy_fingerprint[legacy_fingerprint] = canonical_id
+        canonical_id_by_legacy_alert_id["alert-" + legacy_fingerprint[:16]] = canonical_id
+        canonical_id_by_rule_name[(rule_id.casefold(), name.casefold())] = canonical_id
+
+        severity = str(item.get("severity") or "WARNING").strip().upper()
+        source = str(item.get("source") or "USER_ENTERED_UNVERIFIED").strip()
+        measured_at = item.get("measured_at", item.get("observed_at"))
+        record: dict[str, Any] = {
+            "kpi": name,
+            "value": value,
+            "unit": str(item.get("unit") or ""),
+            "observed_at": measured_at,
+            "source": source,
+        }
+        if item.get("max_age_minutes") is not None:
+            record["max_age_minutes"] = _number(item.get("max_age_minutes"), f"{name}.max_age_minutes")
+        normalized_records.append(record)
+        rules.append({
+            "rule_id": rule_id,
+            "kpi": name,
+            "operator": operator,
+            "threshold": threshold,
+            "severity": severity,
+        })
+
+    previous_open_ids: set[str] = set()
+    for prior in history:
+        if str(prior.get("state", "OPEN")).upper() not in {"OPEN", "OPEN_UNVERIFIED"}:
+            continue
+        fingerprint = str(prior.get("fingerprint") or "").strip()
+        prior_id = str(prior.get("alert_id") or "").strip()
+        mapped_id = (
+            canonical_id_by_legacy_fingerprint.get(fingerprint)
+            or canonical_id_by_legacy_alert_id.get(prior_id)
+        )
+        if not mapped_id:
+            prior_rule_id = str(prior.get("rule_id") or "").strip()
+            prior_name = str(prior.get("name") or prior.get("kpi") or "").strip()
+            if prior_rule_id and prior_name:
+                mapped_id = canonical_id_by_rule_name.get((prior_rule_id.casefold(), prior_name.casefold()))
+        if mapped_id:
+            previous_open_ids.add(mapped_id)
+        elif prior_id.startswith("ALT-"):
+            previous_open_ids.add(prior_id)
+
+    as_of = payload.get("as_of")
+    try:
+        from shoir_target_engines import evaluate_kpi_alerts as evaluate_canonical_kpi_alerts
+    except Exception as exc:
+        raise RuntimeError("The canonical KPI alert engine is unavailable.") from exc
+    result = evaluate_canonical_kpi_alerts(
+        normalized_records,
+        rules,
+        as_of=as_of,
+        stale_after_hours=float(payload.get("stale_after_hours", 24.0)),
+        previous_open_alert_ids=sorted(previous_open_ids),
+    )
+    kpi_frame = result["kpis"]
+    stale_count = int((kpi_frame["freshness"] == "STALE").sum()) if not kpi_frame.empty else 0
+    alert_frame = result["alerts"]
+    if not alert_frame.empty:
+        alert_frame = alert_frame[alert_frame["Event"].isin(["NEW", "CONTINUING", "UNVERIFIED"])].copy()
+    result.update({
         "status": "KPI_EVALUATION_COMPLETE",
-        "as_of": as_of.isoformat(),
-        "kpi_count": len(results),
         "stale_kpi_count": stale_count,
-        "future_kpi_count": future_count,
-        "breached_kpi_count": sum(r["status"] == "BREACHED" for r in results),
-        "open_alert_count": len(alerts),
-        "new_alert_count": sum(bool(a["new_alert"]) for a in alerts),
-        "kpis": pd.DataFrame(results),
-        "alerts": pd.DataFrame(alerts),
-        "alert_records": alerts,
-        "warning": "Alerts are computed from the KPI records supplied to this run. Future-dated or stale readings never open alerts. Cross-session deduplication and notification delivery require saving alert_records to a protected durable store and configuring an approved notification service.",
-    }
+        "kpis": kpi_frame,
+        "alerts": alert_frame,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+        "warning": (
+            "KPI rules use user-entered readings unless an approved source is explicitly supplied. "
+            "Stale, future, invalid-timestamp, missing or unidentified-source readings cannot create a new alert "
+            "or resolve an existing one. An existing alert remains open-but-unverified until a fresh valid reading "
+            "proves recovery. No email, SMS or external notification is sent."
+        ),
+    })
+    return result
 
 
 def _require_connector_operator() -> None:
