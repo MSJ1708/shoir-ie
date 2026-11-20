@@ -124,3 +124,65 @@ The exact-head full run on `8f671ed83f4fc05dcae558b5a7d751b3b64db151` completed 
 The three Streamlit-heavy modules are removed from the parallel xdist suite and are now run in a dedicated serial AppTest step with a 30-minute per-test diagnostic ceiling. The nine-canonical-tool UI route test has the same explicit timeout marker so its full route/entitlement matrix is not killed at ten minutes. PostgreSQL integration remains its own serial step. Both parallel and serial reports remain uploaded as separate JUnit XML files. This preserves all test cases; none is skipped or weakened.
 
 The updated exact-head CI must still run and pass before this remediation is considered complete.
+
+
+---
+
+## Superseding handoff update — 2026-11-20
+
+This addendum supersedes any older handoff text above that describes standalone PR #223 as the T098 integration target. The T098 OIDC implementation was selectively forward-ported into PR #232; PR #223 is closed/superseded and must not be merged. The current detailed T098 status and provider checklist are in `docs/SHOIR_IE_T098_IDENTITY_AUDIT_ACCEPTANCE.md` and `docs/T098_OIDC_AUDIT_CONFIGURATION.md`.
+
+### Current repository engineering candidate
+
+- Active PR: [#232 — Release hardening and staging security acceptance](https://github.com/MSJ1708/shoir-ie/pull/232).
+- Branch: `feat/shoir-ie-release-hardening-20261105`.
+- Current head at this handoff refresh: `ace18eadb47aca2ff193c4ee55706d6041e97580`.
+- Target: `staging-e2e-20261019`.
+- PR remains open and draft. It is a candidate for staging review, not a release approval.
+- The canonical tool readiness matrix remains 96 `IMPLEMENTED_NEEDS_VALIDATION`, four `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), zero `VERIFIED_WORKING`.
+
+### T020 — coordinated Storage lifecycle lease
+
+Repository work now adds migration `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and matching Edge Function integration:
+
+- Private RLS-enabled workspace/dataset lease table; no direct table privileges to anon, authenticated or service_role.
+- Pinned-search-path SECURITY DEFINER acquire/release RPCs executable only by service_role.
+- Lease acquisition is atomic on workspace/dataset, limited to 30–600 seconds, and reclaims expired leases. Release is token-matched so a stale operation cannot release a newer holder's lease.
+- Dataset finalization holds a 300-second lease across temporary object verification, content-addressed object creation/reuse, atomic metadata registration and temporary cleanup.
+- T020 cleanup acquires the same lease before checking both metadata ledgers, writing kind-specific deletion intent, removing an eligible old temporary or immutable orphan object and writing completion evidence.
+- Preview remains default; deletion requires explicit confirmation. The 48-hour newest-timestamp rule, workspace path validation, Owner/Admin manage permission, fail-closed reference checks, 500-object/200-directory scan bound, 100-reference-check limit and 50-deletion limit remain.
+
+The current candidate contains PostgreSQL replay tests for lease table RLS/grants, RPC grants, competing acquisition, stale-token release denial, correct/idempotent release, invalid TTL rejection and expiry reclamation, plus static Edge ordering and T020 UI/operator contracts.
+
+### Exact-head CI and deployment boundary
+
+The eight required workflow runs were created for head `ace18eadb47aca2ff193c4ee55706d6041e97580` at the time of this refresh:
+
+- Full Shoir-IE validation — run [44731941242](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941242).
+- Engine Regression — run [44731941029](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941029).
+- Edge Function verification — run [44731941206](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941206).
+- Production v9 compatibility — run [44731941017](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941017).
+- Security and quality — run [44731941046](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941046).
+- Clean PostgreSQL migration replay — run [44731941092](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941092).
+- Excel Intelligence — run [44731941109](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941109).
+- Subscription transaction integration — run [44731941048](https://github.com/MSJ1708/shoir-ie/actions/runs/44731941048).
+
+At initial inspection, the focused workflows were starting/in progress and the two large suites were pending. Do not infer passes from queued/running states; inspect final job steps and artifacts for this exact SHA. If any subsequent commit is pushed, repeat the complete checks on that newer exact head.
+
+Read-only Supabase project inspection still reports staging Edge v14 and production Edge v10. The connected database migration-history call failed authentication, so the current deployed migration ledger must be confirmed through the authorized operator path before a migration decision. Neither the new migration nor matching Edge source has been deployed to staging or production.
+
+### Work still required before any staging deployment
+
+1. Obtain a green exact-head CI result with inspected JUnit, PostgreSQL replay and Deno logs; resolve all failures, skips and warnings.
+2. Obtain independent code/security review and one required approval on the latest push; resolve every review thread.
+3. Confirm a staging backup and tested rollback/restore path, including Storage object bytes; the database-only backup is insufficient.
+4. Apply reviewed migrations to staging in timestamp order and deploy the matching Edge Function source only in a separately approved staging window. Recheck RLS/grants, RPCs, advisors and deployed function hash/version.
+5. Run authenticated disposable-account staging acceptance for T020 lease conflict/expiry/release, TUS upload interruption/resume, hash/shape validation, historical download, temporary/immutable orphan preview/deletion, Owner/Admin permissions, cross-workspace denial and audit events.
+
+The T020 cleanup remains manual; no scheduler or service identity has been configured. Do not operate it on production.
+
+### External configuration and final acceptance
+
+T096–T099 still require real provider/identity/infrastructure configuration and acceptance. The exact configurations and evidence lists remain in the T096, T097, T098 and T099 acceptance documents. After those are configured, run the authenticated release gate and full browser/module/workbook/export journey with disposable staging identities. Independent Industrial Engineering, security, infrastructure and Saudi privacy/legal review is still required.
+
+**Release position is unchanged: PR #232 remains draft; Shoir-IE remains BETA; production remains NO-GO.** No staging/prod migration, Edge deployment, secret change, Streamlit deploy, merge, customer/account mutation or protected-administrator use is claimed by this repository pass.
