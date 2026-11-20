@@ -2322,10 +2322,10 @@ def plan_recursive_material_requirements(
 
     Each component may include a `children` list defining its own BOM. A row
     accepts component, qty_per_parent, lead_time_periods, lot_size_multiple,
-    optional scrap_pct or yield_pct, revision, and children. Supply is netted
-    once per component as requirements are processed in due-period order.
-    Revision labels are recorded/consistency-checked, but effectivity selection,
-    alternates, order calendars and supply pegging remain outside this planner.
+    optional scrap_pct or yield_pct, revision, and children. Requirements for a
+    repeated item at the same level/due period are aggregated before inventory
+    is netted. An item appearing at multiple levels is rejected to avoid
+    reusing the same inventory balance ambiguously.
     """
     demand = _finite_number(parent_demand_units, "Parent demand")
     if demand <= 0 or not demand.is_integer():
@@ -2349,16 +2349,16 @@ def plan_recursive_material_requirements(
     rows: list[dict[str, Any]] = []
     component_depths: dict[str, int] = {}
     level = 1
-    current: list[tuple[str, float, int, tuple[str, ...], Sequence[Mapping[str, Any]]]] = [
-        ("", demand, due_period, tuple(), bom)
-    ]
+    current: list[
+        tuple[str, float, int, tuple[tuple[str, ...], ...], Sequence[Mapping[str, Any]]]
+    ] = [("", demand, due_period, (tuple(),), bom)]
     processed_component_rows = 0
 
     while current:
         if level > max_levels:
             raise ValueError(f"Recursive BOM exceeded the configured {max_levels}-level limit.")
         grouped: dict[tuple[str, int], dict[str, Any]] = {}
-        for parent_name, parent_demand, parent_due, ancestors, component_rows in current:
+        for parent_name, parent_demand, parent_due, ancestor_paths, component_rows in current:
             for row_index, component in enumerate(component_rows, start=1):
                 processed_component_rows += 1
                 if processed_component_rows > 5000:
@@ -2369,8 +2369,11 @@ def plan_recursive_material_requirements(
                 if not name or len(name) > 160:
                     raise ValueError(f"BOM level {level}, row {row_index} needs a component name of 1 to 160 characters.")
                 key = name.casefold()
-                if key in ancestors:
-                    raise ValueError(f"Recursive BOM cycle detected: {' -> '.join((*ancestors, key))}.")
+                for ancestor_path in ancestor_paths:
+                    if key in ancestor_path:
+                        raise ValueError(
+                            f"Recursive BOM cycle detected: {' -> '.join((*ancestor_path, key))}."
+                        )
                 prior_depth = component_depths.get(key)
                 if prior_depth is not None and prior_depth != level:
                     raise ValueError(
@@ -2392,7 +2395,8 @@ def plan_recursive_material_requirements(
                     yield_pct = _finite_number(component.get("yield_pct", 100), f"Yield percentage for {name}")
                     if not 0 < yield_pct <= 100:
                         raise ValueError(f"Yield percentage for {name} must be in (0, 100].")
-                gross = parent_demand * qty / (yield_pct / 100.0)
+                raw_requirement = parent_demand * qty
+                gross = raw_requirement / (yield_pct / 100.0)
                 if not math.isfinite(gross) or gross < 0:
                     raise ValueError(f"Calculated gross requirement for {name} is invalid.")
 
@@ -2411,18 +2415,20 @@ def plan_recursive_material_requirements(
                     raise ValueError(f"Lot size multiple for {name} must be a positive whole number.")
 
                 group_key = (key, parent_due)
+                new_paths = {(*ancestor_path, key) for ancestor_path in ancestor_paths}
                 group = grouped.get(group_key)
                 if group is None:
                     grouped[group_key] = {
                         "name": name,
                         "gross": gross,
+                        "raw_requirement": raw_requirement,
                         "lead": int(lead),
                         "lot": int(lot),
                         "revision": revision,
                         "children": list(children),
                         "children_signature": children_signature,
                         "parents": {parent_name or "TOP_LEVEL"},
-                        "paths": {" -> ".join((*ancestors, key))},
+                        "paths": new_paths,
                     }
                 else:
                     if (
@@ -2435,10 +2441,13 @@ def plan_recursive_material_requirements(
                             f"Conflicting BOM revision, lead time, lot size or child definition for repeated component {name}."
                         )
                     group["gross"] += gross
+                    group["raw_requirement"] += raw_requirement
                     group["parents"].add(parent_name or "TOP_LEVEL")
-                    group["paths"].add(" -> ".join((*ancestors, key)))
+                    group["paths"].update(new_paths)
 
-        next_level: list[tuple[str, float, int, tuple[str, ...], Sequence[Mapping[str, Any]]]] = []
+        next_level: list[
+            tuple[str, float, int, tuple[tuple[str, ...], ...], Sequence[Mapping[str, Any]]]
+        ] = []
         for (component_key, component_due), group in sorted(
             grouped.items(), key=lambda item: (item[0][1], item[0][0])
         ):
@@ -2462,19 +2471,23 @@ def plan_recursive_material_requirements(
             net = max(0.0, gross + safety - available)
             lot = int(group["lot"])
             planned = int(math.ceil(net / lot) * lot) if net > 0 else 0
-            # Consume gross demand from available supply once; never reuse the
-            # same on-hand/receipt balance when the item appears in later BOMs.
             available_remaining[component_key] = max(0.0, available - gross)
             lead = int(group["lead"])
             release_period = component_due - lead
+            yield_pct_effective = (
+                100.0 * float(group["raw_requirement"]) / gross if gross > 0 else 100.0
+            )
             rows.append({
                 "Level": level,
                 "Component": name,
                 "Parent item(s)": ", ".join(sorted(group["parents"])),
-                "Source path(s)": " | ".join(sorted(group["paths"])),
+                "Source path(s)": " | ".join(
+                    " -> ".join(path) for path in sorted(group["paths"])
+                ),
                 "BOM revision": group["revision"] or "NOT_SPECIFIED",
                 "Gross requirement": gross,
-                "Yield (%)": 100.0 * gross / max(gross, 1e-12) if False else None,
+                "Effective yield (%)": yield_pct_effective,
+                "Scrap loss quantity": gross - float(group["raw_requirement"]),
                 "On hand + scheduled receipts": available,
                 "Safety stock": safety,
                 "Net requirement": net,
@@ -2487,14 +2500,12 @@ def plan_recursive_material_requirements(
                 "Subassembly with BOM": bool(group["children"]),
             })
             if group["children"] and planned > 0:
-                ancestor_names = tuple(
-                    [part.casefold() for part in str(group["paths"]).split(" -> ")[0].split(" | ")]
-                )
-                # Each group has a single normalized item key; cycle detection
-                # is performed as the nested rows are processed below.
                 next_level.append((
-                    name, float(planned), release_period,
-                    (*ancestor_names, component_key), group["children"],
+                    name,
+                    float(planned),
+                    release_period,
+                    tuple(sorted(group["paths"])),
+                    group["children"],
                 ))
 
         current = next_level
