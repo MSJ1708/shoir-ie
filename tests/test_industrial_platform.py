@@ -637,7 +637,7 @@ def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_his
             (decision_id,),
         ).fetchone()
         outcome = conn.execute(
-            "SELECT dataset_dependency_status,predicted_json,stale_dataset_dependencies_json "
+            "SELECT dataset_dependency_status,actual_json,stale_dataset_dependencies_json "
             "FROM experience_decision_outcomes WHERE outcome_id=?",
             (outcome_id,),
         ).fetchone()
