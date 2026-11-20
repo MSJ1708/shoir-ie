@@ -2158,10 +2158,10 @@ Deno.serve(async (req) => {
             age_hours: Math.floor((nowMs - newest) / (60 * 60 * 1000)),
           };
         });
-      // Do not delete immutable content-addressed objects in this action:
-      // a concurrent version-finalize request could be between object read and
-      // metadata commit. A future leased/atomic cleanup protocol must coordinate
-      // with the dataset registration transaction before immutable-object deletion.
+      // Temporary and immutable objects share the same dataset lease with
+      // finalization and platform-record reference writes. The lease is acquired
+      // per candidate before either metadata ledger is checked or an object is
+      // removed, so a concurrent registration cannot race orphan cleanup.
       const sweepCandidates = oldObjects
         .sort((a, b) => b.age_hours - a.age_hours);
       const dryRun = body.confirm_delete !== true;
@@ -2978,26 +2978,93 @@ Deno.serve(async (req) => {
         body,
         "write",
       );
-      const recordId = "SPR-" +
-        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const eventId = "SPE-" +
-        crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const { data, error } = await supabase.rpc(
-        "shoir_platform_upsert_record",
-        {
-          p_record_id: recordId,
-          p_workspace_key: workspaceKey,
-          p_record_type: recordType,
-          p_entity_key: entityKey,
-          p_payload: payload,
-          p_content_hash: contentHash,
-          p_actor: row.username_lc,
-          p_event_id: eventId,
-        },
-      );
-      if (error) throw error;
-      const saved = Array.isArray(data) ? data[0] : data;
-      return sendResponse({ ok: true, record: saved });
+      // The orphan sweeper checks this top-level payload field in the records
+      // ledger. Any valid T020 storage reference must use the same dataset lease
+      // while the record is created/updated, or cleanup could race the write.
+      const referencedStorageKey = typeof payload.storage_key === "string"
+        ? payload.storage_key.trim()
+        : "";
+      const classifiedStoragePath = referencedStorageKey
+        ? classifyDatasetStorageSweepPath(workspaceKey, referencedStorageKey)
+        : null;
+      const looksLikeDatasetStoragePath =
+        /^(?:[0-9a-f]{32}\/DS-[A-F0-9]{12,32}\/[^/]+|tmp\/[0-9a-f]{32}\/DS-[A-F0-9]{12,32}\/[^/]+)$/
+          .test(referencedStorageKey);
+      if (looksLikeDatasetStoragePath && !classifiedStoragePath) {
+        return sendResponse(
+          { error: "Dataset storage references must be valid and scoped to the active workspace." },
+          400,
+        );
+      }
+      const recordLeaseToken = classifiedStoragePath
+        ? crypto.randomUUID()
+        : null;
+      if (classifiedStoragePath && recordLeaseToken) {
+        const { data: leaseRows, error: leaseError } = await supabase.rpc(
+          "shoir_dataset_storage_lease_acquire",
+          {
+            p_workspace_key: workspaceKey,
+            p_dataset_id: classifiedStoragePath.datasetId,
+            p_lease_token: recordLeaseToken,
+            p_lease_operation: "register",
+            p_actor_username_lc: String(row.username_lc || ""),
+            p_lease_seconds: 300,
+          },
+        );
+        if (leaseError) throw leaseError;
+        const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
+        if (lease?.acquired !== true) {
+          return sendResponse(
+            { error: "This dataset is busy with another storage operation. Retry shortly." },
+            409,
+          );
+        }
+      }
+
+      try {
+        const recordId = "SPR-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const eventId = "SPE-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const { data, error } = await supabase.rpc(
+          "shoir_platform_upsert_record",
+          {
+            p_record_id: recordId,
+            p_workspace_key: workspaceKey,
+            p_record_type: recordType,
+            p_entity_key: entityKey,
+            p_payload: payload,
+            p_content_hash: contentHash,
+            p_actor: row.username_lc,
+            p_event_id: eventId,
+          },
+        );
+        if (error) throw error;
+        const saved = Array.isArray(data) ? data[0] : data;
+        return sendResponse({ ok: true, record: saved });
+      } finally {
+        if (classifiedStoragePath && recordLeaseToken) {
+          try {
+            const { data: released, error: releaseError } = await supabase.rpc(
+              "shoir_dataset_storage_lease_release",
+              {
+                p_workspace_key: workspaceKey,
+                p_dataset_id: classifiedStoragePath.datasetId,
+                p_lease_token: recordLeaseToken,
+              },
+            );
+            if (releaseError || released !== true) {
+              console.warn(
+                "Dataset reference registration lease release was not confirmed; its bounded expiry remains the recovery path.",
+              );
+            }
+          } catch {
+            console.warn(
+              "Dataset reference registration lease release could not be confirmed; its bounded expiry remains the recovery path.",
+            );
+          }
+        }
+      }
     }
     if (action === "platform_record_list") {
       const username = String(body.username || "").trim();
