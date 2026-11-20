@@ -383,3 +383,34 @@ The following code changes are now part of the release-hardening candidate; they
 - **Facility Layout:** direct renderer access is guarded by an authenticated matching account and canonical T065 entitlement check, in addition to the Workbench route controls.
 
 The 16 Industrial Intelligence engines and eight shared services remain `FOUNDATION_IMPLEMENTED`, not production accepted. Their independent calculation review, managed hosted save/reload, role/tenant matrix, Digital Thread continuity, dataset two-version lifecycle, workbook/export reconciliation, visual/localization checks and independent engineering/security review remain open. Keep PR #232 draft, BETA status and production NO-GO.
+
+
+---
+
+## Repository engineering refresh — 2026-11-20: lease fencing and method implementation
+
+This addendum supersedes the older T020 sentence above that said immutable content-addressed orphan objects must remain retained until an atomic lease exists. The lease/fencing protocol is now implemented in PR #232 source, but it is not deployed or hosted-accepted.
+
+### T020 lifecycle safety
+
+- Migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql` add a private per-workspace/dataset lease, bounded acquire/renew/release RPCs, and transaction-locked wrappers for dataset-version finalization and generic platform-record Storage-reference writes.
+- Finalization, generic T020 reference registration and temporary/immutable orphan cleanup use the same lease. The early temporary cleanup paths renew the still-live token before removal and fail closed if renewal or Storage removal is uncertain.
+- The T020 operator sweep remains manual and preview-first: 48-hour timestamp guard, two-ledger reference check while holding the lease, kind-specific intent/completion events, maximum 50 deletes and no scheduled job.
+- The exact-head PostgreSQL replay and Edge checks passed on the candidate SHA inspected at this refresh. The full Python/AppTest regression and hosted staging acceptance are not yet accepted.
+
+### Additional canonical Workbench engineering
+
+- **T028:** structured six-category fishbone cause hypotheses and Ishikawa chart integrated with Pareto/5-Why; statements are hypotheses, not verified causal findings.
+- **T041:** two-parameter Weibull maximum likelihood supports independent right-censoring, approximate log-parameter intervals when numerical information is stable, and a descriptive Kaplan–Meier comparison; no unsupported formal p-value is claimed.
+- **T054:** nested multi-level BOM explosion with yield/scrap, inventory and scheduled receipts, lot multiples, release-period propagation, and cycle/revision/ambiguous-level checks.
+- **T063:** time-indexed one-day resource scheduling with skills, shifts, resource non-overlap, precedence and soft due-hour tardiness; the original one-to-one assignment method remains available.
+- **T075:** canonical Workbench forecast-drift action now captures user-supplied model/dataset/version/period provenance, explicitly labelled unverified until linked to a trusted source.
+- **T085:** Research Pack-only sample-size execution and lower-tier denial are exercised through Workbench AppTest, with the design assumptions captured in the input snapshot.
+
+These are source implementation additions, not verified operational performance. The canonical matrix remains 96 `IMPLEMENTED_NEEDS_VALIDATION`, four `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), zero `VERIFIED_WORKING`. T096 requires a chosen real provider and adapter validation; T097 requires an approved hosted API/SDK; T098 requires a live non-production OIDC/MFA provider; T099 requires full database and Storage-byte backup/restore evidence.
+
+### Acceptance and release boundary
+
+The exact candidate is still PR #232 into `staging-e2e-20261019`, open and draft. The new migrations and matching Edge Function have not been deployed. Read-only Supabase inspection still reports staging Edge v14 and production Edge v10. The connected migration-history read has not authenticated, so the applied migration ledger must be checked through an authorized operator before a staging deployment decision.
+
+Independent engineering, reliability, quality, supply-chain, workforce-planning, security, infrastructure and Saudi privacy/legal reviews remain necessary where applicable. Keep BETA and production NO-GO until exact-head CI, independent approval, staging backup/rollback evidence, authenticated disposable-account acceptance and the separate production release approval are complete.
