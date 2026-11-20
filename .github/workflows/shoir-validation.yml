@@ -259,7 +259,7 @@ jobs:
         run: python scripts/runtime_import_smoke.py
       - name: Install Chromium for local runtime smoke
         id: chromium
-        if: ${{ !cancelled() && steps.compile.outcome == 'success' }} && steps.import_smoke.outcome == 'success'
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.import_smoke.outcome == 'success' }}
         run: python -m playwright install --with-deps chromium
       - name: Start local Streamlit application
         id: streamlit_start
