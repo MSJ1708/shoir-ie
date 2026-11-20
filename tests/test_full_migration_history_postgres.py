@@ -910,7 +910,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     _fetchone(
                         target,
                         acquire_sql,
-                        (lease_workspace, "DS-INVALID000000", lease_token_c, "sweep", username, 10),
+                        (lease_workspace, lease_dataset, lease_token_c, "sweep", username, 10),
                     )
                 assert invalid_lease_ttl.value.pgcode == "22023"
                 _execute(target, "ROLLBACK TO SAVEPOINT invalid_dataset_lease_ttl;")
@@ -920,7 +920,8 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     target,
                     """
                     UPDATE public.shoir_dataset_storage_lifecycle_leases
-                       SET expires_at = clock_timestamp() - interval '1 second'
+                       SET acquired_at = clock_timestamp() - interval '2 seconds',
+                           expires_at = clock_timestamp() - interval '1 second'
                      WHERE workspace_key=%s AND dataset_id=%s
                        AND lease_token=%s::uuid;
                     """,
