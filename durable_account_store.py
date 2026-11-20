@@ -1443,13 +1443,23 @@ def edge_upload_and_register_dataset_version(
     organization_id: str = "",
     organization_workspace_id: str = "",
 ) -> dict[str, Any]:
-    """Upload a bounded dataset file to private staging storage, then server-verify and register it."""
+    """Upload a bounded dataset to private staging storage with resumable TUS.
+
+    The signed TUS URL is retained only in this Streamlit server session so a
+    re-upload of the same file can resume after an interrupted request or rerun.
+    A successful upload is still independently hashed and shape-checked by the
+    persistence Edge Function before version registration.
+    """
     import hashlib
     import re
-    import requests
+    import time
     from urllib.parse import urlsplit
 
-    if not str(username or "").strip() or not str(token or ""):
+    from shoir_supabase_tus import TusUploadExpiredError, upload_signed_tus
+
+    actor = str(username or "").strip()
+    bearer = str(token or "")
+    if not actor or not bearer:
         raise PermissionError("An authenticated workspace session is required.")
     if str(APP_ENVIRONMENT).casefold() != "staging":
         raise RuntimeError("Private dataset upload helper is restricted to the staging environment.")
@@ -1460,52 +1470,174 @@ def edge_upload_and_register_dataset_version(
         raise ValueError("Dataset bytes do not match the supplied content hash.")
     if content_type != "text/csv":
         raise ValueError("The normalized dataset artifact must be uploaded as text/csv.")
-    upload = _edge_call("dataset_upload_create", {
-        "username": str(username).strip(),
-        "token": str(token),
-        "workspace": str(workspace or "default").strip(),
-        "organization_id": str(organization_id or "").strip(),
-        "organization_workspace_id": str(organization_workspace_id or "").strip(),
-        "dataset_id": str(dataset_id),
-        "data_hash": actual_hash,
-    })
-    signed_url = str(upload.get("upload_url") or "")
-    parsed = urlsplit(signed_url)
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
-        or not parsed.path.startswith("/storage/v1/object/upload/sign/shoir-industrial-datasets/")
-        or not parsed.query
-    ):
-        raise RuntimeError("Storage provider returned an unexpected signed upload URL.")
-    response = requests.put(
-        signed_url,
-        data=file_bytes,
-        headers={"Content-Type": content_type, "x-upsert": "false"},
-        timeout=(10, 90),
-    )
-    if response.status_code not in {200, 201}:
-        raise RuntimeError(
-            f"Private dataset upload failed ({response.status_code}): {response.text[:300]}"
-        )
-    return _edge_call("dataset_version_finalize", {
-        "username": str(username).strip(),
-        "token": str(token),
-        "workspace": str(workspace or "default").strip(),
-        "organization_id": str(organization_id or "").strip(),
-        "organization_workspace_id": str(organization_workspace_id or "").strip(),
-        "dataset_id": str(dataset_id),
-        "upload_path": str(upload.get("upload_path") or ""),
-        "name": str(name)[:200],
-        "source_name": str(source_name)[:500],
-        "data_hash": actual_hash,
-        "version_fingerprint": str(version_fingerprint).lower(),
-        "row_count": row_count,
-        "column_count": column_count,
-        "schema": dict(schema),
-        "transformations": [dict(x) for x in transformations],
-    })
 
+    # The resume key is session-local and binds the capability to the exact
+    # actor, workspace, dataset, content hash and organization scope.
+    resume_identity = "\x1f".join(
+        (
+            actor.casefold(),
+            str(workspace or "default").strip(),
+            str(dataset_id),
+            actual_hash,
+            str(organization_id or "").strip(),
+            str(organization_workspace_id or "").strip(),
+        )
+    )
+    resume_key = "_shoir_dataset_tus_resume_" + hashlib.sha256(
+        resume_identity.encode("utf-8")
+    ).hexdigest()
+    session_state = None
+    try:
+        if st is not None:
+            session_state = st.session_state
+    except Exception:
+        session_state = None
+
+    now = time.time()
+    pending = None
+    if session_state is not None:
+        try:
+            candidate = session_state.get(resume_key)
+            if isinstance(candidate, dict):
+                created_at = float(candidate.get("created_at") or 0)
+                upload_path_candidate = str(candidate.get("upload_path") or "")
+                tus_url_candidate = str(candidate.get("tus_url") or "")
+                if (
+                    candidate.get("data_hash") == actual_hash
+                    and candidate.get("file_size") == len(file_bytes)
+                    and 0 <= now - created_at < 23 * 60 * 60
+                    and upload_path_candidate.startswith("tmp/")
+                    and ".." not in upload_path_candidate
+                    and len(upload_path_candidate) <= 240
+                    and tus_url_candidate.startswith("https://")
+                ):
+                    pending = candidate
+                else:
+                    session_state.pop(resume_key, None)
+        except Exception:
+            pending = None
+
+    def remember_tus_url(upload_path: str, tus_url: str) -> None:
+        if session_state is None:
+            return
+        try:
+            previous = session_state.get(resume_key)
+            created_at = (
+                float(previous.get("created_at") or now)
+                if isinstance(previous, dict) and previous.get("tus_url") == tus_url
+                else time.time()
+            )
+            session_state[resume_key] = {
+                "upload_path": upload_path,
+                "tus_url": tus_url,
+                "data_hash": actual_hash,
+                "file_size": len(file_bytes),
+                "created_at": created_at,
+            }
+        except Exception:
+            # A Streamlit state-store failure must not weaken server-side
+            # authorization or hash validation; the current upload may proceed.
+            return
+
+    def create_signed_upload() -> tuple[str, str]:
+        upload = _edge_call("dataset_upload_create", {
+            "username": actor,
+            "token": bearer,
+            "workspace": str(workspace or "default").strip(),
+            "organization_id": str(organization_id or "").strip(),
+            "organization_workspace_id": str(organization_workspace_id or "").strip(),
+            "dataset_id": str(dataset_id),
+            "data_hash": actual_hash,
+        })
+        signed_url = str(upload.get("upload_url") or "")
+        parsed = urlsplit(signed_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
+            or parsed.path != "/storage/v1/object/upload/sign/shoir-industrial-datasets/" + str(upload.get("upload_path") or "").lstrip("/")
+            or not parsed.query
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            raise RuntimeError("Storage provider returned an unexpected signed upload URL.")
+        upload_path = str(upload.get("upload_path") or "")
+        upload_token = str(upload.get("upload_token") or "")
+        if (
+            not upload_path.startswith("tmp/")
+            or ".." in upload_path
+            or len(upload_path) > 240
+            or not re.fullmatch(r"[A-Za-z0-9._~-]{16,4096}", upload_token)
+        ):
+            raise RuntimeError("Storage provider returned invalid upload capability metadata.")
+        return upload_path, upload_token
+
+    project_ref = STAGING_SUPABASE_PROJECT_HOST.split(".", 1)[0]
+    if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
+        raise RuntimeError("The staging Supabase project reference is invalid.")
+
+    upload_path = ""
+    resumable_url = ""
+    if pending is not None:
+        upload_path = str(pending["upload_path"])
+        resumable_url = str(pending["tus_url"])
+
+    def perform_upload(path: str, signed_token: str = "", resume_url: str = "") -> str:
+        return upload_signed_tus(
+            project_ref=project_ref,
+            bucket_name="shoir-industrial-datasets",
+            object_name=path,
+            content_type=content_type,
+            signed_upload_token=signed_token,
+            file_bytes=file_bytes,
+            resume_url=resume_url,
+            on_upload_url=lambda value: remember_tus_url(path, value),
+        )
+
+    try:
+        if resumable_url:
+            try:
+                perform_upload(upload_path, resume_url=resumable_url)
+            except TusUploadExpiredError:
+                if session_state is not None:
+                    try:
+                        session_state.pop(resume_key, None)
+                    except Exception:
+                        pass
+                upload_path, upload_token = create_signed_upload()
+                perform_upload(upload_path, signed_token=upload_token)
+        else:
+            upload_path, upload_token = create_signed_upload()
+            perform_upload(upload_path, signed_token=upload_token)
+
+        result = _edge_call("dataset_version_finalize", {
+            "username": actor,
+            "token": bearer,
+            "workspace": str(workspace or "default").strip(),
+            "organization_id": str(organization_id or "").strip(),
+            "organization_workspace_id": str(organization_workspace_id or "").strip(),
+            "dataset_id": str(dataset_id),
+            "upload_path": upload_path,
+            "name": str(name)[:200],
+            "source_name": str(source_name)[:500],
+            "data_hash": actual_hash,
+            "version_fingerprint": str(version_fingerprint).lower(),
+            "row_count": row_count,
+            "column_count": column_count,
+            "schema": dict(schema),
+            "transformations": [dict(x) for x in transformations],
+        })
+        if session_state is not None:
+            try:
+                session_state.pop(resume_key, None)
+            except Exception:
+                pass
+        return result
+    except Exception:
+        # Do not remove an incomplete upload here. The resumable URL stays
+        # session-scoped for a same-file retry; stale temporary objects are
+        # handled by the separate reference-aware cleanup/recovery process.
+        raise
 
 def edge_register_dataset_version(
     username: str,
