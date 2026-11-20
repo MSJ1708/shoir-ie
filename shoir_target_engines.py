@@ -3978,7 +3978,7 @@ def optimize_task_resource_schedule(
 
     model += pulp.lpSum(objective_terms)
     try:
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds, gapRel=0.0)
+        solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit_seconds, gapRel=0.0)
         if not solver.available():
             raise RuntimeError("CBC mixed-integer solver is not available in this environment.")
         model.solve(solver)
