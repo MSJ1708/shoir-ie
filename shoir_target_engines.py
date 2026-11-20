@@ -7543,6 +7543,7 @@ def evaluate_kpi_alerts(
     rows: list[dict[str, Any]] = []
     seen_rules: set[str] = set()
     seen_active_ids: set[str] = set()
+    processed_alert_ids: set[str] = set()
     operators = {">", ">=", "<", "<=", "=="}
     severities = {"INFO", "WARNING", "CRITICAL"}
     for index, rule in enumerate(alert_rules, start=1):
@@ -7605,8 +7606,14 @@ def evaluate_kpi_alerts(
             else "RESOLVED" if alert_id in prior and state == "NORMAL"
             else state
         )
+        processed_alert_ids.add(alert_id)
         if breached:
             seen_active_ids.add(alert_id)
+        elif alert_id in prior and state != "NORMAL":
+            # A stale, future, missing or otherwise unusable reading cannot
+            # prove recovery. Keep the prior alert open but explicitly unverified.
+            seen_active_ids.add(alert_id)
+            event_state = "UNVERIFIED"
         rows.append({
             "Alert ID": alert_id,
             "Rule ID": rule_id,
@@ -7639,6 +7646,8 @@ def evaluate_kpi_alerts(
         "Source": "source",
         "Observed at": "observed_at",
     }).copy()
+    unmatched_prior_ids = prior - processed_alert_ids
+    seen_active_ids.update(unmatched_prior_ids)
     alert_records = [
         {
             "fingerprint": str(row["Alert ID"]),
@@ -7647,23 +7656,26 @@ def evaluate_kpi_alerts(
             "kpi": str(row["KPI"]),
             "severity": str(row["Severity"]),
             "source": str(row["Source"]),
-            "state": "OPEN",
+            "state": "OPEN" if row["State"] == "OPEN" else "OPEN_UNVERIFIED",
             "new_alert": str(row["Event"]) == "NEW",
             "Event": str(row["Event"]),
         }
-        for row in rows if row["State"] == "OPEN"
+        for row in rows
+        if str(row["Alert ID"]) in seen_active_ids
     ]
     future_count = int((frame["State"] == "FUTURE_TIMESTAMP").sum())
-    open_count = int((frame["State"] == "OPEN").sum())
+    open_count = len(seen_active_ids)
+    breached_count = int((frame["State"] == "OPEN").sum())
     return {
         "status": "KPI_ALERT_RULES_EVALUATED",
         "evaluated_at": now.isoformat(),
         "rule_count": len(frame),
         "kpi_count": len(by_name),
         "open_alert_count": open_count,
-        "breached_kpi_count": open_count,
+        "breached_kpi_count": breached_count,
         "new_alert_count": int((frame["Event"] == "NEW").sum()),
         "continuing_alert_count": int((frame["Event"] == "CONTINUING").sum()),
+        "unverified_open_alert_count": int((frame["Event"] == "UNVERIFIED").sum()),
         "stale_or_missing_count": int(frame["State"].isin(["STALE_DATA", "MISSING_DATA", "INVALID_TIMESTAMP", "FUTURE_TIMESTAMP", "SOURCE_NOT_IDENTIFIED"]).sum()),
         "future_kpi_count": future_count,
         "resolved_alert_count": int((frame["Event"] == "RESOLVED").sum()),
