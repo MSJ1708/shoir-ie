@@ -136,6 +136,11 @@ def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
     inspector.select("T028 · Root-Cause Analysis Toolkit")
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.text_area(key="tool028_fishbone_causes").set_value(
+        '{"Manpower":["Training gap"],"Machine":["Loose sensor mount"],"Method":[],"Material":[],"Measurement":[],"Environment":[]}'
+    )
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool028_run").click()
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -145,6 +150,8 @@ def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
     assert root_cause["total_count"] == 22
     assert root_cause["categories_to_reach_80_percent"] == 2
     assert root_cause["data_provenance"] == "SYNTHETIC_EXAMPLE"
+    assert root_cause["fishbone_cause_count"] == 2
+    assert root_cause["fishbone_status"] == "HYPOTHESES_RECORDED"
 
 
 def test_workbench_runs_5s_and_revisioned_kaizen_a3():
