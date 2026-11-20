@@ -2243,8 +2243,10 @@ Deno.serve(async (req) => {
 
           if (candidate.kind === "temporary") {
             eligibleTemporaryCount += 1;
-          } else {
+          } else if (candidate.kind === "immutable") {
             eligibleImmutableCount += 1;
+          } else {
+            continue;
           }
           if (dryRun) continue;
           if (deletedCount >= MAX_DELETES_PER_RUN) {
