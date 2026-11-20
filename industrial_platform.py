@@ -544,6 +544,75 @@ def _mark_legacy_dataset_artifacts_stale(
                     for existing in [*markers, *matching]
                 ):
                     matching.append(marker)
+            # Some older outcome rows predate per-outcome dependency snapshots.
+            # Their parent decision may still have an explicit, versioned dependency.
+            # Inherit the parent's stale marker so an old outcome cannot remain current
+            # merely because it was written before outcome-level lineage was introduced.
+            if table == "experience_decision_outcomes" and not matching:
+                parent = conn.execute(
+                    """
+                    SELECT d.dataset_dependencies_json, d.stale_dataset_dependencies_json
+                    FROM experience_decisions AS d
+                    JOIN experience_decision_outcomes AS o
+                      ON o.decision_id = d.decision_id
+                    WHERE o.outcome_id = ?
+                    """,
+                    (artifact_id,),
+                ).fetchone()
+                if parent:
+                    try:
+                        parent_dependencies = _json.loads(parent[0] or "[]")
+                        parent_markers = _json.loads(parent[1] or "[]")
+                    except Exception:
+                        parent_dependencies, parent_markers = [], []
+                    if isinstance(parent_dependencies, list):
+                        for dependency in parent_dependencies:
+                            if not isinstance(dependency, Mapping):
+                                continue
+                            if str(dependency.get("dataset_id") or "").strip().upper() != normalized_id:
+                                continue
+                            old_version = dependency.get("version")
+                            old_hash = str(dependency.get("data_hash") or "").strip().lower()
+                            old_fingerprint = str(dependency.get("version_fingerprint") or "").strip().lower()
+                            if (
+                                old_version == current_version
+                                and old_hash == data_hash
+                                and old_fingerprint == fingerprint
+                            ):
+                                continue
+                            inherited = {
+                                "dataset_id": normalized_id,
+                                "previous_version": old_version,
+                                "previous_data_hash": old_hash or None,
+                                "previous_version_fingerprint": old_fingerprint or None,
+                                "current_version": current_version,
+                                "current_data_hash": data_hash,
+                                "current_version_fingerprint": fingerprint,
+                                "reason": "The parent decision uses an older immutable dataset version; its outcome is stale with that decision.",
+                            }
+                            if not any(
+                                isinstance(existing, Mapping)
+                                and str(existing.get("dataset_id") or "").upper() == normalized_id
+                                and existing.get("previous_version") == old_version
+                                and existing.get("current_version") == current_version
+                                and str(existing.get("current_data_hash") or "").lower() == data_hash
+                                for existing in [*markers, *matching]
+                            ):
+                                matching.append(inherited)
+                    if not matching and isinstance(parent_markers, list):
+                        for inherited in parent_markers:
+                            if (
+                                not isinstance(inherited, Mapping)
+                                or str(inherited.get("dataset_id") or "").upper() != normalized_id
+                            ):
+                                continue
+                            propagated = dict(inherited)
+                            propagated["reason"] = (
+                                "The parent decision has stale dataset lineage; its historical outcome remains stale."
+                            )
+                            matching.append(propagated)
+                            break
+
             # Older model snapshots already have dataset_id/data_hash columns.
             # Link those only when the old hash resolves to a recorded historical version.
             if table == "platform_models" and not dependencies:
@@ -860,6 +929,22 @@ def register_dataset(
     # reach this path without that startup sequence. This is idempotent and local
     # only; staging has already returned through the authenticated managed API.
     init_platform_db(db_path)
+    # Migrate an already-existing experience ledger before invalidating dataset
+    # dependents. This ensures legacy outcome tables receive the additive lineage
+    # columns before the stale-marking pass runs. Do not create the experience
+    # subsystem solely because a standalone dataset is registered.
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as schema_conn:
+        existing_experience_tables = {
+            str(row[0])
+            for row in schema_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('experience_decisions','experience_decision_outcomes')"
+            ).fetchall()
+        }
+    if existing_experience_tables:
+        from industrial_experience import ensure_experience_db
+        ensure_experience_db(db_path)
+
     created_new_version = False
     with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         conn.execute("BEGIN IMMEDIATE")
