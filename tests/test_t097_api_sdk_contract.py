@@ -22,3 +22,15 @@ def test_t097_openapi_and_sdk_do_not_claim_public_availability_or_ship_secrets()
     assert 'redirect: "error"' in sdk
     assert 'credentials: "omit"' in sdk
     assert 'api_version: API_VERSION' in sdk
+
+def test_t097_openapi_matches_actual_publishable_header_and_session_body_contract():
+    spec = (ROOT / "sdk/typescript/openapi.yaml").read_text(encoding="utf-8")
+    sdk = (ROOT / "sdk/typescript/index.mjs").read_text(encoding="utf-8")
+    assert "sessionBearer" not in spec
+    assert "name: apikey" in spec
+    assert "Existing Shoir-IE user session token, supplied in the JSON request body" in spec
+    assert "api_version: API_VERSION" in sdk
+    assert '"apikey": this.publishableKey' in sdk
+    assert '"Authorization": "Bearer " + this.publishableKey' in sdk
+    assert "token: this.sessionToken" in sdk
+
