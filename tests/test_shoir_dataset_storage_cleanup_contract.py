@@ -16,7 +16,7 @@ def dataset_finalize_source() -> str:
 
 def test_dataset_metadata_is_registered_before_temporary_upload_is_removed():
     source = dataset_finalize_source()
-    rpc = source.index('supabase.rpc(')
+    rpc = source.index('"shoir_platform_register_dataset_version_with_storage"')
     registration = source.index("const registration = Array.isArray(data)", rpc)
     temp_cleanup = source.index("const { error: tempRemoveError } = await bucket.remove([", registration)
 
