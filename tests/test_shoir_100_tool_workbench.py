@@ -1285,6 +1285,51 @@ def test_workbench_runs_kpi_alerts_and_persists_deduplicated_state():
     assert at.session_state.get("shoir_kpi_open_alert_records", []) == []
 
 
+def test_workbench_t094_migrates_legacy_open_alert_identity_without_duplicate():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "workbench-legacy-kpi-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # This is the record shape emitted by the earlier T094 evaluator.
+    at.session_state["shoir_kpi_open_alert_records"] = [{
+        "fingerprint": "legacy-fingerprint",
+        "alert_id": "alert-0123456789abcdef",
+        "rule_id": "scrap-high",
+        "state": "OPEN",
+    }]
+    at.selectbox(key="shoir_100_tool_inspector").select("T094 · KPI Dashboard and Alert Center")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.text_area(key="tool094_records").set_value(
+        '[{"kpi":"Scrap Rate","value":4,"unit":"%","observed_at":"2026-11-12T09:00:00Z","source":"Synthetic acceptance fixture"}]'
+    )
+    at.text_area(key="tool094_rules").set_value(
+        '[{"rule_id":"scrap-high","kpi":"Scrap Rate","operator":"gt","threshold":3,"severity":"HIGH"}]'
+    )
+    at.text_input(key="tool094_as_of").set_value("2026-11-12T10:00:00Z")
+    at.button(key="tool094_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "T094 legacy migration raised: " + "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T094")
+    assert result is not None
+    assert result["new_alert_count"] == 0
+    assert result["continuing_alert_count"] == 1
+    assert result["open_alert_count"] == 1
+    assert len(at.session_state["shoir_kpi_open_alert_records"]) == 1
+    migrated = at.session_state["shoir_kpi_open_alert_records"][0]
+    assert migrated["alert_id"].startswith("ALT-")
+    assert migrated["fingerprint"] == migrated["alert_id"]
+    assert migrated["rule_id"] == "scrap-high"
+
+
 def test_workbench_t094_future_dated_measurement_does_not_open_alert():
     """A future observation must remain visible but cannot create an active alert."""
     from streamlit.testing.v1 import AppTest
