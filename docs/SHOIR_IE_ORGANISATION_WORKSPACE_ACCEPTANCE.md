@@ -59,16 +59,19 @@ The authenticated workflow currently requires an explicit manual `workflow_dispa
 
 ## Remaining acceptance blockers
 
-1. Complete all current branch CI runs, including clean PostgreSQL replay, migration inventory, Edge type/security verification, Python regression and UI tests.
-2. Apply `20261107150000_shoir_organization_close.sql` to staging only after the clean replay and security review pass.
-3. Deploy the repository's exact persistence Edge Function source to staging as a new version, retaining the existing custom session-authentication design. Record the deployed source hash and version.
-4. Run the authenticated release gate manually against the verified staging app and staging Edge endpoint with the dedicated disposable credentials already configured in GitHub Actions. Do not use `sho`, production identities or customer data.
-5. Verify that cleanup closes both disposable organizations and that no invitation, active workspace, membership or open test session is left behind. Retain immutable audit records as designed.
-6. Run hosted suspend/restore acceptance, add expired-invitation acceptance, and verify role-specific access to platform records, datasets, files, jobs, exports, Copilot and Digital Thread.
-10. Apply the shared-state, close and suspend/restore migrations to staging only after clean replay and security review pass; deploy the exact Edge Function source to staging and record version/hash.
-11. Run a two-member authenticated staging round-trip: owner writes a synthetic dataset/workbook, second member reads the same revision, engineer writes a later revision, stale revision save is rejected, viewer read succeeds while viewer write fails, and removal/suspension blocks further access. Also verify workspace archive and organization close block access while retaining immutable audit history.
-12. Verify supported data artifacts (datasets, files, jobs, exports, reports, Digital Thread links) separately. The new shared state table covers workbook/session state only; do not infer that all enterprise artifacts have organization-level ownership or access from this.
-13. Capture the actual staging app URL, Edge Function version and SHA, migration ledger, authenticated run URL, test report and screenshots.
-14. Have the authorized owner review the evidence. Keep PR #232 open and draft until approval; do not merge, deploy production, remove BETA or change the protected administrator.
+1. Complete all eight required CI workflows on the exact final candidate SHA and inspect JUnit, migration replay, Edge, security, Excel and browser/export artifacts.
+2. Obtain one independent review of the latest PR push and resolve every review thread before a staging merge is considered.
+3. Reconcile the actual staging migration ledger with an authorized database operator; the repository connection's database-history authentication failure is not evidence that migrations are absent.
+4. Document and verify a recoverable staging backup/rollback point for both PostgreSQL data and Storage object bytes before any deployment.
+5. Apply only reviewed, actually missing staging migrations in timestamp order. Do not replay a migration already recorded as applied.
+6. Deploy the exact matching candidate persistence Edge Function source to staging, then record function version/hash and recheck RLS, direct grants, RPC grants, bucket policies and Supabase advisors.
+7. Verify the staging banner/build marker and configure the seven dedicated disposable E2E identities and required GitHub Actions secrets/variables.
+8. Run the authenticated release gate against the exact staging app and Edge endpoint. Verify Owner/second-user/Starter/Expired/Module/Research/Inactive login, tier and session expectations.
+9. Complete organization lifecycle tests: Owner/Viewer/Engineer/Approver/Admin boundaries, Admin cannot promote or alter Owner, invitation expiry/revocation, suspend/restore, removal, archive/close and cross-organization denial. Confirm test cleanup leaves no active test session or open disposable organization while retaining immutable audit records.
+10. Run a two-member shared-workspace round trip: Owner creates shared state, Viewer read succeeds/write fails, Engineer updates a new revision, stale revision conflicts, and suspension/removal denies further access.
+11. Verify artifact ownership separately for datasets, Storage files, jobs, exports, reports and Digital Thread links. The shared workspace state table does not make every artifact organization-owned.
+12. Verify Digital Thread identity/rename/alias/edge continuity, dataset-version invalidation and cross-workspace denial across a fresh logout/re-login.
+13. Capture authenticated screenshots/traces at 1440px, 768px and 390px including Arabic/RTL where supported; inspect navigation, workbench, charts, drawers, forms, errors and downloads.
+14. Attach the exact-SHA migration ledger, Edge version/hash, authenticated gate result, redacted test reports, screenshots and reviewer sign-offs. Keep PR #232 draft until the owner and independent reviewers explicitly accept the staging evidence.
 
-Until these steps are complete, Team Workspaces & RBAC is **implemented in the release branch but not verified for hosted commercial use**. Do not advertise it as production-ready enterprise collaboration.
+Until every item is complete, Team Workspaces & RBAC remains **implemented in the release branch but not verified for hosted commercial use**. Do not advertise it as production-ready enterprise collaboration.
