@@ -1,9 +1,7 @@
 BEGIN;
 
--- Serialize dataset Storage finalization and orphan cleanup by workspace/dataset.
--- The Edge Function holds a short-lived token lease while it performs the
--- Storage operation and its metadata transaction. A crashed invocation leaves
--- only an expiring row; the next operation can safely reclaim it after expiry.
+-- Serialize dataset Storage finalization, reference registration and orphan cleanup.
+-- This table is private: callers use only the server-side SECURITY DEFINER RPCs.
 CREATE TABLE public.shoir_dataset_storage_lifecycle_leases (
     workspace_key text NOT NULL
         CHECK (workspace_key ~ '^[0-9a-f]{32}$'),
@@ -22,6 +20,7 @@ CREATE TABLE public.shoir_dataset_storage_lifecycle_leases (
 
 ALTER TABLE public.shoir_dataset_storage_lifecycle_leases
     ENABLE ROW LEVEL SECURITY;
+
 REVOKE ALL ON TABLE public.shoir_dataset_storage_lifecycle_leases
     FROM PUBLIC, anon, authenticated, service_role;
 
@@ -57,12 +56,21 @@ BEGIN
     END IF;
 
     INSERT INTO public.shoir_dataset_storage_lifecycle_leases AS current_lease (
-        workspace_key, dataset_id, lease_token, lease_operation,
-        actor_username_lc, acquired_at, expires_at
+        workspace_key,
+        dataset_id,
+        lease_token,
+        lease_operation,
+        actor_username_lc,
+        acquired_at,
+        expires_at
     )
     VALUES (
-        p_workspace_key, p_dataset_id, p_lease_token, p_lease_operation,
-        lower(btrim(p_actor_username_lc)), clock_timestamp(),
+        p_workspace_key,
+        p_dataset_id,
+        p_lease_token,
+        p_lease_operation,
+        lower(btrim(p_actor_username_lc)),
+        clock_timestamp(),
         clock_timestamp() + make_interval(secs => p_lease_seconds)
     )
     ON CONFLICT (workspace_key, dataset_id)
@@ -107,137 +115,9 @@ DECLARE
     v_updated integer;
 BEGIN
     IF p_workspace_key IS NULL
-       OR p_workspace_key !~ '^[0-9a-f]{32}
-    p_workspace_key text,
-    p_dataset_id text,
-    p_lease_token uuid
-)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $function$
-DECLARE
-    v_deleted integer;
-BEGIN
-    IF p_workspace_key IS NULL
        OR p_workspace_key !~ '^[0-9a-f]{32}$'
        OR p_dataset_id IS NULL
        OR p_dataset_id !~ '^DS-[A-F0-9]{12,32}$'
-       OR p_lease_token IS NULL THEN
-        RAISE EXCEPTION 'Invalid dataset storage lifecycle lease release input.'
-            USING ERRCODE = '22023';
-    END IF;
-
-    DELETE FROM public.shoir_dataset_storage_lifecycle_leases
-     WHERE workspace_key = p_workspace_key
-       AND dataset_id = p_dataset_id
-       AND lease_token = p_lease_token;
-
-    GET DIAGNOSTICS v_deleted = ROW_COUNT;
-    RETURN v_deleted = 1;
-END;
-$function$;
-
-REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_acquire(
-    text, text, uuid, text, text, integer
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_acquire(
-    text, text, uuid, text, text, integer
-) TO service_role;
-
-REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_renew(
-    text, text, uuid, text, text, integer
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_renew(
-    text, text, uuid, text, text, integer
-) TO service_role;
-
-REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_release(
-    text, text, uuid
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_release(
-    text, text, uuid
-) TO service_role;
-
-COMMENT ON TABLE public.shoir_dataset_storage_lifecycle_leases IS
-    'Private server-only fencing leases serializing dataset Storage finalization, reference registration and cleanup.';
-COMMENT ON FUNCTION public.shoir_dataset_storage_lease_acquire(
-    text, text, uuid, text, text, integer
-) IS
-    'Atomically acquire a workspace/dataset Storage lifecycle lease for finalization, reference registration or cleanup; otherwise report the active lease expiry. Only the session-validated Edge Function service role may execute.';
-COMMENT ON FUNCTION public.shoir_dataset_storage_lease_renew(
-    text, text, uuid, text, text, integer
-) IS
-    'Renew only a live lease held by the matching workspace/dataset, token, operation and actor; stale or expired lease holders cannot renew it.';
-
-COMMENT ON FUNCTION public.shoir_dataset_storage_lease_release(
-    text, text, uuid
-) IS
-    'Release only the matching workspace/dataset lease token; stale holders cannot release a newer lease.';
-
-COMMIT;
-
-       OR p_dataset_id IS NULL
-       OR p_dataset_id !~ '^DS-[A-F0-9]{12,32}
-    p_workspace_key text,
-    p_dataset_id text,
-    p_lease_token uuid
-)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $function$
-DECLARE
-    v_deleted integer;
-BEGIN
-    IF p_workspace_key IS NULL
-       OR p_workspace_key !~ '^[0-9a-f]{32}$'
-       OR p_dataset_id IS NULL
-       OR p_dataset_id !~ '^DS-[A-F0-9]{12,32}$'
-       OR p_lease_token IS NULL THEN
-        RAISE EXCEPTION 'Invalid dataset storage lifecycle lease release input.'
-            USING ERRCODE = '22023';
-    END IF;
-
-    DELETE FROM public.shoir_dataset_storage_lifecycle_leases
-     WHERE workspace_key = p_workspace_key
-       AND dataset_id = p_dataset_id
-       AND lease_token = p_lease_token;
-
-    GET DIAGNOSTICS v_deleted = ROW_COUNT;
-    RETURN v_deleted = 1;
-END;
-$function$;
-
-REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_acquire(
-    text, text, uuid, text, text, integer
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_acquire(
-    text, text, uuid, text, text, integer
-) TO service_role;
-
-REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_release(
-    text, text, uuid
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_release(
-    text, text, uuid
-) TO service_role;
-
-COMMENT ON TABLE public.shoir_dataset_storage_lifecycle_leases IS
-    'Private server-only fencing leases serializing dataset Storage finalization, reference registration and cleanup.';
-COMMENT ON FUNCTION public.shoir_dataset_storage_lease_acquire(
-    text, text, uuid, text, text, integer
-) IS
-    'Atomically acquire a workspace/dataset Storage lifecycle lease for finalization, reference registration or cleanup; otherwise report the active lease expiry. Only the session-validated Edge Function service role may execute.';
-COMMENT ON FUNCTION public.shoir_dataset_storage_lease_release(
-    text, text, uuid
-) IS
-    'Release only the matching workspace/dataset lease token; stale holders cannot release a newer lease.';
-
-COMMIT;
-
        OR p_lease_token IS NULL
        OR p_lease_operation IS NULL
        OR p_lease_operation NOT IN ('finalize', 'register', 'sweep')
@@ -302,6 +182,13 @@ GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_acquire(
     text, text, uuid, text, text, integer
 ) TO service_role;
 
+REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_renew(
+    text, text, uuid, text, text, integer
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.shoir_dataset_storage_lease_renew(
+    text, text, uuid, text, text, integer
+) TO service_role;
+
 REVOKE ALL ON FUNCTION public.shoir_dataset_storage_lease_release(
     text, text, uuid
 ) FROM PUBLIC, anon, authenticated;
@@ -315,6 +202,10 @@ COMMENT ON FUNCTION public.shoir_dataset_storage_lease_acquire(
     text, text, uuid, text, text, integer
 ) IS
     'Atomically acquire a workspace/dataset Storage lifecycle lease for finalization, reference registration or cleanup; otherwise report the active lease expiry. Only the session-validated Edge Function service role may execute.';
+COMMENT ON FUNCTION public.shoir_dataset_storage_lease_renew(
+    text, text, uuid, text, text, integer
+) IS
+    'Renew only a live lease held by the matching workspace/dataset, token, operation and actor; stale or expired lease holders cannot renew it.';
 COMMENT ON FUNCTION public.shoir_dataset_storage_lease_release(
     text, text, uuid
 ) IS
