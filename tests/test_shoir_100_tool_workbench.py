@@ -541,6 +541,41 @@ def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
     assert "not verified ROI" in simulation["warning"]
 
 
+def test_workbench_runs_t075_forecast_drift_monitor_and_persists_assumptions():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "forecast-drift-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select(
+        "T075 · Forecast and Model Drift Monitor"
+    )
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool075_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T075")
+    assert result is not None
+    assert result["status"] == "DRIFT_ALERT"
+    assert result["mae"] == pytest.approx(7 / 3)
+    assert result["observations"] == 3
+    saved_inputs = at.session_state.get("shoir_tool_inputs_T075")
+    assert saved_inputs is not None
+    assert saved_inputs["maximum_mae"] == pytest.approx(2.0)
+    assert saved_inputs["trailing_window"] == 0
+    assert result.get("_workspace_persistence") in {
+        "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+        "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+    }
+
+
 def test_workbench_runs_t085_research_pack_sample_size_and_denies_lower_tier():
     from streamlit.testing.v1 import AppTest
 
