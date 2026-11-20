@@ -80,7 +80,12 @@ def _manifest_destination(value: str | Path, root: Path) -> Path:
 def _iter_files(root: Path) -> Iterable[tuple[str, Path]]:
     observed_paths: set[str] = set()
     casefold_paths: set[str] = set()
-    for current, directories, filenames in os.walk(root, topdown=True, followlinks=False):
+    def _walk_error(exc: OSError) -> None:
+        raise ManifestError("Cannot completely enumerate the Storage export directory tree.") from exc
+
+    for current, directories, filenames in os.walk(
+        root, topdown=True, onerror=_walk_error, followlinks=False
+    ):
         current_path = Path(current)
         safe_directories: list[str] = []
         for directory in directories:
@@ -138,6 +143,7 @@ def _hash_regular_file(path: Path, relative: str) -> tuple[int, str]:
             or before.st_ino != after.st_ino
             or before.st_size != after.st_size
             or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
             or total != after.st_size
         ):
             raise ManifestError(f"Storage object changed while it was being hashed: {relative}")
