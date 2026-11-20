@@ -140,7 +140,7 @@ The following remain open: scheduled reference-aware cleanup of older orphan obj
 
 ## Candidate update — 2026-11-20: coordinated Storage lifecycle leases
 
-The current release-hardening candidate adds migration 20261120115000_shoir_dataset_storage_lifecycle_leases.sql and wires the resulting server-only RPCs into the dataset finalizer and T020 maintenance action.
+The current release-hardening candidate adds migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`. Together they wire server-only acquire/renew/release RPCs and transaction-fenced metadata registration into dataset finalization, generic Storage-reference writes and the T020 maintenance action.
 
 - A private RLS-enabled table serializes operations on each workspace/dataset pair. Browser roles and service_role have no direct table privileges; only the session-validated Edge Function service role can invoke the SECURITY DEFINER acquire/release RPCs.
 - Finalization acquires a 300-second lease before reading the temporary object, verifying its hash/CSV shape, creating or reusing the immutable content-addressed object, and committing dataset metadata. A finally block releases only the exact lease token acquired by that request.
