@@ -863,12 +863,14 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         "missing_settings": missing,
         "missing_variables": missing,
         "configuration_problems": problems,
-        "oidc_issuer_syntax_valid": metadata_valid,
+        # Issuer, MFA and audit verifier values live in the Supabase Edge
+        # secret manager. A Streamlit process cannot inspect them.
+        "oidc_issuer_syntax_valid": None,
         "provider_metadata_url_syntax_valid": metadata_valid,
         "redirect_uri_syntax_valid": redirect_valid,
         "openid_scope_present": None,
-        "mfa_enforced_flag": False,
-        "audit_logging_flag": False,
+        "mfa_enforced_flag": None,
+        "audit_logging_flag": None,
         "edge_configuration_visibility": "NOT_INSPECTABLE_FROM_STREAMLIT",
         "expected_edge_secret_names": expected_edge_secrets,
         "sso_active": False,
