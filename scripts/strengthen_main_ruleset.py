@@ -62,7 +62,7 @@ def validate_safe_preconditions(ruleset: dict[str, Any]) -> dict[str, Any]:
         raise RulesetError("The pull-request review rule is missing or malformed.")
     pr = pr_rule["parameters"]
     if (
-        not isinstance(pr.get("required_approving_review_count"), int)
+        type(pr.get("required_approving_review_count")) is not int
         or pr["required_approving_review_count"] < 1
         or pr.get("require_last_push_approval") is not True
         or pr.get("required_review_thread_resolution") is not True
@@ -185,7 +185,22 @@ def main(argv: list[str] | None = None) -> int:
             print("DRY RUN ONLY. Re-run with --apply from an administrator-authenticated gh CLI session.")
             return 0
 
-        updated = _gh_api("PUT", json.dumps(payload))
+        # Re-read immediately before replacement. If an administrator or
+        # automation changed any rule since the initial inspection, stop rather
+        # than overwriting that concurrent change with a stale payload.
+        latest = _gh_api("GET")
+        latest_payload, latest_missing = build_updated_payload(latest)
+        if (
+            json.dumps(latest_payload, sort_keys=True)
+            != json.dumps(payload, sort_keys=True)
+            or latest_missing != added
+        ):
+            raise RulesetError(
+                "The live ruleset changed after the initial inspection. No update was sent; "
+                "review the new state and rerun the dry-run."
+            )
+
+        updated = _gh_api("PUT", json.dumps(latest_payload))
         verify_updated_ruleset(updated)
         print("PASS: main ruleset updated and re-read response verified with all eight required contexts.")
         return 0
