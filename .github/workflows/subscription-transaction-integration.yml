@@ -9,7 +9,7 @@ on:
       - "tests/test_migration_source_inventory.py"
       - ".github/workflows/subscription-transaction-integration.yml"
   push:
-    branches: [main]
+    branches: [main, staging-e2e-20261019]
     paths:
       - "supabase/migrations/**"
       - "tests/test_atomic_subscription_migration_postgres.py"
@@ -19,6 +19,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   postgres-transaction-contract:

@@ -14,7 +14,9 @@ Provision these distinct accounts in the approved staging environment through th
 | Second | Enabled, non-admin, distinct from Active | Prove a valid session cannot read or overwrite another account's workspace |
 | Starter | Enabled, non-admin, Starter tier | Confirm tier returned by the authoritative auth service and deny administrator API access |
 | Expired | Enabled, non-admin, subscription expiry in the past | Confirm renewal-only login, deny workspace read/write, and reject renewal submission without a payment reference |
-| Inactive (optional) | Disabled test account with otherwise valid credentials | Confirm inactive login does not issue a session |
+| Module | Enabled, non-admin, Enterprise Plus tier | Exercise the 96-module rendering/default-state matrix |
+| Research module | Enabled, non-admin, Research Pack add-on | Exercise Research Pack-only module routes |
+| Inactive | Disabled non-admin test account with valid credentials and a future subscription expiry | Confirm inactive login does not issue a session |
 
 The Active test workspace should be a small JSON object and contain no real customer or business data. During the round-trip probe, the script records its prior serialized state, writes a unique temporary marker, logs in again to read that marker, and restores the original state before revoking test sessions. A workspace that is not a JSON object or exceeds 1 MB is not overwritten. Review the JSON evidence artifact for any `FAIL` result or restore warning.
 
@@ -47,7 +49,7 @@ The helper is hard-pinned to staging project `hfhrosthswcybccepmak` and refuses 
 
 If the helper says the `sho` identity already exists, stop and use the approved administrator-recovery procedure rather than rerunning bootstrap. Keep the staging admin password in a password manager because the E2E provisioner below requires it. Never use the admin password as a test-account password.
 
-## Provision the six disposable E2E identities
+## Provision the seven disposable E2E identities
 
 After the staging app configuration and staging administrator are ready, run this from the repository root on a trusted computer:
 
@@ -55,11 +57,11 @@ After the staging app configuration and staging administrator are ready, run thi
 python scripts/provision_staging_e2e_accounts.py
 ```
 
-The helper is hard-pinned to the staging project, rejects the known production project, asks for the staging publishable key, the staging service-role/secret key, and the staging administrator password via hidden prompts, and requires a confirmation phrase. It checks that all six planned usernames are unused before making changes. It creates each test account via `register_request` and approves it via the normal admin approval action. The transaction references are explicitly synthetic **no-charge staging fixtures**; no payment service is contacted.
+The helper is hard-pinned to the staging project, rejects the known production project, asks for the staging publishable key, the staging service-role/secret key, and the staging administrator password via hidden prompts, and requires a confirmation phrase. It checks that all seven planned usernames are unused before making changes. It creates each test account via `register_request` and approves it via the normal admin approval action. The transaction references are explicitly synthetic **no-charge staging fixtures**; no payment service is contacted.
 
-Only the intentionally expired test fixture's `subscription_expires_at` is updated after approval, using the staging server key, so the expired-login/renewal-only path can be verified. The helper verifies all five active accounts' tier/login results and the expired account's renewal-only result, then revokes verification sessions. It does not use production, does not overwrite matching identities, and does not print keys, passwords, session tokens, or API response bodies.
+After approval, the helper uses the hard-pinned staging server key to set the expired fixture's `subscription_expires_at` into the past and to set only `shoir-e2e-inactive.active=false`. It verifies that the five enabled, non-expired accounts can log in with the expected tiers, that the expired account receives renewal-only access, and that the disabled account receives HTTP 401 without a session. It then revokes all verification sessions. No production account or customer identity is touched. It does not use production, does not overwrite matching identities, and does not print keys, passwords, session tokens, or API response bodies.
 
-The script writes six random test passwords to `.staging-e2e-credentials.json` in the repository root, with file permissions restricted to the current user; the filename is git-ignored. Review the `github_actions_secret_map` in this file to copy each username/password into the matching Actions secrets. Keep the file private until all secrets are set, then securely delete it. If provisioning stops part-way, the file records each account status; inspect the staging admin queue and that file before retrying. **Do not rerun to create duplicate accounts.**
+The script writes seven random test passwords to `.staging-e2e-credentials.json` in the repository root, with file permissions restricted to the current user; the filename is git-ignored. Review the `github_actions_secret_map` in this file to copy each username/password into the matching Actions secrets. Keep the file private until all secrets are set, then securely delete it. If provisioning stops part-way, the file records each account status; inspect the staging admin queue and that file before retrying. **Do not rerun to create duplicate accounts.**
 
 ## GitHub Actions configuration
 
@@ -79,33 +81,60 @@ Add this as a GitHub Actions **variable** under Settings → Secrets and variabl
 
 - `SHOIR_E2E_EXPECTED_STAGING_APP_HOST` — the exact hostname of the staging Streamlit app, for example `your-staging-app.streamlit.app` (hostname only; no scheme or path).
 
-Optional inactive-account verification uses `SHOIR_E2E_INACTIVE_USERNAME` and `SHOIR_E2E_INACTIVE_PASSWORD` together. Set the Actions **variable** `SHOIR_E2E_ACTIVE_EXPECTED_TIER` if the Active test account should be a tier other than `Enterprise Plus Tier ($399)`. There is intentionally no default application URL: missing or mismatched staging configuration stops the tests before browser navigation.
+The inactive-account check is mandatory. The provisioner creates the disabled `shoir-e2e-inactive` fixture and maps its credentials to `SHOIR_E2E_INACTIVE_USERNAME` and `SHOIR_E2E_INACTIVE_PASSWORD`. Set the Actions **variable** `SHOIR_E2E_ACTIVE_EXPECTED_TIER` if the Active test account should be a tier other than `Enterprise Plus Tier ($399)`. There is intentionally no default application URL: missing or mismatched staging configuration stops the tests before browser navigation.
 
 Do not put passwords or tokens in workflow inputs, source files, issues, pull requests, or chat messages. Reports deliberately omit usernames, passwords, tokens, workspace payloads, and response bodies.
 
 ## Recovery when dedicated test-account logins return HTTP 401
 
-The initial workflow preflight confirms that all required Actions secrets are present; it cannot prove that a password stored in GitHub matches the hash in the staging account database. If `active_login`, `second_login`, `starter_tier`, or `expired_login_renewal_only` fails with HTTP 401, do not keep retrying and do not create duplicate identities.
+The workflow preflight confirms that required Actions secrets exist; it cannot prove that a GitHub Actions password matches the hash in the staging account database. If a disposable account login fails with HTTP 401, do not keep retrying and do not create duplicate identities.
 
-On the trusted Windows workstation where this repository is checked out and `gh auth status` succeeds, run:
+The repository contains the Python recovery helper `scripts/recover_staging_e2e_credentials.py`. There is no separate PowerShell `.ps1` wrapper. Use a trusted Windows workstation with this repository checked out, Python installed, GitHub CLI installed, and `gh auth status` succeeding for an account allowed to update repository Actions secrets.
+
+The helper requires two values from the **staging Supabase project only**:
+- the staging service-role/server secret key;
+- the staging publishable key (or supported legacy anon key).
+
+Do not type either key in a normal PowerShell command, save it in a script, or paste it into chat. The following PowerShell sequence reads them through secure prompts, passes them only to the current process environment, invokes the helper, and clears the environment values afterwards:
 
 ```powershell
-.\scripts\Recover-StagingE2ECredentials.ps1
+$serviceSecure = Read-Host "Staging Supabase service-role/server secret key" -AsSecureString
+$publishableSecure = Read-Host "Staging Supabase publishable/anon key" -AsSecureString
+$serviceBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($serviceSecure)
+$publishableBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($publishableSecure)
+try {
+    $env:SHOIR_STAGING_SERVICE_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($serviceBstr)
+    $env:SHOIR_STAGING_PUBLISHABLE_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($publishableBstr)
+    python .\scripts\recover_staging_e2e_credentials.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Staging E2E credential recovery failed. Review the non-secret error and do not create duplicate accounts."
+    }
+}
+finally {
+    Remove-Item Env:SHOIR_STAGING_SERVICE_KEY -ErrorAction SilentlyContinue
+    Remove-Item Env:SHOIR_STAGING_PUBLISHABLE_KEY -ErrorAction SilentlyContinue
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($serviceBstr)
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($publishableBstr)
+    $serviceSecure.Dispose()
+    $publishableSecure.Dispose()
+}
 ```
 
-The wrapper reads the **staging** Supabase server key and publishable/anon key directly from the Windows clipboard without displaying them, then clears the clipboard. For each prompt, copy the complete key from the staging Supabase dashboard, return to the terminal, and press Enter—do not paste the key into the terminal. A single asterisk in the older hidden-input prompt did not necessarily mean the key was truncated. The recovery helper is hard-pinned to staging project `hfhrosthswcybccepmak`, checks that all six expected test-account rows already exist and have the expected roles, tiers, active states, and expiry states, then resets only those six disposable passwords and synchronizes their matching `SHOIR_E2E_*_USERNAME` / `SHOIR_E2E_*_PASSWORD` GitHub Actions secrets. It verifies login through the staging Edge Function and revokes temporary sessions. It does not create or delete accounts, modify the `sho` administrator, target production, print secrets, or write new passwords to disk.
+The helper is hard-pinned to staging project `hfhrosthswcybccepmak`. It checks that all seven expected `shoir-e2e-*` account rows already exist and have the expected roles, tiers, active states and expiry states before changing any password. It resets only those seven disposable passwords, synchronizes the matching `SHOIR_E2E_*_USERNAME` / `SHOIR_E2E_*_PASSWORD` GitHub Actions secrets using the authenticated GitHub CLI, verifies login/tier/expiry through the staging Edge Function, and revokes temporary sessions. It does not create or delete accounts, modify the `sho` administrator, target production, print secrets or save the newly generated passwords to disk.
 
-Use only the current workflow-managed secrets for automated testing. The E2E accounts are disposable automation identities; do not treat a previously copied password or an old `.staging-e2e-credentials.json` file as current after recovery. Once recovery succeeds, rerun this workflow on `staging-e2e-20261019`.
+The helper also synchronizes `SHOIR_E2E_PUBLISHABLE_KEY` to the key validated by its staging preflight. It never stores the service-role key in GitHub Actions. Recovery is a state-changing operation on the seven existing disposable staging accounts; run it only during a coordinated staging test window.
+
+After it reports success, confirm that the workflow is using the current secrets, then launch a new authenticated release gate from GitHub Actions. Do not reuse a previous password or old `.staging-e2e-credentials.json` file.
 
 ## Running and evidence
 
 1. Confirm a dedicated staging Streamlit deployment exists and that its own app secrets point to staging Supabase project `hfhrosthswcybccepmak` (not production). Confirm the Edge Function endpoint and publishable key refer to that same project. Changing the approved staging project requires an explicit reviewed code change.
 2. Confirm the configured Edge Function and Streamlit deployment contain the revisions being tested.
-3. Open GitHub Actions → **Authenticated release gate** → **Run workflow**, then select the branch containing the release-candidate commit. For this unmerged PR, select `staging-e2e-20261019` (PR #165). Do not select `main` until these changes have landed there: `workflow_dispatch` runs the workflow code from the selected branch, so choosing `main` would test the older base revision instead of this candidate.
+3. Ensure the dedicated staging Streamlit app is configured to deploy the same release-candidate branch, `feat/shoir-ie-release-hardening-20261105`, and wait until its sign-in page shows both `STAGING TEST ENVIRONMENT` and `SHOIR-IE SHELL VERSION: 3.2`. Then open GitHub Actions → **Authenticated release gate** → **Run workflow** and select `feat/shoir-ie-release-hardening-20261105` in the branch picker. The workflow file and test scripts must come from the candidate branch, while the URLs and keys must still point only to the isolated staging app/project. Do not select `staging-e2e-20261019` (the PR base) or `main`: either would run older workflow code and would not validate PR #232's current candidate.
 4. Review the run summary and download `shoir-ie-authenticated-release-evidence`. Confirm that the run SHA is the candidate commit and that the report identifies the explicit shell active-module marker; a missing marker means the staging Streamlit app has not deployed the candidate code.
 5. Record the run URL, commit SHA, timestamp, target environment, and each case's result in `docs/RELEASE_VERIFICATION_MATRIX.md`. Treat any failed cleanup or workspace restore as a release blocker.
 
-The gate checks active/invalid-password/expired authentication, dedicated-account tier metadata, server-side non-admin denial, owner-bound workspace access, workspace save/re-login/restore, renewal-only restrictions and reference validation, server logout revocation, and an authenticated browser route to the Excel module. It also runs `scripts/authenticated_module_matrix.py` against the 96-name `docs/MODULE_TIER_INVENTORY.csv`: Enterprise Plus routes are exercised using a dedicated Enterprise Plus test account, and Research Pack-only entries are exercised using a distinct Research Pack test account. The script records per-module route/default-state rendering outcomes and fails closed on missing inventory entries, blank content, fatal renderer markers, or horizontal overflow. Both browser checks require the authenticated shell's explicit `data-testid="shoir-active-module"` marker and validate the requested module from that marker rather than from search-result text. If the marker is missing, the run reports that the staging Streamlit deployment is behind the candidate branch; redeploy the staging app from `staging-e2e-20261019` before repeating the gate. The Edge login path consumes server-side buckets: 8 attempts per username per 10 minutes and, when the trusted Cloudflare client-IP header is present, 30 attempts per IP per 10 minutes. A successful login clears that user's bucket; the IP bucket expires naturally after the window. The throttle table and RPC are restricted to service_role, and login fails closed with 503 if the throttle RPC is unavailable. Production already records the login-throttle SQL under version `20261019124815`. The production and staging ledger statements have matching fingerprints; the tracked source filename now reflects the production version. This does not imply the separate atomic subscription-decision migration or its Edge Function dependency is present in production. For an intentional live limiter test, set the Actions variable `SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true`; it generates nine invalid attempts against a random synthetic username (never a real account). This consumes nine attempts from the ephemeral runner's IP bucket, so do not run the optional probe repeatedly inside one 10-minute window.
+The gate checks active/invalid-password/expired authentication, dedicated-account tier metadata, server-side non-admin denial, owner-bound workspace access, workspace save/re-login/restore, renewal-only restrictions and reference validation, server logout revocation, and an authenticated browser route to the Excel module. It also runs `scripts/authenticated_module_matrix.py` against the 96-name `docs/MODULE_TIER_INVENTORY.csv`: Enterprise Plus routes are exercised using a dedicated Enterprise Plus test account, and Research Pack-only entries are exercised using a distinct Research Pack test account. The script records per-module route/default-state rendering outcomes and fails closed on missing inventory entries, blank content, fatal renderer markers, or horizontal overflow. Both browser checks require the authenticated shell's explicit `data-testid="shoir-active-module"` marker and validate the requested module from that marker rather than from search-result text. If the marker is missing, the run reports that the staging Streamlit deployment is behind the candidate branch; redeploy the staging app from `feat/shoir-ie-release-hardening-20261105` before repeating the gate. The Edge login path consumes server-side buckets: 8 attempts per username per 10 minutes and, when the trusted Cloudflare client-IP header is present, 30 attempts per IP per 10 minutes. A successful login clears that user's bucket; the IP bucket expires naturally after the window. The throttle table and RPC are restricted to service_role, and login fails closed with 503 if the throttle RPC is unavailable. Production already records the login-throttle SQL under version `20261019124815`. The production and staging ledger statements have matching fingerprints; the tracked source filename now reflects the production version. This does not imply the separate atomic subscription-decision migration or its Edge Function dependency is present in production. For an intentional live limiter test, set the Actions variable `SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true`; it generates nine invalid attempts against a random synthetic username (never a real account). This consumes nine attempts from the ephemeral runner's IP bucket, so do not run the optional probe repeatedly inside one 10-minute window.
 
 ## Explicit limits
 
@@ -124,4 +153,4 @@ A `session_revocation` case is a three-step authenticated acceptance test, not m
 2. Call `logout` and require HTTP 200, `ok: true`, and `revoked: true`.
 3. Repeat the exact no-write renewal probe with the **same token** and require HTTP 401 with `Unauthorized session.`.
 
-The test fails closed if the token is missing, invalid before logout, logout does not confirm deletion, token reuse returns any other outcome, or the transport fails. Response bodies, passwords, and bearer tokens must not be written to the release evidence. Run this only with the explicitly provisioned `shoir-e2e-*` staging accounts. Do not use the protected master administrator, production accounts, payment references, or real receipts for this probe.
+The test fails closed if the token is missing, invalid before logout, logout does not confirm deletion, token reuse returns any other outcome, or the transport fails. The browser shell gate also records only bounded, redacted JavaScript diagnostics (never bearer tokens or URL query values) and requires two stable signed-out observations with the test username and logout control absent. Response bodies, passwords, and bearer tokens must not be written to the release evidence. Run this only with the explicitly provisioned `shoir-e2e-*` staging accounts. Do not use the protected master administrator, production accounts, payment references, or real receipts for this probe.

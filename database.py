@@ -1,7 +1,12 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from datetime import datetime, timezone
+
+def _utcnow_naive() -> datetime:
+    """Return a naive UTC timestamp for legacy SQLAlchemy DateTime columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 DATABASE_URL = "sqlite:///./operations.db"
 
@@ -19,7 +24,7 @@ class PasscodeDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, unique=True, index=True, nullable=False)
     passcode_type = Column(String, default="Trial")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow_naive)
     expires_at = Column(DateTime, nullable=True)
 
 class WarehouseDB(Base):
@@ -38,7 +43,7 @@ class SimulationLogDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     engine_name = Column(String, nullable=False)  # AEGIS, NEXUS, or PHOENIX
-    executed_at = Column(DateTime, default=datetime.utcnow)
+    executed_at = Column(DateTime, default=_utcnow_naive)
     parameters_json = Column(Text, nullable=False)
     results_json = Column(Text, nullable=False)
 

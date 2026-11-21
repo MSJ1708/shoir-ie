@@ -18,6 +18,7 @@ import json
 import math
 import re
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import time
 import uuid
 import zipfile
@@ -231,7 +232,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return sqlite3.connect(path, timeout=30, factory=ClosingSQLiteConnection)
 
 def _json(data: Any) -> str:
     return json.dumps(data, sort_keys=True, default=str, ensure_ascii=False)

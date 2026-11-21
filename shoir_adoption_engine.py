@@ -16,6 +16,7 @@ import json
 import math
 import re
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
@@ -677,7 +678,7 @@ def create_scenario_branch(
         variables=variables,
         version_label=f"Scenario branch · {name}",
     )
-    with sqlite3.connect(path, timeout=30) as conn:
+    with sqlite3.connect(path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         conn.execute(
             "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
             (
@@ -696,7 +697,7 @@ def create_scenario_branch(
 def product_home_snapshot(username: str, workspace: str = "default", db_path: str = "enterprise_full_workspace.db") -> dict[str, Any]:
     """Collect adoption metrics without exposing credentials or secret values."""
     counts = {"workbooks": 0, "decisions": 0, "studies": 0, "templates": 0}
-    with sqlite3.connect(db_path, timeout=10) as conn:
+    with sqlite3.connect(db_path, timeout=10, factory=ClosingSQLiteConnection) as conn:
         queries = [
             ("workbooks", "SELECT COUNT(*) FROM industrial_workbooks WHERE workspace=?"),
             ("templates", "SELECT COUNT(*) FROM industrial_workbook_templates WHERE workspace=?"),
@@ -746,7 +747,7 @@ def action_center_snapshot(
             rows.append({"Priority": "Action", "Type": "Job", "Item": f"{len(pending):,} job record(s) need attention.", "Source": "Jobs System"})
 
     try:
-        with sqlite3.connect(db_path, timeout=10) as conn:
+        with sqlite3.connect(db_path, timeout=10, factory=ClosingSQLiteConnection) as conn:
             decisions = conn.execute(
                 "SELECT decision_id,title,status FROM experience_decisions WHERE owner=? AND status IN ('Draft','Review','Proposed','Validated') ORDER BY updated_at DESC LIMIT 20",
                 (username,),

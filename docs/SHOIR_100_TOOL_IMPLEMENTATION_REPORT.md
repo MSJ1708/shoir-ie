@@ -1,8 +1,16 @@
 # Shoir-IE 100-tool integration report
 
-**Branch:** `agent/shoir-100-release-gates-verify-20261025`  
-**Scope:** code-grounded 100-target Workbench additions, automated authorization coverage, and persistence Edge Function hardening; no production deployment  
-**Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
+**Current branch:** `feat/shoir-ie-release-hardening-20261105`  
+**Scope:** code-grounded 100-target Workbench additions, automated authorization coverage, persistence hardening and verification notes; no production deployment  
+**Current release status:** BETA / NO-GO — the candidate remains a draft and exact-head CI, authenticated browser, persistence, integration and release checks must pass before staging acceptance.
+
+>
+> **Current candidate reconciliation (14 November 2026).** The detailed focused-runner narrative below originated in an earlier implementation tranche. The current source of truth for all 100 targets is \`docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv\` on the release-hardening branch. It contains exactly 100 IDs: **96 \`IMPLEMENTED_NEEDS_VALIDATION\`, 4 \`EXTERNAL_CONFIGURATION_REQUIRED\`, 0 \`FOUNDATION_ONLY\`, 0 \`VERIFIED_WORKING\`, 0 \`MISSING\` and 0 \`BLOCKED\`**. The four external items are T096 Integration Management, T097 API/SDK/Plugin Toolkit, T098 Enterprise Identity and Audit, and T099 Data Governance and Recovery. Do not use older counts in historical tranche narratives as the current registry classification.
+>
+> The four external items require genuine configuration and evidence: approved SAP/Oracle/REST endpoints and credentials with a secure live round-trip test; a hosted API gateway with external identity/scopes/TLS/rate limits/audit; a configured OIDC/MFA identity provider with login lifecycle/revocation/audit tests; and Supabase PITR/off-project backup plus an isolated database restore rehearsal. A configuration-inspection screen or metadata-only adapter is not a substitute.
+>
+> **Current repository rulesets were re-checked:** \`Protect main — release gates\` and \`Protect staging — acceptance gates\` are both active, with PR-only changes, one approval, stale-review dismissal, last-push approval, conversation resolution, deletion/force-push restrictions and no bypass actors. Main requires \`test\`, \`edge-function\`, \`engine-regression\` and \`security-quality\`; staging additionally requires clean migration replay, PostgreSQL transaction contract, production-v9 security backport and Excel Intelligence. See the live rulesets: [main](https://github.com/MSJ1708/shoir-ie/rules/26065188) and [staging](https://github.com/MSJ1708/shoir-ie/rules/26067544). These are configuration checks, not evidence that the latest candidate has passed its checks.
+
 
 ## UI and architecture preserved
 
@@ -136,13 +144,13 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 87 |
-| `FOUNDATION_ONLY` | 11 |
-| `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 96 |
+| `FOUNDATION_ONLY` | 0 |
+| `EXTERNAL_CONFIGURATION_REQUIRED` | 4 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
 
-These are evidence classifications, not a quality score. `IMPLEMENTED_NEEDS_VALIDATION` means a real implementation/first-pass method is mapped but mandatory verification remains incomplete. `FOUNDATION_ONLY` means the specialist promised behavior remains incomplete. Zero missing catalogue mappings does **not** mean all 100 tools are complete.
+These are evidence classifications, not a quality score. `IMPLEMENTED_NEEDS_VALIDATION` means a real implementation/first-pass method is mapped but mandatory verification remains incomplete. `EXTERNAL_CONFIGURATION_REQUIRED` means the real provider or infrastructure dependency is not yet configured and accepted. Zero missing catalogue mappings does **not** mean all 100 tools are complete.
 
 ## Security review and threat model
 
@@ -157,7 +165,7 @@ Changes made in this candidate branch:
 - Enabled security-quality, platform and engine-regression workflows for pull requests targeting the current 100-tool integration base, in addition to main.
 
 Residual security limitations are material:
-- The repository currently reports main branch protection disabled with required status checks off. The available connected GitHub action could read this state but could not change branch protection; repository settings/admin action is still required.
+- The earlier audit's branch-protection statement is superseded. The live GitHub ruleset API now reports main and staging rulesets active, with strict required checks, one independent approval, stale approval dismissal, last-push approval, conversation resolution, deletion/force-push restrictions and no bypass actors. See the current-candidate reconciliation at the top of this report.
 - Cross-user/cross-workspace denial has not been proven against two disposable authenticated staging accounts and the deployed Supabase project. RLS policy source review is not a substitute for that runtime test.
 - Full review of every SQL execution path, import/export format, Copilot entry point, connector URL, API/plugin action and browser rendering sink is not complete. The workflow secret-pattern guard only scans three application entry files; dependency/security jobs must be checked on the exact release head.
 - No authenticated hosted browser run, staging import-to-export-to-decision run, renewal-only/account revocation walkthrough, production deployment parity check, or independent penetration test is evidenced by this branch.
@@ -166,7 +174,7 @@ Residual security limitations are material:
 ## Verification / release gates
 
 ### Canonical 100-target accounting
-The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The classification remains 0 VERIFIED_WORKING, 87 IMPLEMENTED_NEEDS_VALIDATION, 11 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational.
+The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The current matrix classification is 0 VERIFIED_WORKING, 96 IMPLEMENTED_NEEDS_VALIDATION, 0 FOUNDATION_ONLY, 4 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational.
 
 The newly added test tests/test_shoir_100_tool_tier_truth_table.py is intended to make this cross-check and the six-package authorization truth table part of automated regression coverage. It exercises the canonical authorization helper, not every legacy route or external API callsite; route/API/Copilot/export-level enforcement still requires dedicated authenticated acceptance.
 
@@ -192,4 +200,42 @@ Before this may be considered for merge or deployment, the exact final head must
 
 ## Release position
 
-**DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the remaining foundation-only capabilities and the mandatory release checks are completed.
+**DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the 96 validation-pending targets have passed their evidence gates, the four external capabilities are configured and tested, and the mandatory staging/production release checks are completed.
+
+
+---
+
+## 2026-11-20 candidate reconciliation — canonical routing and T098
+
+This addendum supersedes older tranche wording in this report where it conflicts with the current release-hardening branch.
+
+- The current source-level route audit is `docs/SHOIR_100_TOOL_EXECUTION_AUDIT.md` and its repeatable script/test. It now asserts 100 dedicated, canonical-ID-bound Workbench dispatch branches, zero launch-only IDs and zero IDs without a mapped route. This is source-level route accounting only; it does **not** establish numerical correctness, hosted persistence, authenticated browser acceptance, export round-trips or independent engineering approval.
+- The matrix remains **96 `IMPLEMENTED_NEEDS_VALIDATION`, 4 `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), and 0 `VERIFIED_WORKING`**. No target is promoted to verified from route presence or test references.
+- T098 is no longer only a configuration-inspection screen. PR #232 now contains optional Streamlit OIDC login on the existing sign-in page, independent Edge Function JWT verification (RS256/ES256, exact issuer/audience, token-age/expiry and verified-email checks), unique mapping to an existing active Shoir-IE account, optional provider-claim MFA enforcement, token replay protection, fail-closed append-only audit insertion, new-session revocation on audit failure, and logout that ends both sessions. The server-only audit migration is `20261118170000_shoir_oidc_audit_events.sql`.
+- The old standalone OIDC PR #223 is superseded/closed and must not be merged. PR #232 is the single release-hardening integration target. The updated T098 runbook is `docs/T098_OIDC_AUDIT_CONFIGURATION.md`.
+- T098 nevertheless remains `EXTERNAL_CONFIGURATION_REQUIRED`: no actual IdP tenant/client, Streamlit or staging Edge secrets, provider MFA claim evidence, staging audit migration/deployment, hosted disposable-account acceptance, or independent security review has been completed.
+- T096 remains a generic HTTPS GET-only adapter until a real provider-specific SAP/Oracle adapter and authorized staging endpoint/credential are accepted. T097 remains a local manifest/contract inspector until a hosted authenticated tenant-scoped gateway, published OpenAPI contract and externally consumed SDK are proven. T099's personal workspace export is not database PITR or independent Storage-object recovery; a full isolated restore and measured RPO/RTO remain required.
+
+Keep PR #232 draft, Shoir-IE BETA, and production NO-GO. A successful exact-head CI run is necessary but not sufficient for the hosted and external acceptance above.
+
+
+## 2026-11-20 dataset lifecycle implementation update
+
+The canonical T020 dataset-versioning path now uses `shoir_supabase_tus.py` for private signed TUS uploads (6 MiB chunks, bounded retry, HEAD offset reconciliation, no redirects and strict direct-storage host validation). The resumable upload URL is session-scoped with a 23-hour expiry and binds to the actor, workspace, dataset ID, content hash and organization scope. This resumes across Streamlit reruns and recoverable request interruptions within the same session; it does not promise durable cross-device or process-restart recovery.
+
+The Edge Function's version-finalize flow now registers the content-addressed object in the metadata transaction before removing the temporary object. If metadata registration reports an error, a newly created object is removed only after successful no-reference checks against both the record and event ledgers. Query uncertainty retains the object. After successful registration, temporary cleanup failure is reported separately and does not convert a committed version into a false failure.
+
+New tests: `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. This is a source implementation update, not hosted Storage acceptance. The candidate now includes a manual, session-authenticated T020 operator sweep for aged temporary and immutable orphans, protected by the shared lifecycle lease and transaction-fenced registration/reference writes. It remains unscheduled and staging-only; hosted interrupted-upload/resume, fresh-session, cross-workspace and raw-workbook acceptance remain required.
+
+
+## 2026-11-20 dataset lifecycle coordination update
+
+The T020 candidate now has a database-backed lifecycle lease shared by Storage finalization and orphan cleanup:
+
+- Migrations: `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`.
+- The lease table is RLS-enabled and has no direct grants to browser roles or service_role. Only the session-validated Edge Function can call the pinned-search-path SECURITY DEFINER acquire/renew/release RPCs and the fenced metadata wrappers.
+- A workspace/dataset unique key serializes finalization and cleanup. The finalizer acquires a lease up to the 600-second maximum and renews only its still-live token before Storage cleanup and metadata registration. The fencing migration locks the matching live lease row in the same metadata transaction.
+- The staging-only T020 maintenance action holds the same lease while checking both metadata ledgers, writing kind-specific deletion intent, deleting an eligible temporary or immutable object and writing completion evidence. It preserves preview-by-default, 48-hour age, the 500-object/200-directory scan bound, 100 reference checks and 50 deletions per run. An expired lease can be reclaimed after a crashed invocation; only the matching token can release a lease.
+- The 100-tool matrix remains 96 `IMPLEMENTED_NEEDS_VALIDATION`, 4 `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), and 0 `VERIFIED_WORKING`. T020 is not promoted based on source presence.
+
+The migration, matching Edge source and tests are in PR #232 only. They have not been deployed to staging. Exact-head clean PostgreSQL replay, Edge format/type/security, the Python/AppTest regression suites, independent review and authenticated staging acceptance remain mandatory before any staging deployment or cleanup rehearsal.

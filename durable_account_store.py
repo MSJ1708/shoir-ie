@@ -15,8 +15,9 @@ import base64
 import datetime as dt
 import os
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from typing import Any, Mapping, Optional
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 try:
     import streamlit as st
@@ -175,6 +176,31 @@ def _edge_headers() -> dict[str, str]:
 def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     import requests
     body = dict(payload or {})
+    # Shared managed records/datasets use the selected organization workspace
+    # only in an explicitly configured staging environment. The Edge Function
+    # independently revalidates membership and role for every request.
+    shared_actions = {
+        "dataset_download_url",
+        "dataset_storage_sweep_session",
+        "dataset_upload_create",
+        "dataset_version_finalize",
+        "platform_record_save",
+        "platform_record_list",
+    }
+    if APP_ENVIRONMENT == "staging" and action in shared_actions:
+        try:
+            organization_id = str(
+                st.session_state.get("shoir_active_organization_id") or ""
+            ).strip()
+            organization_workspace_id = str(
+                st.session_state.get("shoir_active_organization_workspace_id") or ""
+            ).strip()
+        except Exception:
+            organization_id = ""
+            organization_workspace_id = ""
+        if organization_id or organization_workspace_id:
+            body["organization_id"] = organization_id
+            body["organization_workspace_id"] = organization_workspace_id
     body["action"] = action
     resp = requests.post(
         SUPABASE_EDGE_URL,
@@ -196,6 +222,53 @@ def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[st
 
 def edge_backend_configured() -> bool:
     return bool(SUPABASE_EDGE_URL and SUPABASE_PUBLISHABLE_KEY)
+
+_ORGANIZATION_EDGE_ACTIONS = {
+    "org_list_session",
+    "org_create_session",
+    "org_workspace_list_session",
+    "org_member_list_session",
+    "org_invitation_create_session",
+    "org_invitation_accept_session",
+    "org_invitation_list_session",
+    "org_invitation_revoke_session",
+    "org_member_role_set_session",
+    "org_member_remove_session",
+    "org_member_suspend_session",
+    "org_member_restore_session",
+    "org_owner_transfer_session",
+    "org_close_session",
+    "org_workspace_create_session",
+    "org_workspace_archive_session",
+    "org_audit_list_session",
+    "workspace_manage_check",
+}
+
+
+def edge_organization_action(
+    action: str,
+    username: str,
+    token: str,
+    **payload: Any,
+) -> dict[str, Any]:
+    """Call one allow-listed, session-authenticated organization operation."""
+    if action not in _ORGANIZATION_EDGE_ACTIONS:
+        raise ValueError("Organization operation is not supported.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError(
+            "Organization workspace actions require explicit SHOIR_ENVIRONMENT=staging configuration."
+        )
+    if not edge_backend_configured():
+        raise RuntimeError("The staging organization persistence endpoint is not configured.")
+    actor = str(username or "").strip()
+    bearer = str(token or "")
+    if not actor or not bearer:
+        raise PermissionError("An authenticated organization session is required.")
+    return _edge_call(
+        action,
+        {"username": actor, "token": bearer, **payload},
+    )
+
 
 
 def database_url() -> str:
@@ -536,6 +609,15 @@ def remote_research_studies(owner: str) -> list[dict[str, Any]]:
 
 def edge_login(username: str, password: str) -> dict[str, Any]:
     return _edge_call("login", {"username": username, "password": password})
+
+ 
+def edge_oidc_login(id_token: str) -> dict[str, Any]:
+    """Exchange a bounded ID token for a Shoir-IE session after Edge verification."""
+    token = str(id_token or "").strip()
+    if len(token) < 32 or len(token) > 16_384:
+        raise ValueError("The identity-provider token is missing or outside the allowed size.")
+    return _edge_call("oidc_login", {"id_token": token})
+
 
 
 def edge_logout(username: str, token: str) -> dict[str, Any]:
@@ -909,7 +991,7 @@ def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db")
             )
             rows = [dict(row) for row in cur.fetchall()]
     inserted = 0
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         for row in rows:
             exists = conn.execute(
                 """
@@ -957,7 +1039,7 @@ def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db")
     rows = remote_accounts()
     if not rows:
         return 0
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         for row in rows:
             conn.execute(
                 """
@@ -1013,7 +1095,7 @@ def migrate_local_accounts_to_remote(db_path: str = "enterprise_full_workspace.d
         return 0
     ensure_remote_schema()
     existing = {row["username_lc"] for row in remote_accounts()}
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, factory=ClosingSQLiteConnection) as conn:
         rows = conn.execute(
             """
             SELECT
@@ -1060,6 +1142,49 @@ def sync_durable_accounts(db_path: str = "enterprise_full_workspace.db") -> bool
     return True
 
 
+
+def _active_organization_workspace_context() -> Optional[dict[str, str]]:
+    """Return the explicitly selected organization workspace, or None for personal state."""
+    if st is None:
+        return None
+    raw = st.session_state.get("shoir_active_organization_workspace")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("Active organization workspace context is invalid.")
+    organization_id = str(raw.get("organization_id") or "").strip()
+    workspace_id = str(raw.get("organization_workspace_id") or "").strip()
+    if not organization_id or not workspace_id:
+        raise ValueError("Both organization and workspace IDs are required for shared persistence.")
+    return {
+        "organization_id": organization_id,
+        "organization_workspace_id": workspace_id,
+    }
+
+
+
+
+def validate_remote_organization_workspace_access(username: str) -> bool:
+    """Revalidate the active shared workspace before each authenticated app rerun."""
+    context = _active_organization_workspace_context()
+    if context is None:
+        return True
+    if APP_ENVIRONMENT != "staging" or not edge_backend_configured() or st is None:
+        raise RuntimeError("Shared workspace access cannot be validated outside the configured staging Edge Function.")
+    token = str(st.session_state.get("remote_session_token") or "")
+    actor = str(username or "").strip()
+    if not actor or not token:
+        raise PermissionError("An active Shoir-IE session is required for shared workspace access.")
+    result = _edge_call(
+        "workspace_access_check",
+        {"username": actor, "token": token, **context},
+    )
+    if result.get("ok") is not True:
+        raise PermissionError("Shared workspace access could not be verified.")
+    return True
+
+
+
 def save_remote_workspace(username: str, state_json: str) -> bool:
     """Persist serialized Streamlit workspace state in managed Supabase."""
     if edge_backend_configured():
@@ -1068,10 +1193,31 @@ def save_remote_workspace(username: str, state_json: str) -> bool:
         token = str(st.session_state.get("remote_session_token") or "")
         if not token:
             return False
-        _edge_call("workspace_save", {
-            "username": username, "token": token, "state_json": state_json,
-        })
+        organization_context = _active_organization_workspace_context()
+        payload = {
+            "username": username,
+            "token": token,
+            "state_json": state_json,
+        }
+        if organization_context is not None:
+            if APP_ENVIRONMENT != "staging":
+                raise RuntimeError("Shared organization persistence is restricted to the authorized staging environment.")
+            revision = st.session_state.get("_workspace_org_revision", 0)
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+                raise ValueError("Shared workspace revision state is invalid.")
+            payload.update(organization_context)
+            payload["expected_revision"] = revision
+            result = _edge_call("workspace_save", payload)
+            saved_revision = result.get("revision")
+            if isinstance(saved_revision, bool) or not isinstance(saved_revision, int) or saved_revision < 1:
+                raise RuntimeError("The shared workspace save did not return a valid revision.")
+            st.session_state["_workspace_org_revision"] = saved_revision
+            st.session_state["_workspace_org_updated_at"] = result.get("updated_at")
+            return True
+        _edge_call("workspace_save", payload)
         return True
+    if st is not None and _active_organization_workspace_context() is not None:
+        raise RuntimeError("Shared organization workspaces require the authenticated staging Edge Function.")
     if not durable_backend_configured():
         return False
     ensure_remote_schema()
@@ -1109,8 +1255,23 @@ def load_remote_workspace(username: str) -> Optional[str]:
         token = str(st.session_state.get("remote_session_token") or "")
         if not token:
             return None
-        result = _edge_call("workspace_load", {"username": username, "token": token})
+        organization_context = _active_organization_workspace_context()
+        payload = {"username": username, "token": token}
+        if organization_context is not None:
+            if APP_ENVIRONMENT != "staging":
+                raise RuntimeError("Shared organization persistence is restricted to the authorized staging environment.")
+            payload.update(organization_context)
+            result = _edge_call("workspace_load", payload)
+            revision = result.get("revision", 0)
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+                raise RuntimeError("The shared workspace load returned an invalid revision.")
+            st.session_state["_workspace_org_revision"] = revision
+            st.session_state["_workspace_org_updated_at"] = result.get("updated_at")
+            return result.get("state_json")
+        result = _edge_call("workspace_load", payload)
         return result.get("state_json")
+    if st is not None and _active_organization_workspace_context() is not None:
+        raise RuntimeError("Shared organization workspaces require the authenticated staging Edge Function.")
     if not durable_backend_configured():
         return None
     ensure_remote_schema()
@@ -1161,3 +1322,471 @@ def renewed_expiry(existing_expiry: Any, days: int = 30, now: Optional[dt.dateti
     else:
         start = now
     return start + dt.timedelta(days=int(days))
+
+_PLATFORM_RECORD_TYPES = {
+    "asset", "dataset", "dataset_version", "process", "product", "material", "calculation",
+    "kpi", "scenario", "recommendation", "decision", "project", "action",
+    "document", "workbook", "model", "quality", "maintenance", "energy",
+    "cost", "traceability", "risk", "workflow", "artifact",
+    "canonical_entity", "canonical_relationship", "canonical_event",
+    "twin_asset", "twin_snapshot", "twin_scenario", "connector_health",
+    "job", "knowledge_document", "monitoring_event", "report_provenance",
+    "security_policy", "twin_snapshot", "connector_run", "connector_schedule",
+    "collaboration_item", "monitoring_rule", "cost_baseline", "kpi_definition",
+    "project_record", "work_order", "change_request", "risk_record",
+    "traceability_record", "laboratory_sample", "procurement_record",
+    "spare_part", "shutdown_package", "competency_record",
+}
+_PLATFORM_FORBIDDEN_KEY = __import__("re").compile(
+    r"(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\bdob\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)",
+    __import__("re").IGNORECASE,
+)
+
+
+def _validate_platform_record_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    import json
+    import math
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("Platform record payload must be an object.")
+    value = dict(payload)
+    encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > 256 * 1024:
+        raise ValueError("Platform record payload exceeds the 256 KiB limit.")
+
+    def inspect(item: Any, depth: int = 0) -> None:
+        if depth > 8:
+            raise ValueError("Platform record payload nesting is too deep.")
+        if isinstance(item, Mapping):
+            for key, child in item.items():
+                if _PLATFORM_FORBIDDEN_KEY.search(str(key)):
+                    raise ValueError("Credential or sensitive identifier fields are not accepted.")
+                inspect(child, depth + 1)
+        elif isinstance(item, (list, tuple)):
+            if len(item) > 5000:
+                raise ValueError("Platform record payload contains too many items.")
+            for child in item:
+                inspect(child, depth + 1)
+        elif isinstance(item, float) and not math.isfinite(item):
+            raise ValueError("Platform record payload contains a non-finite number.")
+        elif item is not None and not isinstance(item, (str, int, float, bool)):
+            raise ValueError("Platform record payload contains an unsupported value.")
+
+    inspect(value)
+    return value
+
+
+def edge_download_dataset_version(
+    username: str,
+    token: str,
+    workspace: str,
+    dataset_id: str,
+    version: int | None = None,
+    organization_id: str = "",
+    organization_workspace_id: str = "",
+) -> tuple[bytes, dict[str, Any]]:
+    """Download a registered dataset from private storage and verify its SHA-256."""
+    import hashlib
+    import requests
+    from urllib.parse import urlsplit
+
+    if not str(username or "").strip() or not str(token or ""):
+        raise PermissionError("An authenticated workspace session is required.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Managed dataset download helper is restricted to staging.")
+    result = _edge_call("dataset_download_url", {
+        "username": str(username).strip(),
+        "token": str(token),
+        "workspace": str(workspace or "default").strip(),
+        "organization_id": str(organization_id or "").strip(),
+        "organization_workspace_id": str(organization_workspace_id or "").strip(),
+        "dataset_id": str(dataset_id),
+        "version": version,
+    })
+    signed_url = str(result.get("download_url") or "")
+    parsed = urlsplit(signed_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
+        or not parsed.path.startswith("/storage/v1/object/sign/shoir-industrial-datasets/")
+        or not parsed.query
+    ):
+        raise RuntimeError("Storage provider returned an unexpected signed download URL.")
+    response = requests.get(signed_url, timeout=(10, 90))
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Private dataset download failed ({response.status_code}): {response.text[:300]}"
+        )
+    content = response.content
+    if not content or len(content) > 50 * 1024 * 1024:
+        raise RuntimeError("Downloaded dataset is empty or exceeds the 50 MiB limit.")
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != str(result.get("data_hash") or "").lower():
+        raise RuntimeError("Downloaded dataset failed its SHA-256 integrity check.")
+    return content, result
+
+
+def edge_sweep_dataset_storage(
+    username: str,
+    token: str,
+    workspace: str = "default",
+    confirm_delete: bool = False,
+    organization_id: str = "",
+    organization_workspace_id: str = "",
+) -> dict[str, Any]:
+    """Preview or explicitly sweep aged temporary uploads in one staging workspace.
+
+    The Edge Function enforces the 48-hour minimum age, Owner/Admin shared-workspace
+    permission, per-dataset lifecycle leases, dual-ledger reference checks, bounded
+    scan/deletion limits and append-only deletion intent/completion events. Both
+    temporary and immutable orphan objects are eligible only while the shared
+    finalization/cleanup lease is held.
+    """
+    actor = str(username or "").strip()
+    bearer = str(token or "")
+    scope = str(workspace or "default").strip()
+    if not actor or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Dataset storage maintenance is restricted to the staging environment.")
+    if not isinstance(confirm_delete, bool):
+        raise ValueError("confirm_delete must be a boolean.")
+    return _edge_call("dataset_storage_sweep_session", {
+        "username": actor,
+        "token": bearer,
+        "workspace": scope,
+        "organization_id": str(organization_id or "").strip(),
+        "organization_workspace_id": str(organization_workspace_id or "").strip(),
+        "confirm_delete": confirm_delete,
+    })
+
+
+def edge_upload_and_register_dataset_version(
+    username: str,
+    token: str,
+    workspace: str,
+    dataset_id: str,
+    name: str,
+    source_name: str,
+    file_bytes: bytes,
+    data_hash: str,
+    version_fingerprint: str,
+    row_count: int,
+    column_count: int,
+    schema: Mapping[str, Any],
+    transformations: Sequence[Mapping[str, Any]] = (),
+    content_type: str = "text/csv",
+    organization_id: str = "",
+    organization_workspace_id: str = "",
+) -> dict[str, Any]:
+    """Upload a bounded dataset to private staging storage with resumable TUS.
+
+    The signed TUS URL is retained only in this Streamlit server session so a
+    re-upload of the same file can resume after an interrupted request or rerun.
+    A successful upload is still independently hashed and shape-checked by the
+    persistence Edge Function before version registration.
+    """
+    import hashlib
+    import re
+    import time
+    from urllib.parse import urlsplit
+
+    from shoir_supabase_tus import TusUploadExpiredError, upload_signed_tus
+
+    actor = str(username or "").strip()
+    bearer = str(token or "")
+    if not actor or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        raise RuntimeError("Private dataset upload helper is restricted to the staging environment.")
+    if not isinstance(file_bytes, bytes) or not file_bytes or len(file_bytes) > 50 * 1024 * 1024:
+        raise ValueError("Dataset upload must be between 1 byte and 50 MiB.")
+    actual_hash = hashlib.sha256(file_bytes).hexdigest()
+    if actual_hash != str(data_hash or "").lower():
+        raise ValueError("Dataset bytes do not match the supplied content hash.")
+    if content_type != "text/csv":
+        raise ValueError("The normalized dataset artifact must be uploaded as text/csv.")
+
+    # The resume key is session-local and binds the capability to the exact
+    # actor, workspace, dataset, content hash and organization scope.
+    resume_identity = "\x1f".join(
+        (
+            actor.casefold(),
+            str(workspace or "default").strip(),
+            str(dataset_id),
+            actual_hash,
+            str(organization_id or "").strip(),
+            str(organization_workspace_id or "").strip(),
+        )
+    )
+    resume_key = "_shoir_dataset_tus_resume_" + hashlib.sha256(
+        resume_identity.encode("utf-8")
+    ).hexdigest()
+    session_state = None
+    try:
+        if st is not None:
+            session_state = st.session_state
+    except Exception:
+        session_state = None
+
+    now = time.time()
+    pending = None
+    if session_state is not None:
+        try:
+            candidate = session_state.get(resume_key)
+            if isinstance(candidate, dict):
+                created_at = float(candidate.get("created_at") or 0)
+                upload_path_candidate = str(candidate.get("upload_path") or "")
+                tus_url_candidate = str(candidate.get("tus_url") or "")
+                if (
+                    candidate.get("data_hash") == actual_hash
+                    and candidate.get("file_size") == len(file_bytes)
+                    and 0 <= now - created_at < 23 * 60 * 60
+                    and upload_path_candidate.startswith("tmp/")
+                    and ".." not in upload_path_candidate
+                    and len(upload_path_candidate) <= 240
+                    and tus_url_candidate.startswith("https://")
+                ):
+                    pending = candidate
+                else:
+                    session_state.pop(resume_key, None)
+        except Exception:
+            pending = None
+
+    def remember_tus_url(upload_path: str, tus_url: str) -> None:
+        if session_state is None:
+            return
+        try:
+            previous = session_state.get(resume_key)
+            created_at = (
+                float(previous.get("created_at") or now)
+                if isinstance(previous, dict) and previous.get("tus_url") == tus_url
+                else time.time()
+            )
+            session_state[resume_key] = {
+                "upload_path": upload_path,
+                "tus_url": tus_url,
+                "data_hash": actual_hash,
+                "file_size": len(file_bytes),
+                "created_at": created_at,
+            }
+        except Exception:
+            # A Streamlit state-store failure must not weaken server-side
+            # authorization or hash validation; the current upload may proceed.
+            return
+
+    def create_signed_upload() -> tuple[str, str]:
+        upload = _edge_call("dataset_upload_create", {
+            "username": actor,
+            "token": bearer,
+            "workspace": str(workspace or "default").strip(),
+            "organization_id": str(organization_id or "").strip(),
+            "organization_workspace_id": str(organization_workspace_id or "").strip(),
+            "dataset_id": str(dataset_id),
+            "data_hash": actual_hash,
+        })
+        signed_url = str(upload.get("upload_url") or "")
+        parsed = urlsplit(signed_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != STAGING_SUPABASE_PROJECT_HOST
+            or unquote(parsed.path) != "/storage/v1/object/upload/sign/shoir-industrial-datasets/" + str(upload.get("upload_path") or "").lstrip("/")
+            or not parsed.query
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            raise RuntimeError("Storage provider returned an unexpected signed upload URL.")
+        upload_path = str(upload.get("upload_path") or "")
+        upload_token = str(upload.get("upload_token") or "")
+        if (
+            not upload_path.startswith("tmp/")
+            or ".." in upload_path
+            or len(upload_path) > 240
+            or not re.fullmatch(r"[A-Za-z0-9._~-]{16,4096}", upload_token)
+        ):
+            raise RuntimeError("Storage provider returned invalid upload capability metadata.")
+        return upload_path, upload_token
+
+    project_ref = STAGING_SUPABASE_PROJECT_HOST.split(".", 1)[0]
+    if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
+        raise RuntimeError("The staging Supabase project reference is invalid.")
+
+    upload_path = ""
+    resumable_url = ""
+    if pending is not None:
+        upload_path = str(pending["upload_path"])
+        resumable_url = str(pending["tus_url"])
+
+    def perform_upload(path: str, signed_token: str = "", resume_url: str = "") -> str:
+        return upload_signed_tus(
+            project_ref=project_ref,
+            bucket_name="shoir-industrial-datasets",
+            object_name=path,
+            content_type=content_type,
+            signed_upload_token=signed_token,
+            file_bytes=file_bytes,
+            resume_url=resume_url,
+            on_upload_url=lambda value: remember_tus_url(path, value),
+        )
+
+    try:
+        if resumable_url:
+            try:
+                perform_upload(upload_path, resume_url=resumable_url)
+            except TusUploadExpiredError:
+                if session_state is not None:
+                    try:
+                        session_state.pop(resume_key, None)
+                    except Exception:
+                        pass
+                upload_path, upload_token = create_signed_upload()
+                perform_upload(upload_path, signed_token=upload_token)
+        else:
+            upload_path, upload_token = create_signed_upload()
+            perform_upload(upload_path, signed_token=upload_token)
+
+        result = _edge_call("dataset_version_finalize", {
+            "username": actor,
+            "token": bearer,
+            "workspace": str(workspace or "default").strip(),
+            "organization_id": str(organization_id or "").strip(),
+            "organization_workspace_id": str(organization_workspace_id or "").strip(),
+            "dataset_id": str(dataset_id),
+            "upload_path": upload_path,
+            "name": str(name)[:200],
+            "source_name": str(source_name)[:500],
+            "data_hash": actual_hash,
+            "version_fingerprint": str(version_fingerprint).lower(),
+            "row_count": row_count,
+            "column_count": column_count,
+            "schema": dict(schema),
+            "transformations": [dict(x) for x in transformations],
+        })
+        if session_state is not None:
+            try:
+                session_state.pop(resume_key, None)
+            except Exception:
+                pass
+        return result
+    except Exception:
+        # Do not remove an incomplete upload here. The resumable URL stays
+        # session-scoped for a same-file retry; stale temporary objects are
+        # handled by the separate reference-aware cleanup/recovery process.
+        raise
+
+def edge_register_dataset_version(
+    username: str,
+    token: str,
+    workspace: str,
+    dataset_id: str,
+    name: str,
+    source_name: str,
+    data_hash: str,
+    version_fingerprint: str,
+    row_count: int,
+    column_count: int,
+    schema: Mapping[str, Any],
+    transformations: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Retired metadata-only API; use the verified resumable upload/finalize path."""
+    raise RuntimeError(
+        "Metadata-only dataset version registration is retired. "
+        "Use edge_upload_and_register_dataset_version() so the uploaded bytes, "
+        "content hash and Storage-backed metadata commit are verified together."
+    )
+
+def edge_save_platform_record(
+    username: str,
+    token: str,
+    workspace: str,
+    record_type: str,
+    entity_key: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Persist one validated workspace-scoped engineering record through the staging Edge API."""
+    import re
+
+    user = str(username or "").strip()
+    bearer = str(token or "")
+    scope = str(workspace or "default").strip()
+    kind = str(record_type or "").strip().lower()
+    key = str(entity_key or "").strip()
+    if not user or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", scope):
+        raise ValueError("Workspace identifier is invalid.")
+    if kind not in _PLATFORM_RECORD_TYPES:
+        raise ValueError("Platform record type is not supported.")
+    if not key or len(key) > 240 or any(ord(ch) < 32 or ord(ch) == 127 for ch in key):
+        raise ValueError("Platform entity key is invalid.")
+    safe_payload = _validate_platform_record_payload(payload)
+    return _edge_call("platform_record_save", {
+        "username": user,
+        "token": bearer,
+        "workspace": scope,
+        "record_type": kind,
+        "entity_key": key,
+        "payload": safe_payload,
+    })
+
+
+def edge_list_platform_records(
+    username: str,
+    token: str,
+    workspace: str = "default",
+    record_type: str = "",
+    limit: int = 100,
+    entity_key: str = "",
+    organization_id: str = "",
+    organization_workspace_id: str = "",
+) -> list[dict[str, Any]]:
+    """List workspace records using bounded server-filtered pages."""
+    import re
+
+    user = str(username or "").strip()
+    bearer = str(token or "")
+    scope = str(workspace or "default").strip()
+    kind = str(record_type or "").strip().lower()
+    key = str(entity_key or "").strip()
+    if not user or not bearer:
+        raise PermissionError("An authenticated workspace session is required.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", scope):
+        raise ValueError("Workspace identifier is invalid.")
+    if kind and kind not in _PLATFORM_RECORD_TYPES:
+        raise ValueError("Platform record type is not supported.")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+        raise ValueError("Platform record limit must be between 1 and 10,000.")
+    if len(key) > 240 or any(ord(ch) < 32 or ord(ch) == 127 for ch in key):
+        raise ValueError("Platform entity key is invalid.")
+
+    records: list[dict[str, Any]] = []
+    offset = 0
+    while len(records) < limit:
+        page_limit = min(200, limit - len(records))
+        result = _edge_call("platform_record_list", {
+            "username": user,
+            "token": bearer,
+            "workspace": scope,
+            "organization_id": str(organization_id or "").strip(),
+            "organization_workspace_id": str(organization_workspace_id or "").strip(),
+            "record_type": kind,
+            "entity_key": key,
+            "limit": page_limit,
+            "offset": offset,
+        })
+        page = result.get("records", [])
+        if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+            raise RuntimeError("Platform persistence returned an invalid record list.")
+        if len(page) > page_limit:
+            raise RuntimeError("Platform persistence exceeded the requested page size.")
+        records.extend(page)
+        if not bool(result.get("has_more")):
+            break
+        next_offset = result.get("next_offset")
+        if isinstance(next_offset, bool) or not isinstance(next_offset, int) or next_offset <= offset:
+            raise RuntimeError("Platform persistence returned an invalid pagination cursor.")
+        if not page:
+            raise RuntimeError("Platform persistence reported more data after an empty page.")
+        offset = next_offset
+    return records

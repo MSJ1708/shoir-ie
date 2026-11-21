@@ -1,0 +1,207 @@
+# Shoir-IE Final Release GO / NO-GO
+
+Assessment date: 2026-11-06. Evidence baseline: `bd76f8450c20e18aa74d9b70d0945e735aa2b804`.  
+Decision: **NO-GO — RELEASE NOT AUTHORISED**.
+
+| Mandatory gate | Current evidence | Decision |
+|---|---|---|
+| Full suite exact SHA | Latest run #42244270608 still in progress; prior completed run had 2 failed, 3 skipped | BLOCKED |
+| Historical 43 failures | Exact run/test inventory not recovered | BLOCKED |
+| Zero unexplained skips/warnings | Current JUnit -ra result pending | BLOCKED |
+| SQLite lifecycle | Test corrections committed; current suite retest pending; additional concurrency/WAL coverage required | IN PROGRESS |
+| Organisation lifecycle | Migration source-only; staging has zero organisation tables; Edge has no organisation actions | FAIL |
+| Dataset lifecycle | Partial staging support; resumable upload/orphan cleanup/downstream invalidation/hosted E2E open | IN PROGRESS |
+| Digital Thread | Canonical identity foundation; managed org lineage acceptance open | IN PROGRESS |
+| T096 | No live SAP/Oracle transport or sandbox evidence; 22 cases NOT RUN | BLOCKED |
+| T098 | Draft PR #223; no configured IdP/MFA hosted test | BLOCKED |
+| Security and DB parity | Stage v13/23 migrations; prod v9/14; production legal columns absent and internal RLS off | BLOCKED |
+| Visual/RTL acceptance | Full 25-screen, 3-viewport authenticated evidence not established | BLOCKED |
+| Export | Synthetic PDF/PPTX parser/render evidence; full authenticated XLSX/PDF/PPTX flow open | IN PROGRESS |
+| Engineering calculations | 0 verified, 88 need validation, 10 foundation-only, 2 external | BLOCKED |
+| PDPL/legal/operator | Verified operator identity and qualified sign-off absent | BLOCKED |
+| Third-party provenance | SBOM/licence/assets/ownership/trademark evidence incomplete | BLOCKED |
+| Backup/restore | PITR and restore rehearsal not verified | BLOCKED |
+| Independent review | Final security/privacy/engineering sign-offs absent | BLOCKED |
+| Production rollout approval | No explicit authorised coordinated deployment | BLOCKED |
+
+## Completion sequence
+
+1. Finish [validation run #42244270608](https://github.com/MSJ1708/shoir-ie/actions/runs/42244270608) and duplicate #42244259985; inspect JUnit, resolve all failures/skips/warnings, then rerun full suite on exact SHA.
+2. Review/replay organisation migration in clean PostgreSQL 17, apply to staging after approval, add session-derived Edge actions and wire existing team workspace UI. Test three disposable users, roles, invitations, ownership transfer, removals and cross-tenant denial.
+3. Finish dataset orphan cleanup, retention/deletion, downstream invalidation and hosted historical version/hash tests; preserve raw XLSX separately through Excel Intelligence.
+4. Integrate Digital Thread managed identity/lineage and prove save/reload/re-login, rename preservation, exact version references and stale dependent outputs.
+5. Complete T096 secure provider-aware GET transport and obtain real SAP/Oracle non-production tenants and scoped credentials.
+6. Complete T098 independent review, staging IdP configuration, real MFA semantics and hosted positive/negative/replay/audit tests.
+7. Complete authenticated visual and export acceptance, including 1440/768/390, RTL where supported, all charts, workbook round-trip and PDF/PPTX rendered-page review.
+8. Validate all marketed calculations against independent reference cases and qualified IE review; resolve 10 foundation-only targets or keep them honestly unavailable.
+9. Obtain verified operator details, working support/refund process, PDPL/privacy review, SBOM/licence/asset clearance and engineering sign-offs.
+10. Reconcile staging/production schema and Edge Function, inspect CORS/RLS/grants, verify backup/PITR, rehearse restore and prepare one coordinated rollback-capable production bundle.
+11. Obtain independent review against exact final SHA and explicit production rollout approval.
+
+No production migration, Edge Function deployment, app deployment or customer-data mutation was performed. The protected administrator aggregate invariant was verified in both environments and was not modified.
+
+**NO-GO — RELEASE NOT AUTHORISED.** Change this decision only when every mandatory gate is PASS and the required approval evidence is attached.
+
+
+## Additional CORS recheck — 2026-11-06
+
+A read-only inspection of the deployed production persistence Edge Function v9 found a response header hard-coded as `Access-Control-Allow-Origin: *`. The deployed staging v13 helper uses an explicit allowlist, but its previous source allowlist included production and staging hosts together. The candidate now binds allowed origins to the exact Supabase project ref: production permits only `https://shoir-ie-app.streamlit.app`; staging permits the configured staging Streamlit hosts and local development origins; an unknown project fails closed; origin-less server-to-server requests remain supported and still require session/action authentication. Cross-environment CORS regression tests were added.
+
+Dedicated Edge Function verification [run #42251683171](https://github.com/MSJ1708/shoir-ie/actions/runs/42251683171) on SHA `cf806aad170916f7e1003a3ef92ffbda2195899c` passed: Deno format checked 3 files, Deno type-check passed, and the security test suite reported **13 passed, 0 failed**. This source fix is not deployed. Production remains on v9 and continues to return wildcard CORS until a reviewed coordinated production rollout is explicitly approved. Do not treat this as a production remediation already applied.
+
+## Live release recheck — 2026-11-07
+
+The earlier sections in this report contain historical staging/CI details. The verified current source baseline is `bb08df77b8b3f7f3eb14159f852d757e33834188`; use this addendum wherever earlier values differ.
+
+- Staging now has the base organisation migration `20261107120637` applied (24 remote versions in total), five RLS-enabled organization tables and service-role-only organization RPCs. The backfill is 9 personal organizations and 9 owner memberships; there are still no team workspaces, invitations or organization audit events.
+- Staging persistence is v14. Its deployed Edge `index.ts` is not yet the candidate version. The candidate has organization suspend/restore, close and revision-checked shared workspace handlers, plus pending migrations `20261107150000`, `20261107153000` and `20261107160000`.
+- The refund-policy source is now aligned to staging's actual recorded version `20261025164602` after exact SQL comparison. The remaining local-only migration versions are `20261026110000` and the three organization migrations; the safe referral migration is idempotent and has an equivalent staging application recorded as `20261105101231`.
+- Current 100-tool matrix: 96 implemented-needs-validation, 4 external-configuration-required (T096–T099), 0 verified-working.
+- The six exact-source workflows (validation `42408321586`, replay `42408321582`, Edge `42408321617`, Excel `42408321580`, subscription `42408321585`, production-v9 backport `42408321591`) were queued at the last inspection. None is a pass. Hosted authenticated E2E, module acceptance and the authenticated live smoke remain unverified.
+- Production remains untouched: migration ledger `20261019140600`, persistence Edge v9. No legal columns or organization tables were applied to production.
+
+**Decision remains NO-GO.** Do not apply the pending staging migrations or deploy the new staging Edge Function until clean migration replay and exact-head CI pass and a staging backup/rollback point is confirmed. Do not deploy production. Keep BETA.
+
+## Live execution recheck — 2026-11-09
+
+This addendum supersedes any older environment/version statements above where they conflict. Read-only verification was performed against the connected GitHub and Supabase projects.
+
+### Exact candidate and CI
+
+- PR #232 remains **open and draft**, targeting `staging-e2e-20261019`.
+- Candidate HEAD observed: `4ac0dcddd46efa42fa6c0bc80f59958195ecf430`.
+- Clean PostgreSQL 17 migration-history replay: run [#42629230716](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230716) — **SUCCESS**.
+- Candidate Edge Function verification: run [#42629230535](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230535) — **SUCCESS**.
+- Production-compatible security backport verification: run [#42629230440](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230440) — **SUCCESS**.
+- Subscription transaction integration: run [#42629230405](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230405) — **SUCCESS**.
+- Excel Intelligence: run [#42629230399](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230399) — **SUCCESS**.
+- Main validation: run [#42629230631](https://github.com/MSJ1708/shoir-ie/actions/runs/42629230631) was still running its regression-test step at inspection. Its separate `live-deployment-smoke` job was **SKIPPED**, not passed.
+- No exact-head full validation pass is claimed until that run finishes and its reports are inspected.
+
+### Current staging facts
+
+- Project: `hfhrosthswcybccepmak`; PostgreSQL 17.11; `ACTIVE_HEALTHY`.
+- Remote migration ledger: 24 versions, ending at `20261107120637`.
+- Persistence Edge Function: active v14; deployed source hash `c4befd44dadd08d6e451026bdbc0039a6613c6505715d4e7c20f3ae5a20fa500`.
+- The three candidate migrations `20261107150000`, `20261107153000` and `20261107160000` remain unapplied.
+- The Performance Advisor still reports six unindexed organization foreign keys. Migration `20261107160000` contains the covering indexes for those references, the complete organization-owner FK and the shared-state updater FK. This is a known, unremediated staging finding until the migration is safely applied and the Advisor is rechecked.
+- Security and Health Advisors returned no lints. The Performance Advisor also reports unused indexes; those are informational and must not be dropped without workload evidence.
+- Live read-only counts: 9 organizations, 0 team workspaces, 0 invitations and 0 organization audit events. This does not prove team-collaboration acceptance.
+- The seven named disposable staging identities (`shoir-e2e-active`, `second`, `starter`, `expired`, `module`, `research`, `inactive`) already exist with the expected broad tier/active/expiry categories. An additional `shoir-e2e-staging-001` identity also exists. Do not provision duplicates. Credentials and GitHub Actions secret values were not read or exposed.
+
+### Current production facts
+
+- Project: `gcsamrdaeraxieaagsta`; PostgreSQL 17.6; `ACTIVE_HEALTHY`.
+- Remote migration ledger: 14 versions, ending at `20261019140600`.
+- Persistence Edge Function: active v10; deployed source hash `4708c87c43ca805536bb1c5decc0205527f400f06496d25a002a6d29d0898d0f`.
+- Security and Health Advisors returned no lints; Performance Advisor reports unused indexes only.
+- Production schema remains behind staging and does not have the staging legal-acceptance/organization changes. No production DDL, Edge deployment, Streamlit deployment or customer/account mutation was performed.
+
+### Protected administrator invariant
+
+Read-only queries in both projects returned exactly one `sho` row with role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, active `true`, and expiry `2099-01-01T00:00:00Z`. It was not used for testing or modified.
+
+### Release decision and next safe action
+
+**NO-GO — RELEASE NOT AUTHORISED.**
+
+The exact-head clean migration replay and five focused integration/verification workflows have passed, but the full regression workflow remains in progress, hosted authenticated staging acceptance has not been run, and the three organization migrations are not deployed. The connected controls do not provide a database backup/PITR snapshot inspection or GitHub workflow-dispatch action. Therefore no migration or new staging Edge deployment is being performed without a separately confirmed staging recovery point and the required authenticated acceptance path.
+
+Next sequence: finish and inspect exact-head validation; verify an actual recoverable staging backup/restore point; apply the three migrations in timestamp order to staging only; recheck schema, grants, RLS and Performance Advisor; deploy the exact candidate Edge source to staging and verify its version/hash; run the authenticated gate with the existing disposable accounts and configured Actions secrets; then complete browser, engineering, dataset/Digital Thread, export, integration and legal acceptance. Keep PR #232 draft and keep BETA. Do not deploy or migrate production.
+
+
+## Current exact-head recheck — 2026-11-18
+
+The last inspected candidate was b43571cacdfa791d1417ca73ee10e572028f61f2. Supporting workflows passed (Engine Regression 521/521; Edge Function 14/14; clean local PostgreSQL 17 replay 2/2; PostgreSQL transaction contract; production-v9 backport 5/5; Excel Intelligence 38 Python tests and 9 Node planner tests; dependency audit with no known vulnerabilities).
+
+The full validation run [#43929726913](https://github.com/MSJ1708/shoir-ie/actions/runs/43929726913) was **CANCELLED at the 120-minute job limit**, with pytest output at approximately 40%. Three failure markers were visible before cancellation, but no JUnit XML or final traceback was produced. The failing test names and final totals are unknown. The full validation gate is **BLOCKED**, not passed. Independent Deno, dependency, code-pattern, synthetic export-render, application import and local responsive public-entry smoke steps completed successfully after cancellation; the in-workflow PostgreSQL and Node checks were skipped. See docs/SHOIR_IE_TECHNICAL_HANDOFF_20261118.md for exact evidence and remediation.
+
+The CI workflow now runs file-isolated parallel tests, keeps shared-PostgreSQL integration tests serial, adds a 10-minute per-test diagnostic timeout and verbose output, preserves separate JUnit files, runs independent checks after regression failures, extends the job limit to 180 minutes and moves Node setup to Node 24. These are workflow changes, not a passing test result. Keep the decision **NO-GO / BETA** until the new exact-head run completes and all identified failures are corrected.
+
+
+## Full-suite failure diagnosis and remediation — 2026-11-18
+
+The exact-head full run on `8f671ed83f4fc05dcae558b5a7d751b3b64db151` completed its 1,413-test report and found 14 failures, 0 errors and 0 skips in the parallel suite. The serial PostgreSQL suite passed 3/3. The failures were:
+
+- Ten Streamlit AppTest timeouts across `test_shoir_resource_intelligence.py`, `test_shoir_100_tool_workbench.py` and `test_shoir_tool_trust_center_workbench.py`. The tests launch full Workbench pages backed by the same local SQLite stores. Running those three modules concurrently on separate xdist workers caused contention and exceeded the AppTest's 45–60 second script-run limits; one long nine-tool end-to-end UI test also exceeded the global 600-second timeout.
+- Two stale error-message regex expectations in `test_final_integration.py`; the current implementation intentionally reports the more precise text “dataset lineage is stale or unverified” and “source dataset version is no longer current”. The assertions have been aligned to the implemented safety messages.
+- One SQLite ResourceWarning caused by the test itself using `with sqlite3.connect(...)`, whose context manager commits/rolls back but does not close the connection. The test now uses `contextlib.closing` for both connections.
+- One workflow-contract test expected the old literal `pytest -q tests` after the CI command had been deliberately replaced with xdist and separate serial suites. The contract now asserts the new parallel/serial workflow and report artifacts.
+
+### Remediation added
+
+The three Streamlit-heavy modules are removed from the parallel xdist suite and are now run in a dedicated serial AppTest step with a 30-minute per-test diagnostic ceiling. The nine-canonical-tool UI route test has the same explicit timeout marker so its full route/entitlement matrix is not killed at ten minutes. PostgreSQL integration remains its own serial step. Both parallel and serial reports remain uploaded as separate JUnit XML files. This preserves all test cases; none is skipped or weakened.
+
+The updated exact-head CI must still run and pass before this remediation is considered complete.
+
+
+## Current candidate reconciliation — 2026-11-20
+
+**Decision remains NO-GO — RELEASE NOT AUTHORISED. Keep BETA and PR #232 draft/unmerged.** This note supersedes older implementation descriptions where they conflict with the active release-hardening candidate; historical test and deployment evidence remains tied to its original SHA only.
+
+Repository-side follow-up now includes:
+- A fail-closed Facility Layout T065 renderer guard requiring an authenticated session, matching active username and canonical Starter-tier tool entitlement.
+- The current 100-tool source audit and reconciled T098 identity/audit handoff. T098's optional OIDC login, server-side ID-token verifier, verified-email account mapping, optional provider-claim MFA, replay protection and append-only audit implementation are present in PR #232. No IdP tenant/client/secrets/MFA mapping, hosted login acceptance or staging audit migration deployment is established.
+- A signed Supabase TUS dataset upload client with 6 MiB chunks, bounded retry and offset recovery. Resume URL is held only in the active Streamlit server session (23-hour validity window); this is not guaranteed across restarts or fresh devices.
+- Dataset finalization now registers immutable metadata before temporary cleanup and removes a newly created final object after a failed RPC only when both metadata ledgers confirm no reference. Migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql` add a private server-only workspace/dataset lease with bounded renewal, token fencing and transaction-locked metadata commit wrappers. Finalization, generic T020 reference writes and cleanup share this lease. T020 cleanup previews by default and can delete 48-hour-old, unreferenced temporary or immutable dataset objects only while holding a live `sweep` lease and after successful dual-ledger checks; it records kind-specific deletion intent/completion events, caps each invocation at 50 deletions and fails closed on uncertain lease/reference state. The lease expires within its configured 30–600 second bound if an invocation crashes. No automatic schedule is configured.
+
+
+
+### Repository engineering update — 2026-11-20: dataset Storage lifecycle coordination
+
+The release-hardening candidate now includes:
+- A server-only PostgreSQL lease table and SECURITY DEFINER acquire/renew/release RPCs with pinned search paths, RLS, no direct browser/service-role table grants, bounded 30–600 second lease duration and matching-token/operation/actor fencing.
+- Dataset finalization renews its workspace/dataset lease through Storage verification and immutable object creation; its final metadata RPC locks and verifies the live `finalize` token inside the same database transaction before writing dataset version/head/event rows.
+- T020 cleanup acquires the same lease before the exact-storage-key checks against both platform records and events, then writes intent, deletes and writes completion while still holding the lease. It handles temporary and immutable orphan objects. Generic platform-record writes also acquire a register lease for valid T020 storage references and reject malformed or cross-workspace T020-style paths.
+- PostgreSQL replay contracts cover RLS and grants, function permissions, active-lease conflict, wrong-token release, idempotent release, invalid TTL rejection and expired-lease reclamation. Static tests cover Edge ordering and the operator contract.
+
+**This is not yet accepted for staging deployment.** The migration and Edge Function source are in PR #232 only. Run exact-head migration replay, Edge formatting/type/security, Engine Regression and full validation; inspect all artifacts and warnings; obtain independent review; then confirm a staging backup/rollback point before deploying to staging. No staging or production migration/function deployment is authorized by this repository commit.
+
+The T094 result and open-alert state are now included in eligible workspace snapshots and the Workbench test round-trips them through the serializer. This remains local automated evidence, not deployed managed-backend acceptance.
+
+These source changes require all applicable workflows to pass on the exact final candidate SHA. A previous head's green workflows do not certify later commits, and local unauthenticated browser smoke is not hosted authenticated acceptance.
+
+Still externally controlled: real T096 provider sandbox/credential and provider-specific SAP/Oracle implementation; T097 public API host/gateway/OpenAPI/SDK/external client; T098 real OIDC provider/secrets/MFA policy/hosted tests; T099 backup/PITR/off-project Storage-object backups and isolated restore with measured RPO/RTO. Also outstanding: apply reviewed staging-only migrations and deploy matching Edge Function after staging backup/rollback proof; disposable authenticated Owner/Admin/Engineer/Approver/Viewer and cross-org acceptance; complete workbook/data/model/simulation/optimization/decision/export browser journeys; Office-hosted add-in/Microsoft tenant validation; independent engineering/security review; Saudi PDPL/e-commerce/privacy/refund/legal identity review; written release approval and eventual production parity/cutover.
+
+No staging or production database mutation, secret change, Edge deploy, Streamlit deployment, merge, branch-ruleset change or production cutover is authorized or claimed by this repository work. Do not promote any tool to `VERIFIED_WORKING` on source/route/test presence alone.
+
+
+---
+
+## Superseding release assessment — 2026-11-20
+
+**Decision remains BETA / NO-GO. PR #232 remains open and draft.** The opening table and checklist above are a historical 2026-11-06 baseline and must not be read as current environment evidence.
+
+### Current candidate and exact-head checks
+
+- PR #232 head at this assessment: `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`.
+- Staging target: `staging-e2e-20261019`.
+- Latest Edge verification: [#44755607682](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607682) — passed Deno formatting, TypeScript, bounded request/security and OIDC tests.
+- Production-v9 compatibility: [#44755607850](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607850) — completed successfully.
+- Engine Regression: [#44755607917](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607917) — in progress at this snapshot.
+- Full validation: [#44755607737](https://github.com/MSJ1708/shoir-ie/actions/runs/44755607737) — pending at this snapshot.
+- Migration replay, transaction integration, security/quality and Excel checks were also running at this snapshot; inspect their exact-head results before approval.
+
+A preceding Engine Regression on SHA `d9eae17a21673e0b49b53a9c27faa668a2dee587` reported 4 failed / 537 passed. Two T063 tests and its Workbench test failed because PuLP `PULP_CBC_CMD` is deprecated in the pinned PuLP 3.3.2; one T028 Workbench test failed because the test module did not import `json`. The fixes were committed on subsequent candidate heads: T063 now uses `COIN_CMD`, and the Workbench test imports `json`. Exact-head regression retest is mandatory; do not close this item from the earlier result.
+
+The metadata-only `dataset_version_register` route is retired (HTTP 410) because it could create a metadata head without downloadable bytes. The supported T020 registration flow is TUS upload plus lease-fenced finalization.
+
+### Dataset and Digital Thread
+
+The candidate now has TUS upload, private per-dataset renewable lifecycle leases, transaction-fenced metadata registration/reference writes, a manual preview-first orphan sweep for temporary and immutable objects, and source-level downstream lineage invalidation. The two lifecycle/fencing migrations and matching Edge Function remain candidate-only. Hosted TUS/fresh-session/tenant/decision/export acceptance, raw XLSX retention in the dataset registry and independent method review remain open.
+
+### Environment and deployment
+
+Read-only Supabase Edge inventory reports staging `shoir-persistence` v14 ACTIVE and production v10 ACTIVE. The connected database migration-history read rejected authentication; the applied live migration ledger is not verified by this connection. No staging or production migration/Edge deployment was performed.
+
+### Remaining mandatory release gates
+
+1. All eight required CI contexts pass on the same final HEAD; inspect JUnit, skip/warning details, migration replay, Deno, Excel, export-render and viewport artifacts.
+2. One independent reviewer approves the latest push and all review threads are resolved.
+3. An authorized operator reconciles the staging migration ledger and documents a recoverable database **and Storage-byte** backup/rollback point.
+4. Staging migrations are applied in a reviewed window and the exact matching Edge source is deployed only after the above gates; record deployed hashes/versions and recheck RLS/grants/RPCs/advisors/bucket policy.
+5. Authenticated disposable-account staging acceptance proves tenant roles, TUS resume/download, T020 lease conflict/renewal/expiry/fencing/audit, Digital Thread continuity, calculation/simulation/optimization/decision/export and fresh-login behavior.
+6. Qualified Industrial Engineering, security, infrastructure/recovery and Saudi privacy/legal reviewers sign their scopes.
+7. Main ruleset is strengthened by a repository administrator to require migration replay, PostgreSQL transaction integration, production-v9 compatibility and Excel Intelligence checks; then a separate production release PR, reviewed migration plan, tested rollback and explicit owner authorization are required.
+
+No production deployment, merge or customer rollout is authorized by this assessment.

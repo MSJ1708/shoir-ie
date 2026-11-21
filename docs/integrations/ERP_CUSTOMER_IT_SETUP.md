@@ -28,6 +28,8 @@ Do not enable the full catalogue by default. Do not include personal workforce r
 5. Export a sanitized schema/response example with realistic identifiers and personal data removed.
 6. Test in the non-production tenant only after connection setup is reviewed.
 
+**Current Shoir-IE adapter:** standard Fusion Applications REST resources are read using the JWT User Assertion grant plus a signed JWT client assertion; generic Client Credentials is only supported by Oracle for Spectra services. Shoir-IE now implements both RS256 assertions. The tenant administrator must create and activate a trusted confidential app with JWT assertion enabled, import the matching public certificate (alias must equal the JWT `kid`), authorize the exact resource scope, and configure the correct identity-domain application-name issuer/subject claims, OAuth client ID, user subject, identity-domain URL and token endpoint in server-side staging secrets. The private key must stay server-side. Do not attempt a live read until a non-production Oracle tenant and read-only resource are approved and the credential/certificate/claim values are verified.
+
 Reference: https://api.sap.com/
 
 ## 4. SAP S/4HANA Private Edition / on-premise / ECC
@@ -47,11 +49,14 @@ References:
 
 1. Confirm the exact Fusion product family, release, API resource version and whether the target is a Fusion Applications REST API or a Spectra service.
 2. Review the official resource documentation, API scopes and permissions for that resource.
-3. Select the OAuth grant/client flow documented for that resource platform and approved by the tenant identity/security owner. Oracle documentation distinguishes supported grant types across resource platforms; do not assume client credentials are valid for every Fusion Applications resource.
-4. Register/configure the provider-side identity/client in the approved identity domain and grant only necessary privileges.
-5. Use the tenant's official REST base URL. Do not copy an example URL from a different customer's tenant.
-6. Provide a sanitized example response and pagination contract.
-7. Test only with a non-production account/tenant.
+3. For normal Fusion Applications REST resources, select the JWT User Assertion grant (two-legged, on behalf of a user) and use a separate signed client assertion. Do not select Client Credentials for standard Fusion Applications resources; Oracle documents that grant only for Spectra services.
+4. Register a Confidential Application in the Fusion Applications identity domain. Enable the JWT assertion grant, mark the client Trusted, import the public X.509 certificate that corresponds to the Shoir-IE server-side RSA private key, and set the certificate alias to exactly the `kid` used in the JWT header.
+5. Record the generated OAuth Client ID, exact identity-domain root URL, token URL (`/oauth2/v1/token`), exact application-name values used as `assertion_issuer` and `client_assertion_subject`, least-privilege Oracle username for `user_subject`, and the exact authorized resource scope. The OAuth Client ID and JWT application-name claim values are distinct settings; confirm the values in the identity-domain UI and do not infer them.
+6. Store the private key only in the dedicated staging Streamlit server-side secret store or approved vault. Never put it in Git, browser input, GitHub Actions, a workbook or chat. The key must be RSA 2048-bit or stronger; rotate the certificate and key together and update the registered certificate alias/`kid`.
+7. Confirm the Oracle read-only user has only the approved resource roles and that no write privileges are assigned to the integration identity.
+8. Use the tenant's official REST base URL. Do not copy an example URL from a different customer's tenant.
+9. Provide a sanitized example response and pagination contract.
+10. Test only with a non-production account/tenant.
 
 References:
 - https://docs.oracle.com/en/cloud/saas/financials/26d/api.html

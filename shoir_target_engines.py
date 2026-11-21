@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pulp
+from scipy.optimize import linprog, minimize
 from scipy.stats import f, nct, norm, t
 
 
@@ -135,11 +136,11 @@ def solve_cutting_stock(
     bins = range(total_items)
     choices = range(len(normalized))
     used = {
-        b: pulp.LpVariable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
+        b: model.add_variable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
         for b in bins
     }
     allocation = {
-        (i, b): pulp.LpVariable(
+        (i, b): model.add_variable(
             f"part_{i}_in_stock_{b}",
             lowBound=0,
             upBound=normalized[i]["quantity"],
@@ -163,7 +164,7 @@ def solve_cutting_stock(
             model += used[b] >= used[b + 1], f"symmetry_{b}"
 
     try:
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds)
+        solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit_seconds)
         if not solver.available():
             raise RuntimeError("PuLP's CBC solver is not available in this runtime.")
         model.solve(solver)
@@ -250,12 +251,20 @@ def monitor_forecast_drift(
     max_mae: float,
     *,
     window: int | None = None,
+    model_id: str = "",
+    model_version: str = "",
+    dataset_id: str = "",
+    dataset_version: str = "",
+    source_label: str = "",
+    evaluation_period_start: str = "",
+    evaluation_period_end: str = "",
 ) -> dict[str, Any]:
     """Monitor forecast fit against later actuals using an absolute MAE threshold.
 
     This is a threshold check, not a self-training detector, causal explanation,
-    or automatic retraining service. Actual zero values are excluded from MAPE
-    and counted in the returned metadata.
+    or automatic retraining service. Optional model/dataset version labels and
+    evaluation dates are user-supplied lineage metadata, not registry-verified.
+    Actual zero values are excluded from MAPE and counted in the returned metadata.
     """
     if isinstance(predictions, (str, bytes)) or isinstance(actuals, (str, bytes)):
         raise ValueError("Predictions and actuals must be numeric sequences.")
@@ -277,6 +286,49 @@ def monitor_forecast_drift(
         if window > len(pred):
             raise ValueError("Window cannot exceed the number of aligned observations.")
         pred, obs = pred[-window:], obs[-window:]
+
+    metadata_values = {
+        "model_id": model_id,
+        "model_version": model_version,
+        "dataset_id": dataset_id,
+        "dataset_version": dataset_version,
+        "source_label": source_label,
+    }
+    normalized_metadata: dict[str, str] = {}
+    for field_name, raw_value in metadata_values.items():
+        value = str(raw_value or "").strip()
+        if len(value) > 160:
+            raise ValueError(f"{field_name} must not exceed 160 characters.")
+        normalized_metadata[field_name] = value
+    if bool(normalized_metadata["model_id"]) != bool(normalized_metadata["model_version"]):
+        raise ValueError("Model ID and model version must be supplied together.")
+    if bool(normalized_metadata["dataset_id"]) != bool(normalized_metadata["dataset_version"]):
+        raise ValueError("Dataset ID and dataset version must be supplied together.")
+
+    period_start = str(evaluation_period_start or "").strip()
+    period_end = str(evaluation_period_end or "").strip()
+    if bool(period_start) != bool(period_end):
+        raise ValueError("Evaluation period start and end must be supplied together.")
+    if period_start:
+        try:
+            parsed_start = _date.fromisoformat(period_start)
+            parsed_end = _date.fromisoformat(period_end)
+        except ValueError as exc:
+            raise ValueError("Evaluation period must use ISO YYYY-MM-DD dates.") from exc
+        if parsed_start.isoformat() != period_start or parsed_end.isoformat() != period_end:
+            raise ValueError("Evaluation period must use ISO YYYY-MM-DD dates.")
+        if parsed_end < parsed_start:
+            raise ValueError("Evaluation period end cannot be before its start.")
+
+    has_model_lineage = bool(normalized_metadata["model_id"] and normalized_metadata["model_version"])
+    has_dataset_lineage = bool(normalized_metadata["dataset_id"] and normalized_metadata["dataset_version"])
+    lineage_status = (
+        "USER_SUPPLIED_MODEL_AND_DATASET_VERSIONS"
+        if has_model_lineage and has_dataset_lineage
+        else "PARTIAL_USER_SUPPLIED_LINEAGE"
+        if has_model_lineage or has_dataset_lineage or period_start or normalized_metadata["source_label"]
+        else "NOT_PROVIDED"
+    )
     residuals = [a - p for p, a in zip(pred, obs)]
     absolute_errors = [abs(x) for x in residuals]
     mae = sum(absolute_errors) / len(residuals)
@@ -305,7 +357,16 @@ def monitor_forecast_drift(
         "zero_actuals_excluded_from_mape": len(obs) - len(nonzero),
         "max_mae_threshold": limit,
         "window": len(pred),
-        "warning": "Threshold alarms indicate degraded forecast fit; they do not identify cause or retrain a model.",
+        "model_id": normalized_metadata["model_id"] or None,
+        "model_version": normalized_metadata["model_version"] or None,
+        "dataset_id": normalized_metadata["dataset_id"] or None,
+        "dataset_version": normalized_metadata["dataset_version"] or None,
+        "source_label": normalized_metadata["source_label"] or None,
+        "evaluation_period_start": period_start or None,
+        "evaluation_period_end": period_end or None,
+        "lineage_status": lineage_status,
+        "lineage_verification": "USER_SUPPLIED_UNVERIFIED",
+        "warning": "Threshold alarms indicate degraded forecast fit; they do not identify cause or retrain a model. Model/dataset IDs and versions are user-supplied and not checked against a registry or source connector.",
         "series": frame,
     }
 
@@ -418,8 +479,9 @@ def analyze_pareto_root_cause(
     countermeasure: str = "",
     owner: str = "",
     due_date: str = "",
+    fishbone_causes: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
-    """Build a reproducible Pareto table and optionally record a complete 5-Why chain.
+    """Build Pareto, optional 5-Why/action, and an optional structured fishbone record.
 
     Pareto concentration describes the observed counts and does not establish
     causation. A 5-Why record is a hypothesis/evidence structure requiring
@@ -487,6 +549,68 @@ def analyze_pareto_root_cause(
         status = "ROOT_CAUSE_REVIEW_RECORDED" if follow_up_complete else "FOLLOW_UP_INCOMPLETE"
     else:
         status = "PARETO_ONLY"
+
+    # Optional six-category fishbone (Ishikawa) structure. This records
+    # investigation hypotheses; it does not infer or prove physical causes.
+    fishbone_categories = {
+        "Manpower": {"manpower", "man", "people", "personnel"},
+        "Machine": {"machine", "machinery", "equipment"},
+        "Method": {"method", "process"},
+        "Material": {"material", "materials"},
+        "Measurement": {"measurement", "measurements", "inspection"},
+        "Environment": {"environment", "mother nature", "mother_nature", "milieu"},
+    }
+    fishbone_by_category: dict[str, list[str]] = {
+        category: [] for category in fishbone_categories
+    }
+    if fishbone_causes is not None:
+        if not isinstance(fishbone_causes, Mapping):
+            raise ValueError("Fishbone causes must be a JSON object keyed by the six M categories.")
+        seen_fishbone_categories: set[str] = set()
+        for raw_category, raw_causes in fishbone_causes.items():
+            category_text = str(raw_category or "").strip().casefold()
+            canonical = next(
+                (
+                    category for category, aliases in fishbone_categories.items()
+                    if category_text in aliases or category_text == category.casefold()
+                ),
+                None,
+            )
+            if canonical is None:
+                raise ValueError(
+                    "Fishbone categories must be one of the six M categories: Manpower, Machine, Method, Material, Measurement or Environment."
+                )
+            if canonical in seen_fishbone_categories:
+                raise ValueError(f"Fishbone category {canonical} was supplied more than once.")
+            seen_fishbone_categories.add(canonical)
+            if isinstance(raw_causes, (str, bytes)) or not isinstance(raw_causes, Sequence):
+                raise ValueError(f"Fishbone causes for {canonical} must be a list of text statements.")
+            if len(raw_causes) > 12:
+                raise ValueError(f"Fishbone category {canonical} is limited to 12 cause statements.")
+            normalized_causes: list[str] = []
+            seen_causes: set[str] = set()
+            for index, raw_cause in enumerate(raw_causes, start=1):
+                cause = str(raw_cause or "").strip()
+                if not cause or len(cause) > 240:
+                    raise ValueError(
+                        f"Fishbone cause {index} in {canonical} must contain 1 to 240 characters."
+                    )
+                key = cause.casefold()
+                if key in seen_causes:
+                    raise ValueError(f"Duplicate fishbone cause in {canonical}: {cause}.")
+                seen_causes.add(key)
+                normalized_causes.append(cause)
+            fishbone_by_category[canonical] = normalized_causes
+
+    fishbone_rows = [
+        {"Category": category, "Cause": cause, "Status": "HYPOTHESIS — VERIFY"}
+        for category, causes in fishbone_by_category.items()
+        for cause in causes
+    ]
+    fishbone_frame = pd.DataFrame(
+        fishbone_rows, columns=["Category", "Cause", "Status"]
+    )
+    fishbone_count = len(fishbone_rows)
     return {
         "status": status,
         "method": "Descending Pareto analysis plus optional structured 5-Why/action record",
@@ -500,6 +624,10 @@ def analyze_pareto_root_cause(
         "owner": action_owner,
         "due_date": date_value,
         "follow_up_complete": follow_up_complete,
+        "fishbone_causes": fishbone_by_category,
+        "fishbone_summary": fishbone_frame,
+        "fishbone_cause_count": fishbone_count,
+        "fishbone_status": "HYPOTHESES_RECORDED" if fishbone_count else "NOT_PROVIDED",
         "formula": "Share = category count / total count; cumulative share = cumulative count / total count.",
         "warning": (
             "Pareto concentration and 5-Why statements do not prove causation. Validate proposed causes with process evidence."
@@ -2242,15 +2370,241 @@ def plan_material_requirements(
     }
 
 
+def plan_recursive_material_requirements(
+    bom: Sequence[Mapping[str, Any]],
+    parent_demand_units: float,
+    *,
+    inventory: Mapping[str, Any] | None = None,
+    due_period: int = 0,
+    max_levels: int = 20,
+) -> dict[str, Any]:
+    """Explode a nested BOM by level, net supply, and propagate planned releases.
+
+    Each component may include a `children` list defining its own BOM. A row
+    accepts component, qty_per_parent, lead_time_periods, lot_size_multiple,
+    optional scrap_pct or yield_pct, revision, and children. Requirements for a
+    repeated item at the same level/due period are aggregated before inventory
+    is netted. An item appearing at multiple levels is rejected to avoid
+    reusing the same inventory balance ambiguously.
+    """
+    demand = _finite_number(parent_demand_units, "Parent demand")
+    if demand <= 0 or not demand.is_integer():
+        raise ValueError("Parent demand must be a positive whole number of assemblies.")
+    if isinstance(due_period, bool) or not isinstance(due_period, int):
+        raise ValueError("Due period must be a whole number index.")
+    if isinstance(max_levels, bool) or not isinstance(max_levels, int) or not 1 <= max_levels <= 20:
+        raise ValueError("max_levels must be an integer between 1 and 20.")
+    if isinstance(bom, (str, bytes)) or not isinstance(bom, Sequence) or not bom:
+        raise ValueError("Provide at least one top-level BOM component object.")
+    if inventory is None:
+        inventory = {}
+    if not isinstance(inventory, Mapping):
+        raise ValueError("Inventory must be a mapping keyed by component name.")
+
+    import json
+
+    stock_by_key = {str(key).strip().casefold(): value for key, value in inventory.items()}
+    available_remaining: dict[str, float] = {}
+    safety_by_key: dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    component_depths: dict[str, int] = {}
+    level = 1
+    current: list[
+        tuple[str, float, int, tuple[tuple[str, ...], ...], Sequence[Mapping[str, Any]]]
+    ] = [("", demand, due_period, (tuple(),), bom)]
+    processed_component_rows = 0
+
+    while current:
+        if level > max_levels:
+            raise ValueError(f"Recursive BOM exceeded the configured {max_levels}-level limit.")
+        grouped: dict[tuple[str, int], dict[str, Any]] = {}
+        for parent_name, parent_demand, parent_due, ancestor_paths, component_rows in current:
+            for row_index, component in enumerate(component_rows, start=1):
+                processed_component_rows += 1
+                if processed_component_rows > 5000:
+                    raise ValueError("Recursive BOM exceeds the 5,000-row safety limit.")
+                if not isinstance(component, Mapping):
+                    raise ValueError(f"BOM level {level}, row {row_index} must be an object.")
+                name = str(component.get("component", component.get("item", ""))).strip()
+                if not name or len(name) > 160:
+                    raise ValueError(f"BOM level {level}, row {row_index} needs a component name of 1 to 160 characters.")
+                key = name.casefold()
+                for ancestor_path in ancestor_paths:
+                    if key in ancestor_path:
+                        raise ValueError(
+                            f"Recursive BOM cycle detected: {' -> '.join((*ancestor_path, key))}."
+                        )
+                prior_depth = component_depths.get(key)
+                if prior_depth is not None and prior_depth != level:
+                    raise ValueError(
+                        f"Component {name} occurs at multiple BOM levels; normalize the BOM to one level per item before netting supply."
+                    )
+                component_depths[key] = level
+
+                qty = _finite_number(component.get("qty_per_parent"), f"Quantity per parent for {name}")
+                if qty <= 0:
+                    raise ValueError(f"Quantity per parent for {name} must be greater than zero.")
+                if "scrap_pct" in component and "yield_pct" in component:
+                    raise ValueError(f"Specify either scrap_pct or yield_pct, not both, for {name}.")
+                if "scrap_pct" in component:
+                    scrap = _finite_number(component.get("scrap_pct"), f"Scrap percentage for {name}")
+                    if not 0 <= scrap < 100:
+                        raise ValueError(f"Scrap percentage for {name} must be in [0, 100).")
+                    yield_pct = 100.0 - scrap
+                else:
+                    yield_pct = _finite_number(component.get("yield_pct", 100), f"Yield percentage for {name}")
+                    if not 0 < yield_pct <= 100:
+                        raise ValueError(f"Yield percentage for {name} must be in (0, 100].")
+                raw_requirement = parent_demand * qty
+                gross = raw_requirement / (yield_pct / 100.0)
+                if not math.isfinite(gross) or gross < 0:
+                    raise ValueError(f"Calculated gross requirement for {name} is invalid.")
+
+                children = component.get("children", [])
+                if isinstance(children, (str, bytes)) or not isinstance(children, Sequence):
+                    raise ValueError(f"Children for {name} must be a JSON list of component objects.")
+                if children and any(not isinstance(child, Mapping) for child in children):
+                    raise ValueError(f"Every child BOM row for {name} must be an object.")
+                children_signature = json.dumps(children, sort_keys=True, separators=(",", ":"))
+                revision = str(component.get("revision", "") or "").strip()
+                lead = _finite_number(component.get("lead_time_periods", 0), f"Lead time periods for {name}")
+                lot = _finite_number(component.get("lot_size_multiple", 1), f"Lot size multiple for {name}")
+                if not lead.is_integer() or lead < 0:
+                    raise ValueError(f"Lead time periods for {name} must be a non-negative whole number.")
+                if not lot.is_integer() or lot <= 0:
+                    raise ValueError(f"Lot size multiple for {name} must be a positive whole number.")
+
+                group_key = (key, parent_due)
+                new_paths = {(*ancestor_path, key) for ancestor_path in ancestor_paths}
+                group = grouped.get(group_key)
+                if group is None:
+                    grouped[group_key] = {
+                        "name": name,
+                        "gross": gross,
+                        "raw_requirement": raw_requirement,
+                        "lead": int(lead),
+                        "lot": int(lot),
+                        "revision": revision,
+                        "children": list(children),
+                        "children_signature": children_signature,
+                        "parents": {parent_name or "TOP_LEVEL"},
+                        "paths": new_paths,
+                    }
+                else:
+                    if (
+                        group["lead"] != int(lead)
+                        or group["lot"] != int(lot)
+                        or group["revision"] != revision
+                        or group["children_signature"] != children_signature
+                    ):
+                        raise ValueError(
+                            f"Conflicting BOM revision, lead time, lot size or child definition for repeated component {name}."
+                        )
+                    group["gross"] += gross
+                    group["raw_requirement"] += raw_requirement
+                    group["parents"].add(parent_name or "TOP_LEVEL")
+                    group["paths"].update(new_paths)
+
+        next_level: list[
+            tuple[str, float, int, tuple[tuple[str, ...], ...], Sequence[Mapping[str, Any]]]
+        ] = []
+        for (component_key, component_due), group in sorted(
+            grouped.items(), key=lambda item: (item[0][1], item[0][0])
+        ):
+            name = group["name"]
+            stock_record = stock_by_key.get(component_key, {})
+            if stock_record is None:
+                stock_record = {}
+            if not isinstance(stock_record, Mapping):
+                raise ValueError(f"Inventory record for {name} must be an object.")
+            if component_key not in available_remaining:
+                on_hand = _finite_number(stock_record.get("on_hand", 0), f"On-hand inventory for {name}")
+                receipts = _finite_number(stock_record.get("scheduled_receipts", 0), f"Scheduled receipts for {name}")
+                safety = _finite_number(stock_record.get("safety_stock", 0), f"Safety stock for {name}")
+                if min(on_hand, receipts, safety) < 0:
+                    raise ValueError(f"On-hand inventory, receipts and safety stock cannot be negative for {name}.")
+                available_remaining[component_key] = on_hand + receipts
+                safety_by_key[component_key] = safety
+            available = available_remaining[component_key]
+            safety = safety_by_key[component_key]
+            gross = float(group["gross"])
+            net = max(0.0, gross + safety - available)
+            lot = int(group["lot"])
+            planned = int(math.ceil(net / lot) * lot) if net > 0 else 0
+            available_remaining[component_key] = max(0.0, available - gross)
+            lead = int(group["lead"])
+            release_period = component_due - lead
+            yield_pct_effective = (
+                100.0 * float(group["raw_requirement"]) / gross if gross > 0 else 100.0
+            )
+            rows.append({
+                "Level": level,
+                "Component": name,
+                "Parent item(s)": ", ".join(sorted(group["parents"])),
+                "Source path(s)": " | ".join(
+                    " -> ".join(path) for path in sorted(group["paths"])
+                ),
+                "BOM revision": group["revision"] or "NOT_SPECIFIED",
+                "Gross requirement": gross,
+                "Effective yield (%)": yield_pct_effective,
+                "Scrap loss quantity": gross - float(group["raw_requirement"]),
+                "On hand + scheduled receipts": available,
+                "Safety stock": safety,
+                "Net requirement": net,
+                "Lot size multiple": lot,
+                "Planned order receipt": planned,
+                "Lead time (periods)": lead,
+                "Due period": component_due,
+                "Planned order release period": release_period,
+                "Release before current period": release_period < 0,
+                "Subassembly with BOM": bool(group["children"]),
+            })
+            if group["children"] and planned > 0:
+                next_level.append((
+                    name,
+                    float(planned),
+                    release_period,
+                    tuple(sorted(group["paths"])),
+                    group["children"],
+                ))
+
+        current = next_level
+        level += 1
+
+    frame = pd.DataFrame(rows)
+    total_levels = int(frame["Level"].max()) if not frame.empty else 0
+    return {
+        "status": "MULTI_LEVEL_MRP_CALCULATED" if total_levels > 1 else "ONE_LEVEL_MRP_CALCULATED",
+        "parent_demand_units": int(demand),
+        "due_period": due_period,
+        "component_count": int(len(frame)),
+        "level_count": total_levels,
+        "total_gross_component_requirement": float(frame["Gross requirement"].sum()) if not frame.empty else 0.0,
+        "total_planned_order_receipts": float(frame["Planned order receipt"].sum()) if not frame.empty else 0.0,
+        "total_planned_order_receipt_units_note": (
+            "This is a descriptive arithmetic sum across component rows. Components may use different units of measure, so the total is not a physically additive inventory quantity; inspect each component row separately."
+        ),
+        "components": frame,
+        "assumptions": "Nested BOM quantities are exploded level by level. Yield/scrap is applied to each component gross requirement; on-hand and scheduled receipts are consumed once per component; lot multiples round planned receipts upward; child requirements are generated from planned receipts and due at the parent's release period.",
+        "warning": "First-pass deterministic multi-level MRP. It records one declared BOM revision per item but does not select effectivity-dated revisions, alternatives, supplier pegging, capacity, order calendars, time-phased scheduled receipts or substitute items. Confirm UOM, BOM ownership/revision, safety stock policy and period definitions before operational use.",
+    }
+
+
 def score_project_portfolio(
     criteria: Sequence[Mapping[str, Any]],
     alternatives: Sequence[Mapping[str, Any]],
+    *,
+    sensitivity_pct: float = 20.0,
 ) -> dict[str, Any]:
-    """Rank alternatives with explicit weights and min-max normalization."""
+    """Rank alternatives and run one-at-a-time multiplicative weight sensitivity."""
     if isinstance(criteria, (str, bytes)) or not isinstance(criteria, Sequence) or not criteria:
         raise ValueError("Provide at least one scoring criterion.")
     if isinstance(alternatives, (str, bytes)) or not isinstance(alternatives, Sequence) or len(alternatives) < 2:
         raise ValueError("Provide at least two project alternatives.")
+    sensitivity = _finite_number(sensitivity_pct, "Sensitivity percentage")
+    if not 0 <= sensitivity <= 100:
+        raise ValueError("Sensitivity percentage must be between 0 and 100.")
+
     normalized_criteria: list[dict[str, Any]] = []
     seen_criteria: set[str] = set()
     for i, criterion in enumerate(criteria, start=1):
@@ -2318,6 +2672,56 @@ def score_project_portfolio(
         by=["Weighted score (0–100)", "Project"], ascending=[False, True], kind="stable"
     ).reset_index(drop=True)
     frame.insert(0, "Rank", range(1, len(frame) + 1))
+
+    base_winner = str(frame.iloc[0]["Project"])
+    base_weights = {criterion["name"]: float(criterion["weight"]) for criterion in normalized_criteria}
+    sensitivity_rows: list[dict[str, Any]] = []
+    sensitivity_scenarios = (
+        ("LOWER", 1.0 - sensitivity / 100.0),
+        ("UPPER", 1.0 + sensitivity / 100.0),
+    )
+    for criterion in normalized_criteria:
+        criterion_name = criterion["name"]
+        for direction_label, multiplier in sensitivity_scenarios:
+            scenario_weights = dict(base_weights)
+            scenario_weights[criterion_name] *= multiplier
+            scenario_total = sum(scenario_weights.values())
+            if scenario_total <= 0:
+                continue
+            scored: list[tuple[str, float]] = []
+            for alternative in normalized_alternatives:
+                weighted = 0.0
+                for other_criterion in normalized_criteria:
+                    other_name = other_criterion["name"]
+                    low, high = ranges[other_name]
+                    value = alternative["scores"][other_name]
+                    if math.isclose(low, high, rel_tol=1e-12, abs_tol=1e-12):
+                        normalized_score = 100.0
+                    elif other_criterion["direction"] == "maximize":
+                        normalized_score = (value - low) / (high - low) * 100.0
+                    else:
+                        normalized_score = (high - value) / (high - low) * 100.0
+                    weighted += normalized_score * scenario_weights[other_name]
+                scored.append((alternative["name"], weighted / scenario_total))
+            scored.sort(key=lambda item: (-item[1], item[0]))
+            winner, winner_score = scored[0]
+            sensitivity_rows.append({
+                "Criterion perturbed": criterion_name,
+                "Scenario": direction_label,
+                "Weight multiplier": multiplier,
+                "Original weight": base_weights[criterion_name],
+                "Scenario weight before normalization": scenario_weights[criterion_name],
+                "Normalized scenario weight": scenario_weights[criterion_name] / scenario_total,
+                "Winner": winner,
+                "Winner score (0–100)": winner_score,
+                "Winner changed": winner != base_winner,
+                "Scenario ranking": " > ".join(name for name, _score in scored),
+            })
+    sensitivity_frame = pd.DataFrame(sensitivity_rows)
+    winner_stability = (
+        float((sensitivity_frame["Winner"] == base_winner).mean() * 100.0)
+        if not sensitivity_frame.empty else 100.0
+    )
     return {
         "status": "SCORED — WEIGHTS ARE USER-DEFINED",
         "method": "Criterion-level min-max normalization to 0–100, direction-aware, weighted average by user-supplied criterion weights",
@@ -2326,8 +2730,18 @@ def score_project_portfolio(
         "total_weight": total_weight,
         "ranking": frame,
         "criteria": pd.DataFrame(normalized_criteria),
-        "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination.",
-        "warning": "This is a decision aid, not an objective or universally correct ranking. Sensitivity to weights has not been calculated in this first implementation; review weights and data quality before selecting a project.",
+        "base_winner": base_winner,
+        "sensitivity_pct": sensitivity,
+        "weight_sensitivity": sensitivity_frame,
+        "sensitivity_scenario_count": int(len(sensitivity_frame)),
+        "winner_stability_pct": winner_stability,
+        "winner_change_count": int(sensitivity_frame["Winner changed"].sum()) if not sensitivity_frame.empty else 0,
+        "zero_weight_criteria_not_perturbed": [
+            criterion["name"] for criterion in normalized_criteria
+            if criterion["weight"] == 0
+        ],
+        "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination. Sensitivity independently multiplies each criterion weight up/down by the stated percentage and renormalizes all weights.",
+        "warning": "This is a decision aid, not an objective or universally correct ranking. Sensitivity analysis is one-at-a-time weight perturbation, not a probability distribution or an assurance of robustness; it does not vary project scores, data uncertainty, criterion definitions or correlated weights. Review all assumptions before selecting a project.",
     }
 
 
@@ -2762,26 +3176,205 @@ def analyze_water_waste_efficiency(process_flows: Sequence[Mapping[str, Any]]) -
     }
 
 
-def analyze_weibull_reliability(failure_times: Sequence[float]) -> dict[str, Any]:
-    """Fit a two-parameter Weibull model to uncensored positive failure times."""
-    if isinstance(failure_times, (str, bytes)) or not isinstance(failure_times, Sequence) or len(failure_times) < 5:
-        raise ValueError("Provide at least five uncensored failure-time observations.")
-    values = [_finite_number(v, f"Failure time observation {i}") for i, v in enumerate(failure_times, start=1)]
-    if any(v <= 0 for v in values):
-        raise ValueError("Failure times must be strictly greater than zero.")
+def analyze_weibull_reliability(
+    failure_times: Sequence[float],
+    event_observed: Sequence[bool | int] | None = None,
+    *,
+    confidence_level: float = 0.95,
+) -> dict[str, Any]:
+    """Fit a two-parameter Weibull model with optional right-censoring.
+
+    event_observed[i] is True/1 for an observed failure and False/0 for a
+    right-censored observation. Confidence intervals use an approximate
+    observed-information (Wald) interval on log parameters. The Kaplan-Meier
+    comparison below is a descriptive diagnostic, not a calibrated hypothesis
+    test or an engineering reliability certification.
+    """
+    if (
+        isinstance(failure_times, (str, bytes))
+        or not isinstance(failure_times, Sequence)
+        or len(failure_times) < 5
+    ):
+        raise ValueError("Provide at least five failure/censoring time observations.")
+
+    values = [
+        _finite_number(value, f"Failure/censoring time observation {index}")
+        for index, value in enumerate(failure_times, start=1)
+    ]
+    if any(value <= 0 for value in values):
+        raise ValueError("Failure and censoring times must be strictly greater than zero.")
     if len(set(values)) < 3:
-        raise ValueError("At least three distinct failure times are required for a meaningful fit.")
+        raise ValueError("At least three distinct failure/censoring times are required.")
+
+    if event_observed is None:
+        observed = np.ones(len(values), dtype=bool)
+    else:
+        if (
+            isinstance(event_observed, (str, bytes))
+            or not isinstance(event_observed, Sequence)
+            or len(event_observed) != len(values)
+        ):
+            raise ValueError("event_observed must be a boolean/0-or-1 list matching the time observations.")
+        flags: list[bool] = []
+        for index, flag in enumerate(event_observed, start=1):
+            if isinstance(flag, (bool, np.bool_)):
+                flags.append(bool(flag))
+            elif isinstance(flag, (int, np.integer)) and flag in (0, 1):
+                flags.append(bool(flag))
+            else:
+                raise ValueError(f"Event flag {index} must be boolean or integer 0/1.")
+        observed = np.asarray(flags, dtype=bool)
+
+    failure_count = int(np.count_nonzero(observed))
+    censored_count = int(len(values) - failure_count)
+    if failure_count < 3:
+        raise ValueError("At least three observed failures are required to estimate a Weibull model.")
+
+    confidence = _finite_number(confidence_level, "Confidence level")
+    if not 0.50 <= confidence <= 0.99:
+        raise ValueError("Confidence level must be between 0.50 and 0.99.")
+
     from scipy.stats import weibull_min
+
     data = np.asarray(values, dtype=float)
-    try:
-        shape, location, scale = weibull_min.fit(data, floc=0)
-    except Exception as exc:
-        raise ValueError(f"Weibull fit did not converge: {exc}") from exc
-    if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
-        raise ValueError("Weibull fit returned invalid shape or scale parameters.")
-    log_likelihood = float(np.sum(weibull_min.logpdf(data, shape, loc=0, scale=scale)))
+    log_times = np.log(data)
+    failure_log_times = log_times[observed]
+    censored = censored_count > 0
+
+    def negative_log_likelihood(theta: np.ndarray) -> float:
+        log_shape, log_scale = float(theta[0]), float(theta[1])
+        shape = math.exp(log_shape)
+        # Bound the exponent before exp() so difficult trial points cannot
+        # overflow the optimizer or turn a non-finite result into a good fit.
+        exponent = shape * (log_times - log_scale)
+        if np.any(exponent > 700.0):
+            return 1.0e100 + float(np.sum(np.maximum(exponent - 700.0, 0.0)))
+        cumulative_hazard = np.exp(np.clip(exponent, -745.0, 700.0))
+        log_likelihood = (
+            failure_count * (log_shape - shape * log_scale)
+            + (shape - 1.0) * float(np.sum(failure_log_times))
+            - float(np.sum(cumulative_hazard))
+        )
+        if not math.isfinite(log_likelihood):
+            return 1.0e100
+        return -log_likelihood
+
+    if censored:
+        # Multi-start bounded MLE for right-censored observations.
+        min_log = float(np.min(log_times))
+        max_log = float(np.max(log_times))
+        bounds = [(-5.0, 5.0), (min_log - 20.0, max_log + 20.0)]
+        initial_scale = float(np.median(data))
+        candidates = []
+        for initial_shape in (0.5, 1.0, 1.5, 2.5, 5.0):
+            initial = np.asarray(
+                [math.log(initial_shape), math.log(initial_scale)],
+                dtype=float,
+            )
+            fitted = minimize(
+                negative_log_likelihood,
+                initial,
+                method="L-BFGS-B",
+                bounds=bounds,
+                options={"maxiter": 2000, "ftol": 1e-12, "gtol": 1e-8},
+            )
+            if np.all(np.isfinite(fitted.x)) and math.isfinite(float(fitted.fun)):
+                candidates.append(fitted)
+        if not candidates:
+            raise ValueError("Right-censored Weibull maximum-likelihood fit did not converge.")
+        best = min(candidates, key=lambda item: float(item.fun))
+        shape = math.exp(float(best.x[0]))
+        scale = math.exp(float(best.x[1]))
+        if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
+            raise ValueError("Weibull fit returned invalid shape or scale parameters.")
+        theta_hat = np.asarray(best.x, dtype=float)
+        fit_converged = bool(best.success)
+        fit_message = str(best.message)
+    else:
+        try:
+            shape, _location, scale = weibull_min.fit(data, floc=0)
+        except Exception as exc:
+            raise ValueError(f"Weibull fit did not converge: {exc}") from exc
+        if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
+            raise ValueError("Weibull fit returned invalid shape or scale parameters.")
+        theta_hat = np.asarray([math.log(float(shape)), math.log(float(scale))])
+        fit_converged = True
+        fit_message = "SciPy two-parameter uncensored maximum-likelihood fit."
+
+    log_likelihood = -negative_log_likelihood(theta_hat)
+    if not math.isfinite(log_likelihood):
+        raise ValueError("Weibull fit returned a non-finite log-likelihood.")
     parameter_count = 2
+    sample_size = len(values)
     aic = 2 * parameter_count - 2 * log_likelihood
+    bic = parameter_count * math.log(sample_size) - 2 * log_likelihood
+    aicc = (
+        aic + (2 * parameter_count * (parameter_count + 1))
+        / (sample_size - parameter_count - 1)
+        if sample_size > parameter_count + 1 else None
+    )
+
+    # Numerical observed information for approximate Wald intervals on
+    # log(shape) and log(scale). Suppress the interval rather than fabricate it
+    # when the curvature is singular or non-positive.
+    hessian = np.zeros((2, 2), dtype=float)
+    step = 1.0e-4
+    center_value = negative_log_likelihood(theta_hat)
+    interval_method = "APPROXIMATE_WALD_LOG_PARAMETER"
+    confidence_intervals: dict[str, Any] | None = None
+    try:
+        for i in range(2):
+            delta = np.zeros(2, dtype=float)
+            delta[i] = step
+            hessian[i, i] = (
+                negative_log_likelihood(theta_hat + delta)
+                - 2.0 * center_value
+                + negative_log_likelihood(theta_hat - delta)
+            ) / (step * step)
+        delta0 = np.asarray([step, step])
+        delta1 = np.asarray([step, -step])
+        cross = (
+            negative_log_likelihood(theta_hat + delta0)
+            - negative_log_likelihood(theta_hat + delta1)
+            - negative_log_likelihood(theta_hat - delta1)
+            + negative_log_likelihood(theta_hat - delta0)
+        ) / (4.0 * step * step)
+        hessian[0, 1] = hessian[1, 0] = cross
+        eigenvalues = np.linalg.eigvalsh(hessian)
+        if not np.all(np.isfinite(eigenvalues)) or float(np.min(eigenvalues)) <= 1e-9:
+            raise np.linalg.LinAlgError("Observed information is not positive definite.")
+        covariance = np.linalg.inv(hessian)
+        standard_errors = np.sqrt(np.diag(covariance))
+        if not np.all(np.isfinite(standard_errors)):
+            raise np.linalg.LinAlgError("Parameter standard errors are not finite.")
+        from scipy.stats import norm as _normal
+        z_value = float(_normal.ppf(0.5 + confidence / 2.0))
+        beta_low, beta_high = np.exp(
+            [theta_hat[0] - z_value * standard_errors[0],
+             theta_hat[0] + z_value * standard_errors[0]]
+        )
+        eta_low, eta_high = np.exp(
+            [theta_hat[1] - z_value * standard_errors[1],
+             theta_hat[1] + z_value * standard_errors[1]]
+        )
+        confidence_intervals = {
+            "method": interval_method,
+            "confidence_level": confidence,
+            "shape_beta": {
+                "lower": float(beta_low),
+                "upper": float(beta_high),
+                "standard_error_log_scale": float(standard_errors[0]),
+            },
+            "scale_eta": {
+                "lower": float(eta_low),
+                "upper": float(eta_high),
+                "standard_error_log_scale": float(standard_errors[1]),
+            },
+        }
+    except (ValueError, FloatingPointError, np.linalg.LinAlgError, OverflowError):
+        interval_method = "UNAVAILABLE_SINGULAR_OR_UNSTABLE_INFORMATION"
+        confidence_intervals = None
+
     b10 = float(scale * (-math.log(0.90)) ** (1.0 / shape))
     b50 = float(scale * (-math.log(0.50)) ** (1.0 / shape))
     mean_ttf = float(scale * math.gamma(1.0 + 1.0 / shape))
@@ -2794,23 +3387,67 @@ def analyze_weibull_reliability(failure_times: Sequence[float]) -> dict[str, Any
         }
         for probability in percentiles
     ])
+
+    # Kaplan-Meier versus model survival discrepancy. This is a visual/
+    # descriptive diagnostic only; fitted parameters invalidate ordinary
+    # one-sample KS critical values, so no p-value is claimed.
+    survival = 1.0
+    at_risk = sample_size
+    km_points: list[dict[str, float]] = []
+    for observed_time in sorted(set(values)):
+        at_time = np.asarray(values) == observed_time
+        deaths = int(np.count_nonzero(at_time & observed))
+        censored_at_time = int(np.count_nonzero(at_time & ~observed))
+        if deaths:
+            survival *= 1.0 - deaths / at_risk
+        fitted_survival = math.exp(-((observed_time / scale) ** shape))
+        km_points.append({
+            "Time": float(observed_time),
+            "Kaplan-Meier reliability": float(survival),
+            "Weibull reliability": float(fitted_survival),
+        })
+        at_risk -= deaths + censored_at_time
+    km_frame = pd.DataFrame(km_points)
+    km_max_difference = (
+        float(np.max(np.abs(
+            km_frame["Kaplan-Meier reliability"] - km_frame["Weibull reliability"]
+        )))
+        if len(km_frame) else None
+    )
     return {
-        "status": "WEIBULL_FIT_UNCENSORED_DATA",
-        "method": "Two-parameter Weibull maximum-likelihood fit with location fixed at zero",
-        "sample_size": int(len(data)),
+        "status": "WEIBULL_FIT_RIGHT_CENSORED_MLE" if censored else "WEIBULL_FIT_UNCENSORED_DATA",
+        "method": "Two-parameter Weibull maximum likelihood; right-censored survival contributions supported; location fixed at zero",
+        "sample_size": int(sample_size),
+        "failure_count": failure_count,
+        "censored_count": censored_count,
         "shape_beta": float(shape),
         "scale_eta": float(scale),
         "location": 0.0,
         "mean_time_to_failure": mean_ttf,
         "B10_life": b10,
         "B50_median_life": b50,
-        "log_likelihood": log_likelihood,
+        "log_likelihood": float(log_likelihood),
         "AIC": float(aic),
+        "AICc": float(aicc) if aicc is not None else None,
+        "BIC": float(bic),
+        "confidence_intervals": confidence_intervals,
+        "confidence_interval_method": interval_method,
+        "fit_converged": fit_converged,
+        "fit_message": fit_message,
         "minimum_observed_time": float(np.min(data)),
         "maximum_observed_time": float(np.max(data)),
         "reliability_percentiles": curve,
-        "assumptions": "Positive independent uncensored failure times, two-parameter Weibull distribution, fixed zero location, consistent unit of time.",
-        "warning": "Right-censored/interval-censored data and confidence intervals are not handled in this first implementation. The fit is not a maintenance guarantee; inspect sample quality, failure mode consistency and fit adequacy with a reliability engineer.",
+        "goodness_of_fit": {
+            "diagnostic": "Kaplan-Meier versus fitted Weibull reliability; descriptive only, not a formal hypothesis test",
+            "km_max_absolute_difference": km_max_difference,
+            "comparison_points": int(len(km_frame)),
+            "comparison_table": km_frame,
+            "formal_p_value": None,
+        },
+        "assumptions": "Independent observations; two-parameter Weibull distribution with fixed zero location; consistent time units; event_observed=false denotes independent right censoring.",
+        "warning": (
+            "Right-censored observations are supported under the independent-censoring assumption. Confidence intervals are approximate Wald intervals on log parameters using numerical observed information. Kaplan-Meier versus fitted survival is descriptive and has no calibrated p-value; formal goodness-of-fit, bootstrap intervals, competing risks and interval censoring still require specialist review. This fit is not a maintenance guarantee; inspect failure-mode consistency and sample quality with a reliability engineer."
+        ),
     }
 
 
@@ -3076,6 +3713,361 @@ def optimize_task_resource_assignment(
         "assignments": pd.DataFrame(assignments),
         "method": "Minimum-cost rectangular linear assignment via the Hungarian algorithm",
         "warning": "This solver supports one-to-one assignment cost only. It does not implement multi-period schedules, calendars, skill constraints, precedence, resource capacity or overtime/labor rules.",
+    }
+
+
+def optimize_task_resource_schedule(
+    tasks: Sequence[Mapping[str, Any]],
+    resources: Sequence[Mapping[str, Any]],
+    *,
+    slot_minutes: int = 30,
+    time_limit_seconds: int = 15,
+) -> dict[str, Any]:
+    """Create a one-day, skill/precedence/capacity constrained resource schedule.
+
+    Time is discrete (30- or 60-minute slots). Each task is assigned once to
+    one eligible resource; each resource performs at most one task at a time.
+    Precedence, shift windows, earliest start and hard latest-finish limits are
+    enforced. Due hours are soft targets with weighted tardiness penalties.
+    The solver does not model breaks, multiple shifts/days, overtime, travel,
+    collective agreements or stochastic durations.
+    """
+    if isinstance(tasks, (str, bytes)) or not isinstance(tasks, Sequence) or not tasks:
+        raise ValueError("Provide at least one task object.")
+    if isinstance(resources, (str, bytes)) or not isinstance(resources, Sequence) or not resources:
+        raise ValueError("Provide at least one resource object.")
+    if len(tasks) > 30:
+        raise ValueError("The scheduling planner is limited to 30 tasks per run.")
+    if len(resources) > 15:
+        raise ValueError("The scheduling planner is limited to 15 resources per run.")
+    if isinstance(slot_minutes, bool) or slot_minutes not in (30, 60):
+        raise ValueError("slot_minutes must be 30 or 60.")
+    if isinstance(time_limit_seconds, bool) or not isinstance(time_limit_seconds, int) or not 1 <= time_limit_seconds <= 60:
+        raise ValueError("Solver time limit must be an integer between 1 and 60 seconds.")
+
+    slot_hours = slot_minutes / 60.0
+    slots_per_day = int(24 / slot_hours)
+    task_rows: list[dict[str, Any]] = []
+    task_index: dict[str, int] = {}
+    for index, raw in enumerate(tasks):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Task row {index + 1} must be an object.")
+        task_id = str(raw.get("task_id", raw.get("name", ""))).strip()
+        if not task_id or len(task_id) > 120:
+            raise ValueError(f"Task row {index + 1} needs a task_id of 1 to 120 characters.")
+        key = task_id.casefold()
+        if key in task_index:
+            raise ValueError(f"Task IDs must be unique: {task_id}.")
+        duration = _finite_number(raw.get("duration_hours"), f"Duration for {task_id}")
+        if duration <= 0 or duration > 24:
+            raise ValueError(f"Duration for {task_id} must be greater than zero and no more than 24 hours.")
+        duration_slots = int(math.ceil(duration / slot_hours - 1e-12))
+        earliest = _finite_number(raw.get("earliest_start_hour", 0), f"Earliest start for {task_id}")
+        latest = _finite_number(raw.get("latest_finish_hour", 24), f"Latest finish for {task_id}")
+        if not 0 <= earliest < 24 or not 0 < latest <= 24 or earliest >= latest:
+            raise ValueError(f"Start/finish window for {task_id} must be within the 0–24 hour day.")
+        due_raw = raw.get("due_hour")
+        due = None if due_raw is None or due_raw == "" else _finite_number(due_raw, f"Due hour for {task_id}")
+        if due is not None and not 0 < due <= 24:
+            raise ValueError(f"Due hour for {task_id} must be within (0, 24].")
+        priority = _finite_number(raw.get("priority_weight", 1), f"Priority weight for {task_id}")
+        if priority <= 0:
+            raise ValueError(f"Priority weight for {task_id} must be greater than zero.")
+        raw_skills = raw.get("required_skills", [])
+        if isinstance(raw_skills, (str, bytes)) or not isinstance(raw_skills, Sequence):
+            raise ValueError(f"Required skills for {task_id} must be a list of strings.")
+        skills = {str(skill).strip().casefold() for skill in raw_skills if str(skill).strip()}
+        predecessors = raw.get("predecessors", [])
+        if isinstance(predecessors, (str, bytes)) or not isinstance(predecessors, Sequence):
+            raise ValueError(f"Predecessors for {task_id} must be a list of task IDs.")
+        pred_keys = [str(pred).strip().casefold() for pred in predecessors]
+        if any(not pred for pred in pred_keys) or len(set(pred_keys)) != len(pred_keys):
+            raise ValueError(f"Predecessors for {task_id} must be non-blank and unique.")
+        task_index[key] = index
+        task_rows.append({
+            "task_id": task_id,
+            "key": key,
+            "duration_hours": duration,
+            "duration_slots": duration_slots,
+            "actual_slot_duration_hours": duration_slots * slot_hours,
+            "earliest_start_hour": earliest,
+            "latest_finish_hour": latest,
+            "due_hour": due,
+            "priority_weight": priority,
+            "required_skills": skills,
+            "predecessor_keys": pred_keys,
+        })
+
+    for task in task_rows:
+        for predecessor in task["predecessor_keys"]:
+            if predecessor not in task_index:
+                raise ValueError(f"Unknown predecessor {predecessor} referenced by {task['task_id']}.")
+            if predecessor == task["key"]:
+                raise ValueError(f"Task {task['task_id']} cannot precede itself.")
+    # Reject cyclic precedence graphs before constructing the MILP.
+    indegree = {task["key"]: 0 for task in task_rows}
+    successors: dict[str, list[str]] = {task["key"]: [] for task in task_rows}
+    for task in task_rows:
+        for predecessor in task["predecessor_keys"]:
+            indegree[task["key"]] += 1
+            successors[predecessor].append(task["key"])
+    queue = [key for key, degree in indegree.items() if degree == 0]
+    visited = 0
+    while queue:
+        current_key = queue.pop()
+        visited += 1
+        for successor in successors[current_key]:
+            indegree[successor] -= 1
+            if indegree[successor] == 0:
+                queue.append(successor)
+    if visited != len(task_rows):
+        raise ValueError("Task precedence graph contains a cycle.")
+
+    resource_rows: list[dict[str, Any]] = []
+    resource_names: set[str] = set()
+    for index, raw in enumerate(resources):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Resource row {index + 1} must be an object.")
+        name = str(raw.get("resource", raw.get("resource_id", raw.get("name", "")))).strip()
+        key = name.casefold()
+        if not name or len(name) > 120 or key in resource_names:
+            raise ValueError(f"Resource names must be non-blank and unique (row {index + 1}).")
+        resource_names.add(key)
+        raw_skills = raw.get("skills", [])
+        if isinstance(raw_skills, (str, bytes)) or not isinstance(raw_skills, Sequence):
+            raise ValueError(f"Skills for resource {name} must be a list of strings.")
+        skills = {str(skill).strip().casefold() for skill in raw_skills if str(skill).strip()}
+        shift_start = _finite_number(raw.get("shift_start_hour", 0), f"Shift start for {name}")
+        shift_end = _finite_number(raw.get("shift_end_hour", 8), f"Shift end for {name}")
+        hourly_cost = _finite_number(raw.get("hourly_cost", 0), f"Hourly cost for {name}")
+        if not 0 <= shift_start < 24 or not 0 < shift_end <= 24 or shift_start >= shift_end:
+            raise ValueError(f"Shift window for {name} must be within the 0–24 hour day.")
+        if hourly_cost < 0:
+            raise ValueError(f"Hourly cost for {name} cannot be negative.")
+        resource_rows.append({
+            "resource": name,
+            "key": key,
+            "skills": skills,
+            "shift_start_slot": int(math.ceil(shift_start / slot_hours - 1e-12)),
+            "shift_end_slot": int(math.floor(shift_end / slot_hours + 1e-12)),
+            "hourly_cost": hourly_cost,
+        })
+
+    # Candidate options are bounded by 30 tasks × 15 resources × 48 half-hour starts.
+    candidates: dict[str, list[tuple[int, int]]] = {}
+    ineligible_reasons: dict[str, str] = {}
+    for task in task_rows:
+        options: list[tuple[int, int]] = []
+        earliest_slot = int(math.ceil(task["earliest_start_hour"] / slot_hours - 1e-12))
+        latest_finish_slot = int(math.floor(task["latest_finish_hour"] / slot_hours + 1e-12))
+        for resource_index, resource in enumerate(resource_rows):
+            if not task["required_skills"].issubset(resource["skills"]):
+                continue
+            start_low = max(earliest_slot, resource["shift_start_slot"])
+            start_high = min(
+                resource["shift_end_slot"] - task["duration_slots"],
+                latest_finish_slot - task["duration_slots"],
+                slots_per_day - task["duration_slots"],
+            )
+            for start_slot in range(start_low, start_high + 1):
+                options.append((resource_index, start_slot))
+        candidates[task["key"]] = options
+        if not options:
+            ineligible_reasons[task["task_id"]] = (
+                "No resource meets the required skills and shift/latest-finish window."
+            )
+    if ineligible_reasons:
+        return {
+            "status": "INFEASIBLE_NO_ELIGIBLE_RESOURCE_SLOT",
+            "task_count": len(task_rows),
+            "resource_count": len(resource_rows),
+            "unassigned_tasks": list(ineligible_reasons),
+            "infeasibility_reasons": ineligible_reasons,
+            "schedule": pd.DataFrame(),
+            "method": "Bounded discrete-time resource scheduling; no feasible candidate slot for at least one task.",
+            "warning": "No task was scheduled because at least one task has no eligible resource/shift slot. Revise skill or availability data; do not silently drop the task.",
+        }
+
+    import pulp
+
+    model = pulp.LpProblem("shoir_task_resource_schedule", pulp.LpMinimize)
+    variables: dict[tuple[str, int, int], Any] = {}
+    by_task: dict[str, list[Any]] = {task["key"]: [] for task in task_rows}
+    add_model_variable = getattr(model, "add_variable", None)
+    for task in task_rows:
+        for resource_index, start_slot in candidates[task["key"]]:
+            variable_name = f"x_{task_index[task['key']]}_{resource_index}_{start_slot}"
+            if callable(add_model_variable):
+                variable = add_model_variable(
+                    name=variable_name,
+                    lowBound=0,
+                    upBound=1,
+                    cat=pulp.LpBinary,
+                )
+            else:
+                # Compatibility with PuLP versions predating LpProblem.add_variable.
+                variable = pulp.LpVariable(
+                    variable_name,
+                    lowBound=0,
+                    upBound=1,
+                    cat=pulp.LpBinary,
+                )
+            variables[(task["key"], resource_index, start_slot)] = variable
+            by_task[task["key"]].append(variable)
+        model += pulp.lpSum(by_task[task["key"]]) == 1
+
+    # One resource cannot overlap two tasks in any discrete slot.
+    for resource_index, resource in enumerate(resource_rows):
+        for occupied_slot in range(slots_per_day):
+            occupying = [
+                variable
+                for (task_key, r_index, start_slot), variable in variables.items()
+                if r_index == resource_index
+                and start_slot <= occupied_slot
+                < start_slot + next(
+                    task["duration_slots"] for task in task_rows if task["key"] == task_key
+                )
+            ]
+            if len(occupying) > 1:
+                model += pulp.lpSum(occupying) <= 1
+
+    start_expr: dict[str, Any] = {}
+    finish_expr: dict[str, Any] = {}
+    objective_terms: list[Any] = []
+    task_by_key = {task["key"]: task for task in task_rows}
+    for task in task_rows:
+        options = [
+            (resource_index, start_slot, variable)
+            for (task_key, resource_index, start_slot), variable in variables.items()
+            if task_key == task["key"]
+        ]
+        start_expr[task["key"]] = pulp.lpSum(
+            (start_slot * slot_hours) * variable
+            for _resource_index, start_slot, variable in options
+        )
+        actual_duration = task["actual_slot_duration_hours"]
+        finish_expr[task["key"]] = start_expr[task["key"]] + actual_duration
+        # Prefer earlier completion when due hours are not specified; enforce
+        # due hours as soft weighted-tardiness targets when supplied.
+        objective_terms.append(task["priority_weight"] * 0.1 * finish_expr[task["key"]])
+        if task["due_hour"] is not None:
+            tardiness_name = f"tardiness_{task_index[task['key']]}"
+            if callable(add_model_variable):
+                tardiness = add_model_variable(
+                    name=tardiness_name,
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
+                )
+            else:
+                tardiness = pulp.LpVariable(
+                    tardiness_name,
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
+                )
+            model += tardiness >= finish_expr[task["key"]] - task["due_hour"]
+            objective_terms.append(100.0 * task["priority_weight"] * tardiness)
+        for resource_index, _start_slot, variable in options:
+            objective_terms.append(
+                resource_rows[resource_index]["hourly_cost"] * actual_duration * variable
+            )
+
+    # Predecessor completion must be no later than successor start.
+    for task in task_rows:
+        for predecessor in task["predecessor_keys"]:
+            model += start_expr[task["key"]] >= finish_expr[predecessor]
+
+    model += pulp.lpSum(objective_terms)
+    try:
+        solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit_seconds, gapRel=0.0)
+        if not solver.available():
+            raise RuntimeError("CBC mixed-integer solver is not available in this environment.")
+        model.solve(solver)
+    except Exception as exc:
+        raise ValueError(f"Constrained scheduling solver could not run: {exc}") from exc
+
+    solver_status = pulp.LpStatus.get(model.status, str(model.status))
+    if model.status != pulp.LpStatusOptimal:
+        return {
+            "status": "INFEASIBLE_OR_SOLVER_LIMIT",
+            "solver_status": solver_status,
+            "task_count": len(task_rows),
+            "resource_count": len(resource_rows),
+            "unassigned_tasks": [task["task_id"] for task in task_rows],
+            "schedule": pd.DataFrame(),
+            "method": "Time-indexed mixed-integer scheduling with resource eligibility, daily shifts and precedence constraints.",
+            "warning": "No optimal schedule was proven within the solver status/time limit. Treat this as not scheduled and revise the horizon or model bounds; do not use a partial assignment as an approved plan.",
+        }
+
+    scheduled_rows: list[dict[str, Any]] = []
+    resource_hours = {resource["key"]: 0.0 for resource in resource_rows}
+    for task in task_rows:
+        selected = [
+            (resource_index, start_slot)
+            for resource_index, start_slot in candidates[task["key"]]
+            if variables[(task["key"], resource_index, start_slot)].value() is not None
+            and variables[(task["key"], resource_index, start_slot)].value() > 0.5
+        ]
+        if len(selected) != 1:
+            raise ValueError(f"Solver returned no unique assignment for task {task['task_id']}.")
+        resource_index, start_slot = selected[0]
+        resource = resource_rows[resource_index]
+        start_hour = start_slot * slot_hours
+        finish_hour = start_hour + task["actual_slot_duration_hours"]
+        tardiness = max(0.0, finish_hour - task["due_hour"]) if task["due_hour"] is not None else 0.0
+        labor_cost = resource["hourly_cost"] * task["actual_slot_duration_hours"]
+        resource_hours[resource["key"]] += task["actual_slot_duration_hours"]
+        scheduled_rows.append({
+            "Task": task["task_id"],
+            "Resource": resource["resource"],
+            "Start hour": start_hour,
+            "Finish hour": finish_hour,
+            "Duration hours (rounded to slot)": task["actual_slot_duration_hours"],
+            "Due hour": task["due_hour"],
+            "Tardiness hours": tardiness,
+            "Priority weight": task["priority_weight"],
+            "Required skills": ", ".join(sorted(task["required_skills"])),
+            "Resource skills": ", ".join(sorted(resource["skills"])),
+            "Predecessors": ", ".join(task["predecessor_keys"]),
+            "Estimated labor cost": labor_cost,
+        })
+    schedule = pd.DataFrame(scheduled_rows).sort_values(
+        ["Start hour", "Resource", "Task"], kind="stable"
+    ).reset_index(drop=True)
+    resource_summary = pd.DataFrame([
+        {
+            "Resource": resource["resource"],
+            "Shift start hour": resource["shift_start_slot"] * slot_hours,
+            "Shift end hour": resource["shift_end_slot"] * slot_hours,
+            "Scheduled hours": resource_hours[resource["key"]],
+            "Available shift hours": (
+                resource["shift_end_slot"] - resource["shift_start_slot"]
+            ) * slot_hours,
+            "Idle hours": (
+                resource["shift_end_slot"] - resource["shift_start_slot"]
+            ) * slot_hours - resource_hours[resource["key"]],
+        }
+        for resource in resource_rows
+    ])
+    return {
+        "status": "OPTIMAL_CONSTRAINED_SCHEDULE",
+        "solver_status": solver_status,
+        "task_count": len(task_rows),
+        "resource_count": len(resource_rows),
+        "assigned_count": int(len(schedule)),
+        "unassigned_tasks": [],
+        "total_assignment_cost": float(schedule["Estimated labor cost"].sum()),
+        "total_weighted_tardiness": float(
+            sum(
+                row["Tardiness hours"] * row["Priority weight"]
+                for row in scheduled_rows
+            )
+        ),
+        "makespan_hours": float(schedule["Finish hour"].max()) if not schedule.empty else 0.0,
+        "slot_minutes": slot_minutes,
+        "schedule": schedule,
+        "resource_summary": resource_summary,
+        "method": "Time-indexed mixed-integer schedule with 30/60-minute slots, one-task-at-a-time resource capacity, skill eligibility, shift windows and precedence constraints.",
+        "warning": "One-day deterministic schedule. Durations are rounded upward to the selected slot. Due hours are soft targets; latest_finish_hour and resource shifts are hard bounds. Breaks, multiple days/shifts, overtime, travel, legal working-time rules and uncertainty are not modelled; obtain local supervisor approval before dispatch.",
     }
 
 
@@ -4490,11 +5482,11 @@ def optimize_supply_chain_network(
 
     model = pulp.LpProblem("shoir_single_period_supply_chain_transport", pulp.LpMinimize)
     shipment_vars = {
-        key: pulp.LpVariable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
+        key: model.add_variable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
         for i, (key, item) in enumerate(route_map.items(), start=1)
     }
     unmet_vars = {
-        site: pulp.LpVariable(f"unmet_{i}", lowBound=0)
+        site: model.add_variable(f"unmet_{i}", lowBound=0)
         for i, site in enumerate(demand, start=1)
     }
     model += pulp.lpSum(route_map[key]["unit_cost"] * shipment_vars[key] for key in route_map) + penalty * pulp.lpSum(unmet_vars.values())
@@ -4506,7 +5498,7 @@ def optimize_supply_chain_network(
         model += pulp.lpSum(
             var for (_, destination), var in shipment_vars.items() if destination == site
         ) + unmet_vars[site] == requested, f"site_demand_{list(demand).index(site)}"
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
+    solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit)
     try:
         model.solve(solver)
     except Exception as exc:
@@ -4911,7 +5903,7 @@ def run_solver_diagnostics(
         pulp.LpMinimize if direction_value in {"minimize", "min"} else pulp.LpMaximize,
     )
     variables = {
-        name: pulp.LpVariable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
+        name: problem.add_variable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
         for name, spec in normalized_specs.items()
     }
     problem += pulp.lpSum(coefficient * variables[name] for name, coefficient in objective.items()), "objective"
@@ -4925,7 +5917,7 @@ def run_solver_diagnostics(
             problem += expression == item["rhs"], item["name"]
 
     try:
-        solver_status_code = problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit))
+        solver_status_code = problem.solve(pulp.COIN_CMD(msg=False, timeLimit=time_limit))
     except Exception as exc:
         return {
             "status": "SOLVER_ERROR",
@@ -4941,6 +5933,67 @@ def run_solver_diagnostics(
     solver_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
     solution_status_code = getattr(problem, "sol_status", None)
     solution_status = pulp.LpSolution.get(solution_status_code, "UNKNOWN_SOLUTION_STATUS")
+    solver_backend = "PuLP COIN_CMD"
+    solver_message = ""
+
+    # CBC can return an Undefined status for a valid continuous LP termination
+    # on some CBC builds even when a definitive LP classification is possible.
+    # In that case, independently classify only continuous models with SciPy
+    # HiGHS. Never use the LP relaxation to claim a mixed-integer model is
+    # feasible or optimal.
+    if solver_status == "Undefined" and all(
+        spec["category"] == "continuous" for spec in normalized_specs.values()
+    ):
+        names = list(normalized_specs)
+        coefficient_vector = np.asarray(
+            [objective.get(name, 0.0) for name in names], dtype=float
+        )
+        if direction_value in {"maximize", "max"}:
+            coefficient_vector = -coefficient_vector
+
+        upper_rows: list[list[float]] = []
+        upper_rhs: list[float] = []
+        equality_rows: list[list[float]] = []
+        equality_rhs: list[float] = []
+        for item in normalized_constraints:
+            row = [float(item["coefficients"].get(name, 0.0)) for name in names]
+            if item["sense"] == pulp.LpConstraintLE:
+                upper_rows.append(row)
+                upper_rhs.append(float(item["rhs"]))
+            elif item["sense"] == pulp.LpConstraintGE:
+                upper_rows.append([-value for value in row])
+                upper_rhs.append(-float(item["rhs"]))
+            else:
+                equality_rows.append(row)
+                equality_rhs.append(float(item["rhs"]))
+
+        fallback = linprog(
+            coefficient_vector,
+            A_ub=np.asarray(upper_rows, dtype=float) if upper_rows else None,
+            b_ub=np.asarray(upper_rhs, dtype=float) if upper_rhs else None,
+            A_eq=np.asarray(equality_rows, dtype=float) if equality_rows else None,
+            b_eq=np.asarray(equality_rhs, dtype=float) if equality_rhs else None,
+            bounds=[(normalized_specs[name]["low"], normalized_specs[name]["up"]) for name in names],
+            method="highs",
+            options={"time_limit": time_limit},
+        )
+        solver_backend = "SciPy HiGHS continuous-LP fallback (CBC returned Undefined)"
+        solver_message = str(fallback.message)
+        if fallback.status == 0 and fallback.success:
+            solver_status = "Optimal"
+            solution_status = "OPTIMAL_SOLUTION_FOUND"
+            for name, value in zip(names, fallback.x):
+                variables[name].varValue = float(value)
+        elif fallback.status == 2:
+            solver_status = "Infeasible"
+            solution_status = "NO_SOLUTION_FOUND"
+        elif fallback.status == 3:
+            solver_status = "Unbounded"
+            solution_status = "NO_SOLUTION_FOUND"
+        elif fallback.status == 1:
+            solver_status = "Not Solved"
+            solution_status = "NO_SOLUTION_FOUND"
+
     variable_rows: list[dict[str, Any]] = []
     violations: list[str] = []
     all_values_assigned = True
@@ -5042,6 +6095,8 @@ def run_solver_diagnostics(
         "status": interpretation_status,
         "solver_status": solver_status,
         "solution_status": solution_status,
+        "solver_backend": solver_backend,
+        "solver_message": solver_message,
         "objective_direction": "minimize" if direction_value in {"minimize", "min"} else "maximize",
         "objective_value": objective_value,
         "variable_count": len(variables),
@@ -5425,11 +6480,11 @@ def optimize_facility_location_flow(
 
     model = pulp.LpProblem("ShoirIE_Facility_Location_Flow", pulp.LpMinimize)
     open_vars = {
-        i: pulp.LpVariable(f"facility_open_{i}", cat=pulp.LpBinary)
+        i: model.add_variable(f"facility_open_{i}", cat=pulp.LpBinary)
         for i in range(len(normalized_facilities))
     }
     flow_vars = {
-        r["index"] - 1: pulp.LpVariable(
+        r["index"] - 1: model.add_variable(
             f"route_flow_{r['index'] - 1}", lowBound=0, upBound=r["capacity"], cat=pulp.LpContinuous
         )
         for r in normalized_routes
@@ -5451,7 +6506,7 @@ def optimize_facility_location_flow(
         model += inbound == customer["demand"], f"customer_demand_{i}"
 
     try:
-        model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=limit))
+        model.solve(pulp.COIN_CMD(msg=False, timeLimit=limit))
     except pulp.PulpSolverError:
         return {
             "status": "SOLVER_UNAVAILABLE",
@@ -6052,3 +7107,750 @@ def assess_capa_8d_records(
         "warning": "This register checks record completeness and status only. It does not verify the truth of root-cause claims, action effectiveness, regulatory compliance or engineering safety.",
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
+
+def calculate_niosh_revised_lifting_equation(
+    load_weight: float,
+    horizontal_origin: float,
+    horizontal_destination: float,
+    vertical_hand_start: float,
+    vertical_travel_distance: float,
+    asymmetry_origin: float,
+    asymmetry_destination: float,
+    frequency_lifts_per_minute: float,
+    frequency_multiplier: float,
+    coupling_multiplier: float,
+    *,
+    units: str = "metric",
+    frequency_duration_category: str = "",
+    coupling_quality: str = "",
+    frequency_multiplier_source: str = "",
+    coupling_multiplier_source: str = "",
+    task_description: str = "",
+) -> dict[str, Any]:
+    """Calculate a single-task, two-handed NIOSH RNLE screening estimate.
+
+    The horizontal and asymmetry values are captured at both lift origin and
+    destination. The more demanding value is used. Frequency and coupling
+    multipliers must be looked up by the user in the applicable official NIOSH
+    tables and include source references; they are never inferred here.
+
+    This is not a multi-task Composite Lifting Index, and it is not applicable
+    to one-handed lifting, carrying, pushing, pulling or unstable loads.
+    """
+    unit_system = str(units or "").strip().casefold()
+    if unit_system not in {"metric", "imperial"}:
+        raise ValueError("Units must be either metric or imperial.")
+    load = _finite_number(load_weight, "Load weight")
+    h_origin = _finite_number(horizontal_origin, "Origin horizontal hand location")
+    h_destination = _finite_number(horizontal_destination, "Destination horizontal hand location")
+    vertical = _finite_number(vertical_hand_start, "Vertical hand location at lift origin")
+    travel = _finite_number(vertical_travel_distance, "Vertical travel distance")
+    a_origin = _finite_number(asymmetry_origin, "Origin asymmetry angle")
+    a_destination = _finite_number(asymmetry_destination, "Destination asymmetry angle")
+    frequency = _finite_number(frequency_lifts_per_minute, "Lift frequency")
+    fm = _finite_number(frequency_multiplier, "Frequency multiplier")
+    cm = _finite_number(coupling_multiplier, "Coupling multiplier")
+    duration = str(frequency_duration_category or "").strip()
+    coupling = str(coupling_quality or "").strip()
+    fm_source = str(frequency_multiplier_source or "").strip()
+    cm_source = str(coupling_multiplier_source or "").strip()
+    description = str(task_description or "").strip()
+
+    if load <= 0:
+        raise ValueError("Load weight must be greater than zero.")
+    if h_origin <= 0 or h_destination <= 0:
+        raise ValueError("Horizontal hand locations at origin and destination must be greater than zero.")
+    if vertical < 0:
+        raise ValueError("Vertical hand location cannot be negative.")
+    if travel <= 0:
+        raise ValueError("Vertical travel distance must be greater than zero.")
+    if not 0 <= a_origin <= 135 or not 0 <= a_destination <= 135:
+        raise ValueError("Origin and destination asymmetry angles must be between 0 and 135 degrees.")
+    if not 0 < frequency <= 15:
+        raise ValueError("Lift frequency must be greater than zero and no more than 15 lifts per minute.")
+    if not 0 < fm <= 1:
+        raise ValueError("Frequency multiplier must be greater than zero and no more than 1.")
+    if not 0 < cm <= 1:
+        raise ValueError("Coupling multiplier must be greater than zero and no more than 1.")
+    if duration not in {"Short (≤ 1 hour)", "Moderate (> 1 to 2 hours)", "Long (> 2 to 8 hours)"}:
+        raise ValueError("Select a valid RNLE lifting-duration category.")
+    if coupling not in {"Good", "Fair", "Poor"}:
+        raise ValueError("Select the observed coupling quality.")
+    if not fm_source:
+        raise ValueError("Provide the official RNLE table/source reference used for FM.")
+    if not cm_source:
+        raise ValueError("Provide the official RNLE table/source reference used for CM.")
+
+    if unit_system == "metric":
+        load_constant = 23.0
+        unit = "kg"
+        distance_unit = "cm"
+        h_reference = 25.0
+        h_limit = 63.0
+        v_reference = 75.0
+        v_limit = 175.0
+        d_minimum = 25.0
+        d_limit = 175.0
+        hm = min(1.0, h_reference / max(h_origin, h_destination))
+        vm = max(0.0, 1.0 - 0.003 * abs(vertical - v_reference))
+        dm = 0.82 + 4.5 / max(travel, d_minimum)
+    else:
+        load_constant = 51.0
+        unit = "lb"
+        distance_unit = "in"
+        h_reference = 10.0
+        h_limit = 25.0
+        v_reference = 30.0
+        v_limit = 70.0
+        d_minimum = 10.0
+        d_limit = 70.0
+        hm = min(1.0, h_reference / max(h_origin, h_destination))
+        vm = max(0.0, 1.0 - 0.0075 * abs(vertical - v_reference))
+        dm = 0.82 + 1.8 / max(travel, d_minimum)
+
+    if max(h_origin, h_destination) > h_limit:
+        raise ValueError(f"Horizontal hand location exceeds the RNLE limit of {h_limit:g} {distance_unit}.")
+    if vertical > v_limit:
+        raise ValueError(f"Vertical hand location exceeds the RNLE limit of {v_limit:g} {distance_unit}.")
+    if travel > d_limit:
+        raise ValueError(f"Vertical travel distance exceeds the RNLE limit of {d_limit:g} {distance_unit}.")
+
+    a_used = max(a_origin, a_destination)
+    am = max(0.0, 1.0 - 0.0032 * a_used)
+    multipliers = {
+        "Horizontal multiplier (HM)": hm,
+        "Vertical multiplier (VM)": vm,
+        "Distance multiplier (DM)": dm,
+        "Asymmetry multiplier (AM)": am,
+        "Frequency multiplier (FM)": fm,
+        "Coupling multiplier (CM)": cm,
+    }
+    rwl = load_constant
+    for multiplier in multipliers.values():
+        rwl *= multiplier
+    if not math.isfinite(rwl) or rwl <= 0:
+        raise ValueError("The calculated recommended weight limit is zero or invalid for these inputs.")
+    lifting_index = load / rwl
+    status = "LI_AT_OR_BELOW_1" if lifting_index <= 1.0 else "LI_ABOVE_1_REVIEW_REQUIRED"
+    table = pd.DataFrame([
+        {"Multiplier": name, "Value": value}
+        for name, value in multipliers.items()
+    ])
+    return {
+        "status": status,
+        "method": "NIOSH Revised Lifting Equation — single-task screening calculation",
+        "task_description": description or "NOT PROVIDED",
+        "units": unit_system,
+        "load_weight": load,
+        "load_unit": unit,
+        "horizontal_origin": h_origin,
+        "horizontal_destination": h_destination,
+        "horizontal_value_used": max(h_origin, h_destination),
+        "vertical_hand_start": vertical,
+        "vertical_travel_distance": travel,
+        "distance_unit": distance_unit,
+        "asymmetry_origin_degrees": a_origin,
+        "asymmetry_destination_degrees": a_destination,
+        "asymmetry_value_used_degrees": a_used,
+        "frequency_lifts_per_minute": frequency,
+        "frequency_duration_category": duration,
+        "coupling_quality": coupling,
+        "load_constant": load_constant,
+        "recommended_weight_limit": rwl,
+        "recommended_weight_limit_unit": unit,
+        "lifting_index": lifting_index,
+        "multipliers": multipliers,
+        "multiplier_table": table,
+        "frequency_multiplier_source": fm_source,
+        "coupling_multiplier_source": cm_source,
+        "formula": "RWL = LC × HM × VM × DM × AM × FM × CM; LI = actual load / RWL",
+        "assumptions": (
+            "Single-task, two-handed lifting. H and A use the more demanding "
+            "origin/destination measurement. V is measured at the origin; D is "
+            "vertical travel distance. FM and CM are user-supplied lookups from "
+            "the applicable official RNLE tables for the frequency, duration "
+            "and coupling conditions."
+        ),
+        "warning": (
+            "A lifting index at or below 1 is a screening goal, not proof of safety. "
+            "This calculation does not assess a multi-task Composite Lifting Index, "
+            "one-handed or seated lifting, carrying, pushing, pulling, unstable loads, "
+            "or all workplace hazards. Confirm measurements and table lookups with a "
+            "qualified ergonomics professional and assess the whole task and workforce."
+        ),
+    }
+
+
+def build_rcm_decision_support(
+    failure_modes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Create reviewable first-pass RCM task candidates from explicit failure data.
+
+    This is a decision-support screen, not a certified SAE JA1011/JA1012 RCM
+    analysis. Safety/environmental and hidden protective-function cases are
+    always escalated; no task is silently authorized for execution.
+    """
+    if isinstance(failure_modes, (str, bytes)) or not isinstance(failure_modes, Sequence) or not failure_modes:
+        raise ValueError("Provide at least one RCM failure-mode record.")
+    if len(failure_modes) > 2000:
+        raise ValueError("RCM screening is limited to 2,000 failure-mode records.")
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    consequences = {"safety", "environmental", "operational", "non_operational", "hidden"}
+    for index, raw in enumerate(failure_modes, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"RCM row {index} must be an object.")
+        asset = str(raw.get("asset", "")).strip()
+        mode = str(raw.get("failure_mode", "")).strip()
+        if not asset or not mode:
+            raise ValueError(f"RCM row {index} needs an asset and failure_mode.")
+        key = (asset + "::" + mode).casefold()
+        if key in seen:
+            raise ValueError(f"Duplicate RCM failure mode for {asset}: {mode}.")
+        seen.add(key)
+        consequence = str(raw.get("consequence", "")).strip().casefold().replace("-", "_").replace(" ", "_")
+        if consequence not in consequences:
+            raise ValueError(
+                f"RCM row {index} consequence must be one of: "
+                + ", ".join(sorted(consequences))
+                + "."
+            )
+        severity_value = _finite_number(raw.get("severity"), f"Severity for {asset} / {mode}")
+        if not severity_value.is_integer() or not 1 <= severity_value <= 10:
+            raise ValueError(f"Severity for {asset} / {mode} must be a whole number from 1 to 10.")
+        severity = int(severity_value)
+        booleans = (
+            "detectable",
+            "age_related",
+            "hidden_protective_function",
+            "on_condition_applicable",
+            "scheduled_restoration_applicable",
+            "scheduled_discard_applicable",
+            "failure_finding_applicable",
+            "run_to_failure_accepted",
+        )
+        flags: dict[str, bool] = {}
+        for field in booleans:
+            value = raw.get(field, False)
+            if not isinstance(value, bool):
+                raise ValueError(f"{field} for {asset} / {mode} must be true or false.")
+            flags[field] = value
+        task_cost = _finite_number(raw.get("preventive_task_cost", 0), f"Preventive task cost for {asset} / {mode}")
+        failure_cost = _finite_number(raw.get("consequence_cost", 0), f"Consequence cost for {asset} / {mode}")
+        if task_cost < 0 or failure_cost < 0:
+            raise ValueError("RCM task and consequence costs cannot be negative.")
+        interval = raw.get("interval_days")
+        if interval not in (None, ""):
+            interval_value = _finite_number(interval, f"Interval days for {asset} / {mode}")
+            if not interval_value.is_integer() or interval_value <= 0:
+                raise ValueError("An RCM task interval must be a positive whole number of days.")
+            interval = int(interval_value)
+        else:
+            interval = None
+        evidence = str(raw.get("evidence_reference", "")).strip()
+
+        chosen = "HUMAN_REVIEW_REQUIRED"
+        rationale = "No applicable maintenance task has been evidenced; review the failure mode and maintenance policy."
+        review = True
+        if consequence in {"safety", "environmental"} or severity >= 9:
+            chosen = "SPECIALIST_SAFETY_REVIEW"
+            rationale = "High-consequence or severity-9/10 failure: do not automate task selection; require a competent safety/reliability review."
+        elif flags["hidden_protective_function"] or consequence == "hidden":
+            if flags["failure_finding_applicable"]:
+                chosen = "FAILURE_FINDING_TASK_CANDIDATE"
+                rationale = "Hidden protective function: a documented failure-finding task is a candidate; define the proof-test interval and independence requirements."
+            else:
+                chosen = "HUMAN_REVIEW_REQUIRED"
+                rationale = "Hidden protective function has no evidenced failure-finding task; specialist review is required."
+        elif flags["detectable"] and flags["on_condition_applicable"]:
+            chosen = "ON_CONDITION_TASK_CANDIDATE"
+            rationale = "A detectable potential-failure condition and an applicable on-condition task were explicitly recorded."
+        elif flags["age_related"] and flags["scheduled_restoration_applicable"]:
+            chosen = "SCHEDULED_RESTORATION_CANDIDATE"
+            rationale = "An age-related failure pattern and an applicable scheduled-restoration task were explicitly recorded."
+        elif flags["age_related"] and flags["scheduled_discard_applicable"]:
+            chosen = "SCHEDULED_DISCARD_CANDIDATE"
+            rationale = "An age-related failure pattern and an applicable scheduled-discard task were explicitly recorded."
+        elif flags["run_to_failure_accepted"] and consequence in {"non_operational", "operational"}:
+            if task_cost > failure_cost:
+                chosen = "RUN_TO_FAILURE_CANDIDATE"
+                rationale = "The user accepted run-to-failure and entered a lower consequence cost than preventive-task cost; verify lifecycle, spare and safety impacts."
+            else:
+                chosen = "HUMAN_REVIEW_REQUIRED"
+                rationale = "Run-to-failure was accepted, but its entered consequence cost is not lower than preventive-task cost."
+        if chosen.endswith("_CANDIDATE"):
+            review = True
+        rows.append({
+            "Asset": asset,
+            "Failure mode": mode,
+            "Consequence": consequence.replace("_", " ").title(),
+            "Severity (1–10)": severity,
+            "Recommended task candidate": chosen,
+            "Review required": review,
+            "Suggested interval (days)": interval,
+            "Preventive task cost": task_cost,
+            "Consequence cost": failure_cost,
+            "Evidence reference": evidence or "NOT PROVIDED",
+            "Rationale": rationale,
+        })
+
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Review required", "Severity (1–10)", "Asset", "Failure mode"],
+        ascending=[False, False, True, True],
+        kind="stable",
+    ).reset_index(drop=True)
+    return {
+        "status": "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL",
+        "method": "First-pass failure-consequence and task-applicability screen",
+        "record_count": len(frame),
+        "specialist_review_count": int(frame["Review required"].sum()),
+        "task_candidate_count": int(frame["Recommended task candidate"].str.endswith("_CANDIDATE").sum()),
+        "decision_tree": frame,
+        "warning": (
+            "This is not a certified RCM analysis and does not establish SAE JA1011/JA1012 compliance. "
+            "Confirm functions, functional failures, failure effects, failure modes, consequence classes, "
+            "task applicability, intervals, cost assumptions and site safety controls with a competent "
+            "reliability engineer before approving a maintenance strategy."
+        ),
+    }
+
+
+def calibrate_simulation_outputs(
+    simulated_values: Sequence[float],
+    measured_values: Sequence[float],
+    *,
+    training_fraction: float = 0.75,
+    min_slope: float = 0.0,
+    max_slope: float = 10.0,
+) -> dict[str, Any]:
+    """Fit and chronologically hold out an affine calibration of simulation outputs.
+
+    Fits measured ~= intercept + slope * simulated on the first observations and
+    evaluates the unchanged fit on the final holdout observations. This calibrates
+    an output mapping only; it does not tune internal simulator physics or connect
+    to a live asset.
+    """
+    # Validate numeric inputs first, then report a shape mismatch before a
+    # minimum-length error so callers receive the actionable validation reason.
+    simulated = _finite_vector(simulated_values, "Simulated values", minimum=0)
+    measured = _finite_vector(measured_values, "Measured values", minimum=0)
+    if len(simulated) != len(measured):
+        raise ValueError("Simulated and measured series must contain the same number of observations.")
+    if len(simulated) < 5:
+        raise ValueError("Simulated and measured series must each contain at least 5 observations.")
+    fraction = _finite_number(training_fraction, "Training fraction")
+    lower = _finite_number(min_slope, "Minimum calibration slope")
+    upper = _finite_number(max_slope, "Maximum calibration slope")
+    if not 0.5 <= fraction <= 0.9:
+        raise ValueError("Training fraction must be between 0.5 and 0.9.")
+    if lower < 0 or upper <= lower:
+        raise ValueError("Calibration slope bounds must satisfy 0 <= min_slope < max_slope.")
+    split = int(math.floor(len(simulated) * fraction))
+    if split < 3 or len(simulated) - split < 2:
+        raise ValueError("Calibration needs at least three training and two holdout observations.")
+    x_train = np.asarray(simulated[:split], dtype=float)
+    y_train = np.asarray(measured[:split], dtype=float)
+    x_holdout = np.asarray(simulated[split:], dtype=float)
+    y_holdout = np.asarray(measured[split:], dtype=float)
+    if float(np.ptp(x_train)) <= 1e-12:
+        raise ValueError("Training simulated values must contain variation to identify a calibration slope.")
+    design = np.column_stack([np.ones(len(x_train)), x_train])
+    intercept, slope = np.linalg.lstsq(design, y_train, rcond=None)[0]
+    intercept = float(intercept)
+    slope = float(slope)
+    if not math.isfinite(intercept) or not math.isfinite(slope):
+        raise ValueError("Calibration produced a non-finite fit.")
+    if slope < lower or slope > upper:
+        raise ValueError("Fitted calibration slope is outside the configured bounds; revise the model or approved bounds.")
+    train_fit = intercept + slope * x_train
+    holdout_fit = intercept + slope * x_holdout
+
+    def metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
+        residual = actual - predicted
+        denominator = float(np.sum((actual - float(np.mean(actual))) ** 2))
+        r2_value = 1.0 - float(np.sum(residual ** 2)) / denominator if denominator > 1e-12 else float("nan")
+        return {
+            "mae": float(np.mean(np.abs(residual))),
+            "rmse": float(np.sqrt(np.mean(residual ** 2))),
+            "bias_measured_minus_calibrated": float(np.mean(residual)),
+            "r_squared": r2_value,
+        }
+
+    calibrated_all = intercept + slope * np.asarray(simulated, dtype=float)
+    holdout = metrics(y_holdout, holdout_fit)
+    train = metrics(y_train, train_fit)
+    residuals = pd.DataFrame({
+        "Observation": np.arange(1, len(simulated) + 1),
+        "Segment": ["TRAIN"] * split + ["HOLDOUT"] * (len(simulated) - split),
+        "Simulated": simulated,
+        "Measured": measured,
+        "Calibrated simulation": calibrated_all.tolist(),
+        "Residual (measured - calibrated)": (np.asarray(measured) - calibrated_all).tolist(),
+    })
+    return {
+        "status": "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT",
+        "method": "Affine output calibration: measured = intercept + slope × simulated",
+        "training_observations": split,
+        "holdout_observations": len(simulated) - split,
+        "training_fraction": fraction,
+        "calibration_intercept": intercept,
+        "calibration_slope": slope,
+        "calibration_equation": f"measured ≈ {intercept:.8g} + {slope:.8g} × simulated",
+        "training_metrics": train,
+        "holdout_metrics": holdout,
+        "residuals": residuals,
+        "warning": (
+            "This is an affine output correction with a chronological holdout, not a physics-based digital-twin calibration. "
+            "Check measurement traceability, sensor bias, operating regimes, residual structure, uncertainty and out-of-range behavior. "
+            "Do not deploy calibrated parameters to a live controller."
+        ),
+    }
+
+
+def evaluate_kpi_alerts(
+    kpi_records: Sequence[Mapping[str, Any]],
+    alert_rules: Sequence[Mapping[str, Any]],
+    *,
+    as_of: Any = None,
+    stale_after_hours: float = 24.0,
+    previous_open_alert_ids: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Evaluate freshness-aware KPI threshold rules and deduplicate alert identities."""
+    if isinstance(kpi_records, (str, bytes)) or not isinstance(kpi_records, Sequence):
+        raise ValueError("KPI records must be a list of objects.")
+    if isinstance(alert_rules, (str, bytes)) or not isinstance(alert_rules, Sequence) or not alert_rules:
+        raise ValueError("Provide at least one KPI alert rule.")
+    stale_hours = _finite_number(stale_after_hours, "Stale-data threshold")
+    if stale_hours <= 0 or stale_hours > 24 * 365:
+        raise ValueError("Stale-data threshold must be greater than zero and no more than one year.")
+    now = pd.Timestamp.now(tz="UTC") if as_of is None else pd.to_datetime(as_of, utc=True, errors="coerce")
+    if pd.isna(now):
+        raise ValueError("Alert evaluation as-of timestamp must be valid.")
+    prior = {str(value).strip() for value in previous_open_alert_ids if str(value).strip()}
+    by_name: dict[str, Mapping[str, Any]] = {}
+    for index, raw in enumerate(kpi_records, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"KPI record {index} must be an object.")
+        name = str(raw.get("kpi", "")).strip()
+        if not name:
+            raise ValueError(f"KPI record {index} needs a KPI name.")
+        key = name.casefold()
+        if key in by_name:
+            raise ValueError(f"Duplicate KPI record: {name}.")
+        by_name[key] = raw
+
+    rows: list[dict[str, Any]] = []
+    seen_rules: set[str] = set()
+    seen_active_ids: set[str] = set()
+    processed_alert_ids: set[str] = set()
+    operators = {">", ">=", "<", "<=", "=="}
+    severities = {"INFO", "WARNING", "CRITICAL"}
+    for index, rule in enumerate(alert_rules, start=1):
+        if not isinstance(rule, Mapping):
+            raise ValueError(f"Alert rule {index} must be an object.")
+        rule_id = str(rule.get("rule_id", "")).strip()
+        name = str(rule.get("kpi", "")).strip()
+        operator = str(rule.get("operator", "")).strip().casefold()
+        operator = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}.get(operator, operator)
+        severity = str(rule.get("severity", "WARNING")).strip().upper()
+        severity = {"LOW": "INFO", "MEDIUM": "WARNING", "HIGH": "CRITICAL"}.get(severity, severity)
+        if not rule_id or len(rule_id) > 100 or rule_id.casefold() in seen_rules:
+            raise ValueError("Alert rule IDs must be non-empty, unique and no longer than 100 characters.")
+        seen_rules.add(rule_id.casefold())
+        if not name:
+            raise ValueError(f"Alert rule {rule_id} needs a KPI name.")
+        if operator not in operators:
+            raise ValueError(f"Alert rule {rule_id} has an unsupported operator.")
+        if severity not in severities:
+            raise ValueError(f"Alert rule {rule_id} severity must be INFO, WARNING or CRITICAL.")
+        threshold = _finite_number(rule.get("threshold"), f"Threshold for {rule_id}")
+        record = by_name.get(name.casefold())
+        state = "MISSING_DATA"
+        value: float | None = None
+        unit = ""
+        source = ""
+        observed = None
+        breached = False
+        age_minutes: float | None = None
+        minutes_until_observation: float | None = None
+        maximum_age_minutes = stale_hours * 60.0
+        if record is not None:
+            value = _finite_number(record.get("value"), f"KPI value for {name}")
+            unit = str(record.get("unit", "")).strip()
+            source = str(record.get("source", "")).strip()
+            observed = pd.to_datetime(record.get("observed_at"), utc=True, errors="coerce")
+            if record.get("max_age_minutes") is not None:
+                maximum_age_minutes = _finite_number(
+                    record.get("max_age_minutes"), f"Maximum age for {name}"
+                )
+                if maximum_age_minutes < 0 or maximum_age_minutes > 24 * 365 * 60:
+                    raise ValueError(f"Maximum age for {name} must be between zero and one year.")
+            if pd.isna(observed):
+                state = "INVALID_TIMESTAMP"
+            elif observed > now:
+                state = "FUTURE_TIMESTAMP"
+                minutes_until_observation = max(0.0, (observed - now).total_seconds() / 60.0)
+            else:
+                age_minutes = max(0.0, (now - observed).total_seconds() / 60.0)
+                if not source:
+                    state = "SOURCE_NOT_IDENTIFIED"
+                elif age_minutes > maximum_age_minutes:
+                    state = "STALE_DATA"
+                else:
+                    if operator == ">":
+                        breached = value > threshold
+                    elif operator == ">=":
+                        breached = value >= threshold
+                    elif operator == "<":
+                        breached = value < threshold
+                    elif operator == "<=":
+                        breached = value <= threshold
+                    else:
+                        breached = math.isclose(value, threshold, rel_tol=1e-9, abs_tol=1e-12)
+                    state = "OPEN" if breached else "NORMAL"
+        freshness = (
+            "FUTURE" if state == "FUTURE_TIMESTAMP"
+            else "STALE" if state == "STALE_DATA"
+            else "FRESH" if state in {"OPEN", "NORMAL"}
+            else "UNKNOWN"
+        )
+        alert_identity = rule_id + "::" + name.casefold()
+        import hashlib
+        alert_id = "ALT-" + hashlib.sha256(alert_identity.encode("utf-8")).hexdigest()[:20].upper()
+        event_state = (
+            "NEW" if breached and alert_id not in prior
+            else "CONTINUING" if breached
+            else "RESOLVED" if alert_id in prior and state == "NORMAL"
+            else state
+        )
+        processed_alert_ids.add(alert_id)
+        if breached:
+            seen_active_ids.add(alert_id)
+        elif alert_id in prior and state != "NORMAL":
+            # A stale, future, missing or otherwise unusable reading cannot
+            # prove recovery. Keep the prior alert open but explicitly unverified.
+            seen_active_ids.add(alert_id)
+            event_state = "UNVERIFIED"
+        rows.append({
+            "Alert ID": alert_id,
+            "Rule ID": rule_id,
+            "KPI": name,
+            "Value": value,
+            "Operator": operator,
+            "Threshold": threshold,
+            "Unit": unit,
+            "Severity": severity,
+            "State": state,
+            "Event": event_state,
+            "Source": source or "NOT PROVIDED",
+            "Observed at": "" if observed is None or pd.isna(observed) else observed.isoformat(),
+            "Freshness": freshness,
+            "Age minutes": age_minutes,
+            "Minutes until observation": minutes_until_observation,
+            "Maximum age minutes": maximum_age_minutes,
+        })
+    frame = pd.DataFrame(rows)
+    duplicate_count = int(frame["Alert ID"].duplicated().sum())
+    if duplicate_count:
+        raise RuntimeError("Internal KPI alert identity collision detected.")
+    kpi_view = frame.rename(columns={
+        "Alert ID": "alert_id",
+        "Rule ID": "rule_id",
+        "KPI": "kpi",
+        "Value": "value",
+        "Operator": "operator",
+        "Threshold": "threshold",
+        "Unit": "unit",
+        "Severity": "severity",
+        "State": "status",
+        "Event": "event",
+        "Source": "source",
+        "Observed at": "observed_at",
+        "Freshness": "freshness",
+        "Age minutes": "age_minutes",
+        "Minutes until observation": "minutes_until_observation",
+        "Maximum age minutes": "max_age_minutes",
+    }).copy()
+    unmatched_prior_ids = prior - processed_alert_ids
+    seen_active_ids.update(unmatched_prior_ids)
+    alert_records = [
+        {
+            "fingerprint": str(row["Alert ID"]),
+            "alert_id": str(row["Alert ID"]),
+            "rule_id": str(row["Rule ID"]),
+            "kpi": str(row["KPI"]),
+            "severity": str(row["Severity"]),
+            "source": str(row["Source"]),
+            "state": "OPEN" if row["State"] == "OPEN" else "OPEN_UNVERIFIED",
+            "new_alert": str(row["Event"]) == "NEW",
+            "Event": str(row["Event"]),
+        }
+        for row in rows
+        if str(row["Alert ID"]) in seen_active_ids
+    ]
+    future_count = int((frame["State"] == "FUTURE_TIMESTAMP").sum())
+    open_count = len(seen_active_ids)
+    breached_count = int((frame["State"] == "OPEN").sum())
+    return {
+        "status": "KPI_ALERT_RULES_EVALUATED",
+        "evaluated_at": now.isoformat(),
+        "rule_count": len(frame),
+        "kpi_count": len(by_name),
+        "open_alert_count": open_count,
+        "breached_kpi_count": breached_count,
+        "new_alert_count": int((frame["Event"] == "NEW").sum()),
+        "continuing_alert_count": int((frame["Event"] == "CONTINUING").sum()),
+        "unverified_open_alert_count": int((frame["Event"] == "UNVERIFIED").sum()),
+        "stale_or_missing_count": int(frame["State"].isin(["STALE_DATA", "MISSING_DATA", "INVALID_TIMESTAMP", "FUTURE_TIMESTAMP", "SOURCE_NOT_IDENTIFIED"]).sum()),
+        "future_kpi_count": future_count,
+        "resolved_alert_count": int((frame["Event"] == "RESOLVED").sum()),
+        "alerts": frame,
+        "kpis": kpi_view,
+        "alert_records": alert_records,
+        "next_open_alert_ids": sorted(seen_active_ids),
+        "warning": (
+            "This evaluation does not dispatch notifications or prove that KPI sources are live. "
+            "Persist rule definitions and alert state in an authorized workspace; validate source freshness and ownership before acting."
+        ),
+    }
+
+def manage_recovery_snapshot_history(
+    history_state: Mapping[str, Any] | None,
+    *,
+    action: str,
+    new_snapshot: Any = None,
+    target_revision: int | None = None,
+    max_history: int = 25,
+    max_snapshot_bytes: int = 32768,
+) -> dict[str, Any]:
+    """Checkpoint, undo, redo or restore bounded JSON snapshots for this tool only."""
+    import json
+
+    if isinstance(max_history, bool) or not isinstance(max_history, int) or not 2 <= max_history <= 100:
+        raise ValueError("max_history must be an integer from 2 to 100.")
+    if isinstance(max_snapshot_bytes, bool) or not isinstance(max_snapshot_bytes, int) or not 256 <= max_snapshot_bytes <= 1_000_000:
+        raise ValueError("max_snapshot_bytes must be an integer from 256 to 1,000,000.")
+
+    action_value = str(action or "").strip().lower()
+    aliases = {
+        "checkpoint": "checkpoint",
+        "create_checkpoint": "checkpoint",
+        "undo": "undo",
+        "redo": "redo",
+        "restore": "restore",
+        "restore_revision": "restore",
+    }
+    if action_value not in aliases:
+        raise ValueError("Recovery action must be checkpoint, undo, redo or restore.")
+    action_value = aliases[action_value]
+
+    def copy_snapshot(value: Any, field: str) -> Any:
+        try:
+            encoded = json.dumps(
+                value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"{field} must be valid JSON-compatible data without NaN or Infinity."
+            ) from exc
+        if len(encoded.encode("utf-8")) > max_snapshot_bytes:
+            raise ValueError(f"{field} exceeds the {max_snapshot_bytes}-byte snapshot limit.")
+        cloned = json.loads(encoded)
+        if not isinstance(cloned, (dict, list)):
+            raise ValueError(f"{field} must be a JSON object or array.")
+        return cloned
+
+    if history_state is None:
+        past: list[Any] = []
+        future: list[Any] = []
+        current: Any = None
+        has_current = False
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Recovery history state must be an object.")
+        past_raw = history_state.get("past", [])
+        future_raw = history_state.get("future", [])
+        has_current = history_state.get("has_current", "current" in history_state)
+        if (
+            not isinstance(past_raw, list)
+            or not isinstance(future_raw, list)
+            or not isinstance(has_current, bool)
+        ):
+            raise ValueError("Recovery history requires past/future lists and a Boolean has_current flag.")
+        past = [copy_snapshot(item, "Prior snapshot") for item in past_raw]
+        future = [copy_snapshot(item, "Redo snapshot") for item in future_raw]
+        current = (
+            copy_snapshot(history_state.get("current"), "Current snapshot")
+            if has_current else None
+        )
+        if len(past) + len(future) + int(has_current) > max_history:
+            raise ValueError(f"Recovery history exceeds the {max_history}-revision limit.")
+        if not has_current and (past or future):
+            raise ValueError("Recovery history cannot contain past/future snapshots without a current snapshot.")
+
+    if action_value == "checkpoint":
+        checkpoint = copy_snapshot(new_snapshot, "New snapshot")
+        if not has_current:
+            current, has_current, past, future = checkpoint, True, [], []
+            status = "SNAPSHOT_CREATED"
+        elif current == checkpoint:
+            status = "SNAPSHOT_UNCHANGED"
+        else:
+            past = (past + [current])[-(max_history - 1):]
+            current, future = checkpoint, []
+            status = "SNAPSHOT_CHECKPOINTED"
+    elif action_value == "undo":
+        if not has_current or not past:
+            raise ValueError("No earlier snapshot is available to undo.")
+        future.append(current)
+        current = past.pop()
+        status = "SNAPSHOT_UNDONE"
+    elif action_value == "redo":
+        if not has_current or not future:
+            raise ValueError("No undone snapshot is available to redo.")
+        past.append(current)
+        current = future.pop()
+        status = "SNAPSHOT_REDONE"
+    else:
+        if not has_current:
+            raise ValueError("No snapshot is available to restore.")
+        if isinstance(target_revision, bool) or not isinstance(target_revision, int):
+            raise ValueError("Target revision must be an integer using 1-based numbering.")
+        timeline_values = [*past, current, *reversed(future)]
+        if target_revision < 1 or target_revision > len(timeline_values):
+            raise ValueError(f"Target revision must be between 1 and {len(timeline_values)}.")
+        past = timeline_values[:target_revision - 1]
+        current = timeline_values[target_revision - 1]
+        future = list(reversed(timeline_values[target_revision:]))
+        status = "REVISION_RESTORED"
+
+    timeline_values = [*past, current, *reversed(future)] if has_current else []
+    timeline = [
+        {"revision": i + 1, "is_current": i == len(past), "snapshot": item}
+        for i, item in enumerate(timeline_values)
+    ]
+    updated_history = {
+        "past": past,
+        "current": current,
+        "future": future,
+        "has_current": has_current,
+        "max_history": max_history,
+    }
+    return {
+        "status": status,
+        "action": action_value,
+        "current_revision": len(past) + 1 if has_current else None,
+        "revision_count": len(timeline_values),
+        "can_undo": bool(has_current and past),
+        "can_redo": bool(has_current and future),
+        "current_snapshot": current if has_current else None,
+        "timeline": timeline,
+        "history_state": updated_history,
+        "limitations": [
+            "History covers only JSON snapshots explicitly entered into this recovery tool.",
+            "It does not intercept arbitrary edits in other Shoir-IE modules or roll back external-system side effects.",
+            "Authenticated managed-workspace persistence, re-login recovery and cross-workspace isolation require staging verification.",
+        ],
+    }
+

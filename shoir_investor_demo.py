@@ -650,7 +650,7 @@ def _button(stage: str, label: str) -> None:
     if stage != "risk":
         previous = STAGES[[x[0] for x in STAGES].index(stage) - 1][0]
         disabled = not _is_done(previous)
-    if st.button(label, type="primary", use_container_width=True, disabled=disabled, key=f"{DEMO_KEY}_btn_{stage}"):
+    if st.button(label, type="primary", width="stretch", disabled=disabled, key=f"{DEMO_KEY}_btn_{stage}"):
         _run_single(stage)
 
 
@@ -770,7 +770,7 @@ def _render_plant_controls(username: str) -> None:
     if st.button(
         "🚨 LOAD FLAGSHIP 72-HOUR FACTORY CRISIS",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         key=f"{DEMO_KEY}_preset_flagship",
     ):
         _apply_inputs(_preset("Flagship 72-hour crisis"), username, "Flagship 72-hour crisis")
@@ -781,7 +781,7 @@ def _render_plant_controls(username: str) -> None:
         if st.button(
             "▶ Apply Plant Changes",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key=f"{DEMO_KEY}_apply_inputs",
         ):
             _apply_inputs(
@@ -803,15 +803,15 @@ def _render_plant_controls(username: str) -> None:
             st.success("Plant state updated. Downstream results have been cleared for re-analysis.")
             st.rerun()
     with b:
-        if st.button("⚠️ Compressor deterioration", use_container_width=True, key=f"{DEMO_KEY}_preset_bad"):
+        if st.button("⚠️ Compressor deterioration", width="stretch", key=f"{DEMO_KEY}_preset_bad"):
             _apply_inputs(_preset("Compressor deterioration"), username, "Compressor deterioration")
             st.rerun()
     with c:
-        if st.button("📈 Demand surge", use_container_width=True, key=f"{DEMO_KEY}_preset_surge"):
+        if st.button("📈 Demand surge", width="stretch", key=f"{DEMO_KEY}_preset_surge"):
             _apply_inputs(_preset("Demand surge"), username, "Demand surge")
             st.rerun()
     with d:
-        if st.button("🟢 Stable recovery", use_container_width=True, key=f"{DEMO_KEY}_preset_good"):
+        if st.button("🟢 Stable recovery", width="stretch", key=f"{DEMO_KEY}_preset_good"):
             _apply_inputs(_preset("Stable recovery"), username, "Stable recovery")
             st.rerun()
 
@@ -830,7 +830,7 @@ def _render_plant_controls(username: str) -> None:
             "overtime_sar": float(overtime),
         }
     )
-    st.dataframe(current, use_container_width=True, hide_index=True)
+    st.dataframe(current, width="stretch", hide_index=True)
     st.caption(
         "Demo safety: these controls change only the synthetic investor scenario. "
         "They do not modify a connected plant."
@@ -875,7 +875,7 @@ def _render_landing() -> None:
     st.markdown("### 🚨 What the Command Center sees")
     left, right = st.columns([1.2, 1])
     with left:
-        st.dataframe(plant, use_container_width=True, hide_index=True)
+        st.dataframe(plant, width="stretch", hide_index=True)
     with right:
         fig = px.bar(
             plant.sort_values("Health %"),
@@ -885,18 +885,18 @@ def _render_landing() -> None:
             range_x=[0, 100],
             title="Operational health map",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     st.info(
         "This is the investor demo entry point. Nothing here is represented as a live plant connection; "
         "the point is to demonstrate the complete industrial decision loop."
     )
     c1, c2 = st.columns([2, 1])
     with c1:
-        if st.button("🚨 ANALYZE PLANT RISK", type="primary", use_container_width=True, key=f"{DEMO_KEY}_start"):
+        if st.button("🚨 ANALYZE PLANT RISK", type="primary", width="stretch", key=f"{DEMO_KEY}_start"):
             _run_all(str(st.session_state.get("current_user") or "demo_user"))
             st.rerun()
     with c2:
-        if st.button("↺ Reset Demo", use_container_width=True, key=f"{DEMO_KEY}_reset_landing"):
+        if st.button("↺ Reset Demo", width="stretch", key=f"{DEMO_KEY}_reset_landing"):
             _reset()
             st.rerun()
 
@@ -912,9 +912,9 @@ def _render_risk() -> None:
     c1.metric("Highest-risk asset", str(top["Asset"]), f"{float(top['Risk %']):.0f}% risk")
     c2.metric("Risk signals", f"{len(risk)}", "cross-domain")
     c3.metric("Customer order", f"{order_protection:.0f}%", "protected" if order_protection >= 90 else "at risk")
-    st.dataframe(risk, use_container_width=True, hide_index=True)
+    st.dataframe(risk, width="stretch", hide_index=True)
     fig = px.bar(risk.sort_values("Risk %"), x="Risk %", y="Asset", orientation="h", title="Risk ranking · traceable signals")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_thread() -> None:
@@ -927,9 +927,9 @@ def _render_thread() -> None:
     c3.metric("Twin snapshot", "Saved", "replayable")
     a, b = st.columns([1, 1.2])
     with a:
-        st.dataframe(_state("thread"), use_container_width=True, hide_index=True)
+        st.dataframe(_state("thread"), width="stretch", hide_index=True)
     with b:
-        st.plotly_chart(_thread_figure(), use_container_width=True)
+        st.plotly_chart(_thread_figure(), width="stretch")
     if _state("twin_persistence_warning"):
         st.caption(f"Local persistence note: {_state('twin_persistence_warning')}")
     try:
@@ -952,8 +952,8 @@ def _render_maintenance() -> None:
     c3.metric("Signals combined", "3", "trend + condition + context")
     fig = px.line(df, x="Hour", y="Risk %", color="Asset", markers=True, title="Maintenance risk trajectory · 72 hours")
     fig.add_hline(y=70, line_dash="dash", annotation_text="High-risk threshold")
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(latest.rename(columns={"Hour": "Horizon h"}), use_container_width=True, hide_index=True)
+    st.plotly_chart(fig, width="stretch")
+    st.dataframe(latest.rename(columns={"Hour": "Horizon h"}), width="stretch", hide_index=True)
     st.caption("Risk is a deterministic demo score from synthetic telemetry-style signals; it is not a live failure prediction.")
 
 
@@ -970,7 +970,7 @@ def _render_simulation() -> None:
     c2.metric("OTIF", f"{intervention['OTIF %']:.1f}%", f"{intervention['OTIF %']-baseline['OTIF %']:+.1f} pp")
     c3.metric("Downtime", f"{intervention['Downtime h']:.1f} h", f"{intervention['Downtime h']-baseline['Downtime h']:+.1f} h")
     c4.metric("Replications", f"{sim['reps']:,}", "72h horizon")
-    st.dataframe(s.round(2), use_container_width=True, hide_index=True)
+    st.dataframe(s.round(2), width="stretch", hide_index=True)
     rescue = _state("rescue_case", _rescue_case())
     comparison = pd.DataFrame({
         "Metric": list(rescue["baseline"].keys()),
@@ -978,7 +978,7 @@ def _render_simulation() -> None:
         "Shoir-IE Rescue": list(rescue["intervention"].values()),
     })
     st.markdown("#### 🆚 What happens if we do nothing?")
-    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    st.dataframe(comparison, width="stretch", hide_index=True)
     st.caption("Rescue-case economics are synthetic demonstration assumptions; simulation outputs remain reproducible.")
     # Plotly is a presentation layer only; if a chart-specific edge case occurs,
     # keep the numeric simulation and downstream decision stages intact.
@@ -999,7 +999,7 @@ def _render_simulation() -> None:
             points=False,
             title="Simulated throughput distribution · baseline vs intervention",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     except Exception as exc:
         _set("simulation_chart_warning", f"{type(exc).__name__}: {exc}")
         st.info("Simulation distribution chart is temporarily unavailable; the numeric simulation results above remain valid.")
@@ -1018,7 +1018,7 @@ def _render_optimization() -> None:
     c4.metric("Intervention", _format_sar(choice["Cost SAR"]))
     if _state("optimization_warning"):
         st.info("The optimization fallback selected the best available candidate; the remaining risk, simulation, decision and ROI evidence is unaffected.")
-    st.dataframe(opt["scored"].round(2), use_container_width=True, hide_index=True)
+    st.dataframe(opt["scored"].round(2), width="stretch", hide_index=True)
     fig = px.scatter(
         opt["alternatives"],
         x="Cost SAR",
@@ -1028,7 +1028,7 @@ def _render_optimization() -> None:
         color="Service %",
         title="Trade-off surface · cost × risk × service",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     if str(_state("active_preset", "")) == "Flagship 72-hour crisis":
         st.success("Optimizer recommendation: **Preventive Rescue** — protects the 72-hour customer order while reducing downtime, scrap, overtime and energy exposure.")
     else:
@@ -1061,14 +1061,14 @@ def _render_decision() -> None:
         ],
         columns=["Evidence", "Result", "State"],
     )
-    st.dataframe(evidence, use_container_width=True, hide_index=True)
+    st.dataframe(evidence, width="stretch", hide_index=True)
     rescue = d.get("rescue_case") or _rescue_case()
     st.markdown("#### 🛠️ Shoir-IE intervention plan")
     action_df = pd.DataFrame(
         [(i + 1, action, "Recommended") for i, action in enumerate(rescue["action_plan"])],
         columns=["Step", "Action", "State"],
     )
-    st.dataframe(action_df, use_container_width=True, hide_index=True)
+    st.dataframe(action_df, width="stretch", hide_index=True)
     if _state("decision_persisted"):
         st.success("Decision artifact persisted to the enterprise workspace.")
 
@@ -1105,7 +1105,7 @@ def _render_impact() -> None:
             _format_sar(intervention["Financial exposure SAR"]),
         ],
     })
-    st.dataframe(result_df, use_container_width=True, hide_index=True)
+    st.dataframe(result_df, width="stretch", hide_index=True)
     st.markdown("#### ⏱️ Workflow time compression")
     t1, t2 = st.columns(2)
     with t1:
@@ -1131,7 +1131,7 @@ def _render_verification() -> None:
     c1.metric("Verification", "PASS" if pass_count == len(ver) else "REVIEW")
     c2.metric("KPIs checked", f"{len(ver)}")
     c3.metric("Passed", f"{pass_count}/{len(ver)}")
-    st.dataframe(ver.round(2), use_container_width=True, hide_index=True)
+    st.dataframe(ver.round(2), width="stretch", hide_index=True)
     st.success(
         "The demonstration closes the loop: the chosen intervention has explicit targets, "
         "a verification record and a traceable outcome."
@@ -1165,11 +1165,11 @@ def render_investor_control_center(tier: str, username: str) -> None:
                 "Recommended live presentation: press ANALYZE PLANT RISK once. "
                 "The flow populates the same evidence that can also be run one stage at a time."
             )
-            if st.button("🚀 RUN FULL RESCUE FLOW", type="primary", use_container_width=True, key=f"{DEMO_KEY}_full"):
+            if st.button("🚀 RUN FULL RESCUE FLOW", type="primary", width="stretch", key=f"{DEMO_KEY}_full"):
                 _run_all(username)
                 st.rerun()
         with c2:
-            if st.button("↺ Reset", use_container_width=True, key=f"{DEMO_KEY}_reset"):
+            if st.button("↺ Reset", width="stretch", key=f"{DEMO_KEY}_reset"):
                 _reset()
                 st.rerun()
 
@@ -1200,6 +1200,6 @@ def render_investor_control_center(tier: str, username: str) -> None:
             "impact": "💰 Quantify ROI",
             "verification": "✅ Verify outcome",
         }
-        if st.button(labels[current], type="primary", use_container_width=True, key=f"{DEMO_KEY}_next"):
+        if st.button(labels[current], type="primary", width="stretch", key=f"{DEMO_KEY}_next"):
             _run_single(current)
             st.rerun()

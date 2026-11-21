@@ -4,11 +4,15 @@ on:
   push:
     branches:
       - main
-      - "feat/**"
+      - staging-e2e-20261019
   pull_request:
     branches:
       - main
-      - "feat/shoir-100-tools-integration-20261025"
+      - staging-e2e-20261019
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   engine-regression:
@@ -27,5 +31,24 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Compile changed Python modules
         run: python -m py_compile shoir_experiment_engine.py shoir_forecasting.py shoir_optimization.py industrial_experience.py industrial_platform.py shoir_live_visuals.py app.py
-      - name: Run engine regression tests
-        run: pytest -q tests/test_shoir_experiment_engine.py tests/test_shoir_forecasting.py tests/test_shoir_optimization.py
+      - name: Run engine and platform acceptance regression tests
+        run: |
+          pytest -q \
+            tests/test_shoir_experiment_engine.py \
+            tests/test_shoir_forecasting.py \
+            tests/test_shoir_optimization.py \
+            tests/test_shoir_industrial_intelligence.py \
+            tests/test_shoir_resource_intelligence.py \
+            tests/test_shoir_remaining_tool_engines.py \
+            tests/test_shoir_target_engines.py \
+            tests/test_shoir_canonical_tool_dispatch.py \
+            tests/test_shoir_100_tool_execution_audit.py \
+            tests/test_shoir_100_tool_workbench.py \
+            tests/test_sqlite_connection_lifecycle.py \
+            tests/test_team_workspaces_ui.py \
+            tests/test_organization_workspace_client.py \
+            tests/test_workspace_persistence.py \
+            tests/test_shoir_digital_thread.py \
+            tests/test_export_pagination.py \
+            tests/test_xlsx_export_formula_injection.py \
+            tests/test_platform_export_argument_compatibility.py

@@ -18,6 +18,7 @@ import math
 import os
 import re
 import sqlite3
+from shoir_sqlite import sqlite_connect
 import threading
 import uuid
 import zipfile
@@ -32,10 +33,26 @@ import requests
 import streamlit as st
 
 try:
-    from durable_account_store import _pg_connect, database_url, postgres_backend_configured
+    from durable_account_store import (
+        APP_ENVIRONMENT,
+        _pg_connect,
+        database_url,
+        edge_list_platform_records,
+        edge_save_platform_record,
+        edge_organization_action,
+        postgres_backend_configured,
+    )
 except Exception:  # local/unit-test safety
     _pg_connect = None
     database_url = lambda: ""
+    APP_ENVIRONMENT = "local"
+    edge_list_platform_records = lambda *args, **kwargs: []
+    edge_save_platform_record = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("Managed platform persistence is unavailable.")
+    )
+    edge_organization_action = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("Managed organization workspaces are unavailable.")
+    )
     postgres_backend_configured = lambda: False
 
 
@@ -59,6 +76,94 @@ def now_iso() -> str:
 def workspace_key(username: str, workspace: str = "default") -> str:
     raw = str(username or "").strip().lower() + "::" + str(workspace or "default").strip().lower()
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+
+
+def _staging_platform_identity(username: str) -> tuple[str, str] | None:
+    """Return the current verified app-session identity for staging-only managed persistence.
+
+    The bearer token is read from Streamlit server session state and is never
+    placed in a persisted payload. Staging must fail closed rather than silently
+    treating a process-local SQLite write as durable storage.
+    """
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        return None
+    requested = str(username or "").strip()
+    try:
+        actor = str(st.session_state.get("current_user") or "").strip()
+        token = str(st.session_state.get("remote_session_token") or "")
+        authenticated = bool(st.session_state.get("authenticated"))
+    except Exception as exc:
+        raise PermissionError(
+            "An authenticated staging workspace session is required."
+        ) from exc
+    if (
+        not authenticated
+        or not actor
+        or actor.casefold() == "guest visitor"
+        or actor.casefold() != requested.casefold()
+        or not token
+    ):
+        raise PermissionError(
+            "The requested user does not match the authenticated staging workspace session."
+        )
+    return actor, token
+
+
+def _staging_platform_save(
+    username: str,
+    workspace: str,
+    record_type: str,
+    entity_key: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    identity = _staging_platform_identity(username)
+    if identity is None:
+        return None
+    actor, token = identity
+    return edge_save_platform_record(
+        actor, token, workspace, record_type, entity_key, payload
+    )
+
+
+def _staging_platform_list(
+    username: str,
+    workspace: str,
+    record_type: str,
+    limit: int = 200,
+    entity_key: str = "",
+) -> list[dict[str, Any]] | None:
+    identity = _staging_platform_identity(username)
+    if identity is None:
+        return None
+    actor, token = identity
+    return edge_list_platform_records(
+        actor, token, workspace, record_type, max(1, min(10000, int(limit))),
+        entity_key=entity_key,
+    )
+
+
+def _platform_records_frame(records: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
+    rows = []
+    for record in records:
+        payload = record.get("payload_json")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, Mapping):
+            payload = {}
+        rows.append({
+            **dict(payload),
+            "entity_key": record.get("entity_key", ""),
+            "content_hash": record.get("content_hash", ""),
+            "version": record.get("version", 1),
+            "created_at": record.get("created_at", ""),
+            "updated_at": record.get("updated_at", ""),
+        })
+    return pd.DataFrame(rows)
 
 
 def _remote() -> bool:
@@ -88,7 +193,7 @@ def _local_connect(db_path: Optional[str] = None):
     # Resolve DEFAULT_DB at call time so tests and local deployments can safely
     # override the enterprise store without relying on a stale default argument.
     target = str(db_path or DEFAULT_DB)
-    conn = sqlite3.connect(target, timeout=30, check_same_thread=False)
+    conn = sqlite_connect(target, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
@@ -330,13 +435,31 @@ def record_artifact(
     workspace: str = "default",
     artifact_id: Optional[str] = None,
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     aid = artifact_id or "ART-" + uuid.uuid4().hex[:14].upper()
     body = payload if isinstance(payload, (dict, list, tuple, str)) else {"value": payload}
     payload_json = _json(body)
     stamp = now_iso()
     content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    safe_staging_body = _canonical_safe(body)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "artifact",
+        aid,
+        {
+            "artifact_type": str(artifact_type)[:100],
+            "name": str(name)[:240],
+            "payload": safe_staging_body,
+            "content_hash": content_hash,
+            "owner": username,
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return aid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -412,9 +535,149 @@ def _canonical_json(payload: Any) -> tuple[str, str]:
     return raw, hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def canonical_entity_id(username: str, workspace: str, entity_type: str, name: str, source: str = "") -> str:
+def _existing_thread_entity_id(
+    username: str,
+    workspace: str,
+    entity_type: str,
+    thread_node_id: str,
+    legacy_names: Sequence[str] = (),
+    source: str = "",
+) -> str:
+    """Resolve an existing canonical ID by immutable source identity or unique legacy alias."""
+    identity = str(thread_node_id or "").strip()
+    names = list(dict.fromkeys(
+        str(value).strip()[:240]
+        for value in legacy_names
+        if str(value or "").strip()
+    ))
+    source_key = str(source or "")[:300]
+    kind = str(entity_type)[:100]
+
+    # An immutable ID or at least one legacy alias is required for a lookup.
+    # Avoid an unnecessary database/API read for brand-new entities.
+    if not identity and not names:
+        return ""
+
+    if str(APP_ENVIRONMENT).casefold() == "staging":
+        records = _staging_platform_list(username, workspace, "canonical_entity", 10000)
+        if records is None:
+            raise PermissionError("Authenticated staging persistence is required for Digital Thread identity.")
+        identity_matches: list[str] = []
+        alias_matches: list[str] = []
+        for record in records:
+            payload = record.get("payload_json") or {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+            if not isinstance(payload, Mapping):
+                continue
+            if str(payload.get("entity_type") or "") != kind:
+                continue
+            saved_id = str(payload.get("entity_id") or record.get("entity_key") or "")
+            saved_name = str(payload.get("name") or "")
+            saved_source = str(payload.get("source") or "")
+            saved_state = payload.get("state_json") or {}
+            if isinstance(saved_state, str):
+                try:
+                    saved_state = json.loads(saved_state)
+                except Exception:
+                    saved_state = {}
+            if not isinstance(saved_state, Mapping):
+                saved_state = {}
+            saved_identity = str(saved_state.get("thread_node_id") or "").strip()
+            if identity and saved_identity == identity:
+                identity_matches.append(saved_id)
+            if names and saved_name.casefold() in {item.casefold() for item in names} and saved_source == source_key:
+                alias_matches.append(saved_id)
+        if len(set(identity_matches)) > 1:
+            raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+        if identity_matches:
+            return identity_matches[0]
+        if len(set(alias_matches)) > 1:
+            raise RuntimeError("Legacy display name maps to multiple canonical entities.")
+        return alias_matches[0] if alias_matches else ""
+
+    ensure_enterprise_schema()
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                if identity:
+                    cur.execute(
+                        """SELECT entity_id
+                           FROM shoir_internal.canonical_entities
+                           WHERE workspace_id=%s AND entity_type=%s
+                             AND state_json::jsonb ->> 'thread_node_id' = %s
+                           ORDER BY updated_at DESC
+                           LIMIT 2""",
+                        (workspace_key(username, workspace), kind, identity),
+                    )
+                    rows = cur.fetchall()
+                    if len(rows) > 1:
+                        raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+                    if rows:
+                        return str(rows[0][0])
+                if names:
+                    cur.execute(
+                        """SELECT entity_id
+                           FROM shoir_internal.canonical_entities
+                           WHERE workspace_id=%s AND entity_type=%s
+                             AND lower(name) = ANY(%s) AND source=%s
+                           ORDER BY updated_at DESC
+                           LIMIT 2""",
+                        (workspace_key(username, workspace), kind, [item.casefold() for item in names], source_key),
+                    )
+                    rows = cur.fetchall()
+                    if len(rows) > 1:
+                        raise RuntimeError("Legacy display name maps to multiple canonical entities.")
+                    if rows:
+                        return str(rows[0][0])
+        return ""
+
+    with _local_connect() as conn:
+        rows = conn.execute(
+            """SELECT entity_id,state_json,name,source
+               FROM shoir_ent_canonical_entities
+               WHERE workspace_id=? AND entity_type=?
+               ORDER BY updated_at DESC""",
+            (workspace_key(username, workspace), kind),
+        ).fetchall()
+    identity_matches: list[str] = []
+    alias_matches: list[str] = []
+    for entity_id, state_json, saved_name, saved_source in rows:
+        try:
+            saved = json.loads(state_json or "{}")
+        except Exception:
+            saved = {}
+        if identity and isinstance(saved, Mapping) and str(saved.get("thread_node_id") or "").strip() == identity:
+            identity_matches.append(str(entity_id))
+        if names and str(saved_name or "").casefold() in {item.casefold() for item in names} and str(saved_source or "") == source_key:
+            alias_matches.append(str(entity_id))
+    if len(set(identity_matches)) > 1:
+        raise RuntimeError("Digital Thread identity maps to multiple canonical entities.")
+    if identity_matches:
+        return identity_matches[0]
+    if len(set(alias_matches)) > 1:
+        raise RuntimeError("Legacy display name maps to multiple canonical entities.")
+    return alias_matches[0] if alias_matches else ""
+
+
+def canonical_entity_id(
+    username: str,
+    workspace: str,
+    entity_type: str,
+    name: str,
+    source: str = "",
+    identity_key: str = "",
+) -> str:
     wid = workspace_key(username, workspace)
-    raw = f"{wid}|{str(entity_type).strip()}|{str(name).strip()}|{str(source).strip()}"
+    immutable_key = str(identity_key or "").strip()
+    raw = (
+        f"{wid}|{str(entity_type).strip()}|identity|{immutable_key}"
+        if immutable_key
+        else f"{wid}|{str(entity_type).strip()}|{str(name).strip()}|{str(source).strip()}"
+    )
     return "CEN-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
 
 
@@ -427,15 +690,58 @@ def upsert_canonical_entity(
     status: str = "Observed",
     workspace: str = "default",
     secret_ref: str = "",
+    identity_key: str = "",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     safe_secret_ref = str(secret_ref or "")[:300]
-    eid = canonical_entity_id(username, workspace, entity_type, name, source)
-    payload_json, content_hash = _canonical_json(state or {})
+    safe_state = _canonical_safe(state or {})
+    state_identity = (
+        str(safe_state.get("thread_node_id") or "").strip()
+        if isinstance(safe_state, Mapping) else ""
+    )
+    immutable_key = str(identity_key or state_identity).strip()
+    metadata = safe_state.get("metadata", {}) if isinstance(safe_state, Mapping) else {}
+    aliases = metadata.get("name_aliases", []) if isinstance(metadata, Mapping) else []
+    if not isinstance(aliases, (list, tuple)):
+        aliases = []
+    existing_id = _existing_thread_entity_id(
+        username,
+        workspace,
+        entity_type,
+        state_identity or immutable_key,
+        legacy_names=aliases,
+        source=source,
+    )
+    eid = existing_id or canonical_entity_id(
+        username, workspace, entity_type, name, source, identity_key=immutable_key
+    )
+    payload_json, content_hash = _canonical_json(safe_state)
     stamp = now_iso()
     values = (eid, wid, str(entity_type)[:100], str(name)[:240], str(source)[:300],
               str(status)[:80] or "Observed", payload_json, content_hash, username, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "canonical_entity",
+        eid,
+        {
+            "entity_id": eid,
+            "workspace_id": wid,
+            "entity_type": str(entity_type)[:100],
+            "name": str(name)[:240],
+            "source": str(source)[:300],
+            "status": str(status)[:80] or "Observed",
+            "state_json": json.loads(payload_json),
+            "content_hash": content_hash,
+            "created_by": username,
+            "has_connector_reference": bool(safe_secret_ref),
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return eid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -444,8 +750,9 @@ def upsert_canonical_entity(
                     (entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (entity_id) DO UPDATE SET
-                      status=EXCLUDED.status,state_json=EXCLUDED.state_json,
-                      content_hash=EXCLUDED.content_hash,updated_at=EXCLUDED.updated_at""",
+                      name=EXCLUDED.name,source=EXCLUDED.source,status=EXCLUDED.status,
+                      state_json=EXCLUDED.state_json,content_hash=EXCLUDED.content_hash,
+                      updated_at=EXCLUDED.updated_at""",
                     values,
                 )
             conn.commit()
@@ -456,8 +763,9 @@ def upsert_canonical_entity(
                 (entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(entity_id) DO UPDATE SET
-                  status=excluded.status,state_json=excluded.state_json,
-                  content_hash=excluded.content_hash,updated_at=excluded.updated_at""",
+                  name=excluded.name,source=excluded.source,status=excluded.status,
+                  state_json=excluded.state_json,content_hash=excluded.content_hash,
+                  updated_at=excluded.updated_at""",
                 values,
             )
             conn.commit()
@@ -479,13 +787,30 @@ def upsert_canonical_relationship(
     metadata: Any = None,
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     rid = canonical_relationship_id(username, workspace, source_entity_id, target_entity_id, relation)
     metadata_json, _ = _canonical_json(metadata or {})
     stamp = now_iso()
     values = (rid, wid, str(source_entity_id), str(target_entity_id), str(relation)[:180],
               str(status)[:80] or "Linked", metadata_json, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "canonical_relationship",
+        rid,
+        {
+            "source_entity_id": str(source_entity_id),
+            "target_entity_id": str(target_entity_id),
+            "relation": str(relation)[:180],
+            "status": str(status)[:80] or "Linked",
+            "metadata_json": json.loads(metadata_json),
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return rid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -519,13 +844,29 @@ def record_canonical_event(
     relationship_id: str = "",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     event_id = "CEVT-" + uuid.uuid4().hex[:14].upper()
     payload_json, _ = _canonical_json(payload or {})
     stamp = now_iso()
     values = (event_id, wid, str(event_type)[:120], str(entity_id or "")[:80] or None,
               str(relationship_id or "")[:80] or None, payload_json, username, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "canonical_event",
+        event_id,
+        {
+            "event_type": str(event_type)[:120],
+            "entity_id": str(entity_id or "")[:80],
+            "relationship_id": str(relationship_id or "")[:80],
+            "payload_json": json.loads(payload_json),
+            "actor": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return event_id
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -549,6 +890,22 @@ def record_canonical_event(
 
 
 def canonical_entities_frame(username: str, workspace: str = "default", entity_type: str = "", limit: int = 2000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "canonical_entity", max(1, min(5000, int(limit))))
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "entity_id", "workspace_id", "entity_type", "name", "source",
+                "status", "state_json", "content_hash", "created_by",
+                "created_at", "updated_at", "entity_key", "version",
+            ])
+        if "entity_id" not in frame.columns:
+            frame["entity_id"] = frame.get("entity_key", "")
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        if not entity_type:
+            return frame.head(max(1, min(5000, int(limit))))
+        return frame[frame["entity_type"].astype(str).str.casefold() == str(entity_type).casefold()].head(max(1, min(5000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_entities" if _remote() else "shoir_ent_canonical_entities"
@@ -564,6 +921,20 @@ def canonical_entities_frame(username: str, workspace: str = "default", entity_t
 
 
 def canonical_relationships_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "canonical_relationship", max(1, min(10000, int(limit))))
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "relationship_id", "workspace_id", "source_entity_id",
+                "target_entity_id", "relation", "status", "metadata_json",
+                "created_at", "updated_at", "entity_key", "version",
+            ])
+        if "relationship_id" not in frame.columns:
+            frame["relationship_id"] = frame.get("entity_key", "")
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        return frame.head(max(1, min(10000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_relationships" if _remote() else "shoir_ent_canonical_relationships"
@@ -573,6 +944,20 @@ def canonical_relationships_frame(username: str, workspace: str = "default", lim
 
 
 def canonical_events_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "canonical_event", max(1, min(10000, int(limit))))
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "event_id", "workspace_id", "event_type", "entity_id",
+                "relationship_id", "payload_json", "actor", "created_at",
+                "entity_key", "version",
+            ])
+        if "event_id" not in frame.columns:
+            frame["event_id"] = frame.get("entity_key", "")
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        return frame.head(max(1, min(10000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.canonical_events" if _remote() else "shoir_ent_canonical_events"
@@ -665,6 +1050,26 @@ def build_control_tower_health_from_canonical(username: str, workspace: str = "d
 
 
 def list_artifacts(username: str, artifact_type: Optional[str] = None, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "artifact", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if artifact_type and not frame.empty:
+            frame = frame[frame["artifact_type"].astype(str) == str(artifact_type)]
+        if frame.empty:
+            return pd.DataFrame(columns=[
+                "artifact_id", "workspace_id", "artifact_type", "name",
+                "payload", "payload_json", "content_hash", "owner",
+                "created_at", "updated_at", "entity_key", "version",
+            ])
+        if "artifact_id" not in frame.columns and "entity_key" in frame.columns:
+            frame["artifact_id"] = frame["entity_key"]
+        if "workspace_id" not in frame.columns:
+            frame["workspace_id"] = workspace_key(username, workspace)
+        if "payload_json" not in frame.columns:
+            frame["payload_json"] = frame.get("payload", {})
+        if "owner" not in frame.columns:
+            frame["owner"] = username
+        return frame.head(max(1, min(1000, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.artifacts" if _remote() else "shoir_ent_artifacts"
@@ -682,6 +1087,21 @@ def _save_twin_asset(username: str, asset_id: str, state: Mapping[str, Any], sou
     wid = workspace_key(username, workspace)
     stamp = now_iso()
     body = _json(state)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "twin_asset",
+        str(asset_id),
+        {
+            "asset_id": str(asset_id),
+            "state_json": _canonical_safe(state),
+            "source": str(source)[:120],
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -713,7 +1133,6 @@ def save_twin_snapshot(
     workspace: str = "default",
 ) -> str:
     """Update live asset state and append a replayable immutable snapshot."""
-    ensure_enterprise_schema()
     if isinstance(states, pd.DataFrame):
         records = states.to_dict("records")
     elif isinstance(states, Mapping):
@@ -731,6 +1150,22 @@ def save_twin_snapshot(
     sid = "TWS-" + uuid.uuid4().hex[:14].upper()
     stamp = now_iso()
     body = _json(normalized)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "twin_snapshot",
+        sid,
+        {
+            "snapshot_id": sid,
+            "scenario_name": str(scenario_name)[:160],
+            "state_json": _canonical_safe(normalized),
+            "created_by": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return sid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -755,6 +1190,23 @@ def save_twin_snapshot(
 
 
 def load_twin_state(username: str, workspace: str = "default", limit: int = 500) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "twin_asset", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        rows = []
+        for row in frame.to_dict("records"):
+            payload = row.get("state_json")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+            item = dict(payload) if isinstance(payload, Mapping) else {}
+            item.setdefault("Asset", row.get("asset_id") or row.get("entity_key"))
+            item["Source"] = row.get("source", "")
+            item["Updated At"] = row.get("updated_at", "")
+            rows.append(item)
+        return pd.DataFrame(rows)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_assets" if _remote() else "shoir_ent_twin_assets"
@@ -788,10 +1240,27 @@ def save_twin_scenario(
     notes: str = "",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     sid = "TWSCN-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "twin_scenario",
+        str(name).strip()[:160],
+        {
+            "scenario_id": sid,
+            "name": str(name)[:160],
+            "parent_name": str(parent_name)[:160],
+            "parameters_json": _canonical_safe(parameters),
+            "notes": str(notes)[:4000],
+            "created_by": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return sid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -820,6 +1289,9 @@ def save_twin_scenario(
 
 
 def list_twin_scenarios(username: str, workspace: str = "default") -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "twin_scenario", 200)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_scenarios" if _remote() else "shoir_ent_twin_scenarios"
@@ -852,6 +1324,12 @@ def twin_what_if(df: pd.DataFrame, changes: Mapping[str, float]) -> tuple[pd.Dat
 
 
 def twin_replay(username: str, scenario_name: Optional[str] = None, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "twin_snapshot", limit)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if scenario_name and not frame.empty:
+            frame = frame[frame["scenario_name"].astype(str) == str(scenario_name)]
+        return frame.head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_snapshots" if _remote() else "shoir_ent_twin_snapshots"
@@ -937,7 +1415,6 @@ def record_connector_health(
     workspace: str = "default",
     secret_ref: str = "",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     cid = "CONN-" + hashlib.sha256((wid + "|" + name + "|" + system_type + "|" + protocol).encode()).hexdigest()[:14].upper()
     stamp = now_iso()
@@ -947,6 +1424,28 @@ def record_connector_health(
         cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms,
         detail, stamp, username, safe_secret_ref,
     )
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "connector_health",
+        cid,
+        {
+            "connector_id": cid,
+            "name": str(name)[:160],
+            "system_type": str(system_type)[:80],
+            "protocol": str(protocol)[:80],
+            "endpoint": safe_endpoint[:500],
+            "status": str(status)[:80],
+            "latency_ms": float(latency_ms) if latency_ms is not None else None,
+            "detail": str(detail)[:1000],
+            "checked_at": stamp,
+            "checked_by": username,
+            "has_connector_reference": bool(safe_secret_ref),
+        },
+    )
+    if staging_saved is not None:
+        return cid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -976,6 +1475,9 @@ def record_connector_health(
 
 
 def connector_health_frame(username: str, workspace: str = "default") -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "connector_health", 200)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.connector_health" if _remote() else "shoir_ent_connector_health"
@@ -1140,7 +1642,7 @@ def _connector_sql_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float
     if target.lower().startswith("sqlite:///"):
         db_path = target[10:]
         try:
-            with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+            with sqlite_connect(db_path, timeout=max(1.0, float(timeout))) as conn:
                 row = conn.execute("SELECT 1").fetchone()
             elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
             return "Healthy", elapsed, "SQLite connection validated.", int(bool(row))
@@ -1367,7 +1869,7 @@ def fetch_connector_sample(
                 target = str(endpoint).strip()
                 if target.lower().startswith("sqlite:///"):
                     db_path = target[10:]
-                    with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+                    with sqlite_connect(db_path, timeout=max(1.0, float(timeout))) as conn:
                         frame = pd.read_sql_query(bounded_query, conn)
                 elif target.lower().startswith(("postgresql://", "postgres://")):
                     import psycopg2
@@ -1540,11 +2042,37 @@ def run_due_connector_syncs(
 
 
 def create_job_record(username: str, module: str, job_type: str, payload: Mapping[str, Any], workspace: str = "default") -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     jid = "JOB-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     params = (jid, wid, str(module), str(job_type), "Queued", 0.0, "Queued", _json(payload), None, 0, False, False, stamp, None, None, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "job",
+        jid,
+        {
+            "job_id": jid,
+            "workspace_id": wid,
+            "module": str(module)[:160],
+            "job_type": str(job_type)[:100],
+            "status": "Queued",
+            "progress": 0.0,
+            "message": "Queued",
+            "payload_json": _canonical_safe(payload),
+            "result_json": None,
+            "attempts": 0,
+            "cancel_requested": False,
+            "pause_requested": False,
+            "created_at": stamp,
+            "started_at": None,
+            "finished_at": None,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return jid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -1570,6 +2098,33 @@ def create_job_record(username: str, module: str, job_type: str, payload: Mappin
 
 
 def update_job_record(username: str, job_id: str, status: Optional[str] = None, progress: Optional[float] = None, message: Optional[str] = None, result: Any = None, workspace: str = "default") -> None:
+    staging_records = _staging_platform_list(username, workspace, "job", 1, entity_key=job_id)
+    if staging_records is not None:
+        if not staging_records:
+            return
+        current = staging_records[0].get("payload_json") or {}
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except Exception:
+                current = {}
+        updated = dict(current) if isinstance(current, Mapping) else {}
+        stamp = now_iso()
+        if status is not None:
+            updated["status"] = status
+        if progress is not None:
+            updated["progress"] = float(max(0, min(100, progress)))
+        if message is not None:
+            updated["message"] = str(message)[:2000]
+        if result is not None:
+            updated["result_json"] = _canonical_safe(result)
+        if status == "Running" and not updated.get("started_at"):
+            updated["started_at"] = stamp
+        if status in {"Completed", "Failed", "Cancelled"}:
+            updated["finished_at"] = stamp
+        updated["updated_at"] = stamp
+        _staging_platform_save(username, workspace, "job", job_id, updated)
+        return
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     fields: list[str] = []
@@ -1684,6 +2239,9 @@ def request_job_action(username: str, job_id: str, action: str, workspace: str =
 
 
 def list_jobs(username: str, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "job", limit)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.jobs" if _remote() else "shoir_ent_jobs"
@@ -1702,11 +2260,32 @@ def add_collaboration_item(
     status: str = "Open",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     iid = "COL-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     params = (iid, wid, item_type, subject, body, username, assignee, reviewer, status, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "collaboration_item",
+        iid,
+        {
+            "item_id": iid,
+            "workspace_id": wid,
+            "item_type": str(item_type)[:100],
+            "subject": str(subject)[:240],
+            "body": str(body)[:10000],
+            "actor": username,
+            "assignee": str(assignee)[:160],
+            "reviewer": str(reviewer)[:160],
+            "status": str(status)[:80],
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return iid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -1726,6 +2305,9 @@ def add_collaboration_item(
 
 
 def collaboration_frame(username: str, workspace: str = "default") -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "collaboration_item", 200)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records)
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.collaboration" if _remote() else "shoir_ent_collaboration"
@@ -2033,15 +2615,38 @@ def add_knowledge_document(
     tags: Sequence[str] = (),
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     clean = str(content or "")
+    staging_identity = _staging_platform_identity(username)
+    if staging_identity is not None and len(clean.encode("utf-8")) > 200 * 1024:
+        raise ValueError("Staging knowledge documents are limited to 200 KiB per record.")
     if len(clean) > 2_000_000:
         raise ValueError("Knowledge document is larger than the 2 MB text limit.")
     did = "KN-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()
     vals = (did, wid, str(name), clean, source_type, _json(list(tags)), digest, username, stamp, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "knowledge_document",
+        did,
+        {
+            "doc_id": did,
+            "name": str(name)[:240],
+            "content": clean,
+            "source_type": str(source_type)[:80],
+            "tags": [str(tag)[:80] for tag in list(tags)[:30]],
+            "sha256": digest,
+            "created_by": username,
+            "created_at": stamp,
+            "updated_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        record_artifact(username, "knowledge_document", name, {"doc_id": did, "sha256": digest, "source_type": source_type}, workspace)
+        return did
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -2062,10 +2667,16 @@ def add_knowledge_document(
 
 
 def search_knowledge(username: str, query: str, workspace: str = "default", limit: int = 20) -> pd.DataFrame:
-    ensure_enterprise_schema()
     q = str(query or "").strip()
     if not q:
         return pd.DataFrame()
+    staging_records = _staging_platform_list(username, workspace, "knowledge_document", 200)
+    if staging_records is not None:
+        frame = _platform_records_frame(staging_records)
+        if frame.empty:
+            return frame
+        matches = frame[frame["content"].astype(str).str.contains(re.escape(q), case=False, na=False)]
+        return matches.head(max(1, min(100, int(limit))))
     wid = workspace_key(username, workspace)
     table = "shoir_internal.knowledge" if _remote() else "shoir_ent_knowledge"
     if _remote():
@@ -2159,11 +2770,30 @@ def save_report_provenance(
     artifact_ids: Sequence[str] = (),
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     rid = "REP-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
     vals = (rid, wid, str(module), str(report_format).upper(), str(filename), source_hash, _json(list(figure_hashes)), _json(list(artifact_ids)), username, stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "report_provenance",
+        rid,
+        {
+            "report_id": rid,
+            "module": str(module)[:160],
+            "format": str(report_format).upper()[:20],
+            "filename": os.path.basename(str(filename))[:240],
+            "source_hash": str(source_hash)[:128],
+            "figure_hashes": [str(x)[:128] for x in list(figure_hashes)[:100]],
+            "artifact_ids": [str(x)[:80] for x in list(artifact_ids)[:100]],
+            "created_by": username,
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return rid
+    ensure_enterprise_schema()
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -2248,6 +2878,340 @@ def build_research_paper_bundle(
 def create_generic_audit_event(username: str, event_type: str, detail: str, workspace: str = "default") -> str:
     return record_artifact(username, "audit_event", event_type, {"detail": detail, "timestamp": now_iso()}, workspace)
 
+
+def _render_organization_workspace_controls(username: str, tier: str) -> None:
+    """Render the authenticated organization workspace controls inside the existing collaboration module."""
+    st.markdown("#### 🏢 Organization-level workspace")
+    try:
+        from durable_account_store import APP_ENVIRONMENT, edge_backend_configured
+    except Exception:
+        APP_ENVIRONMENT = "local"
+        edge_backend_configured = lambda: False
+
+    if str(APP_ENVIRONMENT).casefold() != "staging":
+        st.info(
+            "Organization sharing is currently staging-only. This view does not "
+            "use a local SQLite fallback or claim that company-wide sharing is live."
+        )
+        return
+    if not edge_backend_configured():
+        st.warning("The staging persistence endpoint is not configured for this app.")
+        return
+    token = str(st.session_state.get("remote_session_token") or "")
+    actor = str(st.session_state.get("current_user") or username or "").strip()
+    if not token or not actor or actor.casefold() == "guest visitor":
+        st.warning("Sign in with a dedicated staging account to manage an organization.")
+        return
+
+    def call(action: str, **payload: Any) -> dict[str, Any]:
+        return edge_organization_action(action, actor, token, **payload)
+
+    try:
+        organizations = call("org_list_session").get("organizations", [])
+    except Exception:
+        st.info(
+            "The organization API is not available on the deployed staging function yet. "
+            "No local or in-memory shared workspace was created."
+        )
+        return
+
+    team_organizations = [
+        item for item in organizations
+        if isinstance(item, Mapping) and item.get("org_type") == "team"
+    ]
+    with st.expander("Create a team organization", expanded=not bool(team_organizations)):
+        with st.form("shoir_org_create_form"):
+            display_name = st.text_input(
+                "Organization name",
+                placeholder="e.g. Plant Operations Team",
+                key="shoir_org_create_name",
+            )
+            create = st.form_submit_button("Create organization")
+        if create:
+            try:
+                result = call("org_create_session", display_name=display_name)
+                st.success(
+                    "Organization created: "
+                    + str(result.get("organization", {}).get("display_name") or display_name)
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Organization could not be created: {exc}")
+
+    with st.expander("Accept an invitation"):
+        with st.form("shoir_org_invitation_accept_form"):
+            invitation_token = st.text_input(
+                "Single-use invitation token",
+                type="password",
+                key="shoir_org_accept_token",
+            )
+            accept = st.form_submit_button("Accept invitation")
+        if accept:
+            try:
+                edge_organization_action(
+                    "org_invitation_accept_session",
+                    actor,
+                    token,
+                    invitation_token=invitation_token,
+                )
+                st.success(
+                    "Invitation accepted. You can now choose the organization from the shared workspace selector."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Invitation was not accepted: {exc}")
+
+    if not team_organizations:
+        st.caption(
+            "Create a team organization or accept an invitation to use a shared workspace. "
+            "Invited members must sign in with their own accounts."
+        )
+        return
+
+    org_labels = {
+        f"{item.get('display_name')} · {item.get('role')}": str(item.get("organization_id"))
+        for item in team_organizations
+    }
+    org_label = st.selectbox(
+        "Team organization",
+        list(org_labels),
+        key="shoir_org_selected_label",
+    )
+    organization_id = org_labels[org_label]
+    try:
+        workspace_result = call(
+            "org_workspace_list_session",
+            organization_id=organization_id,
+        )
+        workspaces = workspace_result.get("workspaces", [])
+        membership_role = str(workspace_result.get("role") or "")
+    except Exception as exc:
+        st.error(f"Organization workspaces could not be loaded: {exc}")
+        return
+    if not workspaces:
+        st.warning("This organization has no active workspaces.")
+        return
+
+    workspace_labels = {
+        f"{item.get('display_name')}": str(item.get("workspace_id"))
+        for item in workspaces
+    }
+    workspace_label = st.selectbox(
+        "Shared workspace",
+        list(workspace_labels),
+        key="shoir_org_selected_workspace",
+    )
+    workspace_id = workspace_labels[workspace_label]
+    st.session_state["shoir_active_organization_id"] = organization_id
+    st.session_state["shoir_active_organization_workspace_id"] = workspace_id
+    st.caption(
+        f"Active shared workspace · role: {membership_role}. "
+        "Managed platform records and dataset versions now use this organisation scope; "
+        "the server checks membership and role on every operation."
+    )
+
+    with st.form("shoir_org_workspace_create_form"):
+        new_workspace = st.text_input(
+            "New shared workspace name",
+            placeholder="e.g. Line 3 Improvement",
+            key="shoir_org_new_workspace_name",
+        )
+        create_workspace = st.form_submit_button("Create workspace")
+    if create_workspace:
+        try:
+            call(
+                "org_workspace_create_session",
+                organization_id=organization_id,
+                display_name=new_workspace,
+            )
+            st.success("Shared workspace created.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Shared workspace could not be created: {exc}")
+
+    if membership_role in {"owner", "admin"}:
+        with st.expander("Archive an unused shared workspace"):
+            archive_options = {
+                str(item.get("display_name")): str(item.get("workspace_id"))
+                for item in workspaces
+                if str(item.get("workspace_id")) != workspace_id
+            }
+            if archive_options:
+                archive_label = st.selectbox(
+                    "Workspace to archive",
+                    list(archive_options),
+                    key="shoir_org_archive_target",
+                )
+                if st.button("Archive selected workspace", key="shoir_org_archive_button"):
+                    try:
+                        call(
+                            "org_workspace_archive_session",
+                            organization_id=organization_id,
+                            organization_workspace_id=archive_options[archive_label],
+                        )
+                        st.success("Workspace archived.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Workspace could not be archived: {exc}")
+            else:
+                st.caption("At least one active workspace must remain.")
+
+    try:
+        members = call(
+            "org_member_list_session",
+            organization_id=organization_id,
+        ).get("members", [])
+        st.markdown("**Active members**")
+        st.dataframe(pd.DataFrame(members), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.error(f"Members could not be loaded: {exc}")
+        members = []
+
+    if membership_role in {"owner", "admin"}:
+        with st.expander("Invite a member"):
+            with st.form("shoir_org_invite_form"):
+                target_username = st.text_input(
+                    "Existing Shoir-IE username",
+                    key="shoir_org_invite_target",
+                )
+                invite_role = st.selectbox(
+                    "Role",
+                    ["viewer", "engineer", "approver", "admin"],
+                    key="shoir_org_invite_role",
+                )
+                lifetime = st.number_input(
+                    "Invitation validity (days)",
+                    min_value=1,
+                    max_value=30,
+                    value=7,
+                    step=1,
+                    key="shoir_org_invite_lifetime",
+                )
+                issue_invite = st.form_submit_button("Create single-use invitation")
+            if issue_invite:
+                try:
+                    result = call(
+                        "org_invitation_create_session",
+                        organization_id=organization_id,
+                        target_username_lc=target_username,
+                        role=invite_role,
+                        lifetime_days=int(lifetime),
+                    )
+                    invitation_token = str(result.get("invitation_token") or "")
+                    if invitation_token:
+                        st.success("Invitation created. Copy the token now; it is not retrievable later.")
+                        st.code(invitation_token, language="text")
+                        st.caption(
+                            "Share this token with the named user using a trusted channel. "
+                            "An external email delivery provider is not configured."
+                        )
+                    else:
+                        st.error("The server did not return the one-time invitation token.")
+                except Exception as exc:
+                    st.error(f"Invitation could not be created: {exc}")
+
+        with st.expander("Pending invitations and access changes"):
+            try:
+                invitations = call(
+                    "org_invitation_list_session",
+                    organization_id=organization_id,
+                ).get("invitations", [])
+            except Exception as exc:
+                invitations = []
+                st.error(f"Invitations could not be loaded: {exc}")
+            pending = [
+                item for item in invitations
+                if not item.get("used_at") and not item.get("revoked_at")
+            ]
+            if pending:
+                invite_labels = {
+                    f"{item.get('target_username_lc')} · {item.get('role')} · {item.get('expires_at')}":
+                        str(item.get("invitation_id"))
+                    for item in pending
+                }
+                invite_label = st.selectbox(
+                    "Pending invitation to revoke",
+                    list(invite_labels),
+                    key="shoir_org_revoke_invitation_target",
+                )
+                if st.button("Revoke invitation", key="shoir_org_revoke_invitation_button"):
+                    try:
+                        call(
+                            "org_invitation_revoke_session",
+                            organization_id=organization_id,
+                            invitation_id=invite_labels[invite_label],
+                        )
+                        st.success("Invitation revoked.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Invitation could not be revoked: {exc}")
+
+            member_names = [
+                str(item.get("username_lc"))
+                for item in members
+                if item.get("username_lc") != actor
+            ]
+            if member_names:
+                target_member = st.selectbox(
+                    "Member",
+                    member_names,
+                    key="shoir_org_member_target",
+                )
+                col_role, col_remove, col_owner = st.columns(3)
+                with col_role:
+                    new_role = st.selectbox(
+                        "New role",
+                        ["viewer", "engineer", "approver", "admin"],
+                        key="shoir_org_member_new_role",
+                    )
+                    if st.button("Change role", key="shoir_org_member_role_button"):
+                        try:
+                            call(
+                                "org_member_role_set_session",
+                                organization_id=organization_id,
+                                target_username_lc=target_member,
+                                role=new_role,
+                            )
+                            st.success("Member role updated.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Role change denied: {exc}")
+                with col_remove:
+                    if st.button("Remove member", key="shoir_org_member_remove_button"):
+                        try:
+                            call(
+                                "org_member_remove_session",
+                                organization_id=organization_id,
+                                target_username_lc=target_member,
+                            )
+                            st.success("Member removed.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Member could not be removed: {exc}")
+                with col_owner:
+                    if st.button("Transfer ownership", key="shoir_org_owner_transfer_button"):
+                        try:
+                            call(
+                                "org_owner_transfer_session",
+                                organization_id=organization_id,
+                                target_username_lc=target_member,
+                            )
+                            st.success("Organization ownership transferred.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Ownership transfer denied: {exc}")
+
+        with st.expander("Organization audit history"):
+            try:
+                events = call(
+                    "org_audit_list_session",
+                    organization_id=organization_id,
+                    limit=100,
+                ).get("events", [])
+                st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
+                st.caption("Audit entries are append-only for application roles; database administrators retain infrastructure-level control.")
+            except Exception as exc:
+                st.error(f"Audit history could not be loaded: {exc}")
 
 def _render_enterprise_integration_surface_base(module: str, username: str, tier: str) -> None:
     """Render the established enterprise capabilities for the selected module."""
@@ -2341,6 +3305,7 @@ def _render_enterprise_integration_surface_base(module: str, username: str, tier
 
     # Collaboration: shared comments, assignments and reviewer records.
     if module in {"Team Workspaces & RBAC","Enterprise Integration & Collaboration","Enterprise Integration","Collaboration Suite"}:
+        _render_organization_workspace_controls(username, str(st.session_state.get("user_tier") or "Starter"))
         st.markdown("### 👥 Collaboration & Review")
         c1,c2=st.columns(2)
         with c1:
@@ -2609,11 +3574,32 @@ def record_monitoring_event(
     message: str = "",
     workspace: str = "default",
 ) -> str:
-    ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     eid = "MON-" + uuid.uuid4().hex[:12].upper()
     stamp = now_iso()
-    vals = (eid, wid, rule_id or None, asset_id or None, str(metric), float(value), str(status), str(message), stamp)
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise ValueError("Monitoring event value must be finite.")
+    vals = (eid, wid, rule_id or None, asset_id or None, str(metric), numeric_value, str(status), str(message), stamp)
+    staging_saved = _staging_platform_save(
+        username,
+        workspace,
+        "monitoring_event",
+        eid,
+        {
+            "event_id": eid,
+            "rule_id": str(rule_id or ""),
+            "asset_id": str(asset_id or ""),
+            "metric": str(metric)[:160],
+            "value": numeric_value,
+            "status": str(status)[:80],
+            "message": str(message)[:1000],
+            "created_at": stamp,
+        },
+    )
+    if staging_saved is not None:
+        return eid
+    ensure_enterprise_schema()
     table = "shoir_internal.monitoring_events" if _remote() else "shoir_ent_monitoring_events"
     if _remote():
         with _pg_connect() as conn:
@@ -2634,6 +3620,9 @@ def record_monitoring_event(
 
 
 def monitoring_events_frame(username: str, workspace: str = "default", limit: int = 2000) -> pd.DataFrame:
+    staging_records = _staging_platform_list(username, workspace, "monitoring_event", limit)
+    if staging_records is not None:
+        return _platform_records_frame(staging_records).head(max(1, min(200, int(limit))))
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     table = "shoir_internal.monitoring_events" if _remote() else "shoir_ent_monitoring_events"

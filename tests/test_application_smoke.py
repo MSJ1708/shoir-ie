@@ -9,6 +9,7 @@ REQUIRED_MODULES = (
     "industrial_platform_excellence.py",
     "industrial_operating_system.py",
     "shoir_upgrade.py",
+    "shoir_oidc_auth.py",
 )
 
 
@@ -19,10 +20,28 @@ def test_required_modules_parse():
         ast.parse(path.read_text(encoding="utf-8"), filename=filename)
 
 
-def test_validation_workflow_covers_compile_and_tests():
+def test_validation_workflow_covers_parallel_core_and_isolated_apptests():
     workflow = Path(".github/workflows/shoir-validation.yml").read_text(encoding="utf-8")
     assert "compileall" in workflow
-    assert "pytest -q tests" in workflow
+    assert "pytest -vv -n 4 --dist=loadfile" in workflow
+    parallel_step = workflow.split("name: Run parallel regression suite", 1)[1].split("name: Upload parallel regression diagnostics immediately", 1)[0]
+    assert "set -euo pipefail" in parallel_step, "pytest failures must propagate through tee to fail CI"
+    assert "| tee artifacts/test-results/pytest-parallel.log" in parallel_step
+    assert "--ignore=tests/test_shoir_resource_intelligence.py" in workflow
+    assert "--ignore=tests/test_shoir_100_tool_workbench.py" in workflow
+    assert "--ignore=tests/test_shoir_tool_trust_center_workbench.py" in workflow
+
+    # The historical required check aggregates core regression and the three
+    # isolated Streamlit runners. None of the modules is dropped or skipped.
+    assert "  test-core:" in workflow
+    assert "  streamlit-app-tests:" in workflow
+    assert "needs: [test-core, streamlit-app-tests]" in workflow
+    assert "name: test" in workflow
+    assert "tests/test_shoir_resource_intelligence.py" in workflow
+    assert "tests/test_shoir_100_tool_workbench.py" in workflow
+    assert "tests/test_shoir_tool_trust_center_workbench.py" in workflow
+    assert "junit-streamlit-${{ strategy.job-index }}.xml" in workflow
+    assert "Run serial PostgreSQL integration regression tests" in workflow
 
 
 def test_platform_catalog_has_render_path():
@@ -47,13 +66,21 @@ def test_polished_results_surface_is_wired():
     assert "st.plotly_chart" in source
 
 
-def test_streamlit_application_starts_without_runtime_exception():
-    """Exercise the actual Streamlit script, not only imports and source checks."""
-    from streamlit.testing.v1 import AppTest
-    at = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=30)
-    at.run(timeout=30)
-    assert not at.exception, "\n".join(str(e.value) for e in at.exception)
+def test_streamlit_application_starts_without_runtime_exception(monkeypatch, tmp_path):
+    """Exercise the actual Streamlit script in isolated disposable storage."""
+    # app.py initialises several local SQLite stores and a payment_proofs
+    # directory relative to the working directory. Keep this test isolated
+    # from developer data and from other test fixtures.
+    monkeypatch.chdir(tmp_path)
 
+    from streamlit.testing.v1 import AppTest
+
+    app_path = Path(__file__).resolve().parents[1] / "app.py"
+    # A cold Streamlit run imports the complete engineering module catalogue.
+    # Keep the startup assertion bounded, but allow realistic CI cold-start time.
+    at = AppTest.from_file(app_path, default_timeout=120)
+    at.run(timeout=120)
+    assert not at.exception, "\n".join(str(e.value) for e in at.exception)
 
 
 def test_160_operating_system_route_is_wired():

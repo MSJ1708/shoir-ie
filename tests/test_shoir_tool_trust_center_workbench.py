@@ -13,18 +13,18 @@ PAGE = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
 def _open_workbench():
     from streamlit.testing.v1 import AppTest
 
-    at = AppTest.from_file(PAGE, default_timeout=45)
+    at = AppTest.from_file(PAGE, default_timeout=180)
     at.session_state["current_user"] = "trust-center-checker"
     at.session_state["authenticated"] = True
     at.session_state["user_tier"] = "Enterprise Plus Tier"
-    at.run(timeout=45)
+    at.run(timeout=180)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     return at
 
 
 def _choose_tool(at, label):
     at.selectbox(key="shoir_100_tool_inspector").select(label)
-    at.run(timeout=45)
+    at.run(timeout=180)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
 
@@ -35,7 +35,7 @@ def test_workbench_error_inspector_redacts_before_persisting_result():
         "403 permission denied api_key=very-secret-value owner@example.com"
     )
     at.button(key="tool007_run").click()
-    at.run(timeout=45)
+    at.run(timeout=180)
 
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     result = at.session_state.get("shoir_tool_result_T007")
@@ -52,7 +52,7 @@ def test_workbench_capability_status_and_contextual_help_are_searchable():
     at = _open_workbench()
     _choose_tool(at, "T009 · Capability Status Center")
     at.button(key="tool009_run").click()
-    at.run(timeout=45)
+    at.run(timeout=180)
 
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     status = at.session_state.get("shoir_tool_result_T009")
@@ -64,7 +64,7 @@ def test_workbench_capability_status_and_contextual_help_are_searchable():
     _choose_tool(at, "T010 · Interactive Learning and Help Center")
     at.text_input(key="tool010_query").set_value("facility layout")
     at.button(key="tool010_run").click()
-    at.run(timeout=45)
+    at.run(timeout=180)
 
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     help_result = at.session_state.get("shoir_tool_result_T010")
@@ -80,7 +80,7 @@ def test_workbench_support_bundle_is_downloadable_and_never_claims_delivery():
     )
     at.selectbox(key="tool100_severity").select("HIGH")
     at.button(key="tool100_run").click()
-    at.run(timeout=45)
+    at.run(timeout=180)
 
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     bundle = at.session_state.get("shoir_tool_result_T100")

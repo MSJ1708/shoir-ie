@@ -12,6 +12,7 @@ import html
 import json
 import math
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
@@ -80,6 +81,7 @@ MODULE_CATEGORY_GROUPS = {
     "production": "Production",
     "project & traceability": "Platform & Governance",
     "quality": "Quality",
+    "resource intelligence": "Operations",
     "reporting": "Platform & Governance",
     "research & experimentation": "Research",
     "research ai": "Research",
@@ -127,10 +129,15 @@ MODULE_GROUP_RULES = (
 
 PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
 
+WORKFLOW_STEPS = (
+    "IMPORT", "VALIDATE", "MAP", "MODEL", "RUN",
+    "VISUALIZE", "COMPARE", "EXPLAIN", "DECIDE", "EXPORT", "VERIFY",
+)
+
 PASTED_SPEC_UPDATES = {
     "one_application_shell": "Unified application shell over existing engines",
     "module_launcher": "Searchable grouped module launcher with recents",
-    "universal_workflow": "Data → Validate → Model → Run → Visualize → Compare → Explain → Decide → Export → Verify",
+    "universal_workflow": "IMPORT → VALIDATE → MAP → MODEL → RUN → VISUALIZE → COMPARE → EXPLAIN → DECIDE → EXPORT → VERIFY",
     "reduced_tabs": "Grouped platform surfaces and progressive disclosure",
     "digital_thread_everywhere": "Persistent lineage/trace context",
     "universal_inspector": "Cross-module provenance/assumption/run inspector",
@@ -165,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_shell_outcomes_decision
 
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return sqlite3.connect(path, timeout=30, factory=ClosingSQLiteConnection)
 
 
 def _now() -> str:
@@ -658,10 +665,17 @@ def render_application_header(username: str, tier: str, module: str) -> None:
 
 def render_module_workflow(module: str, provenance: str | None = None) -> None:
     state = provenance or infer_provenance()
-    steps = ["DATA", "VALIDATE", "MODEL", "RUN", "VISUALIZE", "COMPARE", "EXPLAIN", "DECIDE", "EXPORT", "VERIFY"]
-    active_index = 3 if st.session_state.get("last_run_id") or st.session_state.get("shoir_latest_run_id") else 1
+    steps = list(WORKFLOW_STEPS)
+    active_index = 0
+    active_frame, _ = _first_dataframe()
+    if not active_frame.empty and infer_provenance() in {"IMPORTED", "LIVE"}:
+        active_index = 1
     if st.session_state.get("unified_readiness_score", 0):
         active_index = max(active_index, 2)
+    if st.session_state.get("last_run_id") or st.session_state.get("shoir_latest_run_id"):
+        # A saved run is evidence that model/run stages were reached; visualization
+        # remains the next stage until its own output is evidenced.
+        active_index = max(active_index, 5)
     chips = []
     for idx, step in enumerate(steps):
         tone = "active" if idx == active_index else ("done" if idx < active_index else "")

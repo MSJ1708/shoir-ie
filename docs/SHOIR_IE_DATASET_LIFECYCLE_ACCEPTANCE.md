@@ -1,0 +1,74 @@
+# Shoir-IE Dataset Lifecycle Acceptance
+
+Assessment date: 2026-11-06. Status: **partially implemented in staging; full lifecycle not accepted**.
+
+Staging has migrations `20261104192112_shoir_atomic_dataset_version_registry` and `20261104192857_shoir_private_dataset_file_storage_and_linkage`; Edge Function is v13. The design/source notes describe workspace-scoped immutable version records, current pointer, content/schema/transformation fingerprints, signed private object handling, server-side validation, historical selection and quality charts. The current candidate additionally forwards organization-workspace scope through dataset upload/list/download, returns current-head/version-fingerprint metadata, and links registered dataset versions to Industrial Intelligence evidence nodes with `INPUT_TO` edges. A version transition persists a lineage event and current Dataset node even when no older analysis depends on the dataset; older dependent records are marked stale without rewriting historical payloads. These candidate changes still require exact-head CI and hosted staging acceptance.
+
+Documented gaps:
+- registry path stores normalized CSV; raw original XLSX remains separate Excel Intelligence responsibility;
+- resumable/TUS uploads not implemented (single-request 50 MiB limit);
+- reference-aware orphan cleanup absent;
+- downstream invalidation now has candidate source code for Industrial Intelligence records and canonical Digital Thread dataset-version nodes; exact-head CI and hosted acceptance are pending. Legacy module outputs outside that record contract, hosted identity continuity and full managed lineage are not yet proven;
+- clean migration replay and authenticated hosted E2E not accepted;
+- organisation ownership is unavailable because the organisation migration is not deployed.
+
+Complete by testing two-version register/retrieve after fresh login, real object SHA-256, signed-link permissions, schema fingerprint and row/column checks, workbook round-trip separately, retention/deletion, safe orphan cleanup and stale dependent outputs. Use authenticated disposable accounts and record exact deployed commit/function version. Do not claim the full Import→Decide→Export chain until downstream lineage and exports pass.
+
+
+## Candidate update — 2026-11-20: resumable upload and registration cleanup
+
+The release-hardening candidate now includes `shoir_supabase_tus.py` and routes managed normalized-CSV uploads through Supabase Storage's TUS endpoint on the direct project storage hostname. It uses the required 6 MiB chunk size, a signed upload token, bounded retries, HEAD-based offset reconciliation after uncertain PATCH responses, strict upload-location host validation, and disabled redirects. The existing 50 MiB cap remains.
+
+The resumable upload URL is retained only in the active server-side Streamlit session, bound to the user/workspace/dataset/content hash/organization scope, with a 23-hour local expiry. The server can resume the same upload on a rerun or transient connection loss while that session remains available. This is **not** cross-device or guaranteed process-restart persistence; an expired or unavailable upload capability starts a fresh upload.
+
+Dataset finalization now keeps the temporary upload until the atomic metadata RPC succeeds. If that RPC reports failure after a new content-addressed object was created, deletion is attempted only after both the managed-record and event ledgers are successfully queried and confirm no reference exists. An error in either reference query fails closed and retains the object. A pre-existing or concurrent object is never removed by this failure path. After a successful registration, temporary-object removal is best-effort and returned as `temporary_cleanup_pending` rather than falsely reporting the registration as failed.
+
+Regression coverage is added in `tests/test_shoir_supabase_tus.py` and `tests/test_shoir_dataset_storage_cleanup_contract.py`. These are candidate source/test additions until the exact final SHA completes all required CI.
+
+**Still not implemented:** a scheduled, reference-aware sweep for pre-existing/aged orphan objects and abandoned temporary uploads. This must enumerate candidate objects, check all metadata references and tenant/workspace boundaries, retain objects whenever the metadata check fails, and produce a deletion audit. Do not delete objects based on age alone. Hosted staging upload/resume/download, fresh-login, cross-workspace, object-retention and original-workbook round-trip acceptance remain open.
+
+
+## Candidate update — 2026-11-20: bounded operator sweep for abandoned temporary uploads
+
+The current candidate adds a session-authenticated T020 storage-maintenance action and a separate operator control in the existing Industrial Engineering Workbench:
+
+- The action resolves the current personal workspace from the authenticated actor or resolves a shared organization workspace with database-enforced `manage` permission (Owner/Admin only).
+- Preview is the default. Deletion requires a separate explicit `confirm_delete=true` request and a Workbench confirmation checkbox.
+- Only exact T020 temporary-upload and immutable content-addressed dataset paths under the selected workspace can be considered. Other workspaces, buckets, traversal paths and original XLSX workbook objects are excluded.
+- An object must have valid Storage timestamps and remain untouched for at least 48 hours. The newest of created, updated and last-accessed timestamps controls eligibility; missing, malformed or future timestamps are retained.
+- A private `shoir_dataset_storage_lifecycle_leases` row serializes finalization, reference registration and cleanup by workspace/dataset. The acquire/renew/release RPCs are server-only and the lease is bounded to 30–600 seconds. Long-running finalization renews only the same unexpired token and actor; a stale/expired token cannot renew.
+- Before finalization or generic reference registration commits metadata, the new SQL wrappers lock the matching lease row `FOR UPDATE`, verify operation, actor, token and expiry, then perform the write in the same transaction. Finalization uses `shoir_platform_register_dataset_version_with_storage_and_lease`; generic platform records use `shoir_platform_upsert_record_with_dataset_lease`. The sweeper renews its `sweep` lease before deletion and fails closed if renewal is lost.
+- Both the managed-record and event ledgers must successfully confirm no reference to the exact Storage key while the lifecycle lease is held. Any reference-query, lease-acquisition or lease-release uncertainty fails closed for deletion.
+- A kind-specific deletion-intent event is written before Storage removal; a separate deletion-confirmed event follows successful removal. The audit payload records object kind and that the lease/reference checks were completed.
+- The scan is bounded to 500 objects/200 directories, 100 reference checks and 50 deletions per invocation. Operators can repeat preview/deletion to process remaining entries.
+- Preview is the default and never deletes. Deletion requires a separate explicit confirm_delete=true request and Workbench confirmation.
+- No automatic schedule is created. Scheduling this authenticated operation remains an external operational configuration.
+
+The shared lifecycle lease is held by dataset finalization, reference-aware orphan cleanup, and the generic platform-record writer whenever it creates a top-level reference to a T020-managed Storage path. The generic writer rejects T020-style paths that are malformed or point outside the active workspace. The lease operation is recorded as finalize, register or sweep. Immutable orphan deletion is now implemented behind that lease and the same two-ledger check; it must still pass exact-head migration replay, Deno/Python CI, concurrency-oriented review and authenticated Owner/Admin staging acceptance before use. Keep BETA / production NO-GO.
+
+
+## Candidate fencing and early-cleanup update — 2026-11-20
+
+The shared lifecycle protocol is split across two ordered migrations:
+
+- `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` creates the private lease table and server-only acquire/renew/release RPCs.
+- `20261120130000_shoir_dataset_storage_lease_fencing.sql` adds token/operation/actor-checked, `FOR UPDATE`-fenced wrappers for dataset-version finalization and generic platform-record writes that introduce a T020 Storage reference.
+
+Each lease grant is 30–600 seconds. The finalizer and sweeper renew only the exact still-live token; an expired or reclaimed token cannot renew. Before any metadata write commits, the SQL wrapper locks and rechecks the matching lease row in the same transaction. The early finalizer cleanup paths for oversized uploads, hash mismatch, malformed CSV, schema mismatch and metadata-RPC failure all route through the helper that renews the lease before removing the temporary object. If renewal or Storage removal cannot be confirmed, the object is retained and left for the later bounded sweep.
+
+The exact-head PostgreSQL replay on candidate `d4955d165b0f59b5c160971f53cd6236bc65f140` passed, covering both migrations and lease/fencing contracts. Edge Function verification also passed on that head. Full Python/AppTest regression and independent review were not complete at this refresh. Neither migration nor the matching Edge Function has been deployed to staging or production.
+
+
+## Superseding status — 2026-11-20
+
+The opening status and early gaps above are a historical 2026-11-06 snapshot. The current candidate on PR #232 includes:
+- resumable Supabase Storage TUS upload for normalized CSV (6 MiB chunks, bounded retries and HEAD-based offset recovery; resume capability remains in the active server-side session, not across process restart/fresh login);
+- lease/fencing migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql`, with 30–600-second renewable per-workspace/dataset lease;
+- finalization and generic T020 Storage-reference writes fenced by the exact live token in the same metadata transaction;
+- manual, preview-first sweep for 48-hour-old temporary and immutable orphans, with dual-ledger checks under the shared lease, kind-specific audit events and 50-delete cap;
+- downstream Industrial Intelligence dependency invalidation, stale Digital Thread node state, decision/review guards and local SQLite compatibility invalidation;
+- legacy metadata-only `dataset_version_register` retired with HTTP 410; TUS upload plus lease-fenced finalization is the only supported registration flow.
+
+These are repository-source and automated-test capabilities only. The two new migrations and matching Edge source remain candidate-only and have not been deployed. The connected staging migration-history query failed authentication; the authorized operator must reconcile the live ledger before any staging migration. Hosted TUS/fresh-login/cross-tenant/decision-export acceptance, raw XLSX retention for the dataset registry and independent domain review remain open.
+
+At this point Edge verification and production-v9 compatibility passed on head `cf05be0c1e95d7bcbe227b7ee0678e1c68491ca6`; Engine Regression and other required workflows were not all complete. Keep BETA / production NO-GO.

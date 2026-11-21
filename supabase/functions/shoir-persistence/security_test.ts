@@ -1,13 +1,35 @@
 import {
+  classifyDatasetStorageSweepPath,
+  corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  inspectCsvShape,
+  isAllowedApiMethod,
+  isAllowedBrowserOrigin,
+  isDatasetStorageSweepObjectOlderThan,
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
+  normalizePlatformTier,
   normalizeWorkspaceStateJson,
+  platformTierAllows,
   publicErrorFor,
   PublicRequestError,
   readBoundedJsonObject,
   sessionEntitlementFields,
 } from "./security.ts";
+
+Deno.test("only POST may dispatch persistence API actions", () => {
+  assert(isAllowedApiMethod("POST"), "POST must be accepted.");
+  assert(
+    isAllowedApiMethod("post"),
+    "HTTP method comparison must be case-insensitive.",
+  );
+  for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    assert(
+      !isAllowedApiMethod(method),
+      `${method} must not dispatch API actions.`,
+    );
+  }
+});
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -246,4 +268,282 @@ Deno.test("protected administrator invariant is read-only and fails closed on dr
       "Invariant drift must be detected and rejected.",
     );
   }
+});
+
+Deno.test("dataset API package gate follows the canonical tier hierarchy", () => {
+  const allowed = [
+    "Enterprise Tier",
+    "Enterprise Plus Tier ($399)",
+    "Research Pack",
+  ];
+  assert(
+    normalizePlatformTier("Research Pack Add-on") === "Research Pack",
+    "Research Pack should be recognized as a separate add-on state.",
+  );
+  assert(
+    normalizePlatformTier("Enterprise Plus Tier ($399)") === "Enterprise Plus",
+    "Enterprise Plus should keep its own tier identity.",
+  );
+  const denied = [
+    "Starter Tier",
+    "Mid-Tier Pro",
+    "Pro Tier",
+    "Professional Tier",
+    "",
+    undefined,
+  ];
+  for (const tier of allowed) {
+    assert(
+      platformTierAllows(tier, "Enterprise"),
+      "Enterprise dataset capability should be allowed for " + String(tier),
+    );
+  }
+  for (const tier of denied) {
+    assert(
+      !platformTierAllows(tier, "Enterprise"),
+      "Enterprise dataset capability must be denied for " + String(tier),
+    );
+  }
+  assert(
+    !platformTierAllows("Enterprise Plus Tier ($399)", "Research Pack"),
+    "Enterprise Plus must not be treated as the Research Pack add-on.",
+  );
+  assert(
+    platformTierAllows("Research Pack", "Enterprise"),
+    "Research Pack should retain its inherited base capabilities.",
+  );
+});
+
+Deno.test("CSV shape inspection counts quoted logical records and handles CRLF", () => {
+  const input = new TextEncoder().encode(
+    "asset_id,description,value\r\n" +
+      'A-1,"line one, with comma",10\r\n' +
+      'A-2,"line one\nline two",20\r\n' +
+      'A-3,"escaped ""quote""",30\r\n',
+  );
+  const shape = inspectCsvShape(input);
+  assert(shape.rowCount === 3, "Quoted newlines must not create extra rows.");
+  assert(shape.columnCount === 3, "CSV column count is incorrect.");
+  assert(
+    shape.headers.join("|") === "asset_id|description|value",
+    "CSV headers were not parsed correctly.",
+  );
+});
+
+Deno.test("CSV shape inspection rejects duplicate, blank and malformed headers", () => {
+  const invalid = [
+    "asset_id,asset_id\nA-1,A-2\n",
+    "asset_id, \nA-1,A-2\n",
+    'asset_id,description\nA-1,"unterminated\n',
+    'asset_id,description\nA-1,unquoted"quote\n',
+  ];
+  for (const csv of invalid) {
+    try {
+      inspectCsvShape(new TextEncoder().encode(csv));
+    } catch (error) {
+      assert(
+        error instanceof PublicRequestError,
+        "Expected a public CSV validation error.",
+      );
+      assert(
+        error.status === 400,
+        "Malformed CSV must be rejected as client input.",
+      );
+      continue;
+    }
+    throw new Error("Malformed CSV should not be accepted.");
+  }
+});
+
+Deno.test("CORS origins are isolated by the exact Supabase project", () => {
+  const stagingUrl = "https://hfhrosthswcybccepmak.supabase.co";
+  const productionUrl = "https://gcsamrdaeraxieaagsta.supabase.co";
+  const productionOrigin = "https://shoir-ie-app.streamlit.app";
+  const stagingOrigin = "https://shoirieverified.streamlit.app";
+  const alternateStagingOrigin =
+    "https://shoir-ie-atvvfsacfxvqtrka37owfx.streamlit.app";
+  const localOrigin = "http://localhost:8501";
+
+  assert(
+    isAllowedBrowserOrigin(productionOrigin, productionUrl),
+    "Production app origin should be allowed by production.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(stagingOrigin, productionUrl),
+    "Staging origin must not be allowed by production.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(alternateStagingOrigin, productionUrl),
+    "Alternate staging origin must not be allowed by production.",
+  );
+  assert(
+    isAllowedBrowserOrigin(stagingOrigin, stagingUrl),
+    "Staging app origin should be allowed by staging.",
+  );
+  assert(
+    isAllowedBrowserOrigin(alternateStagingOrigin, stagingUrl),
+    "Configured alternate staging origin should be allowed by staging.",
+  );
+  assert(
+    isAllowedBrowserOrigin(localOrigin, stagingUrl),
+    "Local development origin should be allowed only by staging.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(productionOrigin, stagingUrl),
+    "Production origin must not be allowed by staging.",
+  );
+  assert(
+    !isAllowedBrowserOrigin("https://attacker.example", stagingUrl),
+    "Unknown browser origin must be rejected.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(
+      "https://shoir-ie-app.streamlit.app.evil.test",
+      productionUrl,
+    ),
+    "Lookalike production host must be rejected.",
+  );
+  assert(
+    !isAllowedBrowserOrigin(
+      productionOrigin,
+      "https://unknown.supabase.co",
+    ),
+    "Unknown Supabase project must fail closed.",
+  );
+  assert(
+    isAllowedBrowserOrigin(null, productionUrl),
+    "Origin-less server-to-server call should remain possible.",
+  );
+
+  const productionHeaders = corsHeadersForOrigin(
+    productionOrigin,
+    productionUrl,
+  );
+  assert(
+    productionHeaders.get("Access-Control-Allow-Origin") === productionOrigin,
+    "Production CORS header must echo only the production origin.",
+  );
+  const allowedHeaders = productionHeaders.get(
+    "Access-Control-Allow-Headers",
+  ) || "";
+  const expectedHeaders = [
+    "authorization",
+    "x-client-info",
+    "apikey",
+    "content-type",
+    "x-retry-count",
+    "traceparent",
+    "tracestate",
+    "baggage",
+  ];
+  for (const header of expectedHeaders) {
+    assert(
+      allowedHeaders.toLowerCase().includes(header),
+      `CORS preflight must allow the supported Supabase client header: ${header}`,
+    );
+  }
+  const deniedHeaders = corsHeadersForOrigin(stagingOrigin, productionUrl);
+  assert(
+    deniedHeaders.get("Access-Control-Allow-Origin") === null,
+    "Denied origin must not receive Access-Control-Allow-Origin.",
+  );
+});
+
+Deno.test("dataset storage sweep classifies only exact workspace-owned object paths", () => {
+  const workspace = "0123456789abcdef0123456789abcdef";
+  const dataset = "DS-ABCDEF012345";
+  const immutable = classifyDatasetStorageSweepPath(
+    workspace,
+    workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv",
+  );
+  assert(
+    immutable?.kind === "immutable",
+    "Immutable dataset object was not classified.",
+  );
+  assert(
+    immutable.datasetId === dataset,
+    "Immutable dataset identity was not preserved.",
+  );
+
+  const temporary = classifyDatasetStorageSweepPath(
+    workspace,
+    "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(32) + ".csv",
+  );
+  assert(
+    temporary?.kind === "temporary",
+    "Temporary upload object was not classified.",
+  );
+  assert(
+    temporary.datasetId === dataset,
+    "Temporary dataset identity was not preserved.",
+  );
+
+  const invalid = [
+    "tmp/" + workspace + "/" + dataset + "/../" + "b".repeat(32) + ".csv",
+    workspace + "/" + dataset + "/" + "A".repeat(64) + ".csv",
+    workspace + "/ds-ABCDEF012345/" + "a".repeat(64) + ".csv",
+    "fedcba9876543210fedcba9876543210/" + dataset + "/" + "a".repeat(64) +
+    ".csv",
+    workspace + "/" + dataset + "/source.xlsx",
+    "tmp/" + workspace + "/" + dataset + "/" + "b".repeat(31) + ".csv",
+  ];
+  for (const path of invalid) {
+    assert(
+      classifyDatasetStorageSweepPath(workspace, path) === null,
+      "Unsafe or foreign storage path was eligible for cleanup: " + path,
+    );
+  }
+  assert(
+    classifyDatasetStorageSweepPath(
+      "not-a-workspace-key",
+      workspace + "/" + dataset + "/" + "a".repeat(64) + ".csv",
+    ) === null,
+    "Invalid workspace key must fail closed.",
+  );
+});
+
+Deno.test("dataset storage sweep requires the full minimum age after the newest storage timestamp", () => {
+  const now = Date.parse("2026-11-20T12:00:00Z");
+  const hour = 60 * 60 * 1000;
+  const minimumAge = 48 * hour;
+  const oldObject = {
+    created_at: "2026-11-15T00:00:00Z",
+    updated_at: "2026-11-17T12:00:00Z",
+    last_accessed_at: "2026-11-17T12:00:00Z",
+  };
+  assert(
+    isDatasetStorageSweepObjectOlderThan(oldObject, now, minimumAge),
+    "An object untouched for more than 48 hours should be eligible for review.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan(
+      { ...oldObject, last_accessed_at: "2026-11-20T11:30:00Z" },
+      now,
+      minimumAge,
+    ),
+    "Recent access must reset the cleanup age.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan(
+      {
+        created_at: "2026-11-10T00:00:00Z",
+        updated_at: "2026-11-21T00:00:00Z",
+      },
+      now,
+      minimumAge,
+    ),
+    "Future storage timestamps must fail closed.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan(
+      { created_at: "not-a-date" },
+      now,
+      minimumAge,
+    ),
+    "Unparseable storage timestamps must fail closed.",
+  );
+  assert(
+    !isDatasetStorageSweepObjectOlderThan({}, now, minimumAge),
+    "Objects without timestamp metadata must be retained.",
+  );
 });

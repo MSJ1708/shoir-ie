@@ -1,0 +1,416 @@
+# Shoir-IE Industrial Intelligence — Delivery Assessment
+
+**Assessment date:** 2026-11-14  
+**Repository:** `MSJ1708/shoir-ie`  
+**Candidate branch:** `feat/shoir-ie-release-hardening-20261105`  
+**PR:** [#232 — Release hardening and staging security acceptance](https://github.com/MSJ1708/shoir-ie/pull/232)  
+**Source audit head:** `e04de7cf9b507c8d50f4f30db3d9dac696561340`  
+**Disposition:** Foundation source is present in the candidate; exact-head CI, hosted acceptance, independent engineering/security review and full Digital Thread lifecycle acceptance are not complete. Keep PR #232 draft, application BETA and production NO-GO.
+
+## 1. Executive assessment
+
+The 16-tool Industrial Intelligence Suite and its eight shared capabilities are not absent or merely catalogue placeholders. The candidate already contains:
+
+- Six connected suites and 16 separately callable deterministic engines under stable `II-001`–`II-016` identifiers.
+- A searchable interface rendered inside the existing Enterprise-gated Industrial Operating System route in the current Workbench.
+- Eight shared service definitions, service functions and UI surfaces for evidence, entities/relationships, decisions, actions, approvals, risk/barriers, model versions, benefits, events and Copilot evidence retrieval.
+- Provenance-aware workspace records, payload hashes, workspace/organization scoping, managed persistence calls and audit records.
+- A link into the existing Digital Thread graph and the existing Industrial Workbook, without replacing the current navigation or workbook tabs.
+- Dedicated deterministic acceptance-test source for the tool engines, service controls, persistence boundaries, workbook handoff and route integration.
+
+This constitutes a substantial **software foundation**. It does not constitute a fully accepted hosted product. The source audit found material remaining gates, especially dataset-version dependency invalidation and hosted Digital Thread lineage across fresh sessions and organization boundaries. Passing synthetic unit tests would not prove correct calculations for a real plant or authorize operational use.
+
+### Status vocabulary used here
+
+| Status | Meaning |
+|---|---|
+| `FOUNDATION_IMPLEMENTED` | Source implementation and intended application integration exist in the candidate branch. |
+| `TESTS_AUTHORED_PENDING_EXACT_HEAD_CI` | Relevant automated test source is committed; a passing run on the exact current candidate has not yet been evidenced. |
+| `HOSTED_ACCEPTANCE_PENDING` | Authenticated browser, deployed persistence, fresh-session and/or cross-tenant evidence is still required. |
+| `INDEPENDENT_REVIEW_PENDING` | A qualified reviewer who did not author the work must review the engineering, security or control claim. |
+| `BLOCKED_EXTERNAL_CONFIGURATION` | A real third-party/provider configuration or operational dependency is absent; do not substitute a mock and call it live. |
+
+`FOUNDATION_IMPLEMENTED` must not be translated into `VERIFIED_WORKING`, production-ready, legally compliant, or approved for plant operations.
+
+## 2. Six suites and 16 tool engines
+
+All 16 IDs below exist in `shoir_industrial_intelligence.py` and are routed through `analyze_tool(tool_id, payload)`. The interface exposes the suites, searchable aliases, the selected tool's input contract and limits, a deterministic run, provenance selection, JSON result export, a saved-record path, and an Industrial Workbook handoff.
+
+| ID | Suite | Tool | Engine | Focused acceptance test | Foundation status |
+|---|---|---|---|---|---|
+| II-001 | Operations Intelligence | Industrial Operations Mission Control | `_mission_control` | `test_mission_control_priority_is_transparent_and_cause_not_confirmed` | FOUNDATION_IMPLEMENTED |
+| II-002 | Operations Intelligence | Industrial Process Mining and Hidden Inefficiency Intelligence | `_process_mining` | `test_process_mining_separates_elapsed_and_explicit_wait_and_flags_rework_candidate` | FOUNDATION_IMPLEMENTED |
+| II-003 | Engineering Intelligence | Engineering Change Impact Twin | `_engineering_change` | `test_engineering_change_follows_direct_and_downstream_dependencies` | FOUNDATION_IMPLEMENTED |
+| II-004 | Maintenance and Project Intelligence | Shutdown and Turnaround Intelligence Optimizer | `_turnaround` | `test_turnaround_scheduler_respects_dependencies_and_reports_infeasible_prerequisites` | FOUNDATION_IMPLEMENTED |
+| II-005 | Engineering Intelligence | Industrial Data Trust and Measurement Reconciliation Engine | `_data_trust` | `test_data_trust_flags_conflict_and_never_changes_originals` | FOUNDATION_IMPLEMENTED |
+| II-006 | Maintenance and Project Intelligence | Asset Reliability Mission Board | `_asset_reliability` | `test_asset_reliability_ranks_from_input_history_without_failure_date` | FOUNDATION_IMPLEMENTED |
+| II-007 | Production and Quality Intelligence | Production Yield and Process Variability Intelligence | `_yield_intelligence` | `test_yield_math_reconciles_input_good_rework_and_scrap` | FOUNDATION_IMPLEMENTED |
+| II-008 | Maintenance and Project Intelligence | New Factory Commissioning and Production Ramp-up Intelligence | `_commissioning` | `test_commissioning_missing_required_evidence_blocks_readiness` | FOUNDATION_IMPLEMENTED |
+| II-009 | Engineering Intelligence | Industrial Experimentation and Process Improvement Laboratory | `_experimentation` | `test_experiment_design_is_reproducible_and_coded_full_factorial` | FOUNDATION_IMPLEMENTED |
+| II-010 | Supply Chain and Procurement Intelligence | Technical Procurement and Supplier Engineering Assurance | `_procurement` | `test_procurement_assurance_keeps_unverified_and_deviation_separate` | FOUNDATION_IMPLEMENTED |
+| II-011 | Energy and Enterprise Assurance | Industrial Energy Flexibility and Peak-Demand Optimizer | `_energy_flexibility` | `test_energy_flexibility_respects_capacity_and_selects_low_cost_period` | FOUNDATION_IMPLEMENTED |
+| II-012 | Supply Chain and Procurement Intelligence | Critical Spare Parts and Multi-Site Inventory Intelligence | `_spare_parts` | `test_spare_parts_refuses_transfer_below_source_minimum` | FOUNDATION_IMPLEMENTED |
+| II-013 | Energy and Enterprise Assurance | Industrial OT Asset and Configuration Assurance | `_ot_assurance` | `test_ot_configuration_assurance_detects_passively_supplied_difference` | FOUNDATION_IMPLEMENTED |
+| II-014 | Production and Quality Intelligence | Product and Batch Genealogy Intelligence | `_genealogy` | `test_batch_genealogy_traverses_confirmed_links_and_excludes_suspected` | FOUNDATION_IMPLEMENTED |
+| II-015 | Operations Intelligence | Intelligent Shift Handover and Operational Learning | `_shift_handover` | `test_shift_handover_carries_open_action_and_requires_acknowledgement` | FOUNDATION_IMPLEMENTED |
+| II-016 | Energy and Enterprise Assurance | Industrial Benchmarking and Improvement Radar | `_benchmarking` | `test_benchmarking_suppresses_incompatible_comparison` | FOUNDATION_IMPLEMENTED |
+
+The catalogue-level tests also check that the 16 IDs are unique and do not overlap the existing `T001`–`T100` target registry, that all tools have deterministic synthetic fixtures, and that the tool names and aliases are searchable.
+
+### Engineering boundaries that must remain visible
+
+- Mission Control is a triage heuristic, not a safety-risk approval or confirmed root cause.
+- Process Mining reports timestamp gaps as elapsed time; it counts waiting time only when explicitly supplied.
+- Engineering Change reports only declared dependency edges.
+- Turnaround scheduling is bounded by supplied task, skill, resource, dependency, permit, inspection and SIMOPS fields. It cannot authorize a shutdown task or replace site calendars, permit authority or safety controls.
+- Data Trust flags conflicts and balance residuals without silently changing source measurements.
+- Asset Reliability is a transparent ranking heuristic, not an exact failure-date or remaining-useful-life predictor.
+- Yield calculations require a common product/batch boundary, period and unit.
+- Commissioning produces a review-readiness result, not a formal factory acceptance certificate.
+- The DOE tool's first-order factorial fit does not establish causality and does not include interaction/curvature terms in that fitted model.
+- Procurement claims without evidence remain unverified.
+- Energy Flexibility uses supplied tariffs/windows/capacities and does not dispatch equipment.
+- Spare Parts evaluates transfer eligibility; it does not move stock or reserve inventory.
+- OT Assurance compares supplied snapshots passively; it does not scan, connect to, or change an OT device.
+- Genealogy traverses confirmed edges only.
+- Shift Handover does not infer common cause from similar wording.
+- Benchmarking suppresses rankings where the declared metric, units, period or denominator are incompatible.
+
+**Tool conclusion:** 16/16 deterministic foundations are present in source and each has named focused test coverage. All 16 remain pending an exact-head CI pass, authenticated UI/persistence/export journeys, reference calculations and qualified engineering review. None should be marked `VERIFIED_WORKING` from source presence alone.
+
+## 3. Eight shared capabilities
+
+The source defines eight canonical shared capabilities in `SHARED_CAPABILITIES`. The following functions and test names are the code-grounded evidence found during this assessment.
+
+| Capability | Main service surface | Relevant committed test coverage | Foundation status |
+|---|---|---|---|
+| Industrial Cause-and-Effect Intelligence | `record_cause_effect_investigation`, `review_cause_effect_investigation` | `test_cause_effect_candidates_require_separate_independent_review_to_confirm` | FOUNDATION_IMPLEMENTED |
+| Industrial Risk and Barrier Assurance | `record_risk_barrier`, `review_barrier_effectiveness` | `test_risk_barrier_effectiveness_requires_independent_review` | FOUNDATION_IMPLEMENTED |
+| Engineering Knowledge Graph | `add_entity`, `add_relationship`, `thread_snapshot`, Digital Thread synchronization | `test_records_persist_and_create_digital_thread_lineage`; `test_confirmed_relationship_requires_existing_nodes_and_evidence` | FOUNDATION_IMPLEMENTED |
+| Industrial Decision and Action Management | `create_decision`, `review_decision`, `create_action`, `approve_action`, `update_action` | `test_action_approval_is_independent_and_verification_follows_implementation`; `test_event_to_action_to_approval_to_verified_outcome_stays_linked`; `test_action_state_machine_rejects_backwards_transitions` | FOUNDATION_IMPLEMENTED |
+| Industrial Investment and Benefits Realization | `record_benefit`, `verify_benefit_record` | `test_actual_benefit_requires_independent_reviewer_and_evidence`; `test_benefit_record_rejects_unregistered_actual_evidence` | FOUNDATION_IMPLEMENTED |
+| Engineering Model Validation and Registry | `register_model_version`, `validate_model_version` | `test_model_validation_uses_actual_expected_values_and_independent_reviewer` | FOUNDATION_IMPLEMENTED |
+| Operational Event Intelligence | `create_operational_event` | `test_live_operational_event_requires_source_reference_and_keeps_source_timestamp` | FOUNDATION_IMPLEMENTED |
+| Industrial Knowledge Copilot | `copilot_evidence_context`, existing `app.py` Copilot evidence-context integration | `test_copilot_retrieves_authorized_records_with_citations`; `test_copilot_context_refuses_to_return_other_organization_records`; `test_existing_copilot_injects_only_authorized_industrial_evidence_context` | FOUNDATION_IMPLEMENTED |
+
+The four current shared-workspace UI surfaces are grouped in the existing suite as: **Digital Thread and Evidence**, **Decisions, Actions and Approvals**, **Model Registry and Benefits**, and **Industry Templates and Copilot**. The services are shared across the six suites; they are not eight new top-level application pages.
+
+### Shared-service safeguards already represented in source
+
+- Organization role is revalidated through the existing managed organization service; a Viewer is read-only. Owner/Admin/Approver authority is distinguished for approval operations.
+- A record creator cannot independently approve or verify their own action, decision, model, cause-effect relationship, barrier, or benefit.
+- Confirmed graph relationships require existing endpoints and registered evidence; SUSPECTED and PROPOSED links remain distinct.
+- Actual benefits begin as unverified records and do not automatically become realized savings or ROI claims.
+- Model versions retain a definition hash, assumptions, expected/actual test cases and separate reviewer validation.
+- Copilot retrieval is workspace-scoped and returns source record citations and explicit limitations; it is not an autonomous engineering approval or a proven root-cause conclusion.
+
+These are service and unit-test controls. They still need verification against the deployed Edge Function, database grants/RLS, real disposable identities and browser journeys.
+
+## 4. Digital Thread and lineage assessment
+
+### Foundation present
+
+- `shoir_digital_thread.py` maintains the existing canonical graph and supports stable node IDs, supported business identity keys, alias history and user-facing rename without replacing the canonical node ID or connected edges.
+- Synchronization preserves a display-name override and fails closed on ambiguous/duplicate source identity.
+- The Industrial Intelligence service adds record-backed nodes and directed relationships to this existing graph using account/workspace-scoped identity namespaces.
+- CONFIRMED relationships require registered evidence in the Industrial Intelligence service; SUSPECTED and PROPOSED remain separate.
+- Workforce records are restricted to explicitly aggregated fields in the cross-domain thread.
+- Rename persistence requires the authenticated actor to match the active account and the managed workspace save to confirm; the UI restores prior node state on save failure.
+- Existing graph visualizations and exports remain in the existing Digital Thread route. The new suite does not create a competing graph database or remove existing modules.
+
+### Remaining lineage work — not accepted
+
+1. **Dataset-version dependency invalidation:** the current candidate attaches exact immutable dataset-version references to new Industrial Intelligence records when the user enables tracking, creates Dataset-version nodes and `INPUT_TO` edges in the canonical Digital Thread, and on a new version marks prior dependent Industrial Intelligence records/nodes stale while preserving their original payloads. A lineage event and current Dataset node are also persisted when no older dependent record exists. This is candidate source/test implementation only: exact-head CI, legacy module model/run/scenario/decision/outcome integration, hosted save/reload/re-login, cross-tenant verification and runtime acceptance remain pending.
+2. **Hosted identity continuity:** create → rename → save → reload → logout → fresh login must retain the same canonical ID, aliases, rename history and graph edges.
+3. **Tenant and workspace scope:** repeat lineage and graph read/write tests across distinct disposable organizations and workspaces. Current candidate source checks roles and scope, but hosted organization lineage is not accepted.
+4. **Durability and audit distinction:** verify every node/edge and dependent record across a fresh authenticated session. Rename history is workspace metadata; it must not be represented as append-only or tamper-proof security audit evidence.
+5. **Independent review:** obtain review of canonical identity rules, relationship semantics and lineage invalidation.
+6. **Dataset object lifecycle:** the separate dataset registry still has a bounded single-request upload, no reference-aware orphan cleanup, no fully accepted downstream invalidation, and separate raw-XLSX retention via Excel Intelligence. These must not be hidden under a broad “Digital Thread complete” label.
+
+**Digital Thread status:** `FOUNDATION_IMPLEMENTED` for graph identity, record linkage, evidence edges and rename code; `HOSTED_ACCEPTANCE_PENDING` for fresh-session/tenant continuity; `INCOMPLETE` for full dataset-version dependency invalidation and stale-output gating. Do not mark managed lineage accepted yet.
+
+## 5. Application integration and compatibility
+
+The candidate integrates the suite additively:
+
+- Existing Workbench search checks the new tool names/aliases and routes a match into the existing **Industrial Operating System** entry.
+- The existing `app.py` route renders the existing Industrial Operating System and then the Industrial Intelligence Suite behind the Enterprise capability gate.
+- The existing Global Project & Digital Thread entry remains in place.
+- The suite writes to the current workspace persistence path, adds a sheet to the existing Industrial Workbook while preserving existing sheets, and initializes the standard nine engineering tabs only when no workbook exists.
+- The general `T001`–`T100` registry remains separate from the new `II-001`–`II-016` suite. The general 100-tool matrix currently records 96 `IMPLEMENTED_NEEDS_VALIDATION`, four `EXTERNAL_CONFIGURATION_REQUIRED` and zero `VERIFIED_WORKING`; this assessment does not change those counts or imply the four external capabilities are live.
+
+No navigation replacement, second application, subscription remapping or production integration was introduced for this foundation.
+
+## 6. Acceptance test evidence and execution status
+
+### Test source already committed in the candidate
+
+- `tests/test_shoir_industrial_intelligence.py`: catalogue and suite cardinality; all 16 synthetic engine fixtures and individual calculation boundaries; provenance/input rejection; persistence failure; personal and organization scope; Viewer restriction; evidence-backed graph links; independent approval/review; action lifecycle; model validation; benefit and risk review; Copilot filtering/redaction; workbook preservation; search aliases; and Workbench route reachability.
+- `tests/test_shoir_digital_thread.py`: stable IDs, graph export/render helpers, canonical vocabulary, identity-key behavior, workforce aggregation, alias retention, rename continuity, duplicate rejection and managed-save failure.
+- `tests/test_shoir_remaining_tool_engines.py`: T020 pure dataset version hashing and stale-run flag behavior. This does not, by itself, prove persisted downstream invalidation or runtime stale-result blocking.
+
+### Exact-head CI
+
+At the source audit head `e04de7cf9b507c8d50f4f30db3d9dac696561340`, the following eight workflow runs were observed **QUEUED**, not passed:
+
+- Production v9 compatibility/security backport
+- Engine Regression
+- Excel Intelligence
+- Subscription transaction integration
+- Shoir-IE validation
+- Security and quality gates
+- Clean PostgreSQL migration-history replay
+- Edge Function verification
+
+The validation workflow's separate live-deployment smoke job was **SKIPPED**. Skipped is not passed. The current candidate requires a fresh exact-head CI assessment after this document commit; earlier-SHA results must remain historical only.
+
+### Required automated commands
+
+Run on the exact candidate head and attach logs/artifacts:
+
+```bash
+pytest -q tests/test_shoir_industrial_intelligence.py
+pytest -q tests/test_shoir_digital_thread.py
+pytest -q tests/test_shoir_remaining_tool_engines.py
+python -m compileall -q .
+pytest -q
+```
+
+A full-suite pass is necessary but not sufficient. No test result should be inferred from the existence of a test file or a queued GitHub Actions run.
+
+## 7. Remaining acceptance work before any “verified” status
+
+| Gate | Required evidence | Current state |
+|---|---|---|
+| Exact-head CI | All required workflows completed successfully on the exact PR head; inspect artifacts and job logs | PENDING |
+| Tool calculations | Independent reference calculations, dimensions/units, boundary/extreme/invalid cases and qualified IE review for each of 16 tools | PENDING |
+| UI journeys | Authenticated browser run for every tool: search/open, validate input, calculate, inspect result/limitations, save, reload and export | PENDING |
+| Role matrix | Disposable Owner/Admin/Engineer/Approver/Viewer accounts; approve/write/read rules, creator-self-review denial, suspended/removed access | PENDING |
+| Tenant isolation | Two or more disposable organizations; cross-org and cross-workspace reads/writes/approvals denied | PENDING |
+| Managed persistence | Save, refresh, logout/login, revision conflict and restore through exact deployed staging Edge Function | PENDING |
+| Digital Thread | Rename/sync/reload/re-login continuity, edge preservation, duplicate identity rejection and source-version lineage | PENDING |
+| Dataset lifecycle | Two-version register/retrieve, source/object hashes, schema, private signed-object access, retention/orphan handling and stale dependent-output gating | PENDING |
+| Workbook/export | Existing tabs preserved; new result sheet reopens; JSON/CSV/XLSX/PDF/PPTX outputs are independently reopened and reconciled | PENDING |
+| Visual/localization | Arabic/RTL plus 1440 desktop, 768 tablet and 390 mobile visual/browser evidence | PENDING |
+| Security and legal | RLS/Edge review, identity/recovery, PDPL/privacy/e-commerce/legal identity/support/refund and retention evidence | PENDING |
+| Operations recovery | Staging backup readiness, isolated restore rehearsal, rollback plan and monitoring/incident owner | PENDING |
+| Independent sign-off | Independent security and engineering reviewers; resolved review conversations; release owner approval | PENDING |
+
+### Required execution order
+
+1. Obtain exact-head CI and inspect every required job/artifact. Fix failures on the candidate branch; do not cherry-pick around a failing gate or count skipped jobs as green.
+2. Resolve/implement the persisted dataset-version dependency and stale-output gating described above without introducing a competing registry.
+3. Complete the automated regression and independent reference-calculation review for the 16 tools and eight services.
+4. Confirm staging backup/rollback readiness before any staging schema or Edge Function change.
+5. Use disposable staging identities for the authenticated role, persistence, tenant-isolation, workbook/export and Digital Thread journeys.
+6. Capture redacted evidence with exact code commit, migration ledger and deployed Edge Function version/hash.
+7. Obtain independent security/engineering review and resolve review threads.
+8. Only then reconsider the staging acceptance decision. Production requires a separate explicit authorization after all release/legal/operations gates pass.
+
+## 8. Release and safety decision
+
+**Keep Shoir-IE BETA. Keep production NO-GO. Keep PR #232 open and draft.**
+
+Do not merge this PR, apply production migrations, deploy production Edge Functions, change protected-branch rules, use the protected Enterprise Admin identity for testing, or claim live SAP/Oracle/REST/OIDC/MFA/backups/plant telemetry without real configuration and evidence.
+
+The 16 tools and eight shared services are a meaningful, committed foundation in the candidate. The correct delivery wording today is **“foundation implemented; automated and hosted acceptance pending”**, not “fully verified,” “production-ready,” or “all acceptance complete.”
+
+
+---
+
+## 9. Post-audit candidate changes reviewed on 2026-11-14
+
+The source branch continued to receive follow-on changes after the original `e04de7c` source audit. The following code and regression tests were inspected at candidate head `cd77aab60e4ee7e85c4510ae6b4e418a8c091ed5`:
+
+- **Copilot evidence privacy:** returned citations expose `source_reference_present` rather than forwarding the raw source URL. The regression test now supplies a URL containing user information and an API-key-like query value and asserts neither is returned.
+- **Record/graph persistence rollback:** `create_record` now snapshots the Digital Thread graph and restores graph state if the managed workspace save fails. A dedicated test verifies that both the record and graph node are absent after a failed save.
+- **Digital Thread edge rollback:** relationship creation restores the previous graph edges when the managed save is rejected; a dedicated regression test covers this failure.
+- **Data Trust reconciliation proposals:** the engine can calculate a residual assigned to an explicitly selected input/output/loss stream, but returns it as `PROPOSED_NOT_APPLIED_NOT_VERIFIED`, requires approval and preserves the original measurements. Tests cover correct residual math, no mutation and rejection of a negative proposed value.
+- **Persistent shift handover:** shared handovers require an organization workspace, store each unresolved issue, permit only a separate incoming acknowledgement record, prevent the creator from acknowledging their own handover, and keep an acknowledged issue open until a separate closure/verification process. Tests cover successful/duplicate/self acknowledgement and rejection in a personal workspace.
+- **Energy scheduling honesty:** the tool now identifies its method as `DETERMINISTIC_TARIFF_GREEDY`, returns `optimality_guarantee: false`, and explicitly says global minimum cost is not guaranteed. Regression assertions verify that limitation.
+
+These changes improve the foundation and address earlier gaps in persistence rollback, safe measurement reconciliation, privacy and acknowledgement semantics. They do not resolve dataset-version dependency invalidation or hosted Digital Thread acceptance.
+
+At head `cd77aab60e4ee7e85c4510ae6b4e418a8c091ed5`, eight required GitHub Actions workflow runs were again observed queued, and the separate live-deployment smoke job was skipped. The later exact head must still have a complete set of successful required checks and inspected artifacts before any passing status is recorded.
+
+
+---
+
+## 10. Current candidate refresh — security entitlement and handover reference checks
+
+A further review of the current candidate source and its dedicated foundation report confirms these additional safeguards:
+
+- **Authenticated tier enforcement:** `_session_authorize` normalizes and checks the Enterprise entitlement from the authenticated session's `user_tier`. The caller-supplied tier is also constrained and cannot elevate a lower-tier account. The acceptance suite now contains `test_enterprise_entitlement_uses_authenticated_session_tier_not_caller_argument`.
+- **Handover source integrity:** a handover issue that names a `source_record_id` is rejected unless that record already exists in the same active workspace. A dedicated negative-path regression assertion covers an unknown record reference.
+- **Current test count:** the current `tests/test_shoir_industrial_intelligence.py` file contains **56 test functions**. This is test-source coverage only; it is not a passing test result. `tests/test_shoir_digital_thread.py` remains a separate acceptance suite.
+
+These additions strengthen the candidate's entitlement and record-linkage boundaries. They do not close the open dataset-version dependency invalidation, hosted graph continuity, cross-tenant proof, exact-head CI, browser/export or independent engineering/security acceptance gates.
+
+At the time of this source review, the candidate was at `807b8667b52fd3b5b80158563f63115941587271`. Its combined status and workflow-run query did not return completed CI evidence. Keep `IMPLEMENTED — VALIDATION PENDING` as the code-delivery label.
+
+
+
+---
+
+## 11. Dataset lineage hardening update — 2026-11-15
+
+The current candidate adds explicit lineage propagation and stale-state controls beyond the earlier Industrial Intelligence record-only path:
+
+- Generic Industrial Intelligence records now inherit exact immutable dataset-version dependencies from their registered evidence references when the evidence carries those dependencies. This covers evidence-backed operational events, decisions, benefits, cause/effect investigations, risk/barrier records and shift handovers.
+- The separate Industrial Intelligence model registry and action ledger now attach the dataset-version dependencies of their test/evidence records.
+- When a dataset head changes, the invalidation routine now evaluates the active workspace's `records`, Industrial Intelligence `models`, and Industrial Intelligence `actions` ledgers; preserves their original payloads/definitions; marks dependent artifacts stale; updates corresponding Digital Thread nodes; records the affected native IDs in a lineage event; and saves the affected workspace state as one managed workspace snapshot.
+- A failed managed workspace save restores the prior in-memory record/model/action lists and Digital Thread nodes/edges. Regression coverage was added for this rollback.
+- Stale source-linked artifacts cannot be approved or independently reviewed through the corresponding model-validation, action-approval, decision-review, benefit-verification, risk/barrier-review, cause/effect-review and shift-handover acknowledgement paths.
+- T094 now explicitly classifies future-dated KPI measurements as `FUTURE_TIMESTAMP` and does not open threshold alerts from them. An observation exactly at the evaluation timestamp remains eligible under a zero-minute freshness boundary.
+
+New regression coverage includes:
+- `test_dataset_dependency_invalidation_is_idempotent_and_preserves_unrelated_records`
+- `test_dataset_dependency_invalidation_rolls_back_records_models_actions_and_graph_when_save_fails`
+- `test_dataset_version_invalidation_marks_registered_model_stale_and_blocks_validation`
+- `test_dataset_version_invalidation_marks_linked_actions_stale_and_blocks_approval`
+- `test_records_inherit_dataset_dependencies_from_referenced_evidence_and_stale_decisions_cannot_be_approved`
+- `test_dataset_linked_benefit_cannot_be_independently_verified_after_source_change`
+- `test_dataset_linked_risk_barrier_cannot_be_reviewed_after_source_change`
+- `test_dataset_linked_cause_effect_investigation_cannot_be_reviewed_after_source_change`
+- `test_dataset_linked_shift_handover_cannot_be_acknowledged_after_source_change`
+- T094 future-timestamp and exact-evaluation-boundary cases in `tests/test_shoir_remaining_tool_engines.py`.
+
+At this refresh, `tests/test_shoir_industrial_intelligence.py` contains 74 test functions and `tests/test_shoir_resource_intelligence.py` contains 130 test functions. These are test-source counts, **not** passing CI results.
+
+### Remaining lineage boundary
+
+This hardening applies to the Industrial Intelligence workspace record, model-registry and action ledgers. It does **not** yet automatically invalidate every legacy local SQLite artifact in `industrial_platform.py`, including its separate `platform_models`, `platform_scenarios`, `platform_experiments` and `platform_decisions` stores. Those stores remain a separate integration gap and must not be represented as fully covered by the new managed workspace lineage routine.
+
+The exact candidate head remains subject to all required CI and hosted acceptance. The current exact-head workflow runs were queued when checked; the separate live-deployment smoke remains skipped unless a new authenticated staging run proves it. No CI pass or hosted acceptance is claimed by this source update.
+
+
+---
+
+## 12. Latest stale-lineage consumer hardening — 2026-11-15
+
+Two additional consistency gaps were closed in the candidate:
+
+- The duplicate Industrial Intelligence operational-event ledger is now invalidated alongside the primary record ledger. The lineage event and invalidation return object include stale event IDs; the workspace rollback test now includes record, event, model and action stores plus Digital Thread nodes/edges.
+- Industrial Knowledge Copilot evidence retrieval now excludes records whose record status or dataset dependency status is `STALE`. It returns `excluded_stale_evidence_count` so excluded stale evidence is visible as a limitation rather than cited as current evidence.
+
+Additional focused regression tests:
+- `test_dataset_version_invalidation_marks_operational_event_mirror_stale`
+- `test_copilot_evidence_context_excludes_stale_dataset_dependent_records`
+
+The current `tests/test_shoir_industrial_intelligence.py` source contains 76 test functions at this code-review point; this count is not a passing test result. The current candidate exact-head workflows remain queued, so the new source and tests are not yet CI-verified.
+
+
+## 13. Legacy dataset lineage and decision-to-outcome hardening — 2026-11-15
+
+The candidate has now extended dataset freshness control into the separate legacy Industrial Platform SQLite stores and the Experience decision lifecycle:
+
+- The local dataset registry now records immutable metadata versions and current-version pointers. Identical content does not create a new version; changed content under the same stable dataset ID advances the version.
+- Legacy `platform_models`, `platform_experiments`, `platform_scenarios` and `platform_decisions` have explicit dataset dependency/freshness/stale-marker metadata.
+- Dataset-version changes invalidate those artifacts and also invalidate the mirrored `experience_decisions` and existing `experience_decision_outcomes`, preserving their original analytical payloads and adding stale dependency evidence.
+- New artifact saves resolve supplied dataset IDs, hashes and optional version/fingerprint against the local registry. A reference that cannot be resolved is `UNVERIFIED_REFERENCE`, never `CURRENT`.
+- The standalone Experience decision API now accepts optional explicit dataset dependencies; decision specification saves resolve evidence refs; status transitions to Approved/Implemented/Verified are blocked for stale or unverified lineage; new outcome insertion rechecks lineage inside a write transaction to avoid a race with dataset invalidation.
+- Outcome reporting exposes dataset freshness and stale dependency count.
+- Local SQLite dataset fallback is permitted only in local/development/test. Production does not fall back to local SQLite when the managed dataset service is unconfigured.
+- Additive migration tests cover an existing pre-lineage SQLite database and preserve the rule that historical artifacts remain `NOT_LINKED` unless their consumed version can be proven.
+
+Current focused test-source inventory at this update:
+- Industrial Intelligence: 76 test functions
+- Resource Intelligence: 130 test functions
+- Remaining tool engines: 21 test functions
+- Legacy Industrial Platform: 34 test functions
+- Final integration: 21 test functions
+- Industrial Experience: 18 test functions
+
+These are test-source counts only, not passing test results. The latest candidate SHA is `9847464833b32958e3df9ba50fecc2e8b6043495`; its exact-head required GitHub Actions remain subject to completion and artifact review.
+
+### Remaining limitations
+
+The local SQLite registry holds metadata/history, not original source-file bytes. Existing historical analyses lacking explicit/verifiable source references remain `NOT_LINKED` and cannot be retrospectively represented as dataset-derived. Managed staging Storage lifecycle, object retention and cleanup, upload resumability, authenticated browser journeys, cross-tenant isolation, full exports, independent engineering/security review and external configuration remain separate gates.
+
+
+## 14. Initial import and unresolved-lineage safety — 2026-11-15
+
+The dataset lifecycle now creates the canonical Digital Thread Dataset-version node at the first verified import, rather than waiting for an analysis or later version change. That node is persisted through the authenticated workspace snapshot path. If that save is not confirmed, the workspace is marked lineage-blocked and new dataset-dependent records are refused.
+
+The same workspace-wide block now applies to all governed review/approval/verification paths and Copilot retrieval. A failed invalidation cannot leave old records eligible for approval simply because their stale flags were not persisted; model validation, action approval/status changes, decision review, benefit verification, risk/barrier review, cause/effect review, shift-handover acknowledgement and Copilot evidence retrieval all fail closed until lineage resolution is restored.
+
+The local SQLite dataset history also supports content reversion (A → B → A) as immutable version entries 1 → 2 → 3. An additive table rebuild removes the earlier content-hash uniqueness constraint while preserving historical rows.
+
+Latest candidate test-source inventory:
+- Industrial Intelligence: 79 test functions
+- Resource Intelligence: 130
+- Remaining tool engines: 21
+- Legacy Industrial Platform: 34
+- Final integration: 21
+- Industrial Experience: 18
+- 100-tool route audit: 2
+
+These are authored test counts only. Exact-head CI is still queued and no test pass is claimed.
+
+
+## 15. Retry-safe dataset activation and current candidate test inventory — 2026-11-15
+
+The final activation/persistence ordering has been tightened:
+
+- The active immutable dataset dependency and lineage-tracking state are set before the authenticated invalidation routine saves the workspace.
+- Every authenticated Enterprise dataset activation, including a fresh-session reopen of the same version, reruns idempotent invalidation. This repairs a previously failed save without requiring a new dataset version.
+- Current Dataset node, active dataset dependency, lineage status and the per-version lineage event are saved together. A save failure rolls back the artifact lists and Digital Thread graph, then fails closed with `SAVE_FAILED` and the lineage block.
+- One lineage event is reused per dataset/version, and the event keeps the union of previously affected record/event/model/action IDs.
+- Added a fresh-session retry regression test that deliberately fails the first save, reopens the same version, verifies a successful retry, and inspects the persisted snapshot fields.
+- Added a Workbench AppTest for T094 to prove future-dated KPI data cannot open an alert through the actual Workbench form.
+
+Current authored test-function inventory:
+- Industrial Intelligence: 80
+- Resource Intelligence: 130
+- Remaining tool engines: 21
+- Legacy Industrial Platform: 35
+- Final integration: 21
+- Industrial Experience: 18
+- 100-tool route audit: 2
+- 100-tool Workbench: 29
+
+These counts are test-source inventory only. They are not pass counts. The latest candidate head at the time of this refresh is `2dcff01880b3dfeec85a3c88a81a30a1024217cf`; its eight required exact-head GitHub Actions checks were all queued or pending, and the combined commit status was empty. No exact-head CI pass or hosted acceptance is claimed.
+
+
+## 16. Candidate refresh — 2026-11-20: T020 storage path, T094 state, and route guard
+
+The following code changes are now part of the release-hardening candidate; they are implementation evidence, not a change to the acceptance disposition:
+
+- **T020 dataset transfer:** `durable_account_store.py` now routes the normalized private CSV upload through `shoir_supabase_tus.py`, using the direct Storage hostname, signed TUS capability, 6 MiB chunks, bounded retries, HEAD-based offset recovery and strict no-redirect host checks. The upload capability is retained only in the current Streamlit server session for up to 23 hours, bound to actor/workspace/dataset/hash/organization. It resumes after reruns/transient interruptions within that session; it is not guaranteed across fresh login, device change or process restart.
+- **T020 finalization/cleanup:** the Edge Function registers the content-addressed object before deleting the temporary upload. If the metadata RPC reports failure, a new final object is deleted only after both record and event ledgers successfully confirm no reference. Reference-check uncertainty retains the object. Successful registration is not reversed merely because temporary-file cleanup fails. A staging-only operator action now previews and can delete aged, unreferenced temporary uploads under a 48-hour, dual-ledger, audited, bounded policy. It is manual; automatic scheduling remains unconfigured. Immutable content-addressed orphan files are retained until an atomic registration/cleanup lease exists. Hosted upload/resume/download and tenant acceptance remain pending.
+- **T020 access scope:** the dataset Edge actions use the managed organization workspace resolver. Organization creation/finalization requires write permission; listing and historical download use read permission. Personal workspace access remains owner/session scoped. This corrects the older matrix wording that implied organization sharing was not implemented. Real multi-user and cross-organization browser evidence remains required.
+- **T094 KPI alert state:** the Workbench's successful persistence writes serialize eligible session state, including `shoir_tool_result_T094` and `shoir_kpi_open_alert_records`; the workspace loader restores those values. The T094 Workbench test now round-trips both through the actual snapshot pack/unpack helpers. This is serializer/local automated coverage, not proof of the deployed managed backend or organization-level isolation. No live KPI source or notification provider is configured.
+- **Facility Layout:** direct renderer access is guarded by an authenticated matching account and canonical T065 entitlement check, in addition to the Workbench route controls.
+
+The 16 Industrial Intelligence engines and eight shared services remain `FOUNDATION_IMPLEMENTED`, not production accepted. Their independent calculation review, managed hosted save/reload, role/tenant matrix, Digital Thread continuity, dataset two-version lifecycle, workbook/export reconciliation, visual/localization checks and independent engineering/security review remain open. Keep PR #232 draft, BETA status and production NO-GO.
+
+
+---
+
+## Repository engineering refresh — 2026-11-20: lease fencing and method implementation
+
+This addendum supersedes the older T020 sentence above that said immutable content-addressed orphan objects must remain retained until an atomic lease exists. The lease/fencing protocol is now implemented in PR #232 source, but it is not deployed or hosted-accepted.
+
+### T020 lifecycle safety
+
+- Migrations `20261120115000_shoir_dataset_storage_lifecycle_leases.sql` and `20261120130000_shoir_dataset_storage_lease_fencing.sql` add a private per-workspace/dataset lease, bounded acquire/renew/release RPCs, and transaction-locked wrappers for dataset-version finalization and generic platform-record Storage-reference writes.
+- Finalization, generic T020 reference registration and temporary/immutable orphan cleanup use the same lease. The early temporary cleanup paths renew the still-live token before removal and fail closed if renewal or Storage removal is uncertain.
+- The T020 operator sweep remains manual and preview-first: 48-hour timestamp guard, two-ledger reference check while holding the lease, kind-specific intent/completion events, maximum 50 deletes and no scheduled job.
+- The exact-head PostgreSQL replay and Edge checks passed on the candidate SHA inspected at this refresh. The full Python/AppTest regression and hosted staging acceptance are not yet accepted.
+
+### Additional canonical Workbench engineering
+
+- **T028:** structured six-category fishbone cause hypotheses and Ishikawa chart integrated with Pareto/5-Why; statements are hypotheses, not verified causal findings.
+- **T041:** two-parameter Weibull maximum likelihood supports independent right-censoring, approximate log-parameter intervals when numerical information is stable, and a descriptive Kaplan–Meier comparison; no unsupported formal p-value is claimed.
+- **T054:** nested multi-level BOM explosion with yield/scrap, inventory and scheduled receipts, lot multiples, release-period propagation, and cycle/revision/ambiguous-level checks.
+- **T063:** time-indexed one-day resource scheduling with skills, shifts, resource non-overlap, precedence and soft due-hour tardiness; the original one-to-one assignment method remains available.
+- **T075:** canonical Workbench forecast-drift action now captures user-supplied model/dataset/version/period provenance, explicitly labelled unverified until linked to a trusted source.
+- **T085:** Research Pack-only sample-size execution and lower-tier denial are exercised through Workbench AppTest, with the design assumptions captured in the input snapshot.
+
+These are source implementation additions, not verified operational performance. The canonical matrix remains 96 `IMPLEMENTED_NEEDS_VALIDATION`, four `EXTERNAL_CONFIGURATION_REQUIRED` (T096–T099), zero `VERIFIED_WORKING`. T096 requires a chosen real provider and adapter validation; T097 requires an approved hosted API/SDK; T098 requires a live non-production OIDC/MFA provider; T099 requires full database and Storage-byte backup/restore evidence.
+
+### Acceptance and release boundary
+
+The exact candidate is still PR #232 into `staging-e2e-20261019`, open and draft. The new migrations and matching Edge Function have not been deployed. Read-only Supabase inspection still reports staging Edge v14 and production Edge v10. The connected migration-history read has not authenticated, so the applied migration ledger must be checked through an authorized operator before a staging deployment decision.
+
+Independent engineering, reliability, quality, supply-chain, workforce-planning, security, infrastructure and Saudi privacy/legal reviews remain necessary where applicable. Keep BETA and production NO-GO until exact-head CI, independent approval, staging backup/rollback evidence, authenticated disposable-account acceptance and the separate production release approval are complete.

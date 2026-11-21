@@ -2,45 +2,222 @@ name: Shoir-IE validation
 
 on:
   push:
+    branches: ["main", "staging-e2e-20261019"]
   pull_request:
+    branches: ["main", "staging-e2e-20261019"]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  test-core:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shoir_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shoir_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       PYTHONPATH: .
+      SHOIR_TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/shoir_test
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        id: checkout
+        uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install dependencies
+        id: install_dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m pip install "pytest-xdist>=3.8,<4" "pytest-timeout>=2.3,<3"
       - name: Compile all Python modules
+        id: compile
         run: python -m compileall -q .
-      - name: Run regression tests
+      - name: Run parallel regression suite
+        id: regression_parallel
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python -m pytest -q tests
+          PYTHONTRACEMALLOC: "5"
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/test-results
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -n 4 --dist=loadfile -ra --timeout=600 \
+            --ignore=tests/test_atomic_subscription_migration_postgres.py \
+            --ignore=tests/test_full_migration_history_postgres.py \
+            --ignore=tests/test_shoir_resource_intelligence.py \
+            --ignore=tests/test_shoir_100_tool_workbench.py \
+            --ignore=tests/test_shoir_tool_trust_center_workbench.py \
+            tests --junitxml=artifacts/test-results/junit-parallel.xml 2>&1 | tee artifacts/test-results/pytest-parallel.log
+      - name: Upload parallel regression diagnostics immediately
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-parallel-regression-diagnostics
+          path: |
+            artifacts/test-results/junit-parallel.xml
+            artifacts/test-results/pytest-parallel.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Verify local PostgreSQL integration service
+        id: postgres_service
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          import psycopg2
+          url = urlparse(os.environ["SHOIR_TEST_POSTGRES_URL"])
+          assert url.hostname in {"localhost", "127.0.0.1", "::1"}
+          assert url.path == "/shoir_test"
+          with psycopg2.connect(os.environ["SHOIR_TEST_POSTGRES_URL"], connect_timeout=5) as conn:
+              with conn.cursor() as cursor:
+                  cursor.execute("SELECT current_database(), current_user")
+                  database, user = cursor.fetchone()
+          assert database == "shoir_test" and user == "postgres"
+          print("Disposable PostgreSQL integration service is ready.")
+          PY
+      - name: Run serial PostgreSQL integration regression tests
+        id: regression_postgres
+        if: ${{ !cancelled() && steps.postgres_service.outcome == 'success' }}
+        env:
+          PYTHONTRACEMALLOC: "5"
+        run: |
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -ra --timeout=600 \
+            tests/test_atomic_subscription_migration_postgres.py \
+            tests/test_full_migration_history_postgres.py \
+            --junitxml=artifacts/test-results/junit-postgres.xml
+      - name: Upload regression test results and skip/warning detail
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-regression-test-results
+          path: artifacts/test-results/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Set up Node for Excel add-in validation
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Validate Excel add-in JavaScript and planner tests
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: |
+          node --check excel_addin/planner.js
+          node --check excel_addin/taskpane.js
+          node --test tests/excel_addin_planner.test.cjs sdk/typescript/test/client.test.mjs
+      - name: Validate Excel add-in manifest XML
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import xml.etree.ElementTree as ET
+
+          path = Path("excel_addin/manifest.xml")
+          root = ET.parse(path).getroot()
+          ns = {"o": "http://schemas.microsoft.com/office/appforoffice/1.1"}
+          permissions = root.find("o:Permissions", ns)
+          source = root.find("o:DefaultSettings/o:SourceLocation", ns)
+          icon = root.find("o:IconUrl", ns)
+          requirements = root.find("o:Requirements/o:Sets", ns)
+          assert permissions is not None and permissions.text == "ReadWriteDocument"
+          assert requirements is not None
+          assert requirements.attrib.get("DefaultMinVersion") == "1.9"
+          assert any(item.attrib.get("Name") == "ExcelApi" for item in requirements)
+          assert source is not None and icon is not None
+          urls = {
+              "taskpane": source.attrib.get("DefaultValue", ""),
+              "icon": icon.attrib.get("DefaultValue", ""),
+          }
+          placeholders = any("YOUR-SHOIR-IE-HOST" in value for value in urls.values())
+          if placeholders:
+              print("::warning::Office add-in manifest is an unhosted template. It is not installable or deployed.")
+          else:
+              parsed = {name: urlparse(value) for name, value in urls.items()}
+              for name, value in parsed.items():
+                  assert value.scheme == "https" and value.netloc, f"{name} URL must use HTTPS."
+              assert parsed["taskpane"].netloc == parsed["icon"].netloc
+              for item in ("taskpane.html", "taskpane.js", "planner.js"):
+                  assert (Path("excel_addin") / item).is_file()
+          print("Excel manifest XML, API 1.9 and declared permissions are valid.")
+          PY
       - name: Set up Deno
+        id: deno_setup
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Type-check persistence Edge Function
-        run: deno check supabase/functions/shoir-persistence/index.ts
-      - name: Run persistence Edge Function security tests
-        run: deno test supabase/functions/shoir-persistence/security_test.ts
+      - name: Format-check active and production-v9 Edge Functions
+        if: ${{ !cancelled() && steps.deno_setup.outcome == 'success' }}
+        run: |
+          deno fmt --check \
+            supabase/functions/shoir-persistence/index.ts \
+            supabase/functions/shoir-persistence/security.ts \
+            supabase/functions/shoir-persistence/security_test.ts \
+            supabase/functions/shoir-persistence/oidc.ts \
+            supabase/functions/shoir-persistence/oidc_test.ts \
+            supabase/production-backports/shoir-persistence-v9/index.ts \
+            supabase/production-backports/shoir-persistence-v9/security.ts \
+            supabase/production-backports/shoir-persistence-v9/security_test.ts
+      - name: Type-check active and production-v9 Edge Functions
+        if: ${{ !cancelled() && steps.deno_setup.outcome == 'success' }}
+        run: |
+          deno check supabase/functions/shoir-persistence/index.ts
+          deno check supabase/functions/shoir-persistence/oidc_test.ts
+          deno check supabase/production-backports/shoir-persistence-v9/index.ts
+      - name: Run active and production-v9 Edge Function security tests
+        if: ${{ !cancelled() && steps.deno_setup.outcome == 'success' }}
+        run: |
+          deno test supabase/functions/shoir-persistence/security_test.ts
+          deno test supabase/functions/shoir-persistence/oidc_test.ts
+          deno test supabase/production-backports/shoir-persistence-v9/security_test.ts
+      - name: Audit pinned and direct application dependencies
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r requirements.txt
+      - name: Run hard-coded credential pattern guard
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          roots = [Path("app.py"), Path("industrial_platform.py"), Path("industrial_experience.py")]
+          pattern = re.compile(r"""(?i)(api[_-]?key|secret|password)\s*=\s*["'][^"']{12,}["']""")
+          hits = [str(path) for path in roots if pattern.search(path.read_text(encoding="utf-8"))]
+          if hits:
+              raise SystemExit("Potential hard-coded credential pattern found: " + ", ".join(hits))
+          print("No obvious hard-coded credential patterns found in the scanned application files.")
+          PY
       - name: Install PDF rendering tools for visual export acceptance
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y libreoffice-impress poppler-utils
+          sudo apt-get install -y libreoffice-impress poppler-utils default-jre-headless
+      - name: Require PDF and PowerPoint export evidence
+        if: success()
+        run: |
+          test -s artifacts/report-export-validation/complete_export_verification.pdf
+          test -s artifacts/report-export-validation/complete_export_verification.pptx
       - name: Render the exact-head synthetic PDF and every PowerPoint slide
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           evidence=artifacts/report-export-validation
@@ -58,13 +235,15 @@ jobs:
           fi
       - name: Upload sanitized report-export validation artifacts and rendered pages
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-report-export-validation
           path: artifacts/report-export-validation/
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 14
       - name: Parse required application modules
+        id: parse_modules
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         run: |
           python - <<'PY'
           import ast
@@ -75,10 +254,16 @@ jobs:
           print("Required application modules parsed successfully.")
           PY
       - name: Execute application top-level import smoke test
+        id: import_smoke
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         run: python scripts/runtime_import_smoke.py
       - name: Install Chromium for local runtime smoke
+        id: chromium
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.import_smoke.outcome == 'success' }}
         run: python -m playwright install --with-deps chromium
       - name: Start local Streamlit application
+        id: streamlit_start
+        if: ${{ !cancelled() && steps.chromium.outcome == 'success' }}
         run: |
           mkdir -p artifacts/live-deployment-smoke
           nohup python -m streamlit run app.py \
@@ -103,50 +288,143 @@ jobs:
             cat artifacts/live-deployment-smoke/streamlit.log
             exit 1
           fi
-      - name: Browser-smoke the local app at desktop and mobile widths
+      - name: Browser-smoke the local app at desktop tablet and mobile widths
+        id: browser_smoke
+        if: ${{ !cancelled() && steps.streamlit_start.outcome == 'success' }}
         env:
           SHOIR_LIVE_URL: http://127.0.0.1:8501/
         run: python scripts/live_deployment_smoke.py
+      - name: Require desktop tablet and mobile browser screenshots
+        if: ${{ !cancelled() && steps.browser_smoke.outcome == 'success' }}
+        run: |
+          test -s artifacts/live-deployment-smoke/desktop.png
+          test -s artifacts/live-deployment-smoke/tablet.png
+          test -s artifacts/live-deployment-smoke/mobile.png
       - name: Upload local runtime smoke evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-local-runtime-smoke
           path: artifacts/live-deployment-smoke/
+          if-no-files-found: ignore
+
+  streamlit-app-tests:
+    name: streamlit-app-tests (${{ matrix.test_file }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file:
+          - tests/test_shoir_resource_intelligence.py
+          - tests/test_shoir_100_tool_workbench.py
+          - tests/test_shoir_tool_trust_center_workbench.py
+    env:
+      PYTHONPATH: .
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pip install "pytest-timeout>=2.3,<3"
+      - name: Compile selected Streamlit regression module
+        env:
+          TEST_FILE: ${{ matrix.test_file }}
+        run: python -m py_compile "$TEST_FILE"
+      - name: Run isolated Streamlit AppTest module
+        env:
+          TEST_FILE: ${{ matrix.test_file }}
+          PYTHONTRACEMALLOC: "5"
+        run: |
+          mkdir -p artifacts/test-results
+          python -W error::DeprecationWarning -W error::FutureWarning -W error::ResourceWarning -m pytest -vv -ra --timeout=1800 "$TEST_FILE" --junitxml="artifacts/test-results/junit-streamlit-${{ strategy.job-index }}.xml"
+      - name: Upload isolated Streamlit AppTest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-streamlit-apptests-${{ strategy.job-index }}
+          path: artifacts/test-results/
           if-no-files-found: warn
+          retention-days: 14
+
+  # Preserve the historical required status context "test" as an aggregate.
+  # It cannot go green unless the core suite AND all isolated Streamlit AppTests pass.
+  test:
+    name: test
+    if: ${{ always() }}
+    needs: [test-core, streamlit-app-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all regression lanes to pass
+        env:
+          CORE_RESULT: ${{ needs.test-core.result }}
+          STREAMLIT_RESULT: ${{ needs.streamlit-app-tests.result }}
+        run: |
+          test "$CORE_RESULT" = "success"
+          test "$STREAMLIT_RESULT" = "success"
 
   live-deployment-smoke:
-    # Probe the currently hosted, anonymous shell for audit PRs and after
-    # every main push. This is a service-availability/rendering check, not proof
-    # that the hosted app has deployed the triggering Git SHA. Manual runs on
-    # main allow an explicit post-deployment check without account credentials.
+    # This is a hosted post-deployment acceptance check. A pull-request build
+    # has not been deployed to Streamlit Cloud yet, so PR validation uses the
+    # local candidate browser smoke above. Run this hosted check after staging
+    # receives the reviewed candidate, or dispatch it manually after confirming
+    # the dedicated staging app has completed its deployment.
     if: >-
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
-      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+      (github.event_name == 'push' && (github.ref_name == 'staging-e2e-20261019' || github.ref_name == 'main')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref_name == 'staging-e2e-20261019' || github.ref_name == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SHoir_LIVE_URL: https://shoir-ie-app.streamlit.app/
+      # Never fall back to the production Streamlit app from a PR validation.
+      SHOIR_LIVE_URL: https://${{ vars.SHOIR_E2E_EXPECTED_STAGING_APP_HOST }}/
+      SHOIR_E2E_EXPECTED_STAGING_APP_HOST: ${{ vars.SHOIR_E2E_EXPECTED_STAGING_APP_HOST }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Validate the dedicated staging hostname
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from urllib.parse import urlparse
+
+          host = os.environ.get("SHOIR_E2E_EXPECTED_STAGING_APP_HOST", "").strip()
+          if (
+              not host
+              or len(host) > 253
+              or "://" in host
+              or any(char in host for char in "/\\\\?#@")
+              or not re.fullmatch(r"[A-Za-z0-9.-]+", host)
+          ):
+              raise SystemExit(
+                  "BLOCKED: set the Actions variable SHOIR_E2E_EXPECTED_STAGING_APP_HOST "
+                  "to the exact dedicated staging app hostname. Production is never used as a PR fallback."
+              )
+          parsed = urlparse("https://" + host + "/")
+          if parsed.scheme != "https" or parsed.hostname != host.lower() or parsed.path != "/" or parsed.query or parsed.fragment:
+              raise SystemExit("BLOCKED: staging app hostname is not a valid exact HTTPS hostname.")
+          print("Staging target validated: https://" + host + "/")
+          PY
       - name: Install headless browser
         run: |
           python -m pip install --upgrade pip
           python -m pip install playwright
           python -m playwright install --with-deps chromium
       - name: Test hosted entry-screen rendering at desktop and mobile widths
-        env:
-          SHOIR_LIVE_URL: https://shoir-ie-app.streamlit.app/
         run: python scripts/live_deployment_smoke.py
       - name: Save live browser screenshots and result
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-live-deployment-smoke
           path: artifacts/live-deployment-smoke/
-          if-no-files-found: warn
+          if-no-files-found: ignore
 

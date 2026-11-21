@@ -10,6 +10,7 @@ import json
 import math
 import os
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -124,7 +125,7 @@ def _text(value: Any, limit: int = 1000) -> str:
 
 def ensure_shadowshift_schema(db_path: str = DB_PATH) -> None:
     """Create ShadowShift-only tables without altering existing Shoir-IE tables."""
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS shadowshift_studies (
@@ -164,7 +165,7 @@ def ensure_shadowshift_schema(db_path: str = DB_PATH) -> None:
 def create_study(owner: str, name: str = "New ShadowShift Study", db_path: str = DB_PATH) -> str:
     ensure_shadowshift_schema(db_path)
     sid, now = "SS-" + uuid.uuid4().hex[:12].upper(), _now()
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         conn.execute(
             """INSERT INTO shadowshift_studies
             (study_id,owner,name,process_name,observation_window_min,shift_window_min,shifts_per_year,
@@ -179,20 +180,20 @@ def create_study(owner: str, name: str = "New ShadowShift Study", db_path: str =
 
 def list_studies(owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         return pd.read_sql_query("SELECT * FROM shadowshift_studies WHERE owner=? ORDER BY updated_at DESC", conn, params=(str(owner),))
 
 
 def load_study(study_id: str, owner: str, db_path: str = DB_PATH) -> dict[str, Any] | None:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         cursor = conn.execute("SELECT * FROM shadowshift_studies WHERE study_id=? AND owner=?", (str(study_id), str(owner)))
         row = cursor.fetchone()
         return dict(zip([x[0] for x in cursor.description], row)) if row else None
 
 
 def update_study(study_id: str, owner: str, settings: dict[str, Any], db_path: str = DB_PATH) -> None:
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         conn.execute(
             """UPDATE shadowshift_studies SET name=?,process_name=?,observation_window_min=?,shift_window_min=?,
             shifts_per_year=?,loaded_hourly_rate_sar=?,downstream_stress_factor=?,notes=?,updated_at=?
@@ -304,7 +305,7 @@ def add_event(study_id: str, owner: str, event: dict[str, Any], db_path: str = D
     item = _event_record(event, study_id, owner)
     keys = ("event_id", "study_id", "owner", "observed_at", "event_type", "station", "interruption_min",
             "recovery_min", "people_affected", "suspected_cause", "evidence_strength", "evidence_source", "notes", "created_at")
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("""INSERT INTO shadowshift_events
@@ -318,7 +319,7 @@ def add_event(study_id: str, owner: str, event: dict[str, Any], db_path: str = D
 
 def load_events(study_id: str, owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         d = pd.read_sql_query(
             """SELECT event_id AS 'Event ID',observed_at AS 'Observed at',event_type AS 'Event type',
             station AS 'Station',interruption_min AS 'Interruption min',recovery_min AS 'Recovery min',
@@ -336,7 +337,7 @@ def replace_events(study_id: str, owner: str, frame: pd.DataFrame, db_path: str 
     d = clean_event_frame(frame)
     keys = ("event_id", "study_id", "owner", "observed_at", "event_type", "station", "interruption_min",
             "recovery_min", "people_affected", "suspected_cause", "evidence_strength", "evidence_source", "notes", "created_at")
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("DELETE FROM shadowshift_events WHERE study_id=? AND owner=?", (study_id, owner))
@@ -424,7 +425,7 @@ def rank_next_experiments(events: pd.DataFrame) -> pd.DataFrame:
 def save_experiment(study_id: str, owner: str, design: dict[str, Any], db_path: str = DB_PATH) -> str:
     ensure_shadowshift_schema(db_path)
     eid, now = "SSX-" + uuid.uuid4().hex[:10].upper(), _now()
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("""INSERT INTO shadowshift_experiments
@@ -442,7 +443,7 @@ def save_experiment(study_id: str, owner: str, design: dict[str, Any], db_path: 
 
 def list_experiments(study_id: str, owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         return pd.read_sql_query("""SELECT experiment_id AS 'Experiment ID',hypothesis AS 'Hypothesis',
             comparison_condition AS 'Comparison',test_condition AS 'Test condition',primary_metric AS 'Primary metric',
             unit AS 'Unit',target_n AS 'Target n',planned_minutes AS 'Planned min',
@@ -457,7 +458,7 @@ def record_experiment_result(experiment_id: str, study_id: str, owner: str, resu
         "observations_completed": max(0, int(_num(result.get("observations_completed")))),
         "notes": _text(result.get("notes"), 2000), "recorded_at": _now(),
     }
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         cur = conn.execute("""UPDATE shadowshift_experiments SET result_json=?,status='Measured',updated_at=?
             WHERE experiment_id=? AND study_id=? AND owner=?""",
             (json.dumps(payload, sort_keys=True), _now(), experiment_id, study_id, owner))
@@ -470,7 +471,7 @@ def save_analysis_snapshot(study_id: str, owner: str, assumptions: dict[str, Any
     ensure_shadowshift_schema(db_path)
     evidence_hash = hashlib.sha256(clean_event_frame(events).to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
     sid = "SSN-" + uuid.uuid4().hex[:12].upper()
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         if not conn.execute("SELECT 1 FROM shadowshift_studies WHERE study_id=? AND owner=?", (study_id, owner)).fetchone():
             raise ValueError("Study not found for the current owner.")
         conn.execute("INSERT INTO shadowshift_snapshots VALUES(?,?,?,?,?,?,?)", (
@@ -482,7 +483,7 @@ def save_analysis_snapshot(study_id: str, owner: str, assumptions: dict[str, Any
 
 def load_snapshots(study_id: str, owner: str, db_path: str = DB_PATH) -> pd.DataFrame:
     ensure_shadowshift_schema(db_path)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with sqlite3.connect(db_path, timeout=30, factory=ClosingSQLiteConnection) as conn:
         return pd.read_sql_query("""SELECT snapshot_id AS 'Snapshot ID',evidence_sha256 AS 'Evidence SHA-256',
             created_at AS 'Created at' FROM shadowshift_snapshots WHERE study_id=? AND owner=? ORDER BY created_at DESC""",
             conn, params=(study_id, owner))
@@ -642,7 +643,7 @@ def render_shadowshift(tier: str, username: str) -> None:
                         st.error(f"Could not save log edits: {exc}")
                 pick = delete_col.selectbox("Remove event", ["— Keep all events —"] + events["Event ID"].astype(str).tolist(), key=f"shadowshift_delete_pick_{study_id}")
                 if delete_col.button("Delete selected event", use_container_width=True, key=f"shadowshift_delete_{study_id}") and pick != "— Keep all events —":
-                    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+                    with sqlite3.connect(DB_PATH, timeout=30, factory=ClosingSQLiteConnection) as conn:
                         conn.execute("DELETE FROM shadowshift_events WHERE event_id=? AND study_id=? AND owner=?", (pick, study_id, owner))
                         conn.commit()
                     st.rerun()

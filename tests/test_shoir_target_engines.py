@@ -8,9 +8,13 @@ import pytest
 import pandas as pd
 
 from shoir_target_engines import (
+    calculate_niosh_revised_lifting_equation,
     monitor_forecast_drift,
     plan_two_sample_t_sample_size,
     solve_cutting_stock,
+    build_rcm_decision_support,
+    calibrate_simulation_outputs,
+    evaluate_kpi_alerts,
 )
 
 
@@ -65,6 +69,43 @@ def test_forecast_drift_monitor_has_hand_calculated_error_values():
     assert result["mape_pct_excluding_zero_actuals"] == pytest.approx(
         (2/12 + 2/18 + 3/33) / 3 * 100
     )
+
+
+def test_forecast_drift_monitor_records_user_supplied_model_and_dataset_lineage():
+    result = monitor_forecast_drift(
+        [10, 20, 30],
+        [12, 18, 33],
+        max_mae=2,
+        model_id="FORECAST-MODEL-01",
+        model_version="v3.2",
+        dataset_id="DS-ABCDEF123456",
+        dataset_version="2026-11-01",
+        source_label="Staging forecast evaluation",
+        evaluation_period_start="2026-10-01",
+        evaluation_period_end="2026-10-31",
+    )
+    assert result["lineage_status"] == "USER_SUPPLIED_MODEL_AND_DATASET_VERSIONS"
+    assert result["lineage_verification"] == "USER_SUPPLIED_UNVERIFIED"
+    assert result["model_version"] == "v3.2"
+    assert result["dataset_version"] == "2026-11-01"
+    assert result["evaluation_period_start"] == "2026-10-01"
+    assert result["evaluation_period_end"] == "2026-10-31"
+    assert "not checked against a registry" in result["warning"]
+
+
+def test_forecast_drift_monitor_rejects_partial_or_invalid_lineage_metadata():
+    with pytest.raises(ValueError, match="Model ID and model version"):
+        monitor_forecast_drift([1, 2], [1, 2], 1, model_id="MODEL-01")
+    with pytest.raises(ValueError, match="Dataset ID and dataset version"):
+        monitor_forecast_drift([1, 2], [1, 2], 1, dataset_version="v1")
+    with pytest.raises(ValueError, match="supplied together"):
+        monitor_forecast_drift([1, 2], [1, 2], 1, evaluation_period_start="2026-01-01")
+    with pytest.raises(ValueError, match="cannot be before"):
+        monitor_forecast_drift(
+            [1, 2], [1, 2], 1,
+            evaluation_period_start="2026-02-01",
+            evaluation_period_end="2026-01-01",
+        )
 
 
 def test_forecast_drift_monitor_window_and_invalid_inputs():
@@ -291,6 +332,42 @@ def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates(
         analyze_pareto_root_cause({"Machine": 1}, why_chain=["a", "b", "c", "d", "e"])
     with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
         analyze_pareto_root_cause({"Machine": 1}, due_date="tomorrow")
+
+
+def test_pareto_root_cause_builds_six_category_fishbone_and_marks_hypotheses():
+    from shoir_target_engines import analyze_pareto_root_cause
+
+    result = analyze_pareto_root_cause(
+        {"Machine": 12, "Method": 8},
+        fishbone_causes={
+            "Manpower": ["Operator training gap"],
+            "Machine": ["Sensor bracket vibration"],
+            "Method": ["Changeover checklist omits inspection"],
+            "Material": [],
+            "Measurement": ["Counter calibration not recorded"],
+            "Environment": ["Dust ingress suspected"],
+        },
+    )
+    assert result["fishbone_status"] == "HYPOTHESES_RECORDED"
+    assert result["fishbone_cause_count"] == 5
+    assert result["fishbone_summary"]["Category"].tolist() == [
+        "Manpower", "Machine", "Method", "Measurement", "Environment"
+    ]
+    assert set(result["fishbone_summary"]["Status"]) == {"HYPOTHESIS — VERIFY"}
+    assert result["fishbone_causes"]["Material"] == []
+
+
+def test_pareto_root_cause_rejects_invalid_fishbone_categories_and_duplicates():
+    from shoir_target_engines import analyze_pareto_root_cause
+
+    with pytest.raises(ValueError, match="six M categories"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Finance": ["budget"]})
+    with pytest.raises(ValueError, match="list of text"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Machine": "bearing"})
+    with pytest.raises(ValueError, match="Duplicate fishbone cause"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Machine": ["Noise", "noise"]})
+    with pytest.raises(ValueError, match="12 cause"):
+        analyze_pareto_root_cause({"Machine": 1}, fishbone_causes={"Machine": [f"Cause {i}" for i in range(13)]})
 
 
 def test_5s_audit_reports_equal_pillar_scores_and_action_assignment_gaps():
@@ -917,6 +994,47 @@ def test_project_portfolio_score_normalizes_direction_and_weights_reproducibly()
         ])
 
 
+def test_project_portfolio_weight_sensitivity_reveals_winner_changes():
+    from shoir_target_engines import score_project_portfolio
+
+    result = score_project_portfolio(
+        [
+            {"name": "Cost", "weight": 1, "direction": "minimize"},
+            {"name": "Quality", "weight": 1, "direction": "maximize"},
+        ],
+        [
+            {"name": "Project A", "scores": {"Cost": 0, "Quality": 0}},
+            {"name": "Project B", "scores": {"Cost": 100, "Quality": 100}},
+        ],
+        sensitivity_pct=20,
+    )
+    assert result["base_winner"] == "Project A"
+    assert result["sensitivity_scenario_count"] == 4
+    assert result["winner_change_count"] == 2
+    assert result["winner_stability_pct"] == pytest.approx(50.0)
+    assert set(result["weight_sensitivity"]["Scenario"]) == {"LOWER", "UPPER"}
+    assert set(result["weight_sensitivity"]["Winner"]) == {"Project A", "Project B"}
+    assert result["zero_weight_criteria_not_perturbed"] == []
+
+
+def test_project_portfolio_weight_sensitivity_rejects_invalid_range_and_reports_zero_weight():
+    from shoir_target_engines import score_project_portfolio
+
+    criteria = [
+        {"name": "Cost", "weight": 1, "direction": "minimize"},
+        {"name": "Safety", "weight": 0, "direction": "maximize"},
+    ]
+    alternatives = [
+        {"name": "A", "scores": {"Cost": 1, "Safety": 5}},
+        {"name": "B", "scores": {"Cost": 2, "Safety": 10}},
+    ]
+    result = score_project_portfolio(criteria, alternatives, sensitivity_pct=0)
+    assert result["zero_weight_criteria_not_perturbed"] == ["Safety"]
+    assert result["sensitivity_scenario_count"] == 4
+    with pytest.raises(ValueError, match="Sensitivity percentage"):
+        score_project_portfolio(criteria, alternatives, sensitivity_pct=101)
+
+
 def test_preventive_maintenance_planner_hazard_register_mrp_and_portfolio_fixtures():
     from shoir_target_engines import (
         plan_preventive_maintenance, assess_job_hazards,
@@ -1122,6 +1240,220 @@ def test_weibull_fit_reports_shape_scale_percentiles_and_censoring_limit():
     assert "censored" in result["warning"].lower()
     with pytest.raises(ValueError, match="at least five"):
         analyze_weibull_reliability([1, 2, 3, 4])
+
+
+def test_weibull_fit_supports_right_censoring_confidence_intervals_and_km_diagnostic():
+    from shoir_target_engines import analyze_weibull_reliability
+
+    probabilities = np.linspace(0.03, 0.97, 50)
+    true_times = [900 * (-np.log(1 - p)) ** (1 / 1.8) for p in probabilities]
+    cutoff = 600.0
+    observed = [time <= cutoff for time in true_times]
+    recorded = [time if event else cutoff for time, event in zip(true_times, observed)]
+
+    result = analyze_weibull_reliability(recorded, event_observed=observed)
+    assert result["status"] == "WEIBULL_FIT_RIGHT_CENSORED_MLE"
+    assert result["sample_size"] == 50
+    assert result["failure_count"] == sum(observed)
+    assert result["censored_count"] == 50 - sum(observed)
+    assert result["shape_beta"] > 0
+    assert result["scale_eta"] > 0
+    assert result["AICc"] is not None
+    assert result["BIC"] > 0
+    assert result["goodness_of_fit"]["comparison_points"] >= 3
+    assert result["goodness_of_fit"]["km_max_absolute_difference"] is not None
+    assert result["goodness_of_fit"]["formal_p_value"] is None
+    if result["confidence_intervals"] is not None:
+        assert result["confidence_intervals"]["shape_beta"]["lower"] > 0
+        assert result["confidence_intervals"]["shape_beta"]["upper"] >= result["confidence_intervals"]["shape_beta"]["lower"]
+        assert result["confidence_intervals"]["scale_eta"]["lower"] > 0
+        assert result["confidence_intervals"]["scale_eta"]["upper"] >= result["confidence_intervals"]["scale_eta"]["lower"]
+    assert "approximate Wald" in result["warning"]
+
+
+def test_weibull_fit_rejects_invalid_event_flags_and_insufficient_failures():
+    from shoir_target_engines import analyze_weibull_reliability
+
+    times = [10, 20, 30, 40, 50, 60]
+    with pytest.raises(ValueError, match="matching the time observations"):
+        analyze_weibull_reliability(times, event_observed=[True, False])
+    with pytest.raises(ValueError, match="0/1"):
+        analyze_weibull_reliability(times, event_observed=[1, 1, 1, 1, 1, 2])
+    with pytest.raises(ValueError, match="three observed failures"):
+        analyze_weibull_reliability(times, event_observed=[True, False, False, False, False, False])
+    with pytest.raises(ValueError, match="Confidence level"):
+        analyze_weibull_reliability(times, confidence_level=0.2)
+
+
+def test_recursive_mrp_explodes_nested_bom_yield_scrap_and_component_inventory():
+    from shoir_target_engines import plan_recursive_material_requirements
+
+    result = plan_recursive_material_requirements(
+        [
+            {
+                "component": "Subassembly",
+                "qty_per_parent": 1,
+                "lead_time_periods": 1,
+                "lot_size_multiple": 1,
+                "revision": "SUB-A",
+                "children": [
+                    {
+                        "component": "Screw",
+                        "qty_per_parent": 4,
+                        "lead_time_periods": 2,
+                        "lot_size_multiple": 10,
+                        "scrap_pct": 10,
+                    }
+                ],
+            },
+            {
+                "component": "Bolt",
+                "qty_per_parent": 2,
+                "lead_time_periods": 1,
+                "lot_size_multiple": 1,
+                "revision": "BOLT-B",
+            },
+        ],
+        10,
+        inventory={
+            "Screw": {"on_hand": 20, "safety_stock": 5},
+            "Bolt": {"on_hand": 30},
+        },
+        due_period=0,
+    )
+    frame = result["components"].set_index("Component")
+    assert result["status"] == "MULTI_LEVEL_MRP_CALCULATED"
+    assert result["level_count"] == 2
+    assert frame.loc["Subassembly", "Planned order receipt"] == 10
+    assert frame.loc["Screw", "Gross requirement"] == pytest.approx(400 / 9)
+    assert frame.loc["Screw", "Planned order receipt"] == 30
+    assert frame.loc["Screw", "Effective yield (%)"] == pytest.approx(90.0)
+    assert frame.loc["Bolt", "Planned order receipt"] == 0
+    assert frame.loc["Screw", "Due period"] == -1
+    assert "different units of measure" in result["total_planned_order_receipt_units_note"]
+
+
+def test_recursive_mrp_aggregates_repeated_components_once_and_rejects_cycles():
+    from shoir_target_engines import plan_recursive_material_requirements
+
+    aggregated = plan_recursive_material_requirements(
+        [
+            {"component": "Screw", "qty_per_parent": 1, "lot_size_multiple": 1},
+            {"component": "screw", "qty_per_parent": 2, "lot_size_multiple": 1},
+        ],
+        10,
+        inventory={"screw": {"on_hand": 10}},
+    )
+    assert len(aggregated["components"]) == 1
+    assert aggregated["components"].iloc[0]["Gross requirement"] == 30
+    assert aggregated["components"].iloc[0]["Net requirement"] == 20
+
+    with pytest.raises(ValueError, match="cycle detected"):
+        plan_recursive_material_requirements(
+            [
+                {
+                    "component": "A", "qty_per_parent": 1,
+                    "children": [
+                        {
+                            "component": "B", "qty_per_parent": 1,
+                            "children": [{"component": "A", "qty_per_parent": 1}],
+                        }
+                    ],
+                }
+            ],
+            1,
+        )
+
+
+def test_recursive_mrp_rejects_conflicting_revisions_and_invalid_yield():
+    from shoir_target_engines import plan_recursive_material_requirements
+
+    with pytest.raises(ValueError, match="Conflicting BOM revision"):
+        plan_recursive_material_requirements(
+            [
+                {"component": "Screw", "qty_per_parent": 1, "revision": "A"},
+                {"component": "screw", "qty_per_parent": 1, "revision": "B"},
+            ],
+            1,
+        )
+    with pytest.raises(ValueError, match="Yield percentage"):
+        plan_recursive_material_requirements(
+            [{"component": "Screw", "qty_per_parent": 1, "yield_pct": 0}],
+            1,
+        )
+
+
+def test_constrained_task_schedule_enforces_skills_precedence_and_resource_capacity():
+    from shoir_target_engines import optimize_task_resource_schedule
+
+    result = optimize_task_resource_schedule(
+        [
+            {"task_id": "Cut", "duration_hours": 2, "required_skills": ["Cutting"],
+             "predecessors": [], "earliest_start_hour": 0, "latest_finish_hour": 8,
+             "due_hour": 3, "priority_weight": 2},
+            {"task_id": "Inspect", "duration_hours": 1, "required_skills": ["Quality"],
+             "predecessors": ["Cut"], "earliest_start_hour": 0, "latest_finish_hour": 8,
+             "due_hour": 4, "priority_weight": 1},
+            {"task_id": "Pack", "duration_hours": 1, "required_skills": ["Packing"],
+             "predecessors": [], "earliest_start_hour": 0, "latest_finish_hour": 8,
+             "due_hour": 4, "priority_weight": 1},
+        ],
+        [
+            {"resource": "Cutting operator", "skills": ["Cutting"], "shift_start_hour": 0, "shift_end_hour": 8, "hourly_cost": 50},
+            {"resource": "Quality inspector", "skills": ["Quality"], "shift_start_hour": 0, "shift_end_hour": 8, "hourly_cost": 40},
+            {"resource": "Packer", "skills": ["Packing"], "shift_start_hour": 0, "shift_end_hour": 8, "hourly_cost": 35},
+        ],
+    )
+    assert result["status"] == "OPTIMAL_CONSTRAINED_SCHEDULE"
+    assert result["assigned_count"] == 3
+    assert result["total_assignment_cost"] == pytest.approx(175.0)
+    plan = result["schedule"].set_index("Task")
+    assert plan.loc["Inspect", "Start hour"] >= plan.loc["Cut", "Finish hour"]
+    assert plan.loc["Cut", "Resource"] == "Cutting operator"
+    assert plan.loc["Inspect", "Resource"] == "Quality inspector"
+    assert plan.loc["Pack", "Resource"] == "Packer"
+    assert result["slot_minutes"] == 30
+
+
+def test_constrained_task_schedule_serializes_resource_and_reports_skill_infeasibility():
+    from shoir_target_engines import optimize_task_resource_schedule
+
+    result = optimize_task_resource_schedule(
+        [
+            {"task_id": "Task A", "duration_hours": 2, "required_skills": ["Welding"]},
+            {"task_id": "Task B", "duration_hours": 2, "required_skills": ["Welding"]},
+        ],
+        [{"resource": "Welder", "skills": ["Welding"], "shift_start_hour": 0, "shift_end_hour": 4}],
+    )
+    plan = result["schedule"].sort_values("Start hour")
+    assert result["status"] == "OPTIMAL_CONSTRAINED_SCHEDULE"
+    assert plan.iloc[1]["Start hour"] >= plan.iloc[0]["Finish hour"]
+
+    infeasible = optimize_task_resource_schedule(
+        [{"task_id": "Weld", "duration_hours": 1, "required_skills": ["Welding"]}],
+        [{"resource": "Packer", "skills": ["Packing"], "shift_start_hour": 0, "shift_end_hour": 8}],
+    )
+    assert infeasible["status"] == "INFEASIBLE_NO_ELIGIBLE_RESOURCE_SLOT"
+    assert infeasible["unassigned_tasks"] == ["Weld"]
+
+
+def test_constrained_task_schedule_rejects_cyclic_precedence_and_bad_shift():
+    from shoir_target_engines import optimize_task_resource_schedule
+
+    resources = [{"resource": "Tech", "skills": [], "shift_start_hour": 0, "shift_end_hour": 8}]
+    with pytest.raises(ValueError, match="cycle"):
+        optimize_task_resource_schedule(
+            [
+                {"task_id": "A", "duration_hours": 1, "predecessors": ["B"]},
+                {"task_id": "B", "duration_hours": 1, "predecessors": ["A"]},
+            ],
+            resources,
+        )
+    with pytest.raises(ValueError, match="Shift window"):
+        optimize_task_resource_schedule(
+            [{"task_id": "A", "duration_hours": 1}],
+            [{"resource": "Tech", "skills": [], "shift_start_hour": 9, "shift_end_hour": 8}],
+        )
 
 
 def test_spare_parts_criticality_reorder_screen_reconciles_stock_and_lead_time():
@@ -1767,6 +2099,7 @@ def test_solver_diagnostics_distinguishes_infeasible_unbounded_and_milp_models()
     assert infeasible["solver_status"] == "Infeasible"
     assert infeasible["status"] == "INFEASIBLE"
     assert infeasible["objective_value"] is None
+    assert "continuous-LP fallback" in infeasible["solver_backend"]
 
     unbounded = run_solver_diagnostics(
         {"x": {"low": 0, "up": None, "category": "Continuous"}},
@@ -2134,3 +2467,443 @@ def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dat
         assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
     with pytest.raises(ValueError, match="between 1 and 5,000"):
         assess_capa_8d_records([])
+
+def test_niosh_rnle_metric_ideal_case_matches_load_constant():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=25,
+        vertical_hand_start=75,
+        vertical_travel_distance=25,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=1,
+        coupling_multiplier=1,
+        units="metric",
+        frequency_duration_category="Short (≤ 1 hour)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["recommended_weight_limit"] == pytest.approx(23.0)
+    assert result["lifting_index"] == pytest.approx(10 / 23)
+    assert result["status"] == "LI_AT_OR_BELOW_1"
+    assert result["horizontal_value_used"] == 25
+    assert result["asymmetry_value_used_degrees"] == 0
+
+
+def test_niosh_rnle_uses_worst_origin_destination_measurements():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=50,
+        vertical_hand_start=75,
+        vertical_travel_distance=50,
+        asymmetry_origin=10,
+        asymmetry_destination=45,
+        frequency_lifts_per_minute=2,
+        frequency_multiplier=0.8,
+        coupling_multiplier=0.9,
+        units="metric",
+        frequency_duration_category="Moderate (> 1 to 2 hours)",
+        coupling_quality="Fair",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["horizontal_value_used"] == 50
+    assert result["multipliers"]["Horizontal multiplier (HM)"] == pytest.approx(0.5)
+    assert result["asymmetry_value_used_degrees"] == 45
+    assert result["multipliers"]["Asymmetry multiplier (AM)"] == pytest.approx(1 - 0.0032 * 45)
+    expected = 23 * 0.5 * 1 * (0.82 + 4.5 / 50) * (1 - 0.0032 * 45) * 0.8 * 0.9
+    assert result["recommended_weight_limit"] == pytest.approx(expected)
+    assert result["status"] == "LI_ABOVE_1_REVIEW_REQUIRED"
+
+
+def test_niosh_rnle_imperial_ideal_case_and_required_table_sources():
+    result = calculate_niosh_revised_lifting_equation(
+        load_weight=20,
+        horizontal_origin=10,
+        horizontal_destination=10,
+        vertical_hand_start=30,
+        vertical_travel_distance=10,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=1,
+        coupling_multiplier=1,
+        units="imperial",
+        frequency_duration_category="Long (> 2 to 8 hours)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH RNLE manual, Table 5",
+        coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+    )
+    assert result["recommended_weight_limit"] == pytest.approx(51.0)
+    assert result["lifting_index"] == pytest.approx(20 / 51)
+    with pytest.raises(ValueError, match="official RNLE table/source"):
+        calculate_niosh_revised_lifting_equation(
+            load_weight=20,
+            horizontal_origin=10,
+            horizontal_destination=10,
+            vertical_hand_start=30,
+            vertical_travel_distance=10,
+            asymmetry_origin=0,
+            asymmetry_destination=0,
+            frequency_lifts_per_minute=1,
+            frequency_multiplier=1,
+            coupling_multiplier=1,
+            units="imperial",
+            frequency_duration_category="Long (> 2 to 8 hours)",
+            coupling_quality="Good",
+            frequency_multiplier_source="",
+            coupling_multiplier_source="NIOSH RNLE manual, Table 7",
+        )
+
+
+def test_niosh_rnle_rejects_out_of_range_measurements_and_multipliers():
+    base = dict(
+        load_weight=10,
+        horizontal_origin=25,
+        horizontal_destination=25,
+        vertical_hand_start=75,
+        vertical_travel_distance=25,
+        asymmetry_origin=0,
+        asymmetry_destination=0,
+        frequency_lifts_per_minute=1,
+        frequency_multiplier=0.8,
+        coupling_multiplier=0.9,
+        units="metric",
+        frequency_duration_category="Short (≤ 1 hour)",
+        coupling_quality="Good",
+        frequency_multiplier_source="NIOSH manual Table 5",
+        coupling_multiplier_source="NIOSH manual Table 7",
+    )
+    with pytest.raises(ValueError, match="Horizontal hand location exceeds"):
+        calculate_niosh_revised_lifting_equation(**{**base, "horizontal_origin": 70})
+    with pytest.raises(ValueError, match="asymmetry angles"):
+        calculate_niosh_revised_lifting_equation(**{**base, "asymmetry_destination": 140})
+    with pytest.raises(ValueError, match="Frequency multiplier"):
+        calculate_niosh_revised_lifting_equation(**{**base, "frequency_multiplier": 0})
+
+
+def test_rcm_decision_support_separates_task_candidates_from_specialist_review():
+    result = build_rcm_decision_support([
+        {
+            "asset": "P-101", "failure_mode": "Bearing wear",
+            "consequence": "operational", "severity": 5,
+            "detectable": True, "on_condition_applicable": True,
+            "evidence_reference": "inspection-2026-11",
+        },
+        {
+            "asset": "P-102", "failure_mode": "Guard failure",
+            "consequence": "safety", "severity": 10,
+            "detectable": True, "on_condition_applicable": True,
+        },
+        {
+            "asset": "PSV-1", "failure_mode": "Pressure trip fails",
+            "consequence": "hidden", "severity": 8,
+            "hidden_protective_function": True,
+            "failure_finding_applicable": True,
+        },
+    ])
+    assert result["status"] == "RCM_SCREEN_COMPLETED_REQUIRES_SPECIALIST_APPROVAL"
+    frame = result["decision_tree"].set_index("Failure mode")
+    assert frame.loc["Bearing wear", "Recommended task candidate"] == "ON_CONDITION_TASK_CANDIDATE"
+    assert frame.loc["Guard failure", "Recommended task candidate"] == "SPECIALIST_SAFETY_REVIEW"
+    assert frame.loc["Pressure trip fails", "Recommended task candidate"] == "FAILURE_FINDING_TASK_CANDIDATE"
+    assert result["specialist_review_count"] == 3
+    assert "not a certified RCM analysis" in result["warning"]
+
+
+def test_rcm_run_to_failure_requires_explicit_acceptance_and_cost_comparison():
+    accepted = build_rcm_decision_support([{
+        "asset": "A-1", "failure_mode": "Indicator lamp",
+        "consequence": "non_operational", "severity": 2,
+        "preventive_task_cost": 50, "consequence_cost": 10,
+        "run_to_failure_accepted": True,
+    }])
+    assert accepted["decision_tree"].iloc[0]["Recommended task candidate"] == "RUN_TO_FAILURE_CANDIDATE"
+    not_accepted = build_rcm_decision_support([{
+        "asset": "A-2", "failure_mode": "Cooling fan",
+        "consequence": "operational", "severity": 4,
+        "preventive_task_cost": 5, "consequence_cost": 50,
+        "run_to_failure_accepted": True,
+    }])
+    assert not_accepted["decision_tree"].iloc[0]["Recommended task candidate"] == "HUMAN_REVIEW_REQUIRED"
+    with pytest.raises(ValueError, match="whole number from 1 to 10"):
+        build_rcm_decision_support([{
+            "asset": "A-3", "failure_mode": "Invalid severity",
+            "consequence": "operational", "severity": 11,
+        }])
+
+
+def test_simulation_calibration_uses_chronological_holdout_without_leakage():
+    result = calibrate_simulation_outputs(
+        [1, 2, 3, 4, 5, 6],
+        [2.5, 4.5, 6.5, 8.5, 10.5, 12.5],
+        training_fraction=2 / 3,
+    )
+    assert result["status"] == "CALIBRATION_FIT_WITH_CHRONOLOGICAL_HOLDOUT"
+    assert result["training_observations"] == 4
+    assert result["holdout_observations"] == 2
+    assert result["calibration_intercept"] == pytest.approx(0.5)
+    assert result["calibration_slope"] == pytest.approx(2.0)
+    assert result["training_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["holdout_metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert result["residuals"].iloc[-1]["Segment"] == "HOLDOUT"
+    assert "not a physics-based digital-twin calibration" in result["warning"]
+
+
+def test_simulation_calibration_rejects_bad_series_and_slope_bounds():
+    with pytest.raises(ValueError, match="same number"):
+        calibrate_simulation_outputs([1, 2, 3, 4, 5], [1, 2, 3, 4])
+    with pytest.raises(ValueError, match="at least 5 observations"):
+        calibrate_simulation_outputs([1, 2, 3, 4], [2, 4, 6, 8])
+    with pytest.raises(ValueError, match="contain variation"):
+        calibrate_simulation_outputs([1, 1, 1, 1, 1], [2, 3, 4, 5, 6])
+    with pytest.raises(ValueError, match="outside the configured bounds"):
+        calibrate_simulation_outputs(
+            [1, 2, 3, 4, 5], [10, 20, 30, 40, 50],
+            min_slope=0, max_slope=2,
+        )
+
+
+def test_kpi_alerts_are_freshness_aware_and_deduplicate_open_alerts():
+    records = [
+        {
+            "kpi": "OEE", "value": 88.0, "unit": "%",
+            "observed_at": "2026-11-06T17:50:00Z", "source": "synthetic-test",
+        },
+        {
+            "kpi": "Throughput", "value": 20.0, "unit": "units/hour",
+            "observed_at": "2026-11-04T17:00:00Z", "source": "synthetic-test",
+        },
+    ]
+    rules = [
+        {"rule_id": "oee-min", "kpi": "OEE", "operator": "<", "threshold": 90, "severity": "CRITICAL"},
+        {"rule_id": "throughput-min", "kpi": "Throughput", "operator": "<", "threshold": 25},
+        {"rule_id": "scrap-max", "kpi": "Scrap", "operator": ">", "threshold": 3},
+    ]
+    first = evaluate_kpi_alerts(
+        records, rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+    )
+    rows = first["alerts"].set_index("Rule ID")
+    assert first["open_alert_count"] == 1
+    assert first["new_alert_count"] == 1
+    assert rows.loc["oee-min", "Event"] == "NEW"
+    assert rows.loc["throughput-min", "State"] == "STALE_DATA"
+    assert rows.loc["scrap-max", "State"] == "MISSING_DATA"
+
+    second = evaluate_kpi_alerts(
+        records, rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+        previous_open_alert_ids=first["next_open_alert_ids"],
+    )
+    assert second["new_alert_count"] == 0
+    assert second["continuing_alert_count"] == 1
+
+
+def test_kpi_alerts_resolve_breaches_and_reject_duplicate_rules():
+    rules = [{"rule_id": "temperature-high", "kpi": "Temperature", "operator": ">", "threshold": 80}]
+    active = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:01:00Z",
+    )
+    resolved = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-06T17:02:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:03:00Z",
+        previous_open_alert_ids=active["next_open_alert_ids"],
+    )
+    assert resolved["resolved_alert_count"] == 1
+    assert resolved["alerts"].iloc[0]["Event"] == "RESOLVED"
+    with pytest.raises(ValueError, match="unique"):
+        evaluate_kpi_alerts(
+            [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+            [rules[0], rules[0]], as_of="2026-11-06T17:01:00Z",
+        )
+
+
+def test_kpi_alerts_do_not_resolve_an_existing_breach_from_stale_data():
+    rules = [{
+        "rule_id": "temperature-high",
+        "kpi": "Temperature",
+        "operator": "gt",
+        "threshold": 80,
+        "severity": "HIGH",
+    }]
+    active = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 90, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:01:00Z",
+    )
+    assert active["alert_records"][0]["severity"] == "CRITICAL"
+
+    stale = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-04T17:00:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:02:00Z",
+        previous_open_alert_ids=active["next_open_alert_ids"],
+    )
+    assert stale["resolved_alert_count"] == 0
+    assert stale["open_alert_count"] == 1
+    assert stale["breached_kpi_count"] == 0
+    assert stale["unverified_open_alert_count"] == 1
+    assert stale["alert_records"][0]["state"] == "OPEN_UNVERIFIED"
+    assert stale["alerts"].iloc[0]["Event"] == "UNVERIFIED"
+
+    recovered = evaluate_kpi_alerts(
+        [{"kpi": "Temperature", "value": 70, "observed_at": "2026-11-06T17:03:00Z", "source": "sensor-A"}],
+        rules, as_of="2026-11-06T17:04:00Z",
+        previous_open_alert_ids=stale["next_open_alert_ids"],
+    )
+    assert recovered["resolved_alert_count"] == 1
+    assert recovered["open_alert_count"] == 0
+    assert recovered["alerts"].iloc[0]["Event"] == "RESOLVED"
+
+
+def test_kpi_alerts_reject_empty_contracts_and_classify_unusable_readings():
+    with pytest.raises(ValueError, match="at least one KPI alert rule"):
+        evaluate_kpi_alerts([], [], as_of="2026-11-06T18:00:00Z")
+    with pytest.raises(ValueError, match="must be a list"):
+        evaluate_kpi_alerts("not-a-record-list", [
+            {"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85}
+        ])
+
+    rules = [
+        {"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85},
+        {"rule_id": "uptime-floor", "kpi": "Uptime", "operator": "<", "threshold": 95},
+        {"rule_id": "quality-floor", "kpi": "Quality", "operator": "<", "threshold": 99},
+        {"rule_id": "future-reading", "kpi": "Future", "operator": ">", "threshold": 1},
+    ]
+    result = evaluate_kpi_alerts(
+        [
+            {"kpi": "OEE", "value": 70, "unit": "%", "observed_at": "2026-11-06T17:50:00Z", "source": "test-sensor"},
+            {"kpi": "Uptime", "value": 90, "unit": "%", "observed_at": "2026-11-04T17:00:00Z", "source": "test-sensor"},
+            {"kpi": "Quality", "value": 98, "unit": "%", "observed_at": "invalid-date", "source": "test-sensor"},
+            {"kpi": "Future", "value": 2, "unit": "%", "observed_at": "2026-11-06T18:01:00Z", "source": "test-sensor"},
+        ],
+        rules,
+        as_of="2026-11-06T18:00:00Z",
+        stale_after_hours=24,
+    )
+    states = result["alerts"].set_index("Rule ID")["State"].to_dict()
+    assert states == {
+        "oee-floor": "OPEN",
+        "uptime-floor": "STALE_DATA",
+        "quality-floor": "INVALID_TIMESTAMP",
+        "future-reading": "FUTURE_TIMESTAMP",
+    }
+    assert result["open_alert_count"] == 1
+    assert result["new_alert_count"] == 1
+    assert result["stale_or_missing_count"] == 3
+
+
+def test_kpi_alerts_reject_duplicate_casefolded_readings_and_nonfinite_thresholds():
+    with pytest.raises(ValueError, match="Duplicate KPI record"):
+        evaluate_kpi_alerts(
+            [
+                {"kpi": "OEE", "value": 80, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"},
+                {"kpi": "oee", "value": 81, "observed_at": "2026-11-06T17:00:00Z", "source": "sensor-A"},
+            ],
+            [{"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": 85}],
+            as_of="2026-11-06T18:00:00Z",
+        )
+    with pytest.raises(ValueError, match="finite number"):
+        evaluate_kpi_alerts(
+            [],
+            [{"rule_id": "oee-floor", "kpi": "OEE", "operator": "<", "threshold": float("nan")}],
+            as_of="2026-11-06T18:00:00Z",
+        )
+
+def test_recovery_snapshot_history_checkpoints_undoes_redoes_and_restores_revision():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    first = manage_recovery_snapshot_history(
+        None,
+        action="checkpoint",
+        new_snapshot={"asset_id": "P-101", "inspection_state": "PENDING"},
+    )
+    assert first["status"] == "SNAPSHOT_CREATED"
+    assert first["current_revision"] == 1
+    assert first["can_undo"] is False
+
+    second = manage_recovery_snapshot_history(
+        first["history_state"],
+        action="checkpoint",
+        new_snapshot={"asset_id": "P-101", "inspection_state": "COMPLETE"},
+    )
+    assert second["status"] == "SNAPSHOT_CHECKPOINTED"
+    assert second["current_revision"] == 2
+    assert second["can_undo"] is True
+
+    undone = manage_recovery_snapshot_history(second["history_state"], action="undo")
+    assert undone["status"] == "SNAPSHOT_UNDONE"
+    assert undone["current_snapshot"]["inspection_state"] == "PENDING"
+    assert undone["can_redo"] is True
+
+    redone = manage_recovery_snapshot_history(undone["history_state"], action="redo")
+    assert redone["status"] == "SNAPSHOT_REDONE"
+    assert redone["current_snapshot"]["inspection_state"] == "COMPLETE"
+
+    restored = manage_recovery_snapshot_history(
+        redone["history_state"],
+        action="restore",
+        target_revision=1,
+    )
+    assert restored["status"] == "REVISION_RESTORED"
+    assert restored["current_revision"] == 1
+    assert restored["current_snapshot"]["inspection_state"] == "PENDING"
+    assert restored["can_redo"] is True
+    assert "arbitrary edits in other" in " ".join(restored["limitations"])
+
+
+def test_recovery_snapshot_history_clears_redo_and_bounds_history():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    history = None
+    for revision in range(1, 5):
+        result = manage_recovery_snapshot_history(
+            history,
+            action="checkpoint",
+            new_snapshot={"revision": revision},
+            max_history=3,
+        )
+        history = result["history_state"]
+    assert result["revision_count"] == 3
+    assert result["current_snapshot"]["revision"] == 4
+    assert result["timeline"][0]["snapshot"]["revision"] == 2
+
+    undone = manage_recovery_snapshot_history(history, action="undo")
+    assert undone["can_redo"] is True
+    forked = manage_recovery_snapshot_history(
+        undone["history_state"],
+        action="checkpoint",
+        new_snapshot={"revision": 5},
+    )
+    assert forked["can_redo"] is False
+    assert forked["current_snapshot"]["revision"] == 5
+
+
+def test_recovery_snapshot_history_rejects_invalid_actions_data_and_revisions():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    with pytest.raises(ValueError, match="Recovery action"):
+        manage_recovery_snapshot_history(None, action="delete")
+    with pytest.raises(ValueError, match="JSON-compatible"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"bad": float("nan")})
+    with pytest.raises(ValueError, match="snapshot limit"):
+        manage_recovery_snapshot_history(
+            None, action="checkpoint", new_snapshot={"value": "x" * 500},
+            max_snapshot_bytes=256,
+        )
+    with pytest.raises(ValueError, match="No earlier snapshot"):
+        manage_recovery_snapshot_history(
+            None, action="undo"
+        )
+    current = manage_recovery_snapshot_history(
+        None, action="checkpoint", new_snapshot={"revision": 1}
+    )
+    with pytest.raises(ValueError, match="Target revision"):
+        manage_recovery_snapshot_history(current["history_state"], action="restore", target_revision=2)
+

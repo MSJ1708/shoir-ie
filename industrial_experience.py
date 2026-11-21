@@ -12,11 +12,12 @@ import io
 import math
 import json
 import sqlite3
+from shoir_sqlite import sqlite_connect
 import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -131,7 +132,7 @@ def _now() -> str:
 
 
 def _db(path: str = "enterprise_full_workspace.db"):
-    return sqlite3.connect(path, timeout=30)
+    return sqlite_connect(path, timeout=30)
 
 
 def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
@@ -141,19 +142,19 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_projects(project_id TEXT PRIMARY KEY,name TEXT,module TEXT,owner TEXT,status TEXT,payload_json TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_project_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,snapshot_no INTEGER,payload_json TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_lineage(id INTEGER PRIMARY KEY AUTOINCREMENT,source_type TEXT,source_id TEXT,target_type TEXT,target_id TEXT,relation TEXT,actor TEXT,created_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_decisions(decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,status TEXT,metrics_json TEXT,assumptions_json TEXT,uncertainty_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decisions(decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,status TEXT,metrics_json TEXT,assumptions_json TEXT,uncertainty_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT,dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE TABLE IF NOT EXISTS experience_decision_specs(decision_id TEXT PRIMARY KEY,baseline_json TEXT,alternatives_json TEXT,constraints_json TEXT,kpis_json TEXT,uncertainty_json TEXT,evidence_json TEXT,verification_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decision_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT,decision_id TEXT,from_status TEXT,to_status TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,decision_id TEXT,actor TEXT,comment TEXT,created_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT,dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE INDEX IF NOT EXISTS idx_exp_decision_outcomes_decision ON experience_decision_outcomes(decision_id,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT,owner TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL,dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE INDEX IF NOT EXISTS idx_exp_module_runs_owner ON experience_module_runs(owner,module,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
-            "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,evidence_references_json TEXT NOT NULL DEFAULT '[]',protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_runs(run_id TEXT PRIMARY KEY,study_id TEXT NOT NULL,research_id TEXT NOT NULL,owner TEXT NOT NULL,experiment_code TEXT NOT NULL,config_json TEXT NOT NULL,summary_json TEXT NOT NULL,results_csv TEXT NOT NULL,created_at TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS idx_exp_research_runs_study ON experience_research_runs(study_id,created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_exp_research_owner ON experience_research_studies(owner,created_at DESC)",
@@ -164,6 +165,42 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
         ]
         for statement in statements:
             conn.execute(statement)
+        # Backward-compatible additive lineage migration. Existing decisions and
+        # outcomes remain NOT_LINKED unless they carried explicit dataset evidence.
+        for table_name in ("experience_decisions", "experience_decision_outcomes"):
+            existing_columns = {
+                str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")
+            }
+            for column, definition in (
+                ("dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("dataset_dependency_status", "TEXT NOT NULL DEFAULT 'NOT_LINKED'"),
+                ("stale_dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if column not in existing_columns:
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {definition}")
+
+        module_run_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(experience_module_runs)")
+        }
+        for column, definition in (
+            ("dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("dataset_dependency_status", "TEXT NOT NULL DEFAULT 'NOT_LINKED'"),
+            ("stale_dataset_dependencies_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ):
+            if column not in module_run_columns:
+                conn.execute(
+                    f"ALTER TABLE experience_module_runs ADD COLUMN {column} {definition}"
+                )
+
+        research_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(experience_research_studies)")
+        }
+        if "evidence_references_json" not in research_columns:
+            conn.execute(
+                "ALTER TABLE experience_research_studies "
+                "ADD COLUMN evidence_references_json TEXT NOT NULL DEFAULT '[]'"
+            )
+
         # Backward-compatible migration: keep prior rows with owner=NULL.
         job_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(experience_jobs)")}
         if "owner" not in job_columns:
@@ -291,13 +328,28 @@ def create_decision(
     owner: str,
     status: str = "Draft",
     db_path: str = "enterprise_full_workspace.db",
+    dataset_dependencies: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> str:
     ensure_experience_db(db_path)
+    if dataset_dependencies:
+        from industrial_platform import init_platform_db
+        init_platform_db(db_path)
     did = "DEC-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
     with _db(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        from industrial_platform import _resolve_legacy_dataset_dependencies
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
+            conn, {"dataset_dependencies": dataset_dependencies or []}
+        )
+        if dependency_status == "STALE":
+            raise ValueError("Cannot create a decision from a stale dataset version. Reload the current dataset before creating the decision.")
         conn.execute(
-            "INSERT INTO experience_decisions VALUES(?,?,?,?,?,?,?,?,?,?)",
+            """INSERT INTO experience_decisions(
+                decision_id,title,module,status,metrics_json,assumptions_json,uncertainty_json,
+                owner,created_at,updated_at,dataset_dependencies_json,
+                dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 did,
                 str(title)[:180],
@@ -309,6 +361,9 @@ def create_decision(
                 owner,
                 stamp,
                 stamp,
+                json.dumps(dependencies, sort_keys=True),
+                dependency_status,
+                "[]",
             ),
         )
         conn.commit()
@@ -327,6 +382,8 @@ def save_decision_spec(
 ) -> None:
     """Persist decision specifications only for the owning workspace user."""
     ensure_experience_db()
+    from industrial_platform import init_platform_db
+    init_platform_db()
     decision_id = str(decision_id or "").strip()
     owner = str(owner or "").strip()
     if not decision_id or not owner:
@@ -335,13 +392,21 @@ def save_decision_spec(
     with _db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         parent = conn.execute(
-            "SELECT owner FROM experience_decisions WHERE decision_id=?",
+            "SELECT owner,dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
         if not parent:
             raise ValueError("Decision not found.")
         if str(parent[0] or "") != owner:
             raise PermissionError("Decision not found or not owned by this user.")
+        if str(parent[1] or "NOT_LINKED").upper() == "STALE":
+            raise ValueError("Cannot edit or revalidate a decision specification while its source dataset is stale. Reload and rerun the analysis first.")
+        from industrial_platform import _resolve_legacy_dataset_dependencies
+        dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
+            conn, baseline, alternatives, constraints, kpis, uncertainty, evidence, verification
+        )
+        if dependency_status == "STALE":
+            raise ValueError("Decision specification references a stale dataset version. Reload the current dataset before saving.")
 
         conn.execute(
             """
@@ -375,6 +440,19 @@ def save_decision_spec(
                 now,
             ),
         )
+        if dependencies:
+            conn.execute(
+                """UPDATE experience_decisions
+                   SET dataset_dependencies_json=?,dataset_dependency_status=?,updated_at=?
+                   WHERE decision_id=? AND owner=?""",
+                (
+                    json.dumps(dependencies, sort_keys=True),
+                    dependency_status,
+                    now,
+                    decision_id,
+                    owner,
+                ),
+            )
         # If a legacy/corrupt specification row has a different owner, the
         # conditional ON CONFLICT deliberately updated nothing.
         current = conn.execute(
@@ -455,13 +533,20 @@ def transition_decision(
     if to_status not in states:
         raise ValueError("Invalid approval state.")
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT status,owner FROM experience_decisions WHERE decision_id=?",
+            "SELECT status,owner,dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
         if not row:
             raise ValueError("Decision not found.")
         current, owner = str(row[0]), row[1]
+        freshness = str(row[2] or "NOT_LINKED").upper()
+        if freshness in {"STALE", "UNVERIFIED_REFERENCE"} and to_status in {"Approved", "Implemented", "Verified"}:
+            raise ValueError(
+                "A stale dataset-linked decision is blocked because its dataset lineage is stale or unverified and cannot be approved, implemented or verified. "
+                "Register/verify the dataset source and rerun the decision against the current dataset version first."
+            )
         if require_owner and (owner is None or str(owner) != str(actor)):
             raise PermissionError("Decision not found or not owned by this user.")
         if current in states and states.index(to_status) < states.index(current) and to_status not in {"Draft", "Review"}:
@@ -530,11 +615,22 @@ def record_decision_outcome(
     if status not in {"Planned", "Implemented", "Verified"}:
         raise ValueError("Invalid implementation status.")
     with _db(db_path) as conn:
-        row = conn.execute("SELECT owner FROM experience_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        row = conn.execute(
+            "SELECT owner,dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
         if not row:
             raise ValueError("Decision not found.")
         if str(row[0]) != owner:
             raise PermissionError("Decision belongs to another workspace owner.")
+        freshness = str(row[1] or "NOT_LINKED").upper()
+        if freshness in {"STALE", "UNVERIFIED_REFERENCE"}:
+            raise ValueError(
+                "Cannot record a new decision outcome because dataset lineage is stale or unverified: the source dataset version is no longer current. "
+                "Register/verify the source and rerun and reapprove the decision against current data."
+            )
+        decision_dependencies_json = str(row[2] or "[]")
+        decision_dependency_status = str(row[1] or "NOT_LINKED")
     variance = calculate_decision_variance(predicted, actual)
     outcome_id = "OUT-" + uuid.uuid4().hex[:12].upper()
     now = _now()
@@ -542,14 +638,39 @@ def record_decision_outcome(
     predicted_payload = dict(predicted or {})
     variance_payload = variance.to_dict("records")
     with _db(db_path) as conn:
+        # Serialize the final freshness check and outcome insert against dataset
+        # invalidation; do not race a new dataset version between the earlier
+        # ownership check and this write.
+        conn.execute("BEGIN IMMEDIATE")
+        current_decision = conn.execute(
+            "SELECT owner,dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        if not current_decision:
+            raise ValueError("Decision not found.")
+        if str(current_decision[0]) != owner:
+            raise PermissionError("Decision belongs to another workspace owner.")
+        freshness = str(current_decision[1] or "NOT_LINKED").upper()
+        if freshness in {"STALE", "UNVERIFIED_REFERENCE"}:
+            raise ValueError(
+                "Cannot record a new decision outcome because dataset lineage is stale or unverified: the source dataset version is no longer current. "
+                "Register/verify the source and rerun and reapprove the decision against current data."
+            )
+        decision_dependencies_json = str(current_decision[2] or "[]")
+        decision_dependency_status = str(current_decision[1] or "NOT_LINKED")
         conn.execute(
-            "INSERT INTO experience_decision_outcomes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            """INSERT INTO experience_decision_outcomes(
+                outcome_id,decision_id,owner,implementation_status,predicted_json,
+                actual_json,variance_json,lesson,verified_at,created_at,
+                dataset_dependencies_json,dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 outcome_id, decision_id, owner, status,
                 json.dumps(predicted_payload, default=str, sort_keys=True),
                 json.dumps(actual_payload, default=str, sort_keys=True),
                 json.dumps(variance_payload, default=str),
                 str(lesson or "")[:2000], str(verified_at or "") or None, now,
+                decision_dependencies_json, decision_dependency_status, "[]",
             ),
         )
         if lesson or actual_payload:
@@ -640,7 +761,7 @@ def decision_outcomes_frame(
     db_path: str = "enterprise_full_workspace.db",
 ) -> pd.DataFrame:
     ensure_experience_db(db_path)
-    query = "SELECT outcome_id,decision_id,owner,implementation_status,predicted_json,actual_json,variance_json,lesson,verified_at,created_at FROM experience_decision_outcomes"
+    query = "SELECT outcome_id,decision_id,owner,implementation_status,predicted_json,actual_json,variance_json,lesson,verified_at,created_at,dataset_dependency_status,stale_dataset_dependencies_json FROM experience_decision_outcomes"
     clauses = []
     params = []
     if decision_id is not None:
@@ -664,8 +785,9 @@ def decision_to_value_frame(
     outcomes = decision_outcomes_frame(decision_id=decision_id, owner=owner, db_path=db_path)
     if outcomes.empty:
         return pd.DataFrame(columns=[
-            "Outcome ID","Decision ID","Implementation Status","KPI",
-            "Predicted","Actual","Delta","Delta %","Absolute Error","Lesson","Verified At",
+            "Outcome ID","Decision ID","Implementation Status","Dataset Freshness",
+            "Stale Dependency Count","KPI","Predicted","Actual","Delta",
+            "Delta %","Absolute Error","Lesson","Verified At",
         ])
     rows = []
     for row in outcomes.to_dict("records"):
@@ -678,6 +800,8 @@ def decision_to_value_frame(
                 "Outcome ID": row.get("outcome_id"),
                 "Decision ID": row.get("decision_id"),
                 "Implementation Status": row.get("implementation_status"),
+                "Dataset Freshness": row.get("dataset_dependency_status") or "NOT_LINKED",
+                "Stale Dependency Count": len(json.loads(row.get("stale_dataset_dependencies_json") or "[]")),
                 "KPI": item.get("KPI"),
                 "Predicted": item.get("Predicted"),
                 "Actual": item.get("Actual"),
@@ -931,8 +1055,9 @@ def save_module_analysis_run(
     duration_ms: float = 0.0,
     status: str = "Completed",
     db_path: str = "enterprise_full_workspace.db",
+    dataset_dependencies: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Persist a user-scoped input/result snapshot, bounded to protect the app."""
+    """Persist a bounded module snapshot with an optional verified dataset lineage."""
     if not isinstance(input_frame, pd.DataFrame):
         raise TypeError("Module run inputs must be a pandas DataFrame.")
     ensure_experience_db(db_path)
@@ -940,6 +1065,14 @@ def save_module_analysis_run(
     result_frame = analysis.get("result")
     if not isinstance(result_frame, pd.DataFrame):
         result_frame = pd.DataFrame()
+
+    declared_dependencies = (
+        dataset_dependencies
+        if dataset_dependencies is not None
+        else analysis.get("dataset_dependencies", [])
+    )
+    if isinstance(declared_dependencies, (str, bytes)) or not isinstance(declared_dependencies, Sequence):
+        raise ValueError("Module run dataset_dependencies must be a list of reference objects.")
 
     input_raw = input_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
     result_raw = result_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
@@ -963,28 +1096,54 @@ def save_module_analysis_run(
     run_id = "MRUN-" + uuid.uuid4().hex[:16].upper()
     created_at = _now()
     elapsed = max(0.0, float(duration_ms or 0.0))
-    values = (
-        run_id, str(module), str(owner),
-        str(cleaned_profile.get("display_name") or module),
-        str(cleaned_profile.get("project_name") or ""),
-        str(cleaned_profile.get("site_name") or ""),
-        input_hash, int(len(input_frame)),
-        json.dumps([str(column) for column in input_frame.columns], ensure_ascii=False),
-        json.dumps([str(column) for column in result_frame.columns], ensure_ascii=False),
-        input_blob, result_blob,
-        json.dumps(cleaned_profile, ensure_ascii=False, default=str),
-        json.dumps(metrics, ensure_ascii=False, default=str),
-        str(analysis.get("method") or "Module analysis"),
-        str(analysis.get("guardrail") or "Verify the result against independent evidence before implementation."),
-        elapsed, str(status or "Completed")[:40], snapshot_status, created_at,
-    )
+
+    if declared_dependencies:
+        from industrial_platform import init_platform_db
+        # Initialize the local immutable-version registry before opening the
+        # write transaction used to persist this run.
+        init_platform_db(db_path)
+
     with _db(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        dependencies: list[dict[str, Any]] = []
+        dependency_status = "NOT_LINKED"
+        if declared_dependencies:
+            from industrial_platform import _resolve_legacy_dataset_dependencies
+
+            dependencies, dependency_status = _resolve_legacy_dataset_dependencies(
+                conn, {"dataset_dependencies": declared_dependencies}
+            )
+            if dependency_status == "STALE":
+                raise ValueError(
+                    "Cannot save a module run against a stale dataset version. "
+                    "Reload the current dataset and rerun the module."
+                )
+        values = (
+            run_id, str(module), str(owner),
+            str(cleaned_profile.get("display_name") or module),
+            str(cleaned_profile.get("project_name") or ""),
+            str(cleaned_profile.get("site_name") or ""),
+            input_hash, int(len(input_frame)),
+            json.dumps([str(column) for column in input_frame.columns], ensure_ascii=False),
+            json.dumps([str(column) for column in result_frame.columns], ensure_ascii=False),
+            input_blob, result_blob,
+            json.dumps(cleaned_profile, ensure_ascii=False, default=str),
+            json.dumps(metrics, ensure_ascii=False, default=str),
+            str(analysis.get("method") or "Module analysis"),
+            str(analysis.get("guardrail") or "Verify the result against independent evidence before implementation."),
+            elapsed, str(status or "Completed")[:40], snapshot_status, created_at,
+            json.dumps(dependencies, ensure_ascii=False, sort_keys=True),
+            dependency_status,
+            "[]",
+        )
         conn.execute(
             """INSERT INTO experience_module_runs(
                 run_id,module,owner,display_name,project_name,site_name,input_hash,input_rows,
                 input_columns_json,result_columns_json,input_snapshot_gzip,result_snapshot_gzip,
-                profile_json,metrics_json,method,guardrail,duration_ms,status,snapshot_status,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                profile_json,metrics_json,method,guardrail,duration_ms,status,snapshot_status,
+                created_at,dataset_dependencies_json,dataset_dependency_status,
+                stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             values,
         )
         conn.commit()
@@ -992,6 +1151,8 @@ def save_module_analysis_run(
         "run_id": run_id,
         "input_hash": input_hash,
         "snapshot_status": snapshot_status,
+        "dataset_dependencies": dependencies,
+        "dataset_dependency_status": dependency_status,
         "duration_ms": elapsed,
         "created_at": created_at,
     }
@@ -1003,13 +1164,14 @@ def list_module_analysis_runs(
     limit: int = 20,
     db_path: str = "enterprise_full_workspace.db",
 ) -> pd.DataFrame:
-    """List only the current owner's runs for the exact module identifier."""
+    """List only the current owner's runs and their dataset freshness state."""
     ensure_experience_db(db_path)
     safe_limit = max(1, min(50, int(limit)))
     with _db(db_path) as conn:
         rows = conn.execute(
             """SELECT run_id,display_name,project_name,site_name,input_rows,input_hash,
-                      method,status,snapshot_status,duration_ms,created_at
+                      method,status,snapshot_status,duration_ms,created_at,
+                      dataset_dependency_status
                FROM experience_module_runs
                WHERE module=? AND owner=?
                ORDER BY created_at DESC, rowid DESC LIMIT ?""",
@@ -1018,6 +1180,7 @@ def list_module_analysis_runs(
     return pd.DataFrame(rows, columns=[
         "Run ID", "Workspace name", "Project", "Site", "Input rows", "Input SHA-256",
         "Method", "Status", "Snapshot status", "Duration (ms)", "Created at",
+        "Dataset freshness",
     ])
 
 
@@ -1026,14 +1189,15 @@ def load_module_analysis_run(
     owner: str,
     db_path: str = "enterprise_full_workspace.db",
 ) -> dict[str, Any] | None:
-    """Load a saved run only for its owner, including whichever bounded snapshots exist."""
+    """Load an owner's run, preserving historical snapshots and dataset freshness."""
     ensure_experience_db(db_path)
     with _db(db_path) as conn:
         row = conn.execute(
             """SELECT run_id,module,owner,display_name,project_name,site_name,input_hash,
                       input_rows,input_columns_json,result_columns_json,input_snapshot_gzip,
                       result_snapshot_gzip,profile_json,metrics_json,method,guardrail,
-                      duration_ms,status,snapshot_status,created_at
+                      duration_ms,status,snapshot_status,created_at,dataset_dependencies_json,
+                      dataset_dependency_status,stale_dataset_dependencies_json
                FROM experience_module_runs WHERE run_id=? AND owner=?""",
             (str(run_id), str(owner)),
         ).fetchone()
@@ -1042,7 +1206,8 @@ def load_module_analysis_run(
     (
         saved_id,module,saved_owner,display_name,project_name,site_name,input_hash,
         input_rows,input_columns_json,result_columns_json,input_blob,result_blob,
-        raw_profile,raw_metrics,method,guardrail,duration_ms,status,snapshot_status,created_at,
+        raw_profile,raw_metrics,method,guardrail,duration_ms,status,snapshot_status,
+        created_at,raw_dependencies,dependency_status,raw_stale_markers,
     ) = row
 
     def decode_json(raw: Any, fallback: Any) -> Any:
@@ -1061,6 +1226,12 @@ def load_module_analysis_run(
         except Exception:
             return pd.DataFrame(columns=columns if isinstance(columns, list) else [])
 
+    dependencies = decode_json(raw_dependencies, [])
+    stale_markers = decode_json(raw_stale_markers, [])
+    if not isinstance(dependencies, list):
+        dependencies = []
+    if not isinstance(stale_markers, list):
+        stale_markers = []
     return {
         "run_id": saved_id, "module": module, "owner": saved_owner,
         "display_name": display_name, "project_name": project_name, "site_name": site_name,
@@ -1072,6 +1243,12 @@ def load_module_analysis_run(
         "method": method, "guardrail": guardrail,
         "duration_ms": float(duration_ms or 0.0), "status": status,
         "snapshot_status": snapshot_status, "created_at": created_at,
+        "dataset_dependencies": dependencies,
+        "dataset_dependency_status": str(dependency_status or "NOT_LINKED").upper(),
+        "stale_dataset_dependencies": stale_markers,
+        "is_stale": str(dependency_status or "NOT_LINKED").upper() in {
+            "STALE", "UNVERIFIED_REFERENCE"
+        },
     }
 
 
@@ -1118,7 +1295,27 @@ def render_module_run_history(module: str, owner: str, key_suffix: str | None = 
         b.metric("Input rows", f"{record['input_rows']:,}")
         c.metric("Calculation time", f"{record['duration_ms']:,.1f} ms")
         st.caption(f"Input SHA-256: {record['input_hash']} · {record['snapshot_status']}")
-        st.caption(f"Method: {record['method']}")
+        st.caption(f"Dataset freshness: {record['dataset_dependency_status']}")
+        if record["is_stale"]:
+            st.error(
+                "This is a historical run whose source dataset is stale or unverified. "
+                "It remains available for audit, but must not be reused as current decision evidence. "
+                "Reload the current dataset and rerun the module."
+            )
+            if record["stale_dataset_dependencies"]:
+                st.dataframe(
+                    pd.DataFrame(record["stale_dataset_dependencies"]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        elif record["dataset_dependencies"]:
+            st.caption(
+                "Verified dataset version(s): "
+                + ", ".join(
+                    f"{item.get('dataset_id')} v{item.get('version')}"
+                    for item in record["dataset_dependencies"]
+                )
+            )
         if record["guardrail"]:
             st.warning(record["guardrail"])
         if record["snapshot_status"] != "Complete":
@@ -1230,8 +1427,8 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
                 controls_json,baseline_definition,treatment_definition,sample_size,
                 replications,random_seed,alpha,confidence_level,planned_tests_json,
                 inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
-                protocol_hash,protocol_locked,owner,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evidence_references_json,protocol_hash,protocol_locked,owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 study_id,
@@ -1260,6 +1457,7 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
                 str(payload.get("exclusion_criteria", "")).strip()[:2000],
                 str(payload.get("data_source", "")).strip()[:1200],
                 str(payload.get("protocol_notes", "")).strip()[:3000],
+                json.dumps(_research_list(payload.get("evidence_references", [])), ensure_ascii=False),
                 protocol_hash,
                 int(bool(payload.get("protocol_locked", False))),
                 owner,
@@ -1293,8 +1491,8 @@ def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dic
                 controls_json,baseline_definition,treatment_definition,sample_size,
                 replications,random_seed,alpha,confidence_level,planned_tests_json,
                 inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
-                protocol_hash,protocol_locked,owner,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evidence_references_json,protocol_hash,protocol_locked,owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 study_id,
@@ -1323,6 +1521,7 @@ def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dic
                 str(protocol.get("exclusion_criteria", "")).strip()[:2000],
                 str(protocol.get("data_source", "")).strip()[:1200],
                 str(protocol.get("protocol_notes", "")).strip()[:3000],
+                json.dumps(_research_list(protocol.get("evidence_references", [])), ensure_ascii=False),
                 str(protocol.get("protocol_hash") or remote.get("protocol_hash") or _research_hash(protocol)),
                 int(bool(protocol.get("protocol_locked", False))),
                 owner,
@@ -1345,7 +1544,7 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
                    controls_json,baseline_definition,treatment_definition,sample_size,
                    replications,random_seed,alpha,confidence_level,planned_tests_json,
                    inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
-                   protocol_hash,protocol_locked,owner,created_at,updated_at
+                   evidence_references_json,protocol_hash,protocol_locked,owner,created_at,updated_at
             FROM experience_research_studies
             WHERE study_id=?
         """
@@ -1369,11 +1568,11 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
         "primary_endpoint","secondary_metrics","independent_variables","controls",
         "baseline_definition","treatment_definition","sample_size","replications",
         "random_seed","alpha","confidence_level","planned_tests","inclusion_criteria",
-        "exclusion_criteria","data_source","protocol_notes","protocol_hash",
-        "protocol_locked","owner","created_at","updated_at"
+        "exclusion_criteria","data_source","protocol_notes","evidence_references",
+        "protocol_hash","protocol_locked","owner","created_at","updated_at"
     ]
     data = dict(zip(keys, row))
-    for field in ("secondary_metrics", "independent_variables", "controls", "planned_tests"):
+    for field in ("secondary_metrics", "independent_variables", "controls", "planned_tests", "evidence_references"):
         try:
             data[field] = json.loads(data[field] or "[]")
         except Exception:
@@ -2469,7 +2668,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
 
         st.markdown("#### 🗃️ Saved scenario experiments")
         try:
-            with sqlite3.connect("enterprise_full_workspace.db") as scenario_conn:
+            with sqlite_connect("enterprise_full_workspace.db") as scenario_conn:
                 scenario_history = pd.read_sql_query(
                     """SELECT experiment_id AS "Experiment ID", name AS Name, module AS Module,
                                       created_by AS "Created By", created_at AS "Created At"
@@ -2496,7 +2695,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                     format_func=lambda value: history_labels[str(value)],
                     key=open_key,
                 )
-                with sqlite3.connect("enterprise_full_workspace.db") as detail_conn:
+                with sqlite_connect("enterprise_full_workspace.db") as detail_conn:
                     stored = detail_conn.execute(
                         """SELECT scenarios_json, results_json, created_at
                            FROM platform_experiments

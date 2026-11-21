@@ -22,6 +22,7 @@ URL = os.environ.get("SHOIR_LIVE_URL", "https://shoir-ie-app.streamlit.app/")
 OUTPUT = Path("artifacts/live-deployment-smoke")
 VIEWPORTS = (
     ("desktop", {"width": 1440, "height": 1000}),
+    ("tablet", {"width": 768, "height": 1024}),
     ("mobile", {"width": 390, "height": 844}),
 )
 APP_MARKERS = (
@@ -47,6 +48,73 @@ FATAL_TEXT_MARKERS = (
     "internal server error",
     "operationalerror:",
 )
+
+
+def _tab_bar_layout(app_frame) -> dict:
+    """Capture tab-list and tab-label geometry so clipped labels fail browser smoke."""
+    tab_list = app_frame.locator(
+        '[role="tablist"], div[data-testid="stTabs"] [data-baseweb="tab-list"]'
+    ).first
+    if tab_list.count() == 0:
+        raise AssertionError("Streamlit public tab list was not found.")
+    tab_list.wait_for(state="visible", timeout=8_000)
+    return tab_list.evaluate(
+        """element => {
+            const listRect = element.getBoundingClientRect();
+            const tabs = Array.from(new Set(
+                element.querySelectorAll('[role="tab"], [data-baseweb="tab"]')
+            )).map(button => {
+                const rect = button.getBoundingClientRect();
+                const label = button.querySelector('[data-testid="stMarkdownContainer"]') || button;
+                const labelRect = label.getBoundingClientRect();
+                return {
+                    label: (button.innerText || button.textContent || '').trim(),
+                    left: rect.left, right: rect.right,
+                    clientWidth: button.clientWidth, scrollWidth: button.scrollWidth,
+                    clientHeight: button.clientHeight, scrollHeight: button.scrollHeight,
+                    labelLeft: labelRect.left, labelRight: labelRect.right,
+                    labelClientWidth: label.clientWidth, labelScrollWidth: label.scrollWidth,
+                    labelClientHeight: label.clientHeight, labelScrollHeight: label.scrollHeight,
+                    whiteSpace: getComputedStyle(button).whiteSpace,
+                    labelWhiteSpace: getComputedStyle(label).whiteSpace
+                };
+            });
+            return {
+                viewportWidth: window.innerWidth,
+                listLeft: listRect.left, listRight: listRect.right,
+                clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+                tabCount: tabs.length, tabs
+            };
+        }"""
+    )
+
+
+def _validate_tab_bar_layout(layout: dict, viewport_width: int) -> None:
+    """Fail if the public tab list or any tab label is clipped."""
+    if layout.get("tabCount", 0) < 3:
+        raise AssertionError(f"Expected all three public tabs to render: {layout}")
+    if layout["scrollWidth"] > layout["clientWidth"] + 2:
+        raise AssertionError(f"Public tab list requires horizontal scrolling: {layout}")
+    for tab in layout["tabs"]:
+        if tab["left"] < layout["listLeft"] - 2 or tab["right"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab falls outside its tab-list bounds: {tab}")
+        if tab["scrollWidth"] > tab["clientWidth"] + 2:
+            raise AssertionError(f"Public tab label is horizontally clipped: {tab}")
+        if tab["scrollHeight"] > tab["clientHeight"] + 2:
+            raise AssertionError(f"Public tab label is vertically clipped: {tab}")
+        if tab["labelClientWidth"] <= 0 or tab["labelClientHeight"] <= 0:
+            raise AssertionError(f"Public tab label has no visible layout box: {tab}")
+        if tab["labelScrollWidth"] > tab["labelClientWidth"] + 2:
+            raise AssertionError(f"Inner public tab label is horizontally clipped: {tab}")
+        if tab["labelScrollHeight"] > tab["labelClientHeight"] + 2:
+            raise AssertionError(f"Inner public tab label is vertically clipped: {tab}")
+        if tab["labelLeft"] < tab["left"] - 2 or tab["labelRight"] > tab["right"] + 2:
+            raise AssertionError(f"Public tab label extends beyond its button: {tab}")
+    if viewport_width <= 600 and any(
+        tab["whiteSpace"] == "nowrap" or tab["labelWhiteSpace"] == "nowrap"
+        for tab in layout["tabs"]
+    ):
+        raise AssertionError(f"Mobile tab labels are configured not to wrap: {layout}")
 
 
 def main() -> int:
@@ -112,6 +180,117 @@ def main() -> int:
                         # text as readiness: wait for a real sign-in/welcome surface, and
                         # require the same frame to expose it in consecutive polls.
                         item["page_title"] = page.title()
+                        # Dedicated staging apps may be asleep before acceptance.
+                        # Use Streamlit's explicit wake action once, then wait for the
+                        # real Shoir-IE entry surface. Never treat the sleep page as app readiness.
+                        sleep_marker = re.compile(
+                            r"app has gone to sleep due to inactivity", re.I
+                        )
+                        wake_pattern = re.compile(
+                            r"Yes,\s*get this app back up!?", re.I
+                        )
+                        item["wake_recovery_attempted"] = False
+                        item["wake_recovery_succeeded"] = False
+                        item["wake_recovery_strategy"] = None
+                        item["wake_recovery_frame_url"] = None
+
+                        # Streamlit's hosted sleep notice can be inside a child
+                        # frame. Search each frame, then click the wake control
+                        # inside the exact frame that contains the sleep message.
+                        sleeping_frame = None
+                        initial_sleep_body = ""
+                        item["sleep_detection_attempts"] = 0
+                        # Do not inspect only the first DOMContentLoaded snapshot:
+                        # Streamlit injects its hosted sleep page asynchronously.
+                        # Poll actual frame bodies until either the sleep notice or
+                        # a real Shoir-IE readiness marker appears.
+                        sleep_detection_deadline = time.monotonic() + 20
+                        ready_surface_seen = False
+                        while time.monotonic() < sleep_detection_deadline:
+                            item["sleep_detection_attempts"] += 1
+                            for candidate_frame in list(page.frames):
+                                try:
+                                    candidate_body = candidate_frame.locator("body").inner_text(
+                                        timeout=750
+                                    )
+                                except Exception:
+                                    continue
+                                if sleep_marker.search(candidate_body):
+                                    sleeping_frame = candidate_frame
+                                    initial_sleep_body = candidate_body
+                                    break
+                                folded_body = candidate_body.casefold()
+                                if any(
+                                    marker.casefold() in folded_body
+                                    for marker in APP_READY_MARKERS
+                                ):
+                                    ready_surface_seen = True
+                            if sleeping_frame is not None or ready_surface_seen:
+                                break
+                            page.wait_for_timeout(500)
+
+                        item["wake_recovery_frame_count"] = len(page.frames)
+                        item["sleeping_frame_detected"] = sleeping_frame is not None
+                        if sleeping_frame is not None:
+                            item["wake_recovery_frame_url"] = sleeping_frame.url
+                            item["sleeping_frame_body_preview"] = " ".join(initial_sleep_body.split())[:400]
+                            wake_target = None
+                            wake_strategy = None
+                            interactive_wake = sleeping_frame.locator(
+                                "button, a, [role='button']"
+                            ).filter(has_text=wake_pattern).first
+                            try:
+                                item["wake_recovery_interactive_count"] = interactive_wake.count()
+                                if item["wake_recovery_interactive_count"] and interactive_wake.is_visible():
+                                    wake_target = interactive_wake
+                                    wake_strategy = "frame-interactive-element"
+                            except Exception:
+                                item["wake_recovery_interactive_count"] = 0
+
+                            if wake_target is None:
+                                try:
+                                    visible_wake_text = sleeping_frame.get_by_text(
+                                        wake_pattern, exact=False
+                                    ).last
+                                    item["wake_recovery_text_count"] = visible_wake_text.count()
+                                    if item["wake_recovery_text_count"] and visible_wake_text.is_visible():
+                                        wake_target = visible_wake_text
+                                        wake_strategy = "frame-visible-text"
+                                except Exception:
+                                    pass
+
+                            if wake_target is not None:
+                                item["wake_recovery_attempted"] = True
+                                item["wake_recovery_strategy"] = wake_strategy
+                                try:
+                                    wake_target.click(timeout=8_000)
+                                except PlaywrightError:
+                                    # The visible message is itself the documented
+                                    # one-time wake affordance, though some hosting
+                                    # shell versions omit a semantic button wrapper.
+                                    wake_target.click(timeout=8_000, force=True)
+
+                                wake_deadline = time.monotonic() + 90
+                                while time.monotonic() < wake_deadline:
+                                    still_asleep = False
+                                    for candidate_frame in list(page.frames):
+                                        try:
+                                            candidate_body = candidate_frame.locator("body").inner_text(
+                                                timeout=2_000
+                                            )
+                                        except Exception:
+                                            continue
+                                        if sleep_marker.search(candidate_body):
+                                            still_asleep = True
+                                            break
+                                    if not still_asleep:
+                                        item["wake_recovery_succeeded"] = True
+                                        break
+                                    page.wait_for_timeout(1_000)
+                            else:
+                                item["failure_reasons"].append(
+                                    "Staging app is asleep, but no actionable wake control was found inside the sleeping frame."
+                                )
                         frame_records = []
                         rendered_bodies = []
                         app_frame = None
@@ -230,6 +409,9 @@ def main() -> int:
                                 try:
                                     app_frame.get_by_role("tab", name=scenario["tab"]).click(timeout=8_000)
                                     app_frame.get_by_text(scenario["marker"]).wait_for(timeout=10_000)
+                                    tab_layout = _tab_bar_layout(app_frame)
+                                    check["tab_bar_layout"] = tab_layout
+                                    _validate_tab_bar_layout(tab_layout, viewport["width"])
                                     # Tab clicks trigger a Streamlit websocket rerun. Wait for
                                     # the expected form controls/content to attach before asserting;
                                     # immediate locator.count() calls can race that rerun on mobile.

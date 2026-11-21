@@ -1,0 +1,136 @@
+openapi: 3.1.0
+info:
+  title: Shoir-IE Persistence API (Beta)
+  version: 1.0.0
+  description: >-
+    Contract draft for the existing session-scoped Shoir-IE persistence Edge
+    Function. This is not a published public API or production availability
+    guarantee. Session tokens are sensitive request-body credentials and must
+    never be logged.
+servers:
+  - url: https://{project_ref}.supabase.co/functions/v1/shoir-persistence
+    description: Project-specific Supabase Edge Function endpoint
+    variables:
+      project_ref:
+        default: hfhrosthswcybccepmak
+        description: Authorized staging Supabase project reference for acceptance.
+paths:
+  /:
+    post:
+      operationId: shoirPersistenceAction
+      summary: Execute one session-scoped persistence action
+      description: >-
+        The Edge Function revalidates the Shoir-IE session, active account,
+        workspace membership, tier and record-level authorization for each
+        action. The project publishable key is not a user authorization
+        credential. The Shoir-IE user session token is validated separately.
+      security:
+        - supabasePublishableKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/PlatformRecordListRequest'
+                - $ref: '#/components/schemas/PlatformRecordSaveRequest'
+                - $ref: '#/components/schemas/WorkspaceLoadRequest'
+      responses:
+        '200':
+          description: Action completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid request or unsupported API version
+        '401':
+          description: Missing, invalid, expired or revoked Shoir-IE session
+        '403':
+          description: Insufficient tier, workspace role, scope or tenant access
+        '409':
+          description: Optimistic revision or dataset storage lease conflict
+        '410':
+          description: Retired metadata-only dataset registration action
+        '413':
+          description: Request exceeds bounded body size
+        '429':
+          description: Authentication or request rate limit
+        '500':
+          description: Operation failed; caller should use a safe retry policy
+components:
+  securitySchemes:
+    supabasePublishableKey:
+      type: apiKey
+      in: header
+      name: apikey
+  schemas:
+    BaseRequest:
+      type: object
+      required: [api_version, username, token]
+      properties:
+        api_version:
+          type: string
+          const: v1
+        username:
+          type: string
+          maxLength: 120
+        token:
+          type: string
+          description: Existing Shoir-IE user session token, supplied in the JSON request body and independently validated by the Edge Function.
+          maxLength: 4096
+          writeOnly: true
+      additionalProperties: true
+    PlatformRecordListRequest:
+      allOf:
+        - $ref: '#/components/schemas/BaseRequest'
+        - type: object
+          required: [action]
+          properties:
+            action:
+              const: platform_record_list
+            record_type:
+              type: string
+            entity_key:
+              type: string
+              maxLength: 240
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 200
+            offset:
+              type: integer
+              minimum: 0
+              maximum: 100000
+    PlatformRecordSaveRequest:
+      allOf:
+        - $ref: '#/components/schemas/BaseRequest'
+        - type: object
+          required: [action, record_type, entity_key, payload]
+          properties:
+            action:
+              const: platform_record_save
+            record_type:
+              type: string
+            entity_key:
+              type: string
+              maxLength: 240
+            payload:
+              type: object
+              additionalProperties: true
+    WorkspaceLoadRequest:
+      allOf:
+        - $ref: '#/components/schemas/BaseRequest'
+        - type: object
+          required: [action]
+          properties:
+            action:
+              const: workspace_load
+            workspace:
+              type: string
+              default: default
+            organization_id:
+              type: string
+            organization_workspace_id:
+              type: string
