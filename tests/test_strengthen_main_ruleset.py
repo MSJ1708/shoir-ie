@@ -129,4 +129,5 @@ def test_ruleset_refuses_missing_strict_check_or_duplicate_statuses():
 
 
 def test_post_update_verifier_requires_all_eight_contexts():
-    ruleset_tool.verify_updated_ruleset(sample_ruleset())
+    payload, _ = ruleset_tool.build_updated_payload(sample_ruleset())
+    ruleset_tool.verify_updated_ruleset({**payload, "id": ruleset_tool.RULESET_ID})
