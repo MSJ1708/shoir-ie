@@ -28,6 +28,8 @@ Do not enable the full catalogue by default. Do not include personal workforce r
 5. Export a sanitized schema/response example with realistic identifiers and personal data removed.
 6. Test in the non-production tenant only after connection setup is reviewed.
 
+**Current Shoir-IE limitation:** the current Oracle transport fails closed for Oracle Fusion ERP/SCM. Standard Fusion Applications REST resources require a provider-specific JWT user-assertion grant and a separately signed client assertion; generic Client Credentials is documented only for Spectra services. Shoir-IE has not implemented the Oracle JWT assertion exchange yet. Do not attempt a live Oracle read until that adapter is implemented and independently reviewed.
+
 Reference: https://api.sap.com/
 
 ## 4. SAP S/4HANA Private Edition / on-premise / ECC
