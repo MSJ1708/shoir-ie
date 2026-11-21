@@ -429,10 +429,30 @@ class SAPODataOAuthTransport(OAuth2ClientCredentialsTransport):
 
 
 class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
-    """Oracle Fusion Cloud REST read transport using items/hasMore/links pagination."""
+    """Disabled fail-closed placeholder until Oracle's required JWT grant is implemented.
+
+    Oracle Fusion Applications REST resources do not accept the generic
+    client_credentials grant. Oracle documents that grant only for Spectra
+    services. This adapter must not resolve credentials or send any request
+    until a separately reviewed JWT user-assertion flow is implemented.
+    """
 
     provider = "ORACLE"
     supported_products = frozenset({"ORACLE_FUSION_ERP", "ORACLE_FUSION_SCM"})
+
+    def get_json(
+        self,
+        connection: erp.ERPConnectionProfile,
+        relative_path: str,
+        *,
+        page_token: str | None,
+        page_size: int,
+    ) -> erp.TransportPage:
+        raise ERPProviderTransportError(
+            "Oracle Fusion Applications REST resources require the provider-specific JWT user-assertion flow; "
+            "client_credentials is documented only for Spectra services. That flow is not implemented here, "
+            "so no token or ERP request was sent."
+        )
 
     def _initial_page_url(self, initial_url: str, page_size: int) -> str:
         parts = urlsplit(initial_url)
@@ -501,7 +521,10 @@ def transport_for(
     if key in SAPODataOAuthTransport.supported_products:
         return SAPODataOAuthTransport(**common)
     if key in OracleFusionOAuthTransport.supported_products:
-        return OracleFusionOAuthTransport(**common)
+        raise ERPProviderTransportError(
+            "Oracle Fusion ERP/SCM is blocked until the provider-specific JWT user-assertion flow is implemented and reviewed; "
+            "client_credentials is supported only for Oracle Spectra services. No request was sent."
+        )
     raise ERPProviderTransportError(
         "Provider transport is not implemented for this product; SAP ECC and Oracle EBS need separately reviewed legacy auth adapters."
     )
