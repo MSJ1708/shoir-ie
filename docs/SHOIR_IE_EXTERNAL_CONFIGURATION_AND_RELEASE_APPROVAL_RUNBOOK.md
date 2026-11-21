@@ -327,7 +327,17 @@ Record independent named approvals (not self-certification) for:
 
 ### GitHub branch protection
 
-Both `main` and `staging-e2e-20261019` currently have active repository rulesets requiring PR workflow and at least one independent approval, latest-push approval and resolved review threads, with no bypass actors. Staging requires eight CI contexts. Main currently requires only `test`, `edge-function`, `engine-regression` and `security-quality`; before a production PR, add/verify `clean-postgres-migration-replay`, `postgres-transaction-contract`, `production-v9-security-backport`, and `excel-intelligence` as required contexts. The connected GitHub integration can inspect rulesets but cannot edit repository administration settings; a repository administrator must make and verify that change.
+Both `main` and `staging-e2e-20261019` have active repository rulesets requiring PR workflow and at least one independent approval, latest-push approval and resolved review threads, with no bypass actors. Staging requires eight CI contexts. Main currently requires only `test`, `edge-function`, `engine-regression` and `security-quality`; it is not production-strength until `clean-postgres-migration-replay`, `postgres-transaction-contract`, `production-v9-security-backport`, and `excel-intelligence` are also required.
+
+A repository administrator can apply the additive, idempotent change from an administrator-authenticated computer with GitHub CLI installed:
+
+```bash
+gh auth status
+python scripts/strengthen_main_ruleset.py
+python scripts/strengthen_main_ruleset.py --apply
+```
+
+The first invocation is dry-run only. The second requires repository Administration:write access, reads the current main ruleset, refuses to proceed if its branch target, active enforcement, no-bypass, strict checks or independent-review protections have drifted, adds only the four missing contexts, and verifies the returned ruleset. Do not paste a PAT or secret into chat, files, Actions variables or command-line arguments. Afterward, open GitHub Settings → Rules → Protect main — release gates and confirm all eight contexts, one independent review, latest-push approval, resolved threads and no bypass actors. The connected GitHub integration can inspect rulesets but cannot apply this admin-only change itself.
 
 ### Staging-to-production path
 
