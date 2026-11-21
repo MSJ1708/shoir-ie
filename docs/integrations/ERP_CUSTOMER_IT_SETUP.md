@@ -28,7 +28,7 @@ Do not enable the full catalogue by default. Do not include personal workforce r
 5. Export a sanitized schema/response example with realistic identifiers and personal data removed.
 6. Test in the non-production tenant only after connection setup is reviewed.
 
-**Current Shoir-IE limitation:** the current Oracle transport fails closed for Oracle Fusion ERP/SCM. Standard Fusion Applications REST resources require a provider-specific JWT user-assertion grant and a separately signed client assertion; generic Client Credentials is documented only for Spectra services. Shoir-IE has not implemented the Oracle JWT assertion exchange yet. Do not attempt a live Oracle read until that adapter is implemented and independently reviewed.
+**Current Shoir-IE adapter:** standard Fusion Applications REST resources are read using the JWT User Assertion grant plus a signed JWT client assertion; generic Client Credentials is only supported by Oracle for Spectra services. Shoir-IE now implements both RS256 assertions. The tenant administrator must create and activate a trusted confidential app with JWT assertion enabled, import the matching public certificate (alias must equal the JWT `kid`), authorize the exact resource scope, and configure the correct identity-domain application-name issuer/subject claims, OAuth client ID, user subject, identity-domain URL and token endpoint in server-side staging secrets. The private key must stay server-side. Do not attempt a live read until a non-production Oracle tenant and read-only resource are approved and the credential/certificate/claim values are verified.
 
 Reference: https://api.sap.com/
 
