@@ -35,10 +35,11 @@ def test_hosted_smoke_is_post_deployment_not_a_pull_request_check():
 
 def test_hosted_smoke_documents_post_deployment_acceptance_boundary():
     source = WORKFLOW.read_text(encoding="utf-8")
+    normalized_source = " ".join(source.split())
 
-    assert "post-deployment acceptance check" in source
-    assert "has not been deployed to Streamlit Cloud yet" in source
-    assert "confirming the dedicated staging app has completed its deployment" in source
+    assert "post-deployment acceptance check" in normalized_source
+    assert "has not been deployed to Streamlit Cloud yet" in normalized_source
+    assert "confirming the dedicated staging app has completed its deployment" in normalized_source
 
 
 def test_public_tab_smoke_rejects_clipped_mobile_labels():
@@ -132,7 +133,6 @@ def test_tab_bar_layout_validator_allows_desktop_whitespace_when_not_clipped():
         "tabCount": 3, "tabs": tabs,
     }
     _validate_tab_bar_layout(layout, 1440)
-
 
 
 def test_local_runtime_smoke_covers_all_three_release_viewports():
