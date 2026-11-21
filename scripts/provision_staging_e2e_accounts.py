@@ -65,36 +65,45 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def is_publishable_key(key: str) -> bool:
-    key = key.strip()
-    if key.startswith("sb_publishable_"):
-        return len(key) > len("sb_publishable_")
-    parts = key.split(".")
+def _jwt_claims(key: str) -> dict:
+    """Decode untrusted legacy JWT claims without accepting a foreign project."""
+    parts = str(key or "").strip().split(".")
     if len(parts) != 3:
-        return False
+        return {}
     try:
         import base64
         payload = parts[1] + "=" * (-len(parts[1]) % 4)
         claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
-    except Exception:
+    except (ValueError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _safe_api_key_text(key: str) -> bool:
+    value = str(key or "").strip()
+    return bool(value) and value.isascii() and all(33 <= ord(char) <= 126 for char in value)
+
+
+def is_publishable_key(key: str) -> bool:
+    key = str(key or "").strip()
+    if not _safe_api_key_text(key):
         return False
-    return isinstance(claims, dict) and claims.get("role") == "anon"
+    if key.startswith("sb_publishable_"):
+        return len(key) > len("sb_publishable_")
+    claims = _jwt_claims(key)
+    return claims.get("role") == "anon" and claims.get("ref") == STAGING_PROJECT_REF
 
 
 def is_service_role_key(key: str) -> bool:
-    key = key.strip()
+    key = str(key or "").strip()
+    if not _safe_api_key_text(key):
+        return False
     if key.startswith("sb_secret_"):
+        # New secret keys are project-scoped by Supabase. Requests are still
+        # sent only to PROJECT_URL, which is hard-pinned to staging.
         return len(key) > len("sb_secret_")
-    parts = key.split(".")
-    if len(parts) != 3:
-        return False
-    try:
-        import base64
-        payload = parts[1] + "=" * (-len(parts[1]) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
-    except Exception:
-        return False
-    return isinstance(claims, dict) and claims.get("role") == "service_role"
+    claims = _jwt_claims(key)
+    return claims.get("role") == "service_role" and claims.get("ref") == STAGING_PROJECT_REF
 
 
 def _read_response(req: Request) -> tuple[int, object]:
@@ -156,31 +165,61 @@ def rest_call(service_key: str, method: str, path: str, payload: dict | None = N
 
 
 def _write_private_json(path: Path, payload: dict, *, exclusive: bool = False) -> None:
-    """Atomically save credentials with owner-only permissions."""
-    path = path.resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(
-        path,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL if exclusive else os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        0o600,
+    """Atomically save credentials with owner-only permissions.
+
+    The temporary file is created beside the destination so replacement stays
+    on the same filesystem. Exclusive creation uses an atomic hard link and
+    cannot overwrite an existing credential file. Symlink destinations fail
+    closed before any write.
+    """
+    requested = Path(path).expanduser()
+    if requested.is_symlink():
+        raise OSError("Refusing to write staging credentials through a symbolic link.")
+    parent = requested.parent.resolve()
+    parent.mkdir(parents=True, exist_ok=True)
+    destination = parent / requested.name
+    if destination.is_symlink():
+        raise OSError("Refusing to replace a symbolic-link staging credential file.")
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=parent,
     )
-    temp_name = None
+    descriptor_open = True
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor_open = False
             json.dump(payload, stream, indent=2)
-            stream.write("\n")
+            stream.write("\\n")
             stream.flush()
             os.fsync(stream.fileno())
+
+        if exclusive:
+            # Atomic and fails when the destination already exists.
+            os.link(temporary_name, destination)
+            os.unlink(temporary_name)
+        else:
+            os.replace(temporary_name, destination)
+        temporary_name = ""
         try:
-            path.chmod(0o600)
+            destination.chmod(0o600)
         except OSError:
-            pass
-    except Exception:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+            if os.name != "nt":
+                raise
+    finally:
+        if descriptor_open:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_name:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
 
 
 def _expected_accounts() -> list[dict[str, str]]:
