@@ -53,7 +53,7 @@ References:
 4. Register a Confidential Application in the Fusion Applications identity domain. Enable the JWT assertion grant, mark the client Trusted, import the public X.509 certificate that corresponds to the Shoir-IE server-side RSA private key, and set the certificate alias to exactly the `kid` used in the JWT header.
 5. Record the generated OAuth Client ID, exact identity-domain root URL, token URL (`/oauth2/v1/token`), exact application-name values used as `assertion_issuer` and `client_assertion_subject`, least-privilege Oracle username for `user_subject`, and the exact authorized resource scope. The OAuth Client ID and JWT application-name claim values are distinct settings; confirm the values in the identity-domain UI and do not infer them.
 6. Store the private key only in the dedicated staging Streamlit server-side secret store or approved vault. Never put it in Git, browser input, GitHub Actions, a workbook or chat. The key must be RSA 2048-bit or stronger; rotate the certificate and key together and update the registered certificate alias/`kid`.
-7. Use the exact Oracle Fusion tenant REST base URL and confirm the API resource/version, scopes and pagination contract with the tenant owner.
+7. Confirm the Oracle read-only user has only the approved resource roles and that no write privileges are assigned to the integration identity.
 8. Use the tenant's official REST base URL. Do not copy an example URL from a different customer's tenant.
 9. Provide a sanitized example response and pagination contract.
 10. Test only with a non-production account/tenant.
