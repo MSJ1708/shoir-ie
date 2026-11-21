@@ -183,16 +183,16 @@ Keep T098 unverified until the run evidence and independent security review are 
 
 T096 is not made live by entering a URL. Select exactly one provider product/edition and an authorized read-only staging resource first.
 
-**Repository implementation now present:** the release candidate has a server-side OAuth 2.0 client-credentials transport for SAP S/4HANA Cloud Public/Private OData reads. It uses an opaque server-side credential reference, bounded access-token caching, exact HTTPS host allowlisting, DNS/IP pinning, TLS verification, redirects denied, bounded response sizes/timeouts, and sanitized failures. The existing T096 Workbench has an explicit provider-read action. It accepts only a connection ID and logical resource key; connection profiles, field mappings, credential values and host allowlists remain in server-side Streamlit configuration. It verifies the active Shoir-IE session using the staging Edge Function and, for a shared organization workspace, checks the Owner/Admin `manage` permission in the Edge/database path before making a provider request. The Workbench returns only status, record counts, mapping version and digest; it does not display or persist raw provider records.
+**Repository implementation now present:** T096 includes server-side read-only transports for SAP S/4HANA Cloud Public/Private (OAuth 2.0 client credentials) and Oracle Fusion Applications ERP/SCM (OAuth 2.0 JWT User Assertion with signed client assertion). Both use opaque server-side credential references, bounded token caching, exact HTTPS host allowlisting, DNS/IP pinning, TLS verification, redirects denied, bounded response sizes/timeouts and sanitized failures. The Oracle adapter validates an RSA private key (2048-bit minimum), creates distinct short-lived user/client assertions, and invalidates its cached access token when the signing key or identity configuration changes. The existing T096 Workbench has an explicit provider-read action. It accepts only a connection ID and logical resource key; connection profiles, field mappings, credential values and host allowlists remain in server-side Streamlit configuration. It verifies the active Shoir-IE session using the staging Edge Function and, for a shared organization workspace, checks the Owner/Admin `manage` permission in the Edge/database path before making a provider request. The Workbench returns only status, record counts, mapping version and digest; it does not display or persist raw provider records.
 
-**Oracle correction from current official documentation:** the normal Oracle Fusion Applications REST platform (for example, `/fscmRestApi/...`) does not accept the generic Client Credentials grant. Oracle documents Client Credentials only for Spectra services. Fusion Applications non-interactive access requires a provider-configured JWT user-assertion flow (with a separately signed client assertion) or another supported flow. Shoir-IE does not yet implement that Oracle JWT assertion exchange, so the candidate's Oracle Fusion ERP/SCM transport now fails closed before resolving credentials or making an HTTP request. Do not enter a client secret and expect a standard Fusion Applications REST read to work.
+**Oracle authentication boundary:** standard Oracle Fusion Applications REST resources (for example, `/fscmRestApi/...`) use the JWT User Assertion grant for this 2-legged non-interactive user-delegated read; Client Credentials is documented only for Spectra services. The current Shoir-IE adapter generates both required signed JWTs and sends the documented `grant_type`, `assertion`, `client_assertion_type`, `client_assertion`, `client_id` and scope fields. It does not use an Oracle client secret. The administrator must register the confidential application as Trusted, enable JWT assertion, import the matching public certificate, and set the certificate alias to the same `kid` used by Shoir-IE. The configured `assertion_issuer` and `client_assertion_subject` must match the exact identity-domain application-name values required by that tenant; `user_subject` must be the exact Oracle username. This transport is source-tested only; live identity-domain and Fusion resource acceptance remains outstanding.
 
-The only currently implemented client-credentials provider-read transport is SAP S/4HANA Cloud Public/Private. Oracle Fusion ERP/SCM remain specification/configuration work until the provider-specific JWT user-assertion and client-assertion exchange is implemented and independently reviewed. **SAP ECC and Oracle E-Business Suite are also deliberately refused** until their distinct legacy adapters are implemented and reviewed. No live provider acceptance or scheduled integration is claimed.
+The first supported cloud-product choices are SAP S/4HANA Cloud Public/Private and Oracle Fusion Applications ERP/SCM using their distinct provider-specific token exchanges. The owner must still select one product, secure a non-production tenant, obtain read-only resource scopes, and run live positive/negative acceptance with vendor/tenant approval. **SAP ECC and Oracle E-Business Suite are deliberately refused** until their distinct legacy adapters are implemented and reviewed. No live provider acceptance or scheduled integration is claimed.
 
 ### 6.1 Select and authorize the first provider
 
 1. Obtain written authorization from the ERP tenant owner for a non-production sandbox, exact API version, read-only resource/scope, pagination contract and synthetic/non-personal test records.
-2. For the current transport, select SAP S/4HANA Cloud Public/Private only. Select Oracle Fusion ERP/SCM only after a separate reviewed JWT user-assertion adapter is committed. Do not configure SAP ECC or Oracle EBS as a cloud-product substitute.
+2. Select one supported cloud product: SAP S/4HANA Cloud Public/Private or Oracle Fusion Applications ERP/SCM. Do not configure SAP ECC or Oracle EBS as a cloud-product substitute.
 3. Confirm the exact service root, token issuer URL and approved DNS hostnames/ports with the vendor/tenant owner. Do not guess public hostnames or use production ERP endpoints.
 
 ### 6.2 Configure server-side staging settings
@@ -237,6 +237,17 @@ SHOIR_ERP_CREDENTIALS_JSON = '''
     "client_id": "STAGING-OAUTH-CLIENT-ID",
     "client_secret": "STAGING-OAUTH-CLIENT-SECRET",
     "scope": "APPROVED_READ_ONLY_SCOPE"
+  },
+  "vault://shoir/staging/oracle-fusion-read": {
+    "token_url": "https://APPROVED-IDENTITY-DOMAIN/oauth2/v1/token",
+    "identity_domain_url": "https://APPROVED-IDENTITY-DOMAIN/",
+    "client_id": "ORACLE_GENERATED_OAUTH_CLIENT_ID",
+    "assertion_issuer": "EXACT_IDENTITY_DOMAIN_APP_NAME_FOR_ASSERTIONS",
+    "client_assertion_subject": "EXACT_IDENTITY_DOMAIN_APP_NAME_FOR_CLIENT_ASSERTION",
+    "user_subject": "ORACLE_READ_ONLY_SERVICE_USERNAME",
+    "signing_key_id": "CERTIFICATE_ALIAS_MATCHING_JWT_KID",
+    "signing_private_key_pem": "-----BEGIN PRIVATE KEY-----\\nBASE64_PRIVATE_KEY_MATERIAL\\n-----END PRIVATE KEY-----",
+    "scope": "EXACT_ORACLE_APPROVED_FUSION_RESOURCE_SCOPE"
   }
 }
 '''
@@ -245,7 +256,7 @@ SHOIR_ERP_APPROVED_PRIVATE_CIDRS = ""
 SHOIR_ERP_TIMEOUT_SECONDS = "8"
 ```
 
-The example is a schema template, not a working vendor endpoint or OAuth scope. Create a separate connection entry and credential reference for each approved provider/resource. `workspace_id` must exactly match the active personal or organization workspace the operator is using. Only include exact host[:port] values required by the endpoint and token issuer. Leave the private CIDR setting empty unless the network/security owner has approved specific private ranges. The timeout must be between 0.5 and 10 seconds.
+The Oracle `identity_domain_url` must share the same HTTPS origin as the OAuth token endpoint; the JWT audience is that identity-domain root URL. Register the trusted client and import the public certificate whose alias matches `signing_key_id`. Keep the private key only in the staging Streamlit server-side secret store or approved vault. The configured assertion issuer and client assertion subject are separate from the generated OAuth `client_id`; confirm their exact values in the Oracle identity domain before enabling a provider read. `user_subject` must be the least-privilege Oracle username and the scope must be the exact resource scope authorized by the tenant owner.\n\nThe example is a schema template, not a working vendor endpoint or OAuth scope. Create a separate connection entry and credential reference for each approved provider/resource. `workspace_id` must exactly match the active personal or organization workspace the operator is using. Only include exact host[:port] values required by the endpoint and token issuer. Leave the private CIDR setting empty unless the network/security owner has approved specific private ranges. The timeout must be between 0.5 and 10 seconds.
 
 Never place these secrets in GitHub Actions, repository files, the public API SDK, client-side JSON inputs or chat. The Workbench input contains only the opaque `connection_id` and `resource_key`.
 
