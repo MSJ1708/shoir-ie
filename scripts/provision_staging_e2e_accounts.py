@@ -193,7 +193,7 @@ def _write_private_json(path: Path, payload: dict, *, exclusive: bool = False) -
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             descriptor_open = False
             json.dump(payload, stream, indent=2)
-            stream.write("\\n")
+            stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
 
