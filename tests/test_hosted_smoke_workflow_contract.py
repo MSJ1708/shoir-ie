@@ -10,7 +10,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "shoir-validation.yml"
 def test_hosted_smoke_runs_after_staging_or_main_pushes_and_can_be_dispatched():
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "\\n  workflow_dispatch:\\n" in source
+    assert "\n  workflow_dispatch:\n" in source
     assert "github.event_name == 'push'" in source
     assert "github.event_name == 'workflow_dispatch'" in source
     assert "github.ref_name == 'staging-e2e-20261019'" in source
