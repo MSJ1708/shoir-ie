@@ -619,7 +619,6 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
                 "scope": credentials.scope,
                 "client_assertion_type": self.CLIENT_ASSERTION_TYPE,
                 "client_assertion": client_assertion,
-                "client_id": credentials.client_id,
             }
             status, content_type, raw = self.http.request(
                 "POST",
