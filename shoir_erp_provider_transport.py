@@ -43,6 +43,18 @@ class OAuthClientCredentials:
     scope: str = ""
 
 
+@dataclass(frozen=True)
+class OracleJWTAssertionCredentials:
+    token_url: str
+    identity_domain_url: str
+    client_id: str
+    user_subject: str
+    signing_key_id: str
+    signing_private_key_pem: str
+    scope: str
+    private_key: Any
+
+
 class PinnedHTTPSJsonClient:
     """Small HTTP client that pins each TLS connection to a vetted DNS result."""
 
@@ -429,30 +441,207 @@ class SAPODataOAuthTransport(OAuth2ClientCredentialsTransport):
 
 
 class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
-    """Disabled fail-closed placeholder until Oracle's required JWT grant is implemented.
+    """Oracle Fusion Applications REST reads using the JWT User Assertion grant.
 
-    Oracle Fusion Applications REST resources do not accept the generic
-    client_credentials grant. Oracle documents that grant only for Spectra
-    services. This adapter must not resolve credentials or send any request
-    until a separately reviewed JWT user-assertion flow is implemented.
+    This 2-legged flow sends both a signed user assertion (authorization grant)
+    and a signed client assertion (client authentication). The private signing
+    key is resolved only on the server and never leaves the process.
     """
 
     provider = "ORACLE"
     supported_products = frozenset({"ORACLE_FUSION_ERP", "ORACLE_FUSION_SCM"})
+    USER_ASSERTION_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+    ASSERTION_TTL_SECONDS = 300
 
-    def get_json(
+    def _credentials(self, connection: erp.ERPConnectionProfile) -> OracleJWTAssertionCredentials:
+        try:
+            raw = self.credential_resolver(connection.credential_ref)
+        except Exception as exc:
+            raise ERPProviderTransportError("The server-side Oracle credential reference could not be resolved.") from exc
+        if not isinstance(raw, Mapping):
+            raise ERPProviderTransportError("The server-side Oracle credential reference has an invalid contract.")
+
+        token_url = self._safe_secret(raw.get("token_url"), "Oracle OAuth token URL", 2048)
+        identity_domain_url = self._safe_secret(raw.get("identity_domain_url"), "Oracle identity-domain URL", 2048)
+        client_id = self._safe_secret(raw.get("client_id"), "Oracle OAuth client ID", 512)
+        user_subject = self._safe_secret(raw.get("user_subject"), "Oracle user assertion subject", 512)
+        signing_key_id = self._safe_secret(raw.get("signing_key_id"), "Oracle JWT signing key ID", 200)
+        scope = self._safe_secret(raw.get("scope"), "Oracle OAuth scope", 1024)
+        private_key_pem = raw.get("signing_private_key_pem")
+        if (
+            not isinstance(private_key_pem, str)
+            or not 100 <= len(private_key_pem) <= 16384
+            or not private_key_pem.startswith("-----BEGIN ")
+            or "PRIVATE KEY-----" not in private_key_pem[:100]
+            or chr(0) in private_key_pem
+        ):
+            raise ERPProviderTransportError("The server-side Oracle RSA private-key PEM is missing or invalid.")
+
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+
+            private_key = serialization.load_pem_private_key(
+                private_key_pem.encode("utf-8"),
+                password=None,
+            )
+        except Exception as exc:
+            raise ERPProviderTransportError("The Oracle assertion signing key could not be loaded.") from exc
+        if not isinstance(private_key, rsa.RSAPrivateKey) or private_key.key_size < 2048:
+            raise ERPProviderTransportError("Oracle JWT assertions require an RSA private key of at least 2048 bits.")
+
+        try:
+            token = urlsplit(token_url)
+            token_host = (token.hostname or "").rstrip(".").encode("idna").decode("ascii").lower()
+            token_port = token.port or 443
+            audience = urlsplit(identity_domain_url)
+            audience_host = (audience.hostname or "").rstrip(".").encode("idna").decode("ascii").lower()
+            audience_port = audience.port or 443
+        except (ValueError, UnicodeError) as exc:
+            raise ERPProviderTransportError("The Oracle identity-domain or token URL is invalid.") from exc
+
+        if (
+            token.scheme.lower() != "https"
+            or not token_host
+            or token.username
+            or token.password
+            or token.query
+            or token.fragment
+            or token.path.rstrip("/") != "/oauth2/v1/token"
+            or (token_host, token_port) not in self.allowed_hosts
+            or not 1 <= token_port <= 65535
+        ):
+            raise ERPProviderTransportError("The Oracle OAuth token URL is not an approved HTTPS /oauth2/v1/token endpoint.")
+        if (
+            audience.scheme.lower() != "https"
+            or not audience_host
+            or audience.username
+            or audience.password
+            or audience.query
+            or audience.fragment
+            or audience.path not in ("", "/")
+            or audience_host != token_host
+            or audience_port != token_port
+        ):
+            raise ERPProviderTransportError("The Oracle JWT audience must be the same HTTPS identity-domain origin as the token endpoint.")
+
+        return OracleJWTAssertionCredentials(
+            token_url=token_url,
+            identity_domain_url=identity_domain_url.rstrip("/") + "/",
+            client_id=client_id,
+            user_subject=user_subject,
+            signing_key_id=signing_key_id,
+            signing_private_key_pem=private_key_pem,
+            scope=scope,
+            private_key=private_key,
+        )
+
+    @staticmethod
+    def _b64url(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+    @classmethod
+    def _signed_assertion(
+        cls,
+        credentials: OracleJWTAssertionCredentials,
+        *,
+        subject: str,
+        now: int,
+    ) -> str:
+        import uuid
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        header = {
+            "alg": "RS256",
+            "kid": credentials.signing_key_id,
+            "typ": "JWT",
+        }
+        claims = {
+            "iss": credentials.client_id,
+            "sub": subject,
+            "aud": [credentials.identity_domain_url],
+            "iat": now,
+            "exp": now + cls.ASSERTION_TTL_SECONDS,
+            "jti": uuid.uuid4().hex,
+        }
+        encoded_header = cls._b64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+        encoded_claims = cls._b64url(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+        signing_input = encoded_header + "." + encoded_claims
+        signature = credentials.private_key.sign(
+            signing_input.encode("ascii"),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+        return signing_input + "." + cls._b64url(signature)
+
+    def _access_token(
         self,
         connection: erp.ERPConnectionProfile,
-        relative_path: str,
-        *,
-        page_token: str | None,
-        page_size: int,
-    ) -> erp.TransportPage:
-        raise ERPProviderTransportError(
-            "Oracle Fusion Applications REST resources require the provider-specific JWT user-assertion flow; "
-            "client_credentials is documented only for Spectra services. That flow is not implemented here, "
-            "so no token or ERP request was sent."
-        )
+        credentials: OracleJWTAssertionCredentials,
+    ) -> str:
+        key_fingerprint = hashlib.sha256(
+            credentials.signing_private_key_pem.encode("utf-8")
+        ).hexdigest()
+        cache_key = hashlib.sha256(
+            (
+                connection.credential_ref + "|" + connection.product_id + "|"
+                + credentials.token_url + "|" + credentials.identity_domain_url + "|"
+                + credentials.client_id + "|" + credentials.user_subject + "|"
+                + credentials.signing_key_id + "|" + credentials.scope + "|" + key_fingerprint
+            ).encode("utf-8")
+        ).hexdigest()
+
+        def create() -> tuple[str, int]:
+            now = int(time.time())
+            client_assertion = self._signed_assertion(
+                credentials,
+                subject=credentials.client_id,
+                now=now,
+            )
+            user_assertion = self._signed_assertion(
+                credentials,
+                subject=credentials.user_subject,
+                now=now,
+            )
+            form = {
+                "grant_type": self.USER_ASSERTION_GRANT,
+                "assertion": user_assertion,
+                "scope": credentials.scope,
+                "client_assertion_type": self.CLIENT_ASSERTION_TYPE,
+                "client_assertion": client_assertion,
+                "client_id": credentials.client_id,
+            }
+            status, content_type, raw = self.http.request(
+                "POST",
+                credentials.token_url,
+                headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+                body=urlencode(form).encode("ascii"),
+                max_response_bytes=_MAX_TOKEN_BYTES,
+            )
+            if 300 <= status < 400:
+                raise ERPProviderTransportError("Oracle OAuth redirects are blocked.")
+            if status in {401, 403}:
+                raise ERPProviderTransportError("Oracle Identity Domain rejected the configured JWT assertions or scope.")
+            if status != 200 or "json" not in content_type:
+                raise ERPProviderTransportError("Oracle Identity Domain did not return a valid JWT-grant token response.")
+            try:
+                data = json.loads(raw.decode("utf-8"))
+                token = self._safe_secret(data.get("access_token"), "Oracle OAuth access token", 8192)
+                token_type = str(data.get("token_type") or "Bearer").strip().casefold()
+                expires_raw = data.get("expires_in")
+                expires_float = float(expires_raw)
+                if not math.isfinite(expires_float) or not expires_float.is_integer():
+                    raise ValueError("expires_in is invalid")
+                expires_in = int(expires_float)
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+                raise ERPProviderTransportError("Oracle OAuth token response is malformed.") from exc
+            if token_type != "bearer":
+                raise ERPProviderTransportError("Oracle Identity Domain returned an unsupported token type.")
+            return token, expires_in
+
+        return self._tokens.get_or_create(cache_key, create)
 
     def _initial_page_url(self, initial_url: str, page_size: int) -> str:
         parts = urlsplit(initial_url)
@@ -496,7 +685,6 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
                 raise ERPProviderTransportError("The Oracle response offset is invalid.") from exc
             return erp.TransportPage(payload, "offset:" + str(offset + len(items)))
         return erp.TransportPage(payload, None)
-
 
 def transport_for(
     product_id: str,
