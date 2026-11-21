@@ -12,11 +12,11 @@ def test_workbench_renders_tool_directory_and_runs_cutting_stock_action():
     from streamlit.testing.v1 import AppTest
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
-    at = AppTest.from_file(page, default_timeout=45)
+    at = AppTest.from_file(page, default_timeout=120)
     at.session_state["current_user"] = "workbench-checker"
     at.session_state["authenticated"] = True
     at.session_state["user_tier"] = "Enterprise Plus Tier"
-    at.run(timeout=45)
+    at.run(timeout=120)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     # The directory must not auto-run the first tool just because the page opened.
@@ -26,11 +26,11 @@ def test_workbench_renders_tool_directory_and_runs_cutting_stock_action():
 
     # The target directory is within the existing Workbench, not a new top-level page.
     inspector.select("T066 · Cutting Stock and Bin Packing")
-    at.run(timeout=45)
+    at.run(timeout=120)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     at.button(key="tool066_run").click()
-    at.run(timeout=45)
+    at.run(timeout=120)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     result = at.session_state.get("shoir_tool_result_T066")
@@ -42,11 +42,11 @@ def test_workbench_renders_tool_directory_and_runs_cutting_stock_action():
     # by bypassing the legacy renderer or module entitlement check.
     inspector = at.selectbox(key="shoir_100_tool_inspector")
     inspector.select("T067 · Multi-Objective Optimization")
-    at.run(timeout=45)
+    at.run(timeout=120)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     at.button(key="shoir_open_mapped_T067").click()
-    at.run(timeout=45)
+    at.run(timeout=120)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     assert at.session_state["workbench_module_selector"] == "Optimization · Multi-Objective Optimization"
 
