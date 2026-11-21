@@ -709,10 +709,7 @@ def transport_for(
     if key in SAPODataOAuthTransport.supported_products:
         return SAPODataOAuthTransport(**common)
     if key in OracleFusionOAuthTransport.supported_products:
-        raise ERPProviderTransportError(
-            "Oracle Fusion ERP/SCM is blocked until the provider-specific JWT user-assertion flow is implemented and reviewed; "
-            "client_credentials is supported only for Oracle Spectra services. No request was sent."
-        )
+        return OracleFusionOAuthTransport(**common)
     raise ERPProviderTransportError(
         "Provider transport is not implemented for this product; SAP ECC and Oracle EBS need separately reviewed legacy auth adapters."
     )
