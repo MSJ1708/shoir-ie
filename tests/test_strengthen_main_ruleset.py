@@ -138,4 +138,4 @@ def test_ruleset_refuses_boolean_review_count_even_though_bool_is_an_int_subclas
     pull["parameters"]["required_approving_review_count"] = True
     with pytest.raises(ruleset_tool.RulesetError, match="independent-review protections"):
         ruleset_tool.build_updated_payload(ruleset)
-\n
+
