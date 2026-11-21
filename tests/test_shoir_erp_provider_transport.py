@@ -59,17 +59,19 @@ def credentials(_ref):
     }
 
 
-def test_transport_factory_supports_cloud_products_and_fails_closed_for_legacy():
+def test_transport_factory_supports_sap_and_fails_closed_for_unimplemented_products():
     assert isinstance(transport_for(
         "SAP_S4HANA_CLOUD_PUBLIC",
         allowed_hosts={("erp.example.test", 443), ("identity.example.test", 443)},
         credential_resolver=credentials,
     ), SAPODataOAuthTransport)
-    assert isinstance(transport_for(
-        "ORACLE_FUSION_ERP",
-        allowed_hosts={("erp.example.test", 443), ("identity.example.test", 443)},
-        credential_resolver=credentials,
-    ), OracleFusionOAuthTransport)
+    for oracle in ("ORACLE_FUSION_ERP", "ORACLE_FUSION_SCM"):
+        with pytest.raises(ERPProviderTransportError, match="JWT user-assertion flow"):
+            transport_for(
+                oracle,
+                allowed_hosts={("erp.example.test", 443), ("identity.example.test", 443)},
+                credential_resolver=credentials,
+            )
     for legacy in ("SAP_ECC", "ORACLE_EBS"):
         with pytest.raises(ERPProviderTransportError, match="legacy auth adapters"):
             transport_for(
@@ -115,22 +117,23 @@ def test_sap_transport_rejects_cross_origin_or_cross_path_next_link():
         transport.get_json(profile(), "Orders", page_token=None, page_size=100)
 
 
-def test_oracle_fusion_has_more_uses_bounded_offset_pagination():
-    fake = FakeHTTP([
-        (200, "application/json", json.dumps({"access_token": "token", "token_type": "Bearer", "expires_in": 1800}).encode()),
-        (200, "application/json", json.dumps({"items": [{"id": 1}, {"id": 2}], "hasMore": True}).encode()),
-        (200, "application/json", json.dumps({"items": [{"id": 3}], "hasMore": False}).encode()),
-    ])
+def test_oracle_fusion_transport_fails_closed_before_resolving_credentials_or_sending_http():
+    fake = FakeHTTP([])
     transport = OracleFusionOAuthTransport(
         allowed_hosts={("erp.example.test", 443), ("identity.example.test", 443)},
         credential_resolver=credentials,
         http_client=fake,
     )
-    first = transport.get_json(profile("ORACLE_FUSION_ERP"), "fscmRestApi/resources/11.13.18.05/orders", page_token=None, page_size=2)
-    assert first.next_page_token == "offset:2"
-    second = transport.get_json(profile("ORACLE_FUSION_ERP"), "fscmRestApi/resources/11.13.18.05/orders", page_token=first.next_page_token, page_size=2)
-    assert [item["id"] for item in second.payload["items"]] == [3]
-    assert "offset=2" in fake.calls[2][1]
+
+    with pytest.raises(ERPProviderTransportError, match="JWT user-assertion flow"):
+        transport.get_json(
+            profile("ORACLE_FUSION_ERP"),
+            "fscmRestApi/resources/11.13.18.05/orders",
+            page_token=None,
+            page_size=2,
+        )
+
+    assert fake.calls == []
 
 
 def test_provider_transport_refuses_redirect_and_invalid_token_response():
