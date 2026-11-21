@@ -370,14 +370,14 @@ jobs:
           test "$STREAMLIT_RESULT" = "success"
 
   live-deployment-smoke:
-    # Probe the currently hosted, anonymous shell for audit PRs and after
-    # every main push. This is a service-availability/rendering check, not proof
-    # that the hosted app has deployed the triggering Git SHA. Manual runs on
-    # main allow an explicit post-deployment check without account credentials.
+    # This is a hosted post-deployment acceptance check. A pull-request build
+    # has not been deployed to Streamlit Cloud yet, so PR validation uses the
+    # local candidate browser smoke above. Run this hosted check after staging
+    # receives the reviewed candidate, or dispatch it manually after confirming
+    # the dedicated staging app has completed its deployment.
     if: >-
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
-      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+      (github.event_name == 'push' && (github.ref_name == 'staging-e2e-20261019' || github.ref_name == 'main')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref_name == 'staging-e2e-20261019' || github.ref_name == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
