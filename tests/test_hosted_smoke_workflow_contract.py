@@ -35,7 +35,10 @@ def test_hosted_smoke_is_post_deployment_not_a_pull_request_check():
 
 def test_hosted_smoke_documents_post_deployment_acceptance_boundary():
     source = WORKFLOW.read_text(encoding="utf-8")
-    normalized_source = " ".join(source.split())
+    normalized_source = " ".join(
+        line.strip().removeprefix("#").strip()
+        for line in source.splitlines()
+    )
 
     assert "post-deployment acceptance check" in normalized_source
     assert "has not been deployed to Streamlit Cloud yet" in normalized_source
