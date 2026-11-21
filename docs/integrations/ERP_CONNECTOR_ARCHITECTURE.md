@@ -25,6 +25,8 @@ Use exact product IDs; never select auth or API behavior from a broad "SAP" or "
 
 The implementation may share strictly read-only parsing/mapping primitives. Product-specific API selection, auth flows, pagination, response shapes, rate limits and data semantics remain explicit to the product profile and customer tenant. Oracle EBS must never share an assumed Fusion endpoint or grant. SAP ECC must never be presented as S/4HANA support.
 
+**Current Oracle auth boundary:** the generic Client Credentials transport is not valid for standard Oracle Fusion Applications REST resources; Oracle documents that grant for Spectra services only. Fusion Applications requires a provider-configured JWT user-assertion flow with a separate signed client assertion for the 2-legged non-interactive option. Shoir-IE currently refuses Oracle Fusion ERP/SCM in `transport_for` until that flow is implemented and independently reviewed. This is an intentional fail-closed capability boundary, not an integration pass.
+
 ## Credential and tenant contract
 
 Connection metadata contains an opaque secret reference, not secret material. Credentials may only be resolved inside an approved server-side credential/authentication component. Do not pass raw tokens into Streamlit state, browser storage, user-editable JSON, database rows, audit payloads, exports or error text.
