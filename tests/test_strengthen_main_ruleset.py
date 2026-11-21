@@ -88,7 +88,7 @@ def test_main_ruleset_update_is_idempotent():
     )
     assert second_added == []
     assert second_payload == payload
-    ruleset_tool.verify_updated_ruleset(second_payload)
+    ruleset_tool.verify_updated_ruleset({**second_payload, "id": ruleset_tool.RULESET_ID})
 
 
 @pytest.mark.parametrize(
@@ -96,7 +96,7 @@ def test_main_ruleset_update_is_idempotent():
     [
         (lambda r: r.update({"enforcement": "disabled"}), "not an active branch"),
         (lambda r: r.update({"bypass_actors": [{"actor_id": 1}]}), "bypass actors"),
-        (lambda r: r.update({"conditions": {"ref_name": {"include": ["refs/heads/dev"], "exclude": []}}}), "target the default branch"),
+        (lambda r: r.update({"conditions": {"ref_name": {"include": ["refs/heads/dev"], "exclude": []}}}), "targets the default branch"),
     ],
 )
 def test_ruleset_refuses_drift_in_protected_metadata(mutate, message):
