@@ -215,7 +215,9 @@ def test_oracle_fusion_rejects_unapproved_token_host_and_non_rsa_signing_key_bef
     base_credentials = {
         "token_url": "https://identity.example.test/oauth2/v1/token",
         "identity_domain_url": "https://identity.example.test/",
-        "client_id": "oracle-client",
+        "client_id": "oracle-oauth-client-id",
+        "assertion_issuer": "oracle-fusion-app-name",
+        "client_assertion_subject": "oracle-fusion-app-name",
         "user_subject": "shoir-readonly-service",
         "signing_key_id": "shoir-registered-cert",
         "signing_private_key_pem": private_pem,
