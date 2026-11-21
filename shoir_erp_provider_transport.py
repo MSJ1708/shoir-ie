@@ -1,9 +1,10 @@
 """Provider-aware, read-only SAP S/4HANA and Oracle Fusion transport.
 
-Secrets are resolved server-side from an opaque credential reference. This module
-supports OAuth 2.0 client-credentials token exchange, pinned HTTPS GET requests,
+Secrets are resolved server-side from an opaque credential reference. SAP uses
+its configured OAuth 2.0 client-credentials flow; Oracle Fusion Applications uses
+signed JWT User Assertion plus client assertion. Requests use pinned HTTPS GET,
 strict same-origin pagination, bounded response sizes and no automatic retries.
-It does not create provider tenants, credentials, network routes or live acceptance.
+This module does not create provider tenants, credentials, network routes or live acceptance.
 """
 from __future__ import annotations
 
@@ -48,6 +49,8 @@ class OracleJWTAssertionCredentials:
     token_url: str
     identity_domain_url: str
     client_id: str
+    assertion_issuer: str
+    client_assertion_subject: str
     user_subject: str
     signing_key_id: str
     signing_private_key_pem: str
@@ -465,6 +468,8 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
         token_url = self._safe_secret(raw.get("token_url"), "Oracle OAuth token URL", 2048)
         identity_domain_url = self._safe_secret(raw.get("identity_domain_url"), "Oracle identity-domain URL", 2048)
         client_id = self._safe_secret(raw.get("client_id"), "Oracle OAuth client ID", 512)
+        assertion_issuer = self._safe_secret(raw.get("assertion_issuer"), "Oracle JWT assertion issuer", 512)
+        client_assertion_subject = self._safe_secret(raw.get("client_assertion_subject"), "Oracle JWT client assertion subject", 512)
         user_subject = self._safe_secret(raw.get("user_subject"), "Oracle user assertion subject", 512)
         signing_key_id = self._safe_secret(raw.get("signing_key_id"), "Oracle JWT signing key ID", 200)
         scope = self._safe_secret(raw.get("scope"), "Oracle OAuth scope", 1024)
@@ -530,6 +535,8 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
             token_url=token_url,
             identity_domain_url=identity_domain_url.rstrip("/") + "/",
             client_id=client_id,
+            assertion_issuer=assertion_issuer,
+            client_assertion_subject=client_assertion_subject,
             user_subject=user_subject,
             signing_key_id=signing_key_id,
             signing_private_key_pem=private_key_pem,
@@ -559,7 +566,7 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
             "typ": "JWT",
         }
         claims = {
-            "iss": credentials.client_id,
+            "iss": credentials.assertion_issuer,
             "sub": subject,
             "aud": [credentials.identity_domain_url],
             "iat": now,
@@ -588,7 +595,8 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
             (
                 connection.credential_ref + "|" + connection.product_id + "|"
                 + credentials.token_url + "|" + credentials.identity_domain_url + "|"
-                + credentials.client_id + "|" + credentials.user_subject + "|"
+                + credentials.client_id + "|" + credentials.assertion_issuer + "|"
+                + credentials.client_assertion_subject + "|" + credentials.user_subject + "|"
                 + credentials.signing_key_id + "|" + credentials.scope + "|" + key_fingerprint
             ).encode("utf-8")
         ).hexdigest()
@@ -597,7 +605,7 @@ class OracleFusionOAuthTransport(OAuth2ClientCredentialsTransport):
             now = int(time.time())
             client_assertion = self._signed_assertion(
                 credentials,
-                subject=credentials.client_id,
+                subject=credentials.client_assertion_subject,
                 now=now,
             )
             user_assertion = self._signed_assertion(
