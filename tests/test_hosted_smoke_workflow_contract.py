@@ -7,33 +7,39 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "shoir-validation.yml"
 
 
-def test_hosted_smoke_runs_after_main_pushes_and_can_be_dispatched():
+def test_hosted_smoke_runs_after_staging_or_main_pushes_and_can_be_dispatched():
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "\n  workflow_dispatch:\n" in source
+    assert "\\n  workflow_dispatch:\\n" in source
     assert "github.event_name == 'push'" in source
-    assert "github.ref_name == 'main'" in source
     assert "github.event_name == 'workflow_dispatch'" in source
-
-
-def test_hosted_smoke_runs_for_every_pr_and_audit_or_main_pushes():
-    source = WORKFLOW.read_text(encoding="utf-8")
-
-    # Every PR is smoke-tested, including release-hardening and security PRs.
-    # Audit/main pushes and explicit main-branch dispatches are retained.
-    assert "github.event_name == 'pull_request'" in source
-    assert "github.event_name == 'push'" in source
-    assert "startsWith(github.ref_name, 'audit/')" in source
+    assert "github.ref_name == 'staging-e2e-20261019'" in source
     assert "github.ref_name == 'main'" in source
+
+
+def test_hosted_smoke_is_post_deployment_not_a_pull_request_check():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    condition = source.split("  live-deployment-smoke:", 1)[1].split("    runs-on:", 1)[0]
+
+    # The hosted app is not built by a pull request. PRs get the local
+    # candidate browser smoke; hosted smoke runs only after staging/main push
+    # or a deliberate post-deployment workflow dispatch.
+    assert "github.event_name == 'pull_request'" not in condition
+    assert "github.event_name == 'push'" in condition
+    assert "github.event_name == 'workflow_dispatch'" in condition
+    assert "github.ref_name == 'staging-e2e-20261019'" in condition
+    assert "github.ref_name == 'main'" in condition
     assert "SHOIR_E2E_EXPECTED_STAGING_APP_HOST" in source
     assert "https://shoir-ie-app.streamlit.app/" not in source
 
 
-def test_hosted_smoke_documents_that_it_does_not_prove_deployed_sha():
+def test_hosted_smoke_documents_post_deployment_acceptance_boundary():
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "not proof" in source
-    assert "triggering Git SHA" in source
+    assert "post-deployment acceptance check" in source
+    assert "has not been deployed to Streamlit Cloud yet" in source
+    assert "confirming the dedicated staging app has completed its deployment" in source
+
 
 def test_public_tab_smoke_rejects_clipped_mobile_labels():
     source = (ROOT / "scripts" / "live_deployment_smoke.py").read_text(encoding="utf-8")
