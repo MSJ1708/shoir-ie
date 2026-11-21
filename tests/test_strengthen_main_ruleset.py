@@ -131,3 +131,11 @@ def test_ruleset_refuses_missing_strict_check_or_duplicate_statuses():
 def test_post_update_verifier_requires_all_eight_contexts():
     payload, _ = ruleset_tool.build_updated_payload(sample_ruleset())
     ruleset_tool.verify_updated_ruleset({**payload, "id": ruleset_tool.RULESET_ID})
+
+def test_ruleset_refuses_boolean_review_count_even_though_bool_is_an_int_subclass():
+    ruleset = sample_ruleset()
+    pull = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
+    pull["parameters"]["required_approving_review_count"] = True
+    with pytest.raises(ruleset_tool.RulesetError, match="independent-review protections"):
+        ruleset_tool.build_updated_payload(ruleset)
+\n
