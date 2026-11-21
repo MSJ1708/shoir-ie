@@ -190,7 +190,7 @@ def test_oracle_fusion_jwt_user_and_client_assertions_are_signed_and_pagination_
     form = parse_qs(fake.calls[0][3].decode("ascii"))
     assert form["grant_type"] == [OracleFusionOAuthTransport.USER_ASSERTION_GRANT]
     assert form["client_assertion_type"] == [OracleFusionOAuthTransport.CLIENT_ASSERTION_TYPE]
-    assert form["client_id"] == ["oracle-oauth-client-id"]
+    assert "client_id" not in form
     assert form["scope"] == [oracle_credentials["scope"]]
     assert "Authorization" not in fake.calls[0][2]
     assert "synthetic-secret" not in serialized_calls(fake.calls)
