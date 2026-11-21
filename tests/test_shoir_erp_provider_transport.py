@@ -265,6 +265,52 @@ def test_oracle_fusion_rejects_unapproved_token_host_and_non_rsa_signing_key_bef
     assert fake.calls == []
 
 
+def test_oracle_token_cache_invalidates_when_the_registered_rsa_key_rotates():
+    private_key_a, public_key_a = _oracle_signing_key()
+    private_key_b, public_key_b = _oracle_signing_key()
+    config = {
+        "token_url": "https://identity.example.test/oauth2/v1/token",
+        "identity_domain_url": "https://identity.example.test/",
+        "client_id": "oracle-oauth-client-id",
+        "assertion_issuer": "oracle-fusion-app-name",
+        "client_assertion_subject": "oracle-fusion-app-name",
+        "user_subject": "shoir-readonly-service",
+        "signing_key_id": "shoir-certificate-v1",
+        "signing_private_key_pem": private_key_a,
+        "scope": "https://identity.example.test/fscmRestApi.read",
+    }
+    fake = FakeHTTP([
+        (200, "application/json", json.dumps({"access_token": "oracle-token-v1", "token_type": "Bearer", "expires_in": 1800}).encode()),
+        (200, "application/json", json.dumps({"items": [], "hasMore": False}).encode()),
+        (200, "application/json", json.dumps({"access_token": "oracle-token-v2", "token_type": "Bearer", "expires_in": 1800}).encode()),
+        (200, "application/json", json.dumps({"items": [], "hasMore": False}).encode()),
+    ])
+    transport = OracleFusionOAuthTransport(
+        allowed_hosts={("erp.example.test", 443), ("identity.example.test", 443)},
+        credential_resolver=lambda _ref: dict(config),
+        http_client=fake,
+    )
+    request = (
+        profile("ORACLE_FUSION_ERP"),
+        "fscmRestApi/resources/11.13.18.05/orders",
+    )
+    transport.get_json(request[0], request[1], page_token=None, page_size=10)
+
+    config["signing_private_key_pem"] = private_key_b
+    config["signing_key_id"] = "shoir-certificate-v2"
+    transport.get_json(request[0], request[1], page_token=None, page_size=10)
+
+    assert [call[0] for call in fake.calls] == ["POST", "GET", "POST", "GET"]
+    form_a = parse_qs(fake.calls[0][3].decode("ascii"))
+    form_b = parse_qs(fake.calls[2][3].decode("ascii"))
+    header_a, _ = _decode_and_verify_rs256(form_a["client_assertion"][0], public_key_a)
+    header_b, _ = _decode_and_verify_rs256(form_b["client_assertion"][0], public_key_b)
+    assert header_a["kid"] == "shoir-certificate-v1"
+    assert header_b["kid"] == "shoir-certificate-v2"
+    assert private_key_a not in serialized_calls(fake.calls)
+    assert private_key_b not in serialized_calls(fake.calls)
+
+
 def test_provider_transport_refuses_redirect_and_invalid_token_response():
     fake = FakeHTTP([(302, "text/html", b"")])
     transport = SAPODataOAuthTransport(
