@@ -151,7 +151,9 @@ def test_oracle_fusion_jwt_user_and_client_assertions_are_signed_and_pagination_
     oracle_credentials = {
         "token_url": "https://identity.example.test/oauth2/v1/token",
         "identity_domain_url": "https://identity.example.test/",
-        "client_id": "oracle-client",
+        "client_id": "oracle-oauth-client-id",
+        "assertion_issuer": "oracle-fusion-app-name",
+        "client_assertion_subject": "oracle-fusion-app-name",
         "user_subject": "shoir-readonly-service",
         "signing_key_id": "shoir-registered-cert",
         "signing_private_key_pem": private_pem,
@@ -188,7 +190,7 @@ def test_oracle_fusion_jwt_user_and_client_assertions_are_signed_and_pagination_
     form = parse_qs(fake.calls[0][3].decode("ascii"))
     assert form["grant_type"] == [OracleFusionOAuthTransport.USER_ASSERTION_GRANT]
     assert form["client_assertion_type"] == [OracleFusionOAuthTransport.CLIENT_ASSERTION_TYPE]
-    assert form["client_id"] == ["oracle-client"]
+    assert form["client_id"] == ["oracle-oauth-client-id"]
     assert form["scope"] == [oracle_credentials["scope"]]
     assert "Authorization" not in fake.calls[0][2]
     assert "synthetic-secret" not in serialized_calls(fake.calls)
@@ -198,10 +200,10 @@ def test_oracle_fusion_jwt_user_and_client_assertions_are_signed_and_pagination_
     client_header, client_claims = _decode_and_verify_rs256(form["client_assertion"][0], public_key)
     for header in (user_header, client_header):
         assert header == {"alg": "RS256", "kid": "shoir-registered-cert", "typ": "JWT"}
-    assert user_claims["iss"] == "oracle-client"
+    assert user_claims["iss"] == "oracle-fusion-app-name"
     assert user_claims["sub"] == "shoir-readonly-service"
-    assert client_claims["iss"] == "oracle-client"
-    assert client_claims["sub"] == "oracle-client"
+    assert client_claims["iss"] == "oracle-fusion-app-name"
+    assert client_claims["sub"] == "oracle-fusion-app-name"
     for claims in (user_claims, client_claims):
         assert claims["aud"] == ["https://identity.example.test/"]
         assert claims["exp"] - claims["iat"] == OracleFusionOAuthTransport.ASSERTION_TTL_SECONDS
