@@ -537,7 +537,7 @@ def validate_migration_history(
     if not migration_dir.is_dir():
         raise RuntimeError("Checked-out Supabase migration directory is missing.")
     for path in migration_dir.glob("*.sql"):
-        match = re.fullmatch(r"(\\d{14})_(.+)\\.sql", path.name)
+        match = re.fullmatch(r"(\d{14})_(.+)\.sql", path.name)
         if not match:
             raise RuntimeError(f"Unrecognized SQL migration filename: {path.name}.")
         version, name = match.groups()
