@@ -86,6 +86,7 @@ def test_workspace_hydration_strips_nested_credentials_from_legacy_snapshot(tmp_
     # the current save-time filter to verify that hydration also protects users
     # who still have legacy data in their existing workspace record.
     legacy_payload = {
+        "ordinary_value": "keep",
         "nested_state": {
             "__type__": "dict",
             "value": {
