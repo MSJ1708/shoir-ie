@@ -58,3 +58,29 @@ def test_parse_utc_requires_timezone_and_normalizes() -> None:
     assert parsed.isoformat() == "2026-11-22T09:00:00+00:00"
     with pytest.raises(ValueError, match="timezone"):
         parse_utc("2026-11-22T12:00:00")
+
+
+def test_validate_local_target_urls_accepts_only_supabase_local_ports() -> None:
+    from scripts.staging_restore_rehearsal import validate_local_target_urls
+
+    validate_local_target_urls(
+        "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+        "http://127.0.0.1:54321",
+    )
+
+
+@pytest.mark.parametrize(
+    ("db_url", "api_url"),
+    [
+        ("postgresql://postgres:secret@db.example.supabase.co:5432/postgres", "http://127.0.0.1:54321"),
+        ("postgresql://postgres:postgres@127.0.0.1:5432/postgres", "http://127.0.0.1:54321"),
+        ("postgresql://postgres:postgres@127.0.0.1:54322/postgres", "https://shoir-ie-app.streamlit.app"),
+    ],
+)
+def test_validate_local_target_urls_rejects_nonlocal_targets(
+    db_url: str, api_url: str
+) -> None:
+    from scripts.staging_restore_rehearsal import validate_local_target_urls
+
+    with pytest.raises(RuntimeError):
+        validate_local_target_urls(db_url, api_url)
