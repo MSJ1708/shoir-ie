@@ -20,6 +20,20 @@ FORECAST_TARGETS = {
     "Energy": ("energy", "power", "kwh", "consumption"),
 }
 
+def _infer_frequency_string(values: pd.Series) -> str:
+    """Infer a pandas frequency using the forward-compatible offset return type."""
+    future_options = getattr(pd.options, "future", None)
+    if future_options is not None and hasattr(future_options, "infer_freq_returns_offset"):
+        with pd.option_context("future.infer_freq_returns_offset", True):
+            inferred = pd.infer_freq(values)
+    else:
+        inferred = pd.infer_freq(values)
+    if inferred is None:
+        return "D"
+    return str(getattr(inferred, "freqstr", inferred))
+
+
+
 
 def infer_forecast_target(columns: Sequence[str], subject: str = "Demand") -> str | None:
     aliases = FORECAST_TARGETS.get(subject, FORECAST_TARGETS["Demand"])
@@ -86,7 +100,7 @@ def engineering_forecast(
             "Holdout R2": float(r2_score(test[target_col], pred_test)) if len(test) > 1 else float("nan"),
         }
 
-    freq = pd.infer_freq(d[date_col]) or "D"
+    freq = _infer_frequency_string(d[date_col])
     future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon)+1, freq=freq)[1:]
     future = pd.DataFrame({date_col: future_dates})
     for col in external:
