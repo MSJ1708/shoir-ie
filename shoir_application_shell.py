@@ -19,7 +19,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-SHELL_VERSION = "3.2"
+SHELL_VERSION = "3.3"
 
 NAV_GROUPS = {
     "HOME": "⌂ Home",
