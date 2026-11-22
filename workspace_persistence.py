@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS workspace_states (
 _EXACT_EXCLUDE = {
     "authenticated",
     "current_user",
+    # Authentication/session material must never enter durable workspace JSON.
+    # A later login creates a fresh server token; hydrating an old/revoked token
+    # here would overwrite it and make every subsequent workspace call return 401.
+    "remote_session_token",
+    "renewal_session_token",
+    "access_token",
+    "refresh_token",
+    "session_token",
+    "api_secret",
+    "password",
+    "password_hash",
     "user_role",
     "user_tier",
     "user_email",
@@ -51,6 +62,9 @@ _EXACT_EXCLUDE = {
 
 _PREFIX_EXCLUDE = (
     "signin_",
+    "token_",
+    "secret_",
+    "password_",
     "reg_",
     "payment_",
     "uploaded_",
