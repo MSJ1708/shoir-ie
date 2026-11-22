@@ -151,3 +151,17 @@ The following still require owner actions or account permissions:
 - review the measured RPO/RTO and restore evidence.
 
 No R2 bucket, Cloudflare token, GitHub Environment secret, ruleset, staging deployment, backup or restore run has been created by this runbook work. Production `main` and the production Supabase project remain outside scope.
+
+
+## 9. Hosted staging browser smoke (separate from local CI)
+
+The pull-request CI runs the candidate locally with Streamlit and Playwright at desktop and mobile widths. It does not prove that a hosted staging deployment is serving the candidate. The hosted check is deliberately separate so a pull request does not show a misleading skipped job or probe the production Streamlit URL.
+
+After the candidate is approved, merged and deployed to the staging Streamlit app:
+
+1. Create the GitHub Environment `staging-smoke` and restrict it to the staging branch. Add the environment variable `SHOIR_STAGING_LIVE_URL` with the staging app's HTTPS URL. Do not set it to the production URL `https://shoir-ie-app.streamlit.app/`.
+2. Create or update `.github/staging-smoke-triggers/run.txt` through a PR targeting only `staging-e2e-20261019`. Include a unique UTC timestamp and the staging deployment identifier.
+3. Merge that marker PR only after the active staging ruleset is satisfied. The push to the staging marker path starts **Shoir-IE staging hosted browser smoke**; approve the protected `staging-smoke` Environment gate.
+4. Require the run to pass the desktop/mobile browser checks and inspect the uploaded screenshots and JSON evidence. A failed run is not acceptance.
+
+This is an anonymous entry-screen/rendering smoke only. It does not replace the authenticated 96-route module matrix, Owner/Admin/Engineer/Approver/Viewer RBAC tests, cross-user/organization isolation, or a fresh-login workspace persistence test. Those require the owner-provided disposable staging accounts and approved deployment configuration.

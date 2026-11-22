@@ -207,6 +207,11 @@ jobs:
               if not (root / "decrypted" / name).is_file():
                   raise SystemExit(f"Decrypted backup is missing {name}.")
           (root / "plain-storage").mkdir(exist_ok=True)
+          # The restore utility consumes one directory for both the manifest and
+          # decrypted payload. Copy the already-validated manifest beside the
+          # extracted archive files before passing --recovery-dir to the utility.
+          cp "$backup_dir/backup-manifest.json" "$backup_dir/decrypted/backup-manifest.json"
+          chmod 600 "$backup_dir/decrypted/backup-manifest.json"
           print("PASS: archive checksum, decryption, staging project ref, and Auth scope verified.")
           PY
 

@@ -63,9 +63,10 @@ jobs:
             tests/test_excel_runtime.py \
             tests/test_excel_intelligence_navigation.py \
             tests/test_module_catalog_categories.py
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: "20"
+          node-version: "24"
+          package-manager-cache: false
       - name: Check Office.js task pane and run local planner tests
         run: |
           node --check excel_addin/planner.js
@@ -97,7 +98,7 @@ jobs:
           }
           placeholders = any("YOUR-SHOIR-IE-HOST" in value for value in urls.values())
           if placeholders:
-              print("::warning::Office add-in manifest is an unhosted template. It is valid XML, not an installable or deployed add-in.")
+              print("::notice::Office add-in manifest is an unhosted template. It is valid XML, not an installable or deployed add-in; hosted Office deployment remains unverified.")
           else:
               parsed = {name: urlparse(value) for name, value in urls.items()}
               for name, value in parsed.items():
