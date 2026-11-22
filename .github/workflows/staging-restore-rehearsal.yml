@@ -233,6 +233,10 @@ jobs:
           mkdir -p "$restore_project"
           cd "$restore_project"
           supabase init
+          mkdir -p supabase/functions
+          cp -R "$GITHUB_WORKSPACE/supabase/functions/shoir-persistence" supabase/functions/
+          test -s supabase/functions/shoir-persistence/index.ts
+          test -s supabase/functions/shoir-persistence/security.ts
 
           # Match the source PostgreSQL major version. The local stack is
           # isolated on this ephemeral runner and has no hosted project link.
@@ -249,7 +253,7 @@ jobs:
               text = text.replace("[db]\n", "[db]\nmajor_version = 17\n", 1)
           path.write_text(text, encoding="utf-8")
           PY
-          supabase start -x studio,analytics,vector,edge-runtime,postgres-meta,mailpit,imgproxy,supavisor
+          supabase start -x studio,analytics,vector,postgres-meta,mailpit,imgproxy,supavisor
           supabase status -o env > "$RUNNER_TEMP/shoir-local-supabase.env"
           set -a
           # This file is produced by Supabase CLI on the same ephemeral runner.
@@ -259,6 +263,35 @@ jobs:
           test -n "$API_URL"
           test -n "$ANON_KEY"
           test -n "$SERVICE_ROLE_KEY"
+
+          # Run the actual Shoir-IE persistence Edge Function against the
+          # isolated local database, with the local stack's generated keys.
+          # The source project and production are never linked or contacted.
+          supabase functions serve shoir-persistence --no-verify-jwt \
+            > "$RUNNER_TEMP/shoir-local-edge-function.log" 2>&1 &
+          function_pid=$!
+          function_ready=false
+          for attempt in $(seq 1 60); do
+            if ! kill -0 "$function_pid" 2>/dev/null; then
+              echo "::error::Local Shoir-IE Edge Function process exited before becoming ready."
+              tail -n 40 "$RUNNER_TEMP/shoir-local-edge-function.log" || true
+              exit 1
+            fi
+            status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              --max-time 5 --request POST "$API_URL/functions/v1/shoir-persistence" \
+              --header "apikey: $ANON_KEY" --header "Content-Type: application/json" \
+              --data '{"action":"restore_readiness_probe"}' || true)"
+            if [[ "$status_code" == "400" ]]; then
+              function_ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$function_ready" != "true" ]]; then
+            echo "::error::Local Shoir-IE Edge Function did not become ready."
+            tail -n 60 "$RUNNER_TEMP/shoir-local-edge-function.log" || true
+            exit 1
+          fi
 
           # Revoke default target grants that would otherwise be inherited
           # by restored tables; the dump's explicit GRANT statements then
@@ -284,6 +317,9 @@ jobs:
             --service-role-key "$SERVICE_ROLE_KEY" \
             --evidence-out "$RUNNER_TEMP/staging-restore-evidence.json"
 
+          kill "$function_pid" 2>/dev/null || true
+          wait "$function_pid" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/shoir-local-edge-function.log"
           mkdir -p "$RUNNER_TEMP/staging-restore-evidence"
           cp "$RUNNER_TEMP/staging-restore-evidence.json" "$RUNNER_TEMP/staging-restore-evidence/"
 
