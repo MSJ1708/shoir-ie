@@ -164,4 +164,7 @@ After the candidate is approved, merged and deployed to the staging Streamlit ap
 3. Merge that marker PR only after the active staging ruleset is satisfied. The push to the staging marker path starts **Shoir-IE staging hosted browser smoke**; approve the protected `staging-smoke` Environment gate.
 4. Require the run to pass the desktop/mobile browser checks and inspect the uploaded screenshots and JSON evidence. A failed run is not acceptance.
 
-This is an anonymous entry-screen/rendering smoke only. It does not replace the authenticated 96-route module matrix, Owner/Admin/Engineer/Approver/Viewer RBAC tests, cross-user/organization isolation, or a fresh-login workspace persistence test. Those require the owner-provided disposable staging accounts and approved deployment configuration.
+This is an anonymous entry-screen/rendering smoke only.
+
+The public entry-screen smoke checks availability and rendering only. It is **not proof that the triggering Git SHA is deployed**, and it is not proof of authenticated module, role-based-access, persistence, or calculation acceptance. Those require the authenticated release gate and its disposable staging identities.
+ It does not replace the authenticated 96-route module matrix, Owner/Admin/Engineer/Approver/Viewer RBAC tests, cross-user/organization isolation, or a fresh-login workspace persistence test. Those require the owner-provided disposable staging accounts and approved deployment configuration.
