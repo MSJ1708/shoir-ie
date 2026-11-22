@@ -10,6 +10,14 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     source = {
         "authenticated": True,
         "current_user": "Alice",
+        "remote_session_token": "old-revoked-session",
+        "renewal_session_token": "old-renewal-session",
+        "access_token": "old-access-token",
+        "refresh_token": "old-refresh-token",
+        "session_token": "old-session-token",
+        "api_secret": "must-not-persist",
+        "password": "must-not-persist",
+        "password_hash": "must-not-persist",
         "user_tier": "Professional Tier",
         "selected_nav": "Dashboard",
         "enterprise_module_selector": "Inventory · EOQ",
@@ -24,6 +32,9 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     restored = {
         "authenticated": True,
         "current_user": "Alice",
+        # A freshly-authenticated session must survive workspace hydration.
+        "remote_session_token": "fresh-session-token",
+        "renewal_session_token": "fresh-renewal-token",
         "demand": 999,
     }
     assert load_user_workspace("Alice", restored, db)
@@ -35,6 +46,17 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     assert restored["copilot_messages"][0]["content"] == "run my scenario"
     pd.testing.assert_frame_equal(restored["df"], source["df"])
     assert "signin_password_input" not in restored
+    assert restored["remote_session_token"] == "fresh-session-token"
+    assert restored["renewal_session_token"] == "fresh-renewal-token"
+    for secret_key in (
+        "access_token",
+        "refresh_token",
+        "session_token",
+        "api_secret",
+        "password",
+        "password_hash",
+    ):
+        assert secret_key not in restored
 
 
 def test_workspace_isolated_per_user(tmp_path: Path):
