@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sys
 import uuid
@@ -30,7 +31,8 @@ ALLOWED_POLICY_COMMANDS = {"ALL", "SELECT", "INSERT", "UPDATE", "DELETE"}
 ALLOWED_POLICY_MODES = {"PERMISSIVE", "RESTRICTIVE"}
 REQUIRED_ARCHIVE_FILES = {
     "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
-    "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json", "database-contract.json",
+    "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
+    "database-contract.json", "migration-history.json",
 }
 
 
@@ -507,9 +509,65 @@ def smoke_test_shoir_identity(
             raise RuntimeError("Shoir-IE local smoke-test account left synthetic rows after cleanup.")
 
 
+def validate_migration_history(
+    history: list[dict[str, Any]], migration_dir: Path, expected_count: int
+) -> dict[str, Any]:
+    if not isinstance(history, list) or len(history) != expected_count:
+        raise RuntimeError("Source migration ledger count does not match its database contract.")
+    history_by_version: dict[str, str] = {}
+    for row in history:
+        if not isinstance(row, dict):
+            raise RuntimeError("Source migration ledger contains a malformed row.")
+        version = row.get("version")
+        name = row.get("name")
+        if (
+            not isinstance(version, str)
+            or not re.fullmatch(r"\\d{14}", version)
+            or not isinstance(name, str)
+            or not name
+            or "/" in name
+            or "\\\\" in name
+        ):
+            raise RuntimeError("Source migration ledger contains an invalid version or name.")
+        if version in history_by_version:
+            raise RuntimeError(f"Duplicate source migration version: {version}.")
+        history_by_version[version] = name
+
+    repository_by_version: dict[str, str] = {}
+    if not migration_dir.is_dir():
+        raise RuntimeError("Checked-out Supabase migration directory is missing.")
+    for path in migration_dir.glob("*.sql"):
+        match = re.fullmatch(r"(\\d{14})_(.+)\\.sql", path.name)
+        if not match:
+            raise RuntimeError(f"Unrecognized SQL migration filename: {path.name}.")
+        version, name = match.groups()
+        if version in repository_by_version:
+            raise RuntimeError(f"Duplicate repository migration version: {version}.")
+        repository_by_version[version] = name
+
+    missing = sorted(set(history_by_version) - set(repository_by_version))
+    extra = sorted(set(repository_by_version) - set(history_by_version))
+    mismatched = sorted(
+        version
+        for version in set(history_by_version) & set(repository_by_version)
+        if history_by_version[version] != repository_by_version[version]
+    )
+    if missing or extra or mismatched:
+        raise RuntimeError(
+            "Migration history does not exactly match checked-out migration files "
+            f"(missing={missing}, extra={extra}, name_mismatch={mismatched})."
+        )
+    return {
+        "migration_history_count": len(history_by_version),
+        "repository_migration_file_count": len(repository_by_version),
+        "migration_history_matches_repository": True,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--recovery-dir", required=True, type=Path)
+    parser.add_argument("--migration-dir", required=True, type=Path)
     parser.add_argument("--plain-storage-dir", required=True, type=Path)
     parser.add_argument("--db-url", required=True)
     parser.add_argument("--api-url", required=True)
@@ -538,7 +596,10 @@ def main() -> int:
     if manifest.get("storage_bucket_count") is None or manifest.get("storage_object_metadata_count") is None:
         raise RuntimeError("Backup manifest is missing Storage inventory counts.")
 
-    started_at = utc_now()
+    restore_started_raw = os.environ.get("SHOIR_RESTORE_STARTED_AT_UTC")
+    if not restore_started_raw:
+        raise RuntimeError("Restore start timestamp is missing; refusing to report an incomplete RTO.")
+    started_at = parse_utc(restore_started_raw)
     backup_at = parse_utc(manifest["created_at_utc"])
     rpo_seconds = max(0.0, (started_at - backup_at).total_seconds())
     source_buckets = json.loads(
@@ -553,6 +614,9 @@ def main() -> int:
     )
     source_database_contract = json.loads(
         (args.recovery_dir / "database-contract.json").read_text(encoding="utf-8")
+    )
+    source_migration_history = json.loads(
+        (args.recovery_dir / "migration-history.json").read_text(encoding="utf-8")
     )
     if not isinstance(source_buckets, list) or not isinstance(source_policies, list):
         raise RuntimeError("Storage metadata exports must be JSON arrays.")
@@ -569,6 +633,13 @@ def main() -> int:
     }
     if not isinstance(source_database_contract, dict) or not expected_contract_keys.issubset(source_database_contract):
         raise RuntimeError("Database restore contract is incomplete.")
+    migration_validation = validate_migration_history(
+        source_migration_history,
+        args.migration_dir,
+        int(source_database_contract["source_migration_count"]),
+    )
+    if int(manifest.get("migration_history_count", -1)) != migration_validation["migration_history_count"]:
+        raise RuntimeError("Backup manifest migration count does not match encrypted migration ledger.")
 
     # Only a local DB connection is supplied by the workflow. No remote project
     # URL or service credential for the hosted staging/production projects is accepted.
@@ -660,6 +731,7 @@ def main() -> int:
         "application_table_count": len(source_table_counts),
         "database_contract": restored_contract,
         "source_migration_count": int(source_database_contract["source_migration_count"]),
+        **migration_validation,
         "storage_bucket_count": restored_bucket_count,
         "storage_policy_count": restored_policy_count,
         "storage_object_count": restored_object_count,
