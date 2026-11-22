@@ -205,6 +205,13 @@ jobs:
             --command "SELECT jsonb_build_object('rls_table_count', (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public', 'shoir_internal') AND c.relkind = 'r' AND c.relrowsecurity), 'policy_count', (SELECT count(*) FROM pg_policies WHERE schemaname IN ('public', 'shoir_internal')), 'constraint_count', (SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace WHERE n.nspname IN ('public', 'shoir_internal')), 'function_count', (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public', 'shoir_internal') AND p.prokind IN ('f', 'p')), 'table_grant_count', (SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema IN ('public', 'shoir_internal')), 'routine_grant_count', (SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema IN ('public', 'shoir_internal')), 'source_migration_count', (SELECT count(*) FROM supabase_migrations.schema_migrations))" \
             > "$backup_dir/database-contract.json"
 
+          # Snapshot the exact migration ledger (versions + names only) inside
+          # the encrypted bundle so the restore runner can prove the repository
+          # contains every migration applied to this staging database.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "SELECT COALESCE(jsonb_agg(jsonb_build_object('version', version, 'name', name) ORDER BY version), '[]'::jsonb) FROM supabase_migrations.schema_migrations" \
+            > "$backup_dir/migration-history.json"
+
           test -s "$backup_dir/roles.sql"
           test -s "$backup_dir/schema.sql"
           test -s "$backup_dir/data.sql"
@@ -212,11 +219,12 @@ jobs:
           test -s "$backup_dir/storage-policies.json"
           test -s "$backup_dir/app-table-counts.json"
           test -s "$backup_dir/database-contract.json"
+          test -s "$backup_dir/migration-history.json"
 
           tar --create --gzip --file "$backup_dir/database-bundle.tar.gz" \
             --directory "$backup_dir" roles.sql schema.sql data.sql \
             storage-buckets.json storage-objects.ndjson storage-policies.json \
-            app-table-counts.json database-contract.json
+            app-table-counts.json database-contract.json migration-history.json
           age --encrypt --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
             --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
           (cd "$backup_dir" && sha256sum database-bundle.tar.gz.age > database-bundle.tar.gz.age.sha256)
@@ -229,6 +237,7 @@ jobs:
           root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-backup"
           buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
           table_counts = json.loads((root / "app-table-counts.json").read_text(encoding="utf-8"))
+          migration_history = json.loads((root / "migration-history.json").read_text(encoding="utf-8"))
           object_file = root / "storage-objects.ndjson"
           object_count = sum(1 for line in object_file.open("rb") if line.strip())
           manifest = {
@@ -239,6 +248,8 @@ jobs:
               "storage_bucket_count": len(buckets),
               "storage_object_metadata_count": object_count,
               "application_table_count": len(table_counts),
+              "migration_history_count": len(migration_history),
+              "source_migration_count": len(migration_history),
               "auth_data_exported": False,
               "auth_non_migration_rows": int(os.environ["SHOIR_AUTH_NON_MIGRATION_ROWS"]),
               "auth_data_policy": "backup is blocked unless every non-schema_migrations auth table is empty",
