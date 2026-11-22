@@ -112,6 +112,8 @@ jobs:
           set +x
           backup_dir="$RUNNER_TEMP/shoir-staging-backup"
           mkdir -p "$backup_dir"
+          export RUN_STARTED_AT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          : > "$backup_dir/storage-objects.ndjson"
 
           # CLI v2 is pinned because v3 changed db dump's remote-selection
           # defaults. The direct database hostname is checked above.
