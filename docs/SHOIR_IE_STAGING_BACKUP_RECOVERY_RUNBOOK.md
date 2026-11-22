@@ -48,15 +48,21 @@ Record the account's HTTPS R2 endpoint from the Cloudflare dashboard and use reg
 
 ## 3. Create the encryption material
 
-On a trusted computer, install the official `age` utility and generate a key pair:
+On a trusted computer, install the official `age` utility and generate **two independent age key pairs**:
 
 ```bash
-age-keygen -o shoir-staging-backup-identity.txt
+age-keygen -o shoir-staging-offline-identity.txt
+age-keygen -o shoir-staging-restore-runner-identity.txt
 ```
 
-The command writes a private identity file and prints an `age1...` public recipient. Keep the private identity file offline/in an approved secret manager with a recovery copy held by the authorized recovery owner. The backup workflow only needs the **public recipient**; never put the private identity into the export workflow or source code.
+Each command writes a private identity file and prints a different `age1...` public recipient.
 
-Generate two different random rclone crypt passwords (at least 32 characters each). Keep them in the same approved secret manager as the recovery identity, with separate access control. These passwords are needed to decrypt Storage objects later. Do not use a human password or reuse another service's password. Keep the private age identity's offline recovery copy in the owner's custody; a protected Environment secret copy is also required for the restore runner, because restore decryption occurs inside GitHub Actions.
+- **Offline recovery key:** keep `shoir-staging-offline-identity.txt` and its private identity on encrypted offline media under the recovery owner's custody. Make a second offline copy in a separate secure location. Its private key must never be uploaded to GitHub, R2, source control, workflow artifacts, or chat. The export workflow receives only this key's public recipient.
+- **Restore-runner key:** the second key is a distinct automation identity used only by the protected isolated-restore workflow. Its public recipient is used by the export workflow; its private identity is stored as the protected Environment secret `SHOIR_BACKUP_AGE_RESTORE_IDENTITY`. This key is separate from the offline master recovery key and can be rotated/revoked without losing the offline recovery path.
+
+The export encrypts each database archive for **both recipients**. This gives the recovery owner an offline decrypt path independent of GitHub, while allowing the ephemeral restore runner to decrypt its own copy. Never substitute the offline private identity for the restore-runner identity.
+
+Generate two different random rclone crypt passwords (at least 32 characters each). Store them in the protected Environment and keep independent secure recovery copies under the authorized recovery owner's custody. They are needed to decrypt Storage objects later. Do not use a human password or reuse another service's password.
 
 ## 4. Configure the staging source credentials
 
@@ -94,10 +100,11 @@ In GitHub repository `MSJ1708/shoir-ie`:
 | `SHOIR_RECOVERY_S3_BUCKET` | Exactly `shoir-ie-staging-recovery` |
 | `SHOIR_RECOVERY_S3_ACCESS_KEY_ID` | Restricted destination key ID |
 | `SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY` | Restricted destination secret |
-| `SHOIR_BACKUP_AGE_RECIPIENT` | The public `age1...` recipient only |
+| `SHOIR_BACKUP_AGE_RECIPIENT` | Public `age1...` recipient from the offline recovery key; public value only |
+| `SHOIR_BACKUP_AGE_RESTORE_RECIPIENT` | Public `age1...` recipient from the distinct restore-runner key |
 | `SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD` | First random rclone crypt password |
 | `SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2` | Different second random rclone crypt password |
-| `SHOIR_BACKUP_AGE_IDENTITY` | Private age identity text, used only by the protected isolated-restore workflow; retain a separate offline recovery copy |
+| `SHOIR_BACKUP_AGE_RESTORE_IDENTITY` | Private identity for the separate restore-runner key only; **never** put the offline recovery identity here |
 
 Do not add a Supabase service-role API key as a secret for the export workflow. The export uses the DB URL and dedicated Storage S3 credentials; its source target is hard-pinned to staging. The local restore workflow generates its own temporary local service-role key from the ephemeral Supabase stack.
 
@@ -112,7 +119,7 @@ After the environment secrets and bucket have been configured, and after PR #236
 5. Inspect the redacted `backup-manifest.json` and archive SHA-256 artifact. Confirm the expected bucket count and Storage object metadata count (re-inventory at run time; the previous point-in-time inventory found two private buckets and one payment-proof object).
 6. In the off-project provider console, confirm the encrypted database archive and encrypted Storage prefix exist. Do not open or download the raw payment-proof object into chat or a public artifact.
 
-The backup destination uses a unique run prefix `shoir-ie/staging/<workflow-run-id>-<attempt>`; do not overwrite a previous recovery point. The workflow's GitHub artifact is only short-retention evidence, not the backup itself.
+The backup destination uses a unique run prefix `shoir-ie/staging/<workflow-run-id>-<attempt>`; do not overwrite a previous recovery point. The encrypted database archive can be decrypted using either the owner's offline recovery private identity or the separate restore-runner identity. The workflow's GitHub artifact is only short-retention evidence, not the backup itself.
 
 ## 7. Isolated local Supabase restore rehearsal
 
@@ -122,7 +129,7 @@ After a real backup export has succeeded and its run prefix has been confirmed i
 
 1. Create or update `.github/restore-triggers/staging-recovery.txt` through a separate PR targeting only `staging-e2e-20261019`. The file must contain the exact backup prefix, for example `backup_prefix=shoir-ie/staging/123456789-1`. Replace the example with the actual successful backup run ID and attempt; never guess it.
 2. Merge that trigger PR only after the active staging ruleset is satisfied. The staging push to this exact file launches **Staging Encrypted Backup Restore Rehearsal**. Confirm its branch, event and protected Environment before approving the Environment gate.
-3. The workflow downloads the encrypted database archive and encrypted Storage tree from the exact R2 prefix, verifies the downloaded SHA-256 checksum against both the checksum file and backup manifest, and decrypts within the ephemeral runner. It checks the encrypted migration ledger against the checked-out repository before restoring roles/schema/data into a clean local PostgreSQL 17 stack. The current staging database ledger contains 24 applied migrations; a missing, extra, duplicate or incorrectly named migration causes the rehearsal to fail.
+3. The workflow downloads the encrypted database archive and encrypted Storage tree from the exact R2 prefix, verifies the downloaded SHA-256 checksum against both the checksum file and backup manifest, and decrypts within the ephemeral runner using only `SHOIR_BACKUP_AGE_RESTORE_IDENTITY`. The separate offline private recovery identity is never exposed to the runner. It checks the encrypted migration ledger against the checked-out repository before restoring roles/schema/data into a clean local PostgreSQL 17 stack. The current staging database ledger contains 24 applied migrations; a missing, extra, duplicate or incorrectly named migration causes the rehearsal to fail.
 4. It restores bucket metadata and policies, uploads each decrypted Storage object to local Supabase Storage, then downloads each object again and compares SHA-256 and byte length. It compares every application table's restored row count and the database security contract (RLS-enabled tables, policies, constraints, functions/procedures and table/routine grants) with the source-time measurements in the encrypted bundle.
 5. It creates a synthetic local GoTrue/Auth user, signs it in, deletes it, and confirms no test GoTrue user remains. Separately, it creates a random synthetic **Shoir-IE custom account** in the restored `public.shoir_accounts` table using the same PBKDF2-SHA256 password-hash format, then calls the actual `shoir-persistence` Edge Function served by the local Supabase stack. It verifies custom account login, live session entitlement, workspace save, workspace load and JSON round-trip, logout revocation, denial of the revoked token, and removal of all synthetic account/session/workspace/pending-credential/login-throttle rows. No real or protected Shoir-IE account is used or modified.
 6. The restore timer starts at the beginning of the GitHub Actions job, before archive download, decryption, local-stack startup or import. The workflow emits redacted evidence JSON containing the restore contract, hash-verification totals, migration-ledger match, custom login/workspace/logout results, cleanup status, measured RPO and end-to-end verified-restore RTO; uploads that evidence artifact; and destroys the ephemeral local Supabase stack and local Edge Function process. It never uploads the decrypted database, object bytes, age identity, passwords, bearer tokens or service-role key.
@@ -138,7 +145,7 @@ The latest read-only inventory measured a roughly 14 MB PostgreSQL database, 29 
 The following still require owner actions or account permissions:
 
 - create the private Cloudflare R2 bucket `shoir-ie-staging-recovery` and a bucket-scoped Object Read & Write token;
-- add the 11 export secrets and the private age identity restore secret to protected GitHub Environment `staging-recovery`;
+- add the 12 protected export/restore configuration values to GitHub Environment `staging-recovery`, including the two public age recipients and the separate restore-runner private identity; keep the offline private recovery identity completely outside GitHub;
 - make the authorized staging-only ruleset change or obtain the real independent approval required by the active ruleset;
 - merge the reviewed PR to staging, create the export marker after setup, verify the actual backup, then create the restore marker using that exact run prefix;
 - review the measured RPO/RTO and restore evidence.
