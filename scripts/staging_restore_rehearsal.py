@@ -29,7 +29,7 @@ ALLOWED_POLICY_COMMANDS = {"ALL", "SELECT", "INSERT", "UPDATE", "DELETE"}
 ALLOWED_POLICY_MODES = {"PERMISSIVE", "RESTRICTIVE"}
 REQUIRED_ARCHIVE_FILES = {
     "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
-    "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
+    "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json", "database-contract.json",
 }
 
 
@@ -95,6 +95,42 @@ def validate_local_target_urls(db_url: str, api_url: str) -> None:
 
 def db_connect(db_url: str):
     return psycopg2.connect(db_url)
+
+
+def database_contract(conn) -> dict[str, int]:
+    queries = {
+        "rls_table_count": """
+            SELECT count(*) FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname IN ('public', 'shoir_internal')
+              AND c.relkind = 'r' AND c.relrowsecurity
+        """,
+        "policy_count": "SELECT count(*) FROM pg_policies WHERE schemaname IN ('public', 'shoir_internal')",
+        "constraint_count": """
+            SELECT count(*) FROM pg_constraint c
+            JOIN pg_namespace n ON n.oid = c.connamespace
+            WHERE n.nspname IN ('public', 'shoir_internal')
+        """,
+        "function_count": """
+            SELECT count(*) FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname IN ('public', 'shoir_internal') AND p.prokind IN ('f', 'p')
+        """,
+        "table_grant_count": """
+            SELECT count(*) FROM information_schema.role_table_grants
+            WHERE table_schema IN ('public', 'shoir_internal')
+        """,
+        "routine_grant_count": """
+            SELECT count(*) FROM information_schema.routine_privileges
+            WHERE specific_schema IN ('public', 'shoir_internal')
+        """,
+    }
+    values: dict[str, int] = {}
+    with conn.cursor() as cursor:
+        for key, query in queries.items():
+            cursor.execute(query)
+            values[key] = int(cursor.fetchone()[0])
+    return values
 
 
 def table_columns(cursor, schema: str, table: str) -> dict[str, str]:
@@ -382,6 +418,9 @@ def main() -> int:
     source_table_counts = json.loads(
         (args.recovery_dir / "app-table-counts.json").read_text(encoding="utf-8")
     )
+    source_database_contract = json.loads(
+        (args.recovery_dir / "database-contract.json").read_text(encoding="utf-8")
+    )
     if not isinstance(source_buckets, list) or not isinstance(source_policies, list):
         raise RuntimeError("Storage metadata exports must be JSON arrays.")
     if len(source_buckets) != int(manifest["storage_bucket_count"]):
@@ -390,6 +429,13 @@ def main() -> int:
         raise RuntimeError("Storage object metadata count does not match the backup manifest.")
     if not isinstance(source_table_counts, dict) or not source_table_counts:
         raise RuntimeError("Application table row-count manifest is empty or invalid.")
+    expected_contract_keys = {
+        "rls_table_count", "policy_count", "constraint_count",
+        "function_count", "table_grant_count", "routine_grant_count",
+        "source_migration_count",
+    }
+    if not isinstance(source_database_contract, dict) or not expected_contract_keys.issubset(source_database_contract):
+        raise RuntimeError("Database restore contract is incomplete.")
 
     # Only a local DB connection is supplied by the workflow. No remote project
     # URL or service credential for the hosted staging/production projects is accepted.
@@ -419,6 +465,17 @@ def main() -> int:
                 actual_count = cursor.fetchone()[0]
             if actual_count != int(expected_count):
                 raise RuntimeError(f"Restored row count mismatch for {qualified_name}.")
+
+        restored_contract = database_contract(conn)
+        for key in (
+            "rls_table_count", "policy_count", "constraint_count",
+            "function_count", "table_grant_count", "routine_grant_count",
+        ):
+            if restored_contract[key] != int(source_database_contract[key]):
+                raise RuntimeError(
+                    f"Restored database contract mismatch for {key}: "
+                    f"source={source_database_contract[key]}, restored={restored_contract[key]}."
+                )
 
         with conn.cursor() as cursor:
             cursor.execute("SELECT count(*) FROM storage.buckets")
@@ -465,6 +522,8 @@ def main() -> int:
         "database_name": "postgres",
         "postgres_major_version": 17,
         "application_table_count": len(source_table_counts),
+        "database_contract": restored_contract,
+        "source_migration_count": int(source_database_contract["source_migration_count"]),
         "storage_bucket_count": restored_bucket_count,
         "storage_policy_count": restored_policy_count,
         "storage_object_count": restored_object_count,
