@@ -30,23 +30,6 @@ on:
   pull_request:
     branches:
       - staging-e2e-20261019
-    paths:
-      - "excel_addin/**"
-      - "shoir_excel_entitlements.py"
-      - "durable_account_store.py"
-      - "supabase/functions/shoir-persistence/**"
-      - "tests/test_durable_account_store_environment.py"
-      - "shoir_excel_runtime.py"
-      - "shoir_excel_foundation.py"
-      - "shoir_tier_capabilities.py"
-      - "industrial_platform.py"
-      - "industrial_platform_excellence.py"
-      - "pages/Industrial_Engineering_Workbench.py"
-      - "shoir_live_visuals.py"
-      - "tests/test_excel_*.py"
-      - "tests/excel_addin_planner.test.cjs"
-      - "tests/test_module_catalog_categories.py"
-      - ".github/workflows/excel-intelligence-check.yml"
 
 permissions:
   contents: read
