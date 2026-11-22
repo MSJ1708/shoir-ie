@@ -200,6 +200,9 @@ jobs:
           psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
             --command "SELECT COALESCE(jsonb_object_agg(table_schema || '.' || table_name, (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text::bigint), '{}'::jsonb) FROM information_schema.tables WHERE table_schema IN ('public', 'shoir_internal') AND table_type = 'BASE TABLE'" \
             > "$backup_dir/app-table-counts.json"
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "SELECT jsonb_build_object('rls_table_count', (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public', 'shoir_internal') AND c.relkind = 'r' AND c.relrowsecurity), 'policy_count', (SELECT count(*) FROM pg_policies WHERE schemaname IN ('public', 'shoir_internal')), 'constraint_count', (SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace WHERE n.nspname IN ('public', 'shoir_internal')), 'function_count', (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public', 'shoir_internal') AND p.prokind IN ('f', 'p')), 'table_grant_count', (SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema IN ('public', 'shoir_internal')), 'routine_grant_count', (SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema IN ('public', 'shoir_internal')), 'source_migration_count', (SELECT count(*) FROM supabase_migrations.schema_migrations))" \
+            > "$backup_dir/database-contract.json"
 
           test -s "$backup_dir/roles.sql"
           test -s "$backup_dir/schema.sql"
@@ -207,11 +210,12 @@ jobs:
           test -s "$backup_dir/storage-buckets.json"
           test -s "$backup_dir/storage-policies.json"
           test -s "$backup_dir/app-table-counts.json"
+          test -s "$backup_dir/database-contract.json"
 
           tar --create --gzip --file "$backup_dir/database-bundle.tar.gz" \
             --directory "$backup_dir" roles.sql schema.sql data.sql \
             storage-buckets.json storage-objects.ndjson storage-policies.json \
-            app-table-counts.json
+            app-table-counts.json database-contract.json
           age --encrypt --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
             --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
           (cd "$backup_dir" && sha256sum database-bundle.tar.gz.age > database-bundle.tar.gz.age.sha256)
