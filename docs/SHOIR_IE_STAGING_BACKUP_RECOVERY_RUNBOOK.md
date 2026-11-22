@@ -145,7 +145,7 @@ The latest read-only inventory measured a roughly 14 MB PostgreSQL database, 29 
 The following still require owner actions or account permissions:
 
 - create the private Cloudflare R2 bucket `shoir-ie-staging-recovery` and a bucket-scoped Object Read & Write token;
-- add the 12 protected export/restore configuration values to GitHub Environment `staging-recovery`, including the two public age recipients and the separate restore-runner private identity; keep the offline private recovery identity completely outside GitHub;
+- add the 12 export configuration secrets and the one separate restore-runner private-identity secret to GitHub Environment `staging-recovery`; keep the offline private recovery identity completely outside GitHub;
 - make the authorized staging-only ruleset change or obtain the real independent approval required by the active ruleset;
 - merge the reviewed PR to staging, create the export marker after setup, verify the actual backup, then create the restore marker using that exact run prefix;
 - review the measured RPO/RTO and restore evidence.
