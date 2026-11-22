@@ -218,6 +218,10 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             """,
         )[0]
 
+        # _fetchone opens a read transaction on psycopg2's default connection
+        # mode. End it before switching to autocommit for the SQL-owned
+        # transaction boundary below.
+        target.commit()
         safe_migration = MIGRATIONS / "20261105101231_safe_beta_legal_referrals_20261105.sql"
         # This SQL file has its own transaction boundary too.
         target.autocommit = True
