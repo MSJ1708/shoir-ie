@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -374,6 +375,138 @@ def smoke_test_local_auth(
                 raise RuntimeError("The local Auth smoke test left user data behind.")
 
 
+def smoke_test_shoir_identity(
+    session: requests.Session,
+    api_url: str,
+    anon_key: str,
+    service_key: str,
+    db_url: str,
+) -> None:
+    """Exercise the real Shoir-IE persistence login/session/workspace path locally."""
+    username_lc = f"restore-smoke-{uuid.uuid4().hex}"
+    username = username_lc
+    password = secrets.token_urlsafe(32)
+    salt_hex = secrets.token_hex(16)
+    password_hash = salt_hex + "$" + hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        bytes.fromhex(salt_hex),
+        200_000,
+        dklen=32,
+    ).hex()
+    throttle_hash = hmac.new(
+        service_key.encode("utf-8"),
+        ("user:" + username_lc).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    marker = {"restore_rehearsal": "passed", "probe_id": uuid.uuid4().hex}
+    endpoint = f"{api_url.rstrip('/')}/functions/v1/shoir-persistence"
+    headers = {"apikey": anon_key, "Content-Type": "application/json"}
+    token: str | None = None
+
+    with db_connect(db_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO public.shoir_accounts
+                    (username, username_lc, password_hash, role, tier, email,
+                     created_at, subscription_expires_at, active, updated_at)
+                VALUES (%s, %s, %s, 'User', 'Enterprise Tier', %s,
+                        now(), '2099-01-01T00:00:00Z', true, now())
+                """,
+                (username, username_lc, password_hash, f"{username_lc}@example.invalid"),
+            )
+        conn.commit()
+
+    def call(action: str, **extra: Any) -> tuple[requests.Response, dict[str, Any]]:
+        response = session.post(
+            endpoint,
+            headers=headers,
+            json={"action": action, "username": username, **extra},
+            timeout=(10, 60),
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Shoir-IE local persistence action {action} returned non-JSON HTTP {response.status_code}."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Shoir-IE local persistence action {action} returned an invalid response.")
+        return response, payload
+
+    try:
+        login_response, login = call("login", password=password)
+        if login_response.status_code != 200 or login.get("ok") is not True:
+            raise RuntimeError("Shoir-IE custom account login failed in local restore rehearsal.")
+        token_value = login.get("token")
+        if not isinstance(token_value, str) or len(token_value) < 32:
+            raise RuntimeError("Shoir-IE custom login did not return a valid session token.")
+        token = token_value
+
+        entitlement_response, entitlement = call("session_entitlement", token=token)
+        if (
+            entitlement_response.status_code != 200
+            or entitlement.get("ok") is not True
+            or entitlement.get("username") != username
+            or entitlement.get("active") is not True
+        ):
+            raise RuntimeError("Shoir-IE local session entitlement validation failed.")
+
+        save_response, saved = call("workspace_save", token=token, state_json=marker)
+        if save_response.status_code != 200 or saved.get("ok") is not True:
+            raise RuntimeError("Shoir-IE local workspace save failed.")
+
+        load_response, loaded = call("workspace_load", token=token)
+        restored_state = loaded.get("state_json")
+        if isinstance(restored_state, str):
+            try:
+                restored_state = json.loads(restored_state)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("Shoir-IE local workspace state was not valid JSON.") from exc
+        if (
+            load_response.status_code != 200
+            or loaded.get("ok") is not True
+            or restored_state != marker
+        ):
+            raise RuntimeError("Shoir-IE local workspace load did not return the saved probe state.")
+
+        logout_response, logout = call("logout", token=token)
+        if logout_response.status_code != 200 or logout.get("ok") is not True or logout.get("revoked") is not True:
+            raise RuntimeError("Shoir-IE local logout did not revoke the synthetic session.")
+
+        stale_response, stale = call("workspace_load", token=token)
+        if stale_response.status_code != 401 or stale.get("error") != "Unauthorized session.":
+            raise RuntimeError("Shoir-IE local session remained usable after logout.")
+    finally:
+        # Remove only this random synthetic account from the disposable local DB.
+        with db_connect(db_url) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM public.shoir_sessions WHERE username_lc = %s", (username_lc,))
+                cursor.execute("DELETE FROM public.shoir_workspace_states WHERE username_lc = %s", (username_lc,))
+                cursor.execute("DELETE FROM public.shoir_login_throttle WHERE key_hash = %s", (throttle_hash,))
+                cursor.execute("DELETE FROM public.shoir_pending_credentials WHERE username_lc = %s", (username_lc,))
+                cursor.execute("DELETE FROM public.shoir_accounts WHERE username_lc = %s", (username_lc,))
+            conn.commit()
+
+        with db_connect(db_url) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                      (SELECT count(*) FROM public.shoir_accounts WHERE username_lc = %s),
+                      (SELECT count(*) FROM public.shoir_sessions WHERE username_lc = %s),
+                      (SELECT count(*) FROM public.shoir_workspace_states WHERE username_lc = %s),
+                      (SELECT count(*) FROM public.shoir_pending_credentials WHERE username_lc = %s),
+                      (SELECT count(*) FROM public.shoir_login_throttle WHERE key_hash = %s)
+                    """,
+                    (username_lc, username_lc, username_lc, username_lc, throttle_hash),
+                )
+                remaining = cursor.fetchone()
+        if any(remaining):
+            raise RuntimeError("Shoir-IE local smoke-test account left synthetic rows after cleanup.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--recovery-dir", required=True, type=Path)
@@ -513,6 +646,9 @@ def main() -> int:
                 raise RuntimeError("Backup restore unexpectedly populated Auth users despite zero-row guard.")
 
     smoke_test_local_auth(session, args.api_url, args.anon_key, args.service_role_key, args.db_url)
+    smoke_test_shoir_identity(
+        session, args.api_url, args.anon_key, args.service_role_key, args.db_url
+    )
 
     finished_at = utc_now()
     evidence = {
@@ -531,8 +667,13 @@ def main() -> int:
         "storage_object_bytes_sha256_verified": verified_bytes,
         "auth_data_exported": False,
         "auth_non_migration_source_rows": 0,
-        "local_auth_synthetic_login": "PASS",
-        "local_auth_test_user_removed": True,
+        "local_supabase_auth_synthetic_login": "PASS",
+        "local_supabase_auth_test_user_removed": True,
+        "shoir_custom_account_login": "PASS",
+        "shoir_session_entitlement": "PASS",
+        "shoir_workspace_save_load": "PASS",
+        "shoir_logout_revocation": "PASS",
+        "shoir_synthetic_account_and_session_cleanup": "PASS",
         "backup_created_at_utc": backup_at.isoformat(),
         "restore_started_at_utc": started_at.isoformat(),
         "restore_completed_at_utc": finished_at.isoformat(),
