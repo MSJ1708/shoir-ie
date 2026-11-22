@@ -163,11 +163,16 @@ def preflight_candidate_organization_actions(
         if status == 401:
             continue
         error = str(data.get("error") or "")
-        if status == 400 and "unsupported" in error.casefold():
+        normalized_error = error.casefold()
+        if status in (400, 404) and any(
+            marker in normalized_error
+            for marker in ("unknown action", "unsupported action", "action not found", "not supported")
+        ):
             return False, (
-                f"Staging Edge Function does not expose {action}; deploy the "
-                "reviewed candidate function and its required organization "
-                "migrations before running organization suspension/restore/close tests."
+                f"Staging Edge Function does not expose {action} (HTTP {status}: "
+                f"{error[:100]}); deploy the reviewed candidate function and its "
+                "required organization migrations before running organization "
+                "suspension/restore/close tests."
             )
         return False, (
             f"Staging Edge action {action} did not stop at the expected invalid-session "
