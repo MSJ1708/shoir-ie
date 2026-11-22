@@ -36,6 +36,12 @@ jobs:
       - name: Check out the reviewed staging branch
         uses: actions/checkout@v7
 
+      - name: Record restore start time for measured RPO and RTO
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SHOIR_RESTORE_STARTED_AT_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
       - name: Install pinned Supabase CLI v2
         uses: supabase/setup-cli@v3
         with:
@@ -154,7 +160,7 @@ jobs:
           allowed = {
               "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
               "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
-              "database-contract.json",
+              "database-contract.json", "migration-history.json",
           }
           with tarfile.open(source, "r:gz") as archive:
               members = archive.getmembers()
@@ -312,6 +318,7 @@ jobs:
 
           python "$GITHUB_WORKSPACE/scripts/staging_restore_rehearsal.py" \
             --recovery-dir "$backup_dir/decrypted" \
+            --migration-dir "$GITHUB_WORKSPACE/supabase/migrations" \
             --plain-storage-dir "$backup_dir/plain-storage" \
             --db-url "$DB_URL" \
             --api-url "$API_URL" \
