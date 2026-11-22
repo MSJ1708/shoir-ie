@@ -1,3 +1,7 @@
+-- Source for staging migration 20261105101231_safe_beta_legal_referrals_20261105.
+-- Applied to staging project hfhrosthswcybccepmak on 2026-11-05.
+-- This is an idempotent replay of the reviewed safe referral migration. It does
+-- not update affiliate_code, updated_at, referral records or account rows.
 -- Safe replacement schema migration for beta legal acceptance and referral attribution.
 -- IMPORTANT: The earlier 20261021130000_shoir_beta_legal_referrals.sql migration
 -- has already run in staging and contains data-rewriting UPDATE statements. For a
