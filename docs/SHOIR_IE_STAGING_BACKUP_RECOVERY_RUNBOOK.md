@@ -29,7 +29,9 @@ When all required environment secrets are configured, it:
 6. Checks the remote Storage copy against the live source and checks the uploaded encrypted database archive.
 7. Uploads only a redacted manifest and archive checksum to the short-retention GitHub artifact. Raw database data, Storage object bytes and encryption material are not uploaded as GitHub artifacts.
 
-The workflow does **not** yet restore the database or Storage into a separate Supabase project. A successful run proves that the encrypted backup was uploaded and checked against its source; it does not prove disaster recovery. T099 stays unaccepted until the isolated restore steps in section 7 pass.
+The workflow does **not** yet restore the database or Storage into a separate Supabase project. There is also a material scope gap: Supabase CLI `db dump` excludes Supabase-managed schemas such as `auth` and `storage`; this workflow explicitly dumps only `public` and `shoir_internal`. Storage metadata and object bytes are copied separately, but **Auth user records are not exported**. The current bundle therefore does not preserve `auth.users`, `auth.identities`, password hashes, or MFA/authentication records. It cannot prove recovery of existing Shoir-IE sign-in identities.
+
+A successful run would prove only that the encrypted custom-database bundle and Storage objects were uploaded and checked against their source. It does not prove full application disaster recovery. T099 stays **NOT ACCEPTED** until the Auth data scope is resolved through a compatible, encrypted export/restore method, the isolated restore steps in section 7 pass, and RPO/RTO are measured. Do not treat newly created test users on the restore target as proof that existing user identities were recovered.
 
 ## 2. Select an off-project destination
 
@@ -120,8 +122,9 @@ The restore procedure must:
 4. Decrypt the Storage prefix using the rclone crypt passwords and restore all bucket contents into the isolated Storage service.
 5. Compare bucket/object counts, paths, file sizes and SHA-256 hashes against the source-time manifest. Verify private bucket policies and object access.
 6. Verify migration versions, table counts, constraints, RLS, grants, RPC execute rights, critical subscription/account/workspace rows and tenant isolation.
-7. Point a disposable Streamlit instance at the isolated restore and test login, workspace load/save, dataset download, private payment-proof access and exports.
-8. Record recovery start/end time, recovery point timestamp, achieved RPO/RTO, failures and rollback. Obtain independent infrastructure/security approval.
+7. Before claiming identity recovery, implement and validate a separate encrypted Auth-data export/restoration path compatible with the source and target Supabase Auth versions. Preserve required user/identity records while invalidating old sessions and refresh tokens. Until that exists, only create fresh synthetic disposable users in the isolated target; a successful fresh-user login is not proof that the source Auth users were restored.
+8. Point a disposable Streamlit instance at the isolated restore and test fresh-user login, workspace load/save, dataset download, private payment-proof access and exports. Test existing-account recovery only after the Auth records have been restored through the supported path.
+9. Record recovery start/end time, recovery point timestamp, achieved RPO/RTO, failures and rollback. Obtain independent infrastructure/security approval.
 
 The current workflow does **not** perform this isolated restore automatically. Do not claim T099 accepted until the complete test is documented and independently reviewed. Do not create a new Supabase project or incur a charge without the owner's explicit approval.
 
