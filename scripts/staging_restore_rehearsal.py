@@ -383,7 +383,7 @@ def smoke_test_shoir_identity(
     db_url: str,
 ) -> None:
     """Exercise the real Shoir-IE persistence login/session/workspace path locally."""
-    username_lc = f"restore-smoke-{uuid.uuid4().hex}"
+    username_lc = f"restore-{uuid.uuid4().hex[:16]}"
     username = username_lc
     password = secrets.token_urlsafe(32)
     salt_hex = secrets.token_hex(16)
@@ -411,7 +411,7 @@ def smoke_test_shoir_identity(
                 INSERT INTO public.shoir_accounts
                     (username, username_lc, password_hash, role, tier, email,
                      created_at, subscription_expires_at, active, updated_at)
-                VALUES (%s, %s, %s, 'User', 'Enterprise Tier', %s,
+                VALUES (%s, %s, %s, 'User', 'Enterprise Tier ($199)', %s,
                         now(), '2099-01-01T00:00:00Z', true, now())
                 """,
                 (username, username_lc, password_hash, f"{username_lc}@example.invalid"),
