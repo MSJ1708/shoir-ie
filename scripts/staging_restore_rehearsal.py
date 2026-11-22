@@ -148,6 +148,69 @@ def table_columns(cursor, schema: str, table: str) -> dict[str, str]:
     return {row[0]: row[1] for row in cursor.fetchall()}
 
 
+def normalize_bucket_config(row: dict[str, Any]) -> dict[str, Any]:
+    allowed = row.get("allowed_mime_types")
+    if allowed is not None and not isinstance(allowed, list):
+        raise RuntimeError("Storage bucket allowed_mime_types is malformed.")
+    limit = row.get("file_size_limit")
+    return {
+        "id": str(row.get("id", "")),
+        "name": str(row.get("name", "")),
+        "public": bool(row.get("public", False)),
+        "file_size_limit": None if limit is None else int(limit),
+        "allowed_mime_types": None if allowed is None else sorted(str(item) for item in allowed),
+    }
+
+
+def validate_storage_object_inventory(
+    source_objects: list[dict[str, Any]],
+    restored_rows: list[tuple[str, str, Any]],
+) -> None:
+    expected: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in source_objects:
+        bucket = item.get("bucket_id")
+        name = item.get("name")
+        metadata = item.get("metadata") or {}
+        if not isinstance(bucket, str) or not isinstance(name, str) or not isinstance(metadata, dict):
+            raise RuntimeError("Source Storage object inventory contains malformed metadata.")
+        key = (bucket, name)
+        if key in expected:
+            raise RuntimeError("Source Storage object inventory contains duplicate object keys.")
+        expected[key] = metadata
+
+    restored: dict[tuple[str, str], Any] = {}
+    for bucket, name, metadata in restored_rows:
+        key = (str(bucket), str(name))
+        if key in restored:
+            raise RuntimeError("Restored Storage object inventory contains duplicate object keys.")
+        restored[key] = metadata if isinstance(metadata, dict) else {}
+
+    missing = sorted(set(expected) - set(restored))
+    extra = sorted(set(restored) - set(expected))
+    if missing or extra:
+        raise RuntimeError(
+            f"Restored Storage object key set differs from source (missing={missing}, extra={extra})."
+        )
+
+    for key, source_metadata in expected.items():
+        target_metadata = restored[key]
+        for field in ("size", "mimetype", "cacheControl"):
+            expected_value = source_metadata.get(field)
+            if expected_value is None:
+                continue
+            actual_value = target_metadata.get(field)
+            if field == "size":
+                expected_value = int(expected_value)
+                actual_value = None if actual_value is None else int(actual_value)
+            else:
+                expected_value = str(expected_value)
+                actual_value = None if actual_value is None else str(actual_value)
+            if actual_value != expected_value:
+                raise RuntimeError(
+                    f"Restored Storage object {key[0]}/{key[1]} metadata mismatch for {field}."
+                )
+
+
 def restore_buckets(conn, source_buckets: list[dict[str, Any]]) -> None:
     with conn.cursor() as cursor:
         columns = table_columns(cursor, "storage", "buckets")
@@ -295,6 +358,9 @@ def upload_and_verify_objects(
         content_type = expected_metadata.get("mimetype") or "application/octet-stream"
         object_url = f"{api_url.rstrip('/')}/storage/v1/object/{quote(bucket, safe='')}/{quote(name, safe='/')}"
         headers = {**base_headers, "Content-Type": str(content_type)}
+        cache_control = expected_metadata.get("cacheControl")
+        if cache_control is not None:
+            headers["Cache-Control"] = str(cache_control)
         with source_path.open("rb") as handle:
             response = session.post(object_url, headers=headers, data=handle, timeout=(15, 600))
         if response.status_code not in {200, 201}:
@@ -691,13 +757,27 @@ def main() -> int:
         if restored_bucket_count != len(source_buckets):
             raise RuntimeError("Restored Storage bucket count does not match source.")
         with conn.cursor() as cursor:
-            cursor.execute("SELECT id, public FROM storage.buckets")
-            restored_bucket_privacy = {row[0]: row[1] for row in cursor.fetchall()}
-        expected_bucket_privacy = {
-            row["id"]: bool(row.get("public", False)) for row in source_buckets
+            cursor.execute(
+                "SELECT id, name, public, file_size_limit, allowed_mime_types FROM storage.buckets"
+            )
+            restored_bucket_rows = [
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "public": row[2],
+                    "file_size_limit": row[3],
+                    "allowed_mime_types": row[4],
+                }
+                for row in cursor.fetchall()
+            ]
+        expected_bucket_config = {
+            row["id"]: normalize_bucket_config(row) for row in source_buckets
         }
-        if restored_bucket_privacy != expected_bucket_privacy:
-            raise RuntimeError("Restored Storage bucket privacy flags do not match source.")
+        restored_bucket_config = {
+            row["id"]: normalize_bucket_config(row) for row in restored_bucket_rows
+        }
+        if restored_bucket_config != expected_bucket_config:
+            raise RuntimeError("Restored Storage bucket privacy, size limit, or MIME allowlist differs from source.")
         if restored_policy_count != len(source_policies):
             raise RuntimeError("Restored Storage policy count does not match source.")
 
@@ -714,6 +794,9 @@ def main() -> int:
             restored_object_count = cursor.fetchone()[0]
             if restored_object_count != len(source_objects):
                 raise RuntimeError("Restored Storage object metadata count does not match source.")
+            cursor.execute("SELECT bucket_id, name, metadata FROM storage.objects")
+            restored_object_rows = cursor.fetchall()
+            validate_storage_object_inventory(source_objects, restored_object_rows)
             cursor.execute("SELECT count(*) FROM auth.users")
             if cursor.fetchone()[0] != 0:
                 raise RuntimeError("Backup restore unexpectedly populated Auth users despite zero-row guard.")
