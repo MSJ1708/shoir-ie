@@ -29,7 +29,7 @@ jobs:
       SHOIR_RECOVERY_S3_BUCKET: ${{ secrets.SHOIR_RECOVERY_S3_BUCKET }}
       SHOIR_RECOVERY_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
       SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
-      SHOIR_BACKUP_AGE_IDENTITY: ${{ secrets.SHOIR_BACKUP_AGE_IDENTITY }}
+      SHOIR_BACKUP_AGE_RESTORE_IDENTITY: ${{ secrets.SHOIR_BACKUP_AGE_RESTORE_IDENTITY }}
       SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
       SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
     steps:
@@ -86,7 +86,7 @@ jobs:
                   raise SystemExit(f"{name} must contain at least 32 characters.")
           if os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD"] == os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"]:
               raise SystemExit("The rclone crypt passwords must be different.")
-          identity = os.environ.get("SHOIR_BACKUP_AGE_IDENTITY", "")
+          identity = os.environ.get("SHOIR_BACKUP_AGE_RESTORE_IDENTITY", "")
           if "AGE-SECRET-KEY-1" not in identity:
               raise SystemExit("Missing valid-format private age identity in the protected restore environment.")
 
@@ -145,7 +145,7 @@ jobs:
 
           (cd "$backup_dir" && sha256sum --check database-bundle.tar.gz.age.sha256)
           identity_file="$RUNNER_TEMP/shoir-staging-age-identity.txt"
-          printf '%s\n' "$SHOIR_BACKUP_AGE_IDENTITY" > "$identity_file"
+          printf '%s\n' "$SHOIR_BACKUP_AGE_RESTORE_IDENTITY" > "$identity_file"
           chmod 600 "$identity_file"
           age --decrypt --identity "$identity_file" \
             --output "$backup_dir/database-bundle.tar.gz" \
