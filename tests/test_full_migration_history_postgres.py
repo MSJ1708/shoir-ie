@@ -158,13 +158,17 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             if migration.name.split("_", 1)[0] < "20261021130000"
         ]
         assert base_migrations, "No pre-referral schema migrations were found."
+        # Migration files own explicit BEGIN/COMMIT boundaries. Run scripts
+        # in autocommit mode so psycopg2 does not implicitly open an outer
+        # transaction before a migration's own BEGIN statement.
+        target.autocommit = True
         for migration in base_migrations:
             sql = migration.read_text(encoding="utf-8")
             if not sql.strip():
                 pytest.fail(f"Migration file is empty: {migration.name}")
             with target.cursor() as cursor:
                 cursor.execute(sql)
-            target.commit()
+        target.autocommit = False
 
         with target.cursor() as cursor:
             cursor.executemany(
@@ -215,9 +219,11 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
         )[0]
 
         safe_migration = MIGRATIONS / "20261105101231_safe_beta_legal_referrals_20261105.sql"
+        # This SQL file has its own transaction boundary too.
+        target.autocommit = True
         with target.cursor() as cursor:
             cursor.execute(safe_migration.read_text(encoding="utf-8"))
-        target.commit()
+        target.autocommit = False
 
         after = _fetchone(
             target,
@@ -369,13 +375,16 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 )
             target.commit()
 
+            # Versioned migration scripts may include explicit transactions.
+            # Do not nest those in psycopg2's implicit transaction.
+            target.autocommit = True
             for migration in migration_files:
                 sql = migration.read_text(encoding="utf-8")
                 if not sql.strip():
                     pytest.fail(f"Migration file is empty: {migration.name}")
                 with target.cursor() as cursor:
                     cursor.execute(sql)
-                target.commit()
+            target.autocommit = False
 
             # Required schema objects and the correct versioned function contracts.
             expected_tables = {
