@@ -3,9 +3,6 @@ name: Production v9 compatibility security backport
 on:
   pull_request:
     branches: ["main", "staging-e2e-20261019"]
-    paths:
-      - "supabase/production-backports/shoir-persistence-v9/**"
-      - ".github/workflows/production-v9-security-backport.yml"
   push:
     branches: ["main", "staging-e2e-20261019"]
     paths:
