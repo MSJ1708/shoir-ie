@@ -9,7 +9,9 @@ from scripts.staging_restore_rehearsal import (
     load_objects,
     parse_utc,
     safe_object_path,
+    normalize_bucket_config,
     validate_migration_history,
+    validate_storage_object_inventory,
 )
 
 
@@ -154,3 +156,96 @@ def test_validate_migration_history_rejects_duplicate_ledger_versions(tmp_path: 
 
     with pytest.raises(RuntimeError, match="Duplicate source migration"):
         validate_migration_history(history, migration_dir, expected_count=2)
+
+
+def test_normalize_bucket_config_preserves_privacy_limits_and_mime_allowlist() -> None:
+    source = {
+        "id": "private",
+        "name": "private",
+        "public": False,
+        "file_size_limit": 524288,
+        "allowed_mime_types": ["image/jpeg", "application/pdf"],
+    }
+    restored = {**source, "allowed_mime_types": ["application/pdf", "image/jpeg"]}
+
+    assert normalize_bucket_config(source) == normalize_bucket_config(restored)
+
+
+def test_normalize_bucket_config_rejects_malformed_mime_allowlist() -> None:
+    with pytest.raises(RuntimeError, match="allowed_mime_types"):
+        normalize_bucket_config(
+            {
+                "id": "private",
+                "name": "private",
+                "public": False,
+                "file_size_limit": 524288,
+                "allowed_mime_types": "image/jpeg",
+            }
+        )
+
+
+def test_validate_storage_object_inventory_checks_exact_keys_and_metadata() -> None:
+    source = [
+        {
+            "bucket_id": "private",
+            "name": "renewals/proof.jpg",
+            "metadata": {
+                "size": 1234,
+                "mimetype": "image/jpeg",
+                "cacheControl": "max-age=300",
+            },
+        }
+    ]
+    restored = [
+        (
+            "private",
+            "renewals/proof.jpg",
+            {
+                "size": 1234,
+                "mimetype": "image/jpeg",
+                "cacheControl": "max-age=300",
+            },
+        )
+    ]
+
+    validate_storage_object_inventory(source, restored)
+
+
+def test_validate_storage_object_inventory_rejects_wrong_key_set() -> None:
+    source = [
+        {
+            "bucket_id": "private",
+            "name": "expected.jpg",
+            "metadata": {"size": 12, "mimetype": "image/jpeg"},
+        }
+    ]
+    restored = [("private", "unexpected.jpg", {"size": 12, "mimetype": "image/jpeg"})]
+
+    with pytest.raises(RuntimeError, match="key set differs"):
+        validate_storage_object_inventory(source, restored)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("size", 99),
+        ("mimetype", "application/octet-stream"),
+        ("cacheControl", "max-age=3600"),
+    ],
+)
+def test_validate_storage_object_inventory_rejects_metadata_drift(
+    field: str, bad_value: object
+) -> None:
+    source_metadata = {
+        "size": 12,
+        "mimetype": "image/jpeg",
+        "cacheControl": "max-age=300",
+    }
+    restored_metadata = dict(source_metadata)
+    restored_metadata[field] = bad_value
+
+    with pytest.raises(RuntimeError, match="metadata mismatch"):
+        validate_storage_object_inventory(
+            [{"bucket_id": "private", "name": "proof.jpg", "metadata": source_metadata}],
+            [("private", "proof.jpg", restored_metadata)],
+        )
