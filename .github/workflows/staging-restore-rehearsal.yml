@@ -194,13 +194,15 @@ jobs:
               raise SystemExit("Backup manifest belongs to a different project.")
           if manifest.get("auth_data_exported") is not False or manifest.get("auth_non_migration_rows") != 0:
               raise SystemExit("Backup does not prove the source Auth zero-row guard passed.")
+          if int(manifest.get("migration_history_count", -1)) != int(manifest.get("source_migration_count", -2)):
+              raise SystemExit("Backup manifest migration history counters do not agree.")
           checksum = (root / "database-bundle.tar.gz.age.sha256").read_text(encoding="utf-8").split()[0]
           if manifest.get("database_archive_sha256") != checksum:
               raise SystemExit("Archive checksum does not match the signed-off manifest digest.")
           for name in (
               "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
               "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
-              "database-contract.json",
+              "database-contract.json", "migration-history.json",
           ):
               if not (root / "decrypted" / name).is_file():
                   raise SystemExit(f"Decrypted backup is missing {name}.")
