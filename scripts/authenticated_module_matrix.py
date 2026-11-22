@@ -290,6 +290,23 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     return frame
 
 
+def authenticated_surface_issue(frame) -> str:
+    """Return a sanitized explanation when the app has fallen out of its authenticated shell."""
+    try:
+        body = frame.locator("body").inner_text(timeout=3_000).casefold()
+    except Exception:
+        return "The authenticated page could not be read after a Streamlit rerun."
+    if "your 30-day subscription has expired" in body or "subscription_expired" in body:
+        return (
+            "The UI returned to the expired-subscription screen even though the direct "
+            "staging Edge login preflight accepted this account. The app is likely using "
+            "a stale local subscription-expiry cache; deploy the candidate server-expiry fix."
+        )
+    if "sign in to your workspace" in body and "lock / logout workspace" not in body:
+        return "The app returned to the unauthenticated sign-in screen before module traversal completed."
+    return ""
+
+
 def route_module(page, frame, module_name: str, account_class: str) -> dict[str, Any]:
     case: dict[str, Any] = {
         "case_id": f"MODULE-ROUTE-{account_class.upper()}",
@@ -303,6 +320,9 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
         "failure_reason": "",
     }
     try:
+        surface_issue = authenticated_surface_issue(frame)
+        if surface_issue:
+            raise RuntimeError(surface_issue)
         search = frame.get_by_placeholder(MODULE_SEARCH)
         main = frame.get_by_role("main")
         active_text = ""
@@ -460,8 +480,30 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
             return
 
         for row in rows:
+            surface_issue = authenticated_surface_issue(frame)
+            if surface_issue:
+                cases.append({
+                    "case_id": f"MODULE-SESSION-LOST-{account_class.upper()}",
+                    "module_name": None,
+                    "account_class": account_class,
+                    "status": "FAIL",
+                    "failure_reason": surface_issue,
+                })
+                break
             module_name = row["module_name"].strip()
-            cases.append(route_module(page, frame, module_name, account_class))
+            route_case = route_module(page, frame, module_name, account_class)
+            cases.append(route_case)
+            if route_case.get("status") != "PASS":
+                surface_issue = authenticated_surface_issue(frame)
+                if surface_issue:
+                    cases.append({
+                        "case_id": f"MODULE-SESSION-LOST-{account_class.upper()}",
+                        "module_name": None,
+                        "account_class": account_class,
+                        "status": "FAIL",
+                        "failure_reason": surface_issue,
+                    })
+                    break
         if page_errors:
             cases.append({
                 "case_id": f"MODULE-JS-{account_class.upper()}",
@@ -484,6 +526,12 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
             try:
                 # Let the last module rerun finish before dispatching logout.
                 page.wait_for_timeout(1_000)
+                surface_issue = authenticated_surface_issue(frame)
+                if surface_issue:
+                    raise RuntimeError(
+                        "Logout could not be attempted because the app had already left "
+                        f"the authenticated surface: {surface_issue}"
+                    )
                 visible_logout_button(frame).click(timeout=15_000)
                 try:
                     frame.get_by_text(
