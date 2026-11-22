@@ -144,12 +144,13 @@ jobs:
           age --decrypt --identity "$identity_file" \
             --output "$backup_dir/database-bundle.tar.gz" \
             "$backup_dir/database-bundle.tar.gz.age"
-          python - <<'PY'
+          BACKUP_DIR="$backup_dir" python - <<'PY'
+          import os
           import tarfile
           from pathlib import Path
 
-          source = Path("$backup_dir/database-bundle.tar.gz")
-          target = Path("$backup_dir/decrypted")
+          source = Path(os.environ["BACKUP_DIR"]) / "database-bundle.tar.gz"
+          target = Path(os.environ["BACKUP_DIR"]) / "decrypted"
           allowed = {
               "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
               "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
