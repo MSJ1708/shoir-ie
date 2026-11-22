@@ -65,36 +65,45 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def is_publishable_key(key: str) -> bool:
-    key = key.strip()
-    if key.startswith("sb_publishable_"):
-        return len(key) > len("sb_publishable_")
-    parts = key.split(".")
+def _jwt_claims(key: str) -> dict:
+    """Decode untrusted legacy JWT claims without accepting a foreign project."""
+    parts = str(key or "").strip().split(".")
     if len(parts) != 3:
-        return False
+        return {}
     try:
         import base64
         payload = parts[1] + "=" * (-len(parts[1]) % 4)
         claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
-    except Exception:
+    except (ValueError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _safe_api_key_text(key: str) -> bool:
+    value = str(key or "").strip()
+    return bool(value) and value.isascii() and all(33 <= ord(char) <= 126 for char in value)
+
+
+def is_publishable_key(key: str) -> bool:
+    key = str(key or "").strip()
+    if not _safe_api_key_text(key):
         return False
-    return isinstance(claims, dict) and claims.get("role") == "anon"
+    if key.startswith("sb_publishable_"):
+        return len(key) > len("sb_publishable_")
+    claims = _jwt_claims(key)
+    return claims.get("role") == "anon" and claims.get("ref") == STAGING_PROJECT_REF
 
 
 def is_service_role_key(key: str) -> bool:
-    key = key.strip()
+    key = str(key or "").strip()
+    if not _safe_api_key_text(key):
+        return False
     if key.startswith("sb_secret_"):
+        # New secret keys are project-scoped by Supabase. Requests are still
+        # sent only to PROJECT_URL, which is hard-pinned to staging.
         return len(key) > len("sb_secret_")
-    parts = key.split(".")
-    if len(parts) != 3:
-        return False
-    try:
-        import base64
-        payload = parts[1] + "=" * (-len(parts[1]) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
-    except Exception:
-        return False
-    return isinstance(claims, dict) and claims.get("role") == "service_role"
+    claims = _jwt_claims(key)
+    return claims.get("role") == "service_role" and claims.get("ref") == STAGING_PROJECT_REF
 
 
 def _read_response(req: Request) -> tuple[int, object]:
@@ -156,31 +165,61 @@ def rest_call(service_key: str, method: str, path: str, payload: dict | None = N
 
 
 def _write_private_json(path: Path, payload: dict, *, exclusive: bool = False) -> None:
-    """Atomically save credentials with owner-only permissions."""
-    path = path.resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(
-        path,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL if exclusive else os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        0o600,
+    """Atomically save credentials with owner-only permissions.
+
+    The temporary file is created beside the destination so replacement stays
+    on the same filesystem. Exclusive creation uses an atomic hard link and
+    cannot overwrite an existing credential file. Symlink destinations fail
+    closed before any write.
+    """
+    requested = Path(path).expanduser()
+    if requested.is_symlink():
+        raise OSError("Refusing to write staging credentials through a symbolic link.")
+    parent = requested.parent.resolve()
+    parent.mkdir(parents=True, exist_ok=True)
+    destination = parent / requested.name
+    if destination.is_symlink():
+        raise OSError("Refusing to replace a symbolic-link staging credential file.")
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=parent,
     )
-    temp_name = None
+    descriptor_open = True
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor_open = False
             json.dump(payload, stream, indent=2)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+
+        if exclusive:
+            # Atomic and fails when the destination already exists.
+            os.link(temporary_name, destination)
+            os.unlink(temporary_name)
+        else:
+            os.replace(temporary_name, destination)
+        temporary_name = ""
         try:
-            path.chmod(0o600)
+            destination.chmod(0o600)
         except OSError:
-            pass
-    except Exception:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+            if os.name != "nt":
+                raise
+    finally:
+        if descriptor_open:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_name:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
 
 
 def _expected_accounts() -> list[dict[str, str]]:
@@ -191,6 +230,7 @@ def _expected_accounts() -> list[dict[str, str]]:
         ("expired", "shoir-e2e-expired", STARTER_TIER),
         ("module", "shoir-e2e-module", ACTIVE_TIER),
         ("research_module", "shoir-e2e-research", RESEARCH_TIER),
+        ("inactive", "shoir-e2e-inactive", STARTER_TIER),
     ]
     result = []
     for key, username, tier in specs:
@@ -261,12 +301,13 @@ def provision() -> int:
         expected_names = {
             "shoir-e2e-active", "shoir-e2e-second", "shoir-e2e-starter",
             "shoir-e2e-expired", "shoir-e2e-module", "shoir-e2e-research",
+            "shoir-e2e-inactive",
         }
         if not isinstance(candidate_accounts, list) or {
             str(a.get("username", "")).casefold() for a in candidate_accounts
             if isinstance(a, dict)
         } != expected_names:
-            raise RuntimeError("The existing credential file does not contain exactly the six expected staging identities.")
+            raise RuntimeError("The existing credential file does not contain exactly the seven expected staging identities.")
         safe_resume_statuses = {"NOT_STARTED", "REGISTRATION_FAILED"}
         for account in candidate_accounts:
             if not isinstance(account, dict) or account.get("status") not in safe_resume_statuses or "request_id" in account:
@@ -306,8 +347,8 @@ def provision() -> int:
         raise ValueError("Administrator password cannot be empty.")
 
     accounts = existing_document["accounts"] if existing_document is not None else _expected_accounts()
-    print("This will create six disposable staging identities through registration and admin approval.")
-    print("It refuses to reuse matching identities. The expired account is a synthetic test fixture.")
+    print("This will create seven disposable staging identities through registration and admin approval.")
+    print("It refuses to reuse matching identities. The expired and disabled accounts are synthetic test fixtures.")
     confirmation_phrase = (
         f"RESUME SHOIR STAGING E2E ACCOUNTS {STAGING_PROJECT_REF}"
         if resume_existing
@@ -346,6 +387,7 @@ def provision() -> int:
                 "expired": ["SHOIR_E2E_EXPIRED_USERNAME", "SHOIR_E2E_EXPIRED_PASSWORD"],
                 "module": ["SHOIR_E2E_MODULE_USERNAME", "SHOIR_E2E_MODULE_PASSWORD"],
                 "research_module": ["SHOIR_E2E_RESEARCH_MODULE_USERNAME", "SHOIR_E2E_RESEARCH_MODULE_PASSWORD"],
+                "inactive": ["SHOIR_E2E_INACTIVE_USERNAME", "SHOIR_E2E_INACTIVE_PASSWORD"],
             },
             "results": [],
         }
@@ -402,15 +444,49 @@ def provision() -> int:
         expired["status"] = "EXPIRED_FIXTURE_SET"
         _write_private_json(OUTPUT_PATH, document)
 
-        # Validate the login/tier contract for the five active accounts and the
-        # renewal-only contract for the intentionally expired account.
+        # Disable only the dedicated inactive fixture. This is a staging-only
+        # server-key mutation against one exact allowlisted test username; the
+        # account itself was created and approved through the normal lifecycle.
+        inactive = next(account for account in accounts if account["secret_prefix"] == "inactive")
+        inactive_filter = quote(inactive["username"], safe="")
+        inactive_status, inactive_rows = rest_call(
+            service_key,
+            "PATCH",
+            f"shoir_accounts?username_lc=eq.{inactive_filter}",
+            {"active": False, "updated_at": datetime.now(timezone.utc).isoformat()},
+        )
+        if (
+            inactive_status not in (200, 204)
+            or not isinstance(inactive_rows, list)
+            or len(inactive_rows) != 1
+            or inactive_rows[0].get("username_lc") != inactive["username"]
+            or inactive_rows[0].get("role") != "User"
+            or inactive_rows[0].get("active") is not False
+        ):
+            _set_status(document, inactive, "INACTIVE_FIXTURE_FAILED")
+            raise RuntimeError("Could not confirm the dedicated inactive staging fixture; inspect staging before retrying.")
+        inactive["status"] = "INACTIVE_FIXTURE_SET"
+        _write_private_json(OUTPUT_PATH, document)
+
+        # Validate five enabled, non-expired accounts, the expired renewal-only
+        # account, and the disabled-account denial contract.
         for account in accounts:
             login_status, auth = edge_call(
                 publishable_key,
                 "login",
                 {"username": account["username"], "password": account["password"]},
             )
-            if account["secret_prefix"] == "expired":
+            if account["secret_prefix"] == "inactive":
+                valid = (
+                    login_status == 401
+                    and auth.get("error") == "Invalid username or password."
+                    and not auth.get("token")
+                )
+                if not valid:
+                    _set_status(document, account, "INACTIVE_LOGIN_VALIDATION_FAILED")
+                    raise RuntimeError("Inactive-account login denial failed in staging; inspect the evidence.")
+                account["status"] = "VERIFIED_INACTIVE_DENIED"
+            elif account["secret_prefix"] == "expired":
                 valid = (
                     login_status == 403
                     and auth.get("error") == "SUBSCRIPTION_EXPIRED"
@@ -462,7 +538,7 @@ def provision() -> int:
             OUTPUT_PATH.chmod(0o600)
         except OSError:
             pass
-        print("PASS: six staging identities were created through registration/approval and their login/expiry contracts were verified.")
+        print("PASS: seven staging identities were created through registration/approval and their active/expired/inactive login contracts were verified.")
         print(f"Private credentials file written: {OUTPUT_PATH.resolve()}")
         print("No password, token, key, or response body was printed.")
         print("Copy username/password values into the mapped GitHub Actions secrets, then keep or securely delete the file.")

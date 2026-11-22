@@ -54,8 +54,8 @@ def test_renewal_sessions_are_short_lived_and_scoped():
 
 
 def test_workspace_reads_and_writes_require_workspace_scope():
-    assert _source_contract_contains(EDGE_SOURCE, 'if(action==="workspace_load"){await getSession(String(body.token),String(body.username));')
-    assert _source_contract_contains(EDGE_SOURCE, 'if(action==="workspace_save"){await getSession(String(body.token),String(body.username));')
+    assert _source_contract_contains(EDGE_SOURCE, 'if(action==="workspace_load"){const actor=await getSession(String(body.token),String(body.username),"workspace");')
+    assert _source_contract_contains(EDGE_SOURCE, 'if(action==="workspace_save"){const actor=await getSession(String(body.token),String(body.username),"workspace");')
     assert _source_contract_contains(EDGE_SOURCE, 'async function adminSession(username:string,token:string){const row=await getSession(token,username);')
 
 

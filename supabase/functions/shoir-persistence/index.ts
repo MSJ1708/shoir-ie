@@ -1,15 +1,26 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
+  classifyDatasetStorageSweepPath,
   corsHeadersForOrigin,
   hasCanonicalMasterAdminInvariant,
+  inspectCsvShape,
+  isAllowedApiMethod,
   isAllowedBrowserOrigin,
+  isDatasetStorageSweepObjectOlderThan,
   normalizeWorkspaceStateJson,
+  platformTierAllows,
   publicErrorFor,
   readBoundedJsonObject,
   sessionEntitlementFields,
   shouldAutoAssignReferralCode,
 } from "./security.ts";
+import {
+  escapePostgrestLikeLiteral,
+  MAX_OIDC_ID_TOKEN_CHARS,
+  readOidcVerifierConfig,
+  verifyOidcIdToken,
+} from "./oidc.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -22,6 +33,28 @@ const PRIVACY_POLICY_VERSION = "2026-10-21-v1";
 const REFUND_POLICY_VERSION = "2026-10-23-v2";
 const COOKIE_POLICY_VERSION = "2026-10-21-v1";
 // Keep these values aligned with the public notices and the matching SQL migration.
+
+async function renewDatasetStorageLifecycleLease(
+  workspaceKey: string,
+  datasetId: string,
+  leaseToken: string,
+  leaseOperation: "finalize" | "register" | "sweep",
+  actorUsernameLc: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc(
+    "shoir_dataset_storage_lease_renew",
+    {
+      p_workspace_key: workspaceKey,
+      p_dataset_id: datasetId,
+      p_lease_token: leaseToken,
+      p_lease_operation: leaseOperation,
+      p_actor_username_lc: actorUsernameLc,
+      p_lease_seconds: 600,
+    },
+  );
+  if (error) throw error;
+  return data === true;
+}
 
 async function ensurePaymentProofBucket() {
   const { data, error } = await supabase.storage.getBucket(
@@ -132,7 +165,7 @@ function response(
 ) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: corsHeadersForOrigin(origin),
+    headers: corsHeadersForOrigin(origin, SUPABASE_URL),
   });
 }
 function hexToBytes(hex: string) {
@@ -243,6 +276,14 @@ async function getSession(
   }
   const row = await getAccount(data.username_lc);
   if (!row || row.active === false) throw new Error("Account is inactive.");
+  // Re-check the immutable reserved-administrator invariant for every
+  // already-issued session, not only at the moment of login.
+  if (
+    row.username_lc === "sho" &&
+    !hasCanonicalMasterAdminInvariant(row)
+  ) {
+    throw new Error("Administrator account requires manual security review.");
+  }
   if (
     requiredScope === "workspace" &&
     !(row.username_lc === "sho" && row.role === "Enterprise Admin") &&
@@ -250,6 +291,59 @@ async function getSession(
   ) throw new Error("SUBSCRIPTION_EXPIRED");
   return row;
 }
+function datasetEntitlementDenied(row: Record<string, unknown>): boolean {
+  return !platformTierAllows(row.tier, "Professional");
+}
+
+function datasetEntitlementDenial(
+  row: Record<string, unknown>,
+): {
+  error: string;
+  required_tier: string;
+  current_tier: string;
+} | null {
+  if (!datasetEntitlementDenied(row)) return null;
+  return {
+    error: "FEATURE_REQUIRES_PROFESSIONAL",
+    required_tier: "Professional",
+    current_tier: String(row.tier || "Starter"),
+  };
+}
+
+async function datasetEntitlementDenialForRequest(
+  row: Record<string, unknown>,
+  body: Record<string, unknown>,
+): Promise<
+  {
+    error: string;
+    required_tier: string;
+    current_tier: string;
+  } | null
+> {
+  const organizationId = String(body.organization_id || "").trim();
+  const workspaceId = String(body.organization_workspace_id || "").trim();
+  if (organizationId || workspaceId) {
+    if (!organizationId || !workspaceId) {
+      return {
+        error: "ORGANIZATION_WORKSPACE_ACCESS_DENIED",
+        required_tier: "Active Enterprise organization membership",
+        current_tier: String(row.tier || "Starter"),
+      };
+    }
+    try {
+      await organizationForActor(String(row.username_lc || ""), organizationId);
+      return null;
+    } catch {
+      return {
+        error: "ORGANIZATION_WORKSPACE_ACCESS_DENIED",
+        required_tier: "Active Enterprise organization membership",
+        current_tier: String(row.tier || "Starter"),
+      };
+    }
+  }
+  return datasetEntitlementDenial(row);
+}
+
 async function adminSession(username: string, token: string) {
   const row = await getSession(token, username);
   if (row.username_lc !== "sho" || row.role !== "Enterprise Admin") {
@@ -314,9 +408,346 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
   return keys;
 }
 
+type LoginThrottleBucket = {
+  key_hash: string;
+  max_attempts: number;
+  reset_on_success: boolean;
+};
+
+async function loginIpThrottleBuckets(
+  req: Request,
+): Promise<LoginThrottleBucket[]> {
+  const keys: LoginThrottleBucket[] = [];
+  // Trust only the reverse-proxy-populated Cloudflare IP header; never accept a
+  // client-controlled X-Forwarded-For value as the source of an IP limit.
+  const clientIp = String(req.headers.get("cf-connecting-ip") || "").trim();
+  if (clientIp && clientIp.length <= 128) {
+    keys.push({
+      key_hash: await loginThrottleKey("ip:" + clientIp),
+      max_attempts: 30,
+      reset_on_success: false,
+    });
+  }
+  return keys;
+}
+
+type OidcAuditOutcome = "success" | "denied" | "expired" | "error";
+
+async function writeOidcAuditEvent(event: {
+  event_type: "oidc_login";
+  outcome: OidcAuditOutcome;
+  actor_username_lc?: string | null;
+  provider_issuer?: string | null;
+  subject_sha256?: string | null;
+  id_token_sha256?: string | null;
+  details?: Record<string, unknown>;
+}) {
+  const { error } = await supabase.from("shoir_security_audit_events").insert({
+    event_type: event.event_type,
+    outcome: event.outcome,
+    actor_username_lc: event.actor_username_lc ?? null,
+    provider_issuer: event.provider_issuer ?? null,
+    subject_sha256: event.subject_sha256 ?? null,
+    id_token_sha256: event.id_token_sha256 ?? null,
+    details: event.details ?? {},
+  });
+  return error;
+}
+
+async function revokeJustCreatedSession(token: string, usernameLc: string) {
+  const tokenHash = await sha256Hex(token);
+  const { error } = await supabase.from("shoir_sessions").delete()
+    .eq("token_hash", tokenHash)
+    .eq("username_lc", usernameLc);
+  if (error) throw new Error("Could not revoke the un-audited session.");
+}
+
+function isUniqueConstraintError(error: { code?: string } | null): boolean {
+  return error?.code === "23505";
+}
+
+async function findAccountByVerifiedOidcEmail(email: string) {
+  const pattern = escapePostgrestLikeLiteral(email);
+  const { data, error } = await supabase.from("shoir_accounts").select(
+    "username,username_lc,role,tier,email,active,subscription_expires_at",
+  ).ilike("email", pattern).limit(5);
+  if (error) throw new Error("The account directory is unavailable.");
+  const matches = (data || []).filter((row) =>
+    typeof row.email === "string" && row.email.trim().toLowerCase() === email
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function recordOidcDenial(
+  issuer: string,
+  reason: string,
+  subject: string | null = null,
+  usernameLc: string | null = null,
+) {
+  try {
+    const error = await writeOidcAuditEvent({
+      event_type: "oidc_login",
+      outcome: "denied",
+      provider_issuer: issuer,
+      subject_sha256: subject ? await sha256Hex(subject) : null,
+      actor_username_lc: usernameLc,
+      details: { reason },
+    });
+    if (error) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const PLATFORM_RECORD_TYPES = new Set([
+  "asset",
+  "dataset",
+  "dataset_version",
+  "process",
+  "product",
+  "material",
+  "calculation",
+  "kpi",
+  "scenario",
+  "recommendation",
+  "decision",
+  "project",
+  "action",
+  "document",
+  "workbook",
+  "model",
+  "quality",
+  "maintenance",
+  "energy",
+  "cost",
+  "traceability",
+  "risk",
+  "workflow",
+  "artifact",
+  "canonical_entity",
+  "canonical_relationship",
+  "canonical_event",
+  "twin_asset",
+  "twin_snapshot",
+  "twin_scenario",
+  "connector_health",
+  "job",
+  "knowledge_document",
+  "monitoring_event",
+  "report_provenance",
+  "security_policy",
+  "connector_run",
+  "connector_schedule",
+  "collaboration_item",
+  "monitoring_rule",
+  "cost_baseline",
+  "kpi_definition",
+  "project_record",
+  "work_order",
+  "change_request",
+  "risk_record",
+  "traceability_record",
+  "laboratory_sample",
+  "procurement_record",
+  "spare_part",
+  "shutdown_package",
+  "competency_record",
+]);
+const PLATFORM_SECRET_KEY =
+  /(?:password|passwd|token|secret|api.?key|authorization|cookie|credential|private.?key|national.?id|passport|e.?mail|phone|mobile|birth|\bdob\b|street|postal.?address|home.?address|full.?name|first.?name|last.?name|username|employee.?id|person.?id)/i;
+function validatePlatformPayload(
+  value: unknown,
+  depth = 0,
+): Record<string, unknown> {
+  if (
+    !value || typeof value !== "object" || Array.isArray(value) || depth > 8
+  ) {
+    throw new Error("Platform payload must be a bounded JSON object.");
+  }
+  const encoded = JSON.stringify(value);
+  if (new TextEncoder().encode(encoded).byteLength > 256 * 1024) {
+    throw new Error("Platform payload exceeds the 256 KiB limit.");
+  }
+  const walk = (item: unknown, level: number): void => {
+    if (level > 8) throw new Error("Platform payload nesting is too deep.");
+    if (Array.isArray(item)) {
+      if (item.length > 5000) {
+        throw new Error("Platform payload contains too many items.");
+      }
+      for (const child of item) walk(child, level + 1);
+    } else if (item && typeof item === "object") {
+      for (
+        const [key, child] of Object.entries(item as Record<string, unknown>)
+      ) {
+        if (PLATFORM_SECRET_KEY.test(key)) {
+          throw new Error(
+            "Credential or sensitive identifier fields are not accepted in platform records.",
+          );
+        }
+        walk(child, level + 1);
+      }
+    } else if (typeof item === "number" && !Number.isFinite(item)) {
+      throw new Error("Platform payload contains a non-finite number.");
+    }
+  };
+  walk(value, depth);
+  return value as Record<string, unknown>;
+}
+function stablePlatformJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return "[" + value.map(stablePlatformJson).join(",") + "]";
+  }
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return "{" + Object.keys(object).sort().map((key) =>
+      JSON.stringify(key) + ":" + stablePlatformJson(object[key])
+    ).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return bytesToHex(digest);
+}
+
+async function sha256Bytes(value: Uint8Array): Promise<string> {
+  const bytes = new Uint8Array(value.byteLength);
+  bytes.set(value);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    bytes.buffer as ArrayBuffer,
+  );
+  return bytesToHex(digest);
+}
+async function platformWorkspaceKey(
+  username: string,
+  workspace: string,
+): Promise<string> {
+  const user = username.trim().toLowerCase();
+  const scope = workspace.trim().toLowerCase();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(scope)) {
+    throw new Error("Workspace identifier is invalid.");
+  }
+  return (await sha256Hex(user + "::" + scope)).slice(0, 32);
+}
+
+const ORGANIZATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function validatedOrganizationId(value: unknown): string {
+  const id = String(value || "").trim();
+  if (!ORGANIZATION_ID_PATTERN.test(id)) {
+    throw new Error("Organization identifier is invalid.");
+  }
+  return id;
+}
+
+function requireOrganizationTier(row: Record<string, unknown>): void {
+  if (!platformTierAllows(row.tier, "Enterprise")) {
+    throw new Error(
+      "Organization workspaces require an active Enterprise subscription.",
+    );
+  }
+  if (
+    row.active !== true ||
+    isExpired(
+      typeof row.subscription_expires_at === "string"
+        ? row.subscription_expires_at
+        : null,
+    )
+  ) {
+    throw new Error(
+      "The organization owner subscription is inactive or expired.",
+    );
+  }
+}
+
+async function organizationForActor(
+  actor: string,
+  organizationIdValue: unknown,
+  requireManage = false,
+): Promise<{ organization: Record<string, unknown>; role: string }> {
+  const organizationId = validatedOrganizationId(organizationIdValue);
+  const { data: organization, error: organizationError } = await supabase
+    .from("shoir_organizations")
+    .select("organization_id,display_name,org_type,owner_username_lc,status")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (organizationError) throw organizationError;
+  if (!organization || organization.status !== "active") {
+    throw new Error("Active organization was not found.");
+  }
+  const { data: membership, error: membershipError } = await supabase
+    .from("shoir_organization_memberships")
+    .select("role,status")
+    .eq("organization_id", organizationId)
+    .eq("username_lc", actor)
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership || membership.status !== "active") {
+    throw new Error("Active organization membership is required.");
+  }
+  const role = String(membership.role || "");
+  if (requireManage && !["owner", "admin"].includes(role)) {
+    throw new Error("Organization management permission is required.");
+  }
+  if (organization.org_type === "team") {
+    const owner = await getAccount(
+      String(organization.owner_username_lc || ""),
+    );
+    if (!owner) throw new Error("Organization owner account was not found.");
+    requireOrganizationTier(owner as Record<string, unknown>);
+  }
+  return { organization: organization as Record<string, unknown>, role };
+}
+
+async function resolveManagedWorkspaceKey(
+  row: Record<string, unknown>,
+  body: Record<string, unknown>,
+  permission: "read" | "write" | "approve" | "manage",
+): Promise<string> {
+  const organizationId = String(body.organization_id || "").trim();
+  const workspaceId = String(body.organization_workspace_id || "").trim();
+  if (!organizationId && !workspaceId) {
+    return await platformWorkspaceKey(
+      String(row.username_lc || ""),
+      String(body.workspace || "default"),
+    );
+  }
+  if (!organizationId || !workspaceId) {
+    throw new Error(
+      "Both organization_id and organization_workspace_id are required.",
+    );
+  }
+  const organization = await organizationForActor(
+    String(row.username_lc || ""),
+    organizationId,
+  );
+  if (!ORGANIZATION_ID_PATTERN.test(workspaceId)) {
+    throw new Error("Organization workspace identifier is invalid.");
+  }
+  const { data, error } = await supabase.rpc("shoir_org_resolve_workspace", {
+    p_actor: String(row.username_lc || ""),
+    p_organization_id: organizationId,
+    p_workspace_id: workspaceId,
+    p_permission: permission,
+  });
+  if (error) throw new Error("Organization workspace access was denied.");
+  const resolved = Array.isArray(data) ? data[0] : data;
+  const key = String(resolved?.workspace_key || "");
+  if (!/^[0-9a-f]{32}$/.test(key)) {
+    throw new Error("Organization workspace could not be resolved.");
+  }
+  return key;
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
-  if (!isAllowedBrowserOrigin(origin)) {
+  if (!isAllowedBrowserOrigin(origin, SUPABASE_URL)) {
     return new Response(JSON.stringify({ error: "Origin not allowed." }), {
       status: 403,
       headers: {
@@ -330,12 +761,307 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: corsHeadersForOrigin(origin),
+      headers: corsHeadersForOrigin(origin, SUPABASE_URL),
     });
+  }
+  if (!isAllowedApiMethod(req.method)) {
+    return sendResponse({ error: "Method not allowed." }, 405);
   }
   try {
     const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
+    const apiVersion = String(body.api_version || "v1").trim();
+    if (apiVersion !== "v1") {
+      return sendResponse({
+        error: "Unsupported API version.",
+        supported_versions: ["v1"],
+      }, 400);
+    }
+
+    if (action === "oidc_login") {
+      let oidcConfig: ReturnType<typeof readOidcVerifierConfig>;
+      try {
+        oidcConfig = readOidcVerifierConfig();
+      } catch {
+        return sendResponse({
+          error:
+            "Enterprise identity authentication is not correctly configured.",
+        }, 503);
+      }
+      if (!oidcConfig.enabled || !oidcConfig.ready) {
+        return sendResponse({
+          error: "Enterprise identity authentication is not configured.",
+        }, 503);
+      }
+      const idToken = typeof body.id_token === "string" ? body.id_token : "";
+      if (!idToken || idToken.length > MAX_OIDC_ID_TOKEN_CHARS) {
+        return sendResponse(
+          { error: "Invalid identity-provider response." },
+          400,
+        );
+      }
+      // Before token verification, rate-limit only by the trusted edge IP.
+      // Never use a caller-supplied email/display hint as an account throttle key:
+      // an attacker could otherwise lock out another user's identity.
+      let ipThrottleBuckets: LoginThrottleBucket[] = [];
+      try {
+        ipThrottleBuckets = await loginIpThrottleBuckets(req);
+        for (const bucket of ipThrottleBuckets) {
+          if (
+            await checkLoginThrottle(
+              bucket.key_hash,
+              bucket.max_attempts,
+              "attempt",
+            )
+          ) {
+            return sendResponse({
+              error: "Too many sign-in attempts. Please wait and try again.",
+            }, 429);
+          }
+        }
+      } catch {
+        return sendResponse({
+          error:
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
+        }, 503);
+      }
+
+      let identity: Awaited<ReturnType<typeof verifyOidcIdToken>>;
+      try {
+        identity = await verifyOidcIdToken(idToken, oidcConfig);
+      } catch (error) {
+        const reason = typeof error === "object" && error !== null &&
+            "code" in error && typeof error.code === "string"
+          ? error.code
+          : "identity_token_rejected";
+        const recorded = await recordOidcDenial(
+          oidcConfig.issuer,
+          reason.slice(0, 64),
+        );
+        if (!recorded) {
+          return sendResponse({
+            error: "Authentication audit is temporarily unavailable.",
+          }, 503);
+        }
+        return sendResponse({
+          error: "Unable to sign in with the configured identity provider.",
+        }, 401);
+      }
+
+      // The per-identity throttle key is derived only after the JWT has been
+      // independently verified. An unverified browser hint cannot target it.
+      const oidcUserThrottleBucket: LoginThrottleBucket = {
+        key_hash: await loginThrottleKey("user:" + identity.email),
+        max_attempts: 8,
+        reset_on_success: true,
+      };
+      const oidcThrottleBuckets = [
+        ...ipThrottleBuckets,
+        oidcUserThrottleBucket,
+      ];
+      try {
+        if (
+          await checkLoginThrottle(
+            oidcUserThrottleBucket.key_hash,
+            oidcUserThrottleBucket.max_attempts,
+            "attempt",
+          )
+        ) {
+          const recorded = await recordOidcDenial(
+            identity.issuer,
+            "rate_limited",
+            identity.subject,
+          );
+          return sendResponse({
+            error: "Too many sign-in attempts. Please wait and try again.",
+          }, recorded ? 429 : 503);
+        }
+      } catch {
+        return sendResponse({
+          error:
+            "Authentication protection is temporarily unavailable. Please retry shortly.",
+        }, 503);
+      }
+
+      try {
+        const account = await findAccountByVerifiedOidcEmail(identity.email);
+        if (!account || account.active !== true) {
+          const recorded = await recordOidcDenial(
+            identity.issuer,
+            "account_not_found_or_inactive",
+            identity.subject,
+            account && typeof account.username_lc === "string"
+              ? account.username_lc
+              : null,
+          );
+          if (!recorded) {
+            return sendResponse({
+              error: "Authentication audit is temporarily unavailable.",
+            }, 503);
+          }
+          return sendResponse({
+            error: "Unable to sign in with the configured identity provider.",
+          }, 401);
+        }
+
+        const username = String(account.username || "").trim();
+        const usernameLc = String(account.username_lc || username).trim()
+          .toLowerCase();
+        const role = String(account.role || "User");
+        const tier = String(account.tier || "Starter Tier");
+        const email = String(account.email || "");
+        const expiry = account.subscription_expires_at;
+        if (!username || !usernameLc) {
+          const recorded = await recordOidcDenial(
+            identity.issuer,
+            "account_identity_incomplete",
+            identity.subject,
+          );
+          if (!recorded) {
+            return sendResponse({
+              error: "Authentication audit is temporarily unavailable.",
+            }, 503);
+          }
+          return sendResponse({
+            error: "Unable to sign in with the configured identity provider.",
+          }, 401);
+        }
+
+        if (
+          usernameLc === "sho" ||
+          role.trim().toLowerCase() === "enterprise admin"
+        ) {
+          const { data: activeAdmins, error: adminLookupError } = await supabase
+            .from("shoir_accounts")
+            .select("username_lc,role,tier,active,subscription_expires_at")
+            .ilike("role", "Enterprise Admin")
+            .eq("active", true);
+          if (
+            adminLookupError ||
+            !activeAdmins ||
+            activeAdmins.length !== 1 ||
+            activeAdmins[0].username_lc !== "sho" ||
+            !hasCanonicalMasterAdminInvariant(activeAdmins[0]) ||
+            !hasCanonicalMasterAdminInvariant(
+              account as Record<string, unknown>,
+            )
+          ) {
+            const recorded = await recordOidcDenial(
+              identity.issuer,
+              "protected_admin_invariant_failed",
+              identity.subject,
+              usernameLc,
+            );
+            if (!recorded) {
+              return sendResponse({
+                error: "Authentication audit is temporarily unavailable.",
+              }, 503);
+            }
+            return sendResponse({
+              error:
+                "Protected administrator authentication requires manual review.",
+            }, 503);
+          }
+        }
+
+        try {
+          for (const bucket of oidcThrottleBuckets) {
+            if (bucket.reset_on_success) {
+              await checkLoginThrottle(
+                bucket.key_hash,
+                bucket.max_attempts,
+                "clear",
+              );
+            }
+          }
+        } catch {
+          return sendResponse({
+            error:
+              "Authentication protection is temporarily unavailable. Please retry shortly.",
+          }, 503);
+        }
+
+        const expired = usernameLc !== "sho" && isExpired(expiry);
+        const sessionToken = await createSession(
+          usernameLc,
+          expired ? "renewal" : "workspace",
+          expired ? 60 * 60 * 1000 : 8 * 60 * 60 * 1000,
+        );
+        const tokenFingerprint = await sha256Hex(idToken);
+        const auditError = await writeOidcAuditEvent({
+          event_type: "oidc_login",
+          outcome: expired ? "expired" : "success",
+          actor_username_lc: usernameLc,
+          provider_issuer: identity.issuer,
+          subject_sha256: await sha256Hex(identity.subject),
+          id_token_sha256: tokenFingerprint,
+          details: {
+            auth_method: "oidc",
+            mfa_verified: identity.mfaVerified,
+            renewal_only: expired,
+          },
+        });
+        if (auditError) {
+          try {
+            await revokeJustCreatedSession(sessionToken, usernameLc);
+          } catch {
+            // The session token is not returned to the caller if revocation fails.
+          }
+          if (isUniqueConstraintError(auditError)) {
+            const recorded = await recordOidcDenial(
+              identity.issuer,
+              "identity_token_replay",
+              identity.subject,
+              usernameLc,
+            );
+            return sendResponse({
+              error: recorded
+                ? "Unable to sign in with the configured identity provider."
+                : "Authentication audit is temporarily unavailable.",
+            }, recorded ? 401 : 503);
+          }
+          return sendResponse({
+            error: "Authentication audit is temporarily unavailable.",
+          }, 503);
+        }
+
+        if (expired) {
+          return sendResponse({
+            error: "SUBSCRIPTION_EXPIRED",
+            token: sessionToken,
+            username,
+            tier,
+            email,
+            expires_at: expiry,
+            renewal_only: true,
+            auth_method: "oidc",
+            mfa_verified: identity.mfaVerified,
+          }, 403);
+        }
+        return sendResponse({
+          ok: true,
+          token: sessionToken,
+          username,
+          role,
+          tier,
+          email,
+          expires_at: expiry,
+          auth_method: "oidc",
+          mfa_verified: identity.mfaVerified,
+        });
+      } catch {
+        const recorded = await recordOidcDenial(
+          oidcConfig.issuer,
+          "identity_flow_unavailable",
+          identity.subject,
+        );
+        return sendResponse({
+          error: recorded
+            ? "Authentication service is temporarily unavailable."
+            : "Authentication audit is temporarily unavailable.",
+        }, 503);
+      }
+    }
 
     if (action === "login") {
       const username = String(body.username || "").trim(),
@@ -803,12 +1529,1814 @@ Deno.serve(async (req) => {
       return sendResponse({ ok: true, revoked: !!(data && data.length) });
     }
 
+    if (action === "org_list_session") {
+      const username = String(body.username || "").trim();
+      const actor = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const { data, error } = await supabase.from(
+        "shoir_organization_memberships",
+      )
+        .select("organization_id,role,status,joined_at")
+        .eq("username_lc", actor.username_lc)
+        .eq("status", "active")
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      const memberships = data || [];
+      const organizationIds = memberships.map((item) => item.organization_id);
+      if (!organizationIds.length) {
+        return sendResponse({ ok: true, organizations: [] });
+      }
+      const { data: organizations, error: organizationError } = await supabase
+        .from("shoir_organizations")
+        .select(
+          "organization_id,display_name,org_type,owner_username_lc,status",
+        )
+        .in("organization_id", organizationIds)
+        .eq("status", "active")
+        .order("display_name", { ascending: true });
+      if (organizationError) throw organizationError;
+      const byId = new Map((organizations || []).map((item) => [
+        item.organization_id,
+        item,
+      ]));
+      const result = memberships.flatMap((membership) => {
+        const organization = byId.get(membership.organization_id);
+        if (!organization) return [];
+        return [{
+          organization_id: organization.organization_id,
+          display_name: organization.display_name,
+          org_type: organization.org_type,
+          owner_username_lc: organization.owner_username_lc,
+          role: membership.role,
+          joined_at: membership.joined_at,
+        }];
+      });
+      return sendResponse({ ok: true, organizations: result });
+    }
+
+    if (action === "org_create_session") {
+      const username = String(body.username || "").trim();
+      const actor = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      requireOrganizationTier(actor as Record<string, unknown>);
+      const displayName = String(body.display_name || "").trim();
+      if (displayName.length < 2 || displayName.length > 120) {
+        return sendResponse({
+          error: "Organization name must contain 2 to 120 characters.",
+        }, 400);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_create", {
+        p_actor: actor.username_lc,
+        p_display_name: displayName,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        organization: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_workspace_list_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      const { data, error } = await supabase.from(
+        "shoir_organization_workspaces",
+      )
+        .select(
+          "workspace_id,display_name,name_key,status,created_at,updated_at",
+        )
+        .eq("organization_id", String(membership.organization.organization_id))
+        .eq("status", "active")
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        role: membership.role,
+        workspaces: data || [],
+      });
+    }
+
+    if (action === "org_member_list_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      const { data, error } = await supabase.from(
+        "shoir_organization_memberships",
+      )
+        .select("username_lc,role,status,joined_at,created_at,updated_at")
+        .eq("organization_id", String(membership.organization.organization_id))
+        .eq("status", "active")
+        .order("role", { ascending: true })
+        .order("username_lc", { ascending: true });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        role: membership.role,
+        members: data || [],
+      });
+    }
+
+    if (action === "org_invitation_create_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      if (membership.organization.org_type !== "team") {
+        return sendResponse({
+          error: "Invitations are available only for team organizations.",
+        }, 403);
+      }
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      const role = String(body.role || "viewer").trim().toLowerCase();
+      if (
+        !target || target.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(target)
+      ) {
+        return sendResponse({ error: "Invitation username is invalid." }, 400);
+      }
+      if (!["admin", "engineer", "approver", "viewer"].includes(role)) {
+        return sendResponse({ error: "Invitation role is invalid." }, 400);
+      }
+      const lifetimeDays = Number(body.lifetime_days ?? 7);
+      if (
+        !Number.isInteger(lifetimeDays) || lifetimeDays < 1 || lifetimeDays > 30
+      ) {
+        return sendResponse({
+          error: "Invitation lifetime must be between 1 and 30 days.",
+        }, 400);
+      }
+      const tokenBytes = new Uint8Array(32);
+      crypto.getRandomValues(tokenBytes);
+      const invitationToken = bytesToHex(tokenBytes);
+      const tokenHash = await sha256Hex(invitationToken);
+      const expiresAt = new Date(
+        Date.now() + lifetimeDays * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const { data, error } = await supabase.rpc(
+        "shoir_org_invitation_create",
+        {
+          p_actor: actor.username_lc,
+          p_organization_id: String(membership.organization.organization_id),
+          p_target_username_lc: target,
+          p_role: role,
+          p_token_hash: tokenHash,
+          p_expires_at: expiresAt,
+        },
+      );
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        invitation: Array.isArray(data) ? data[0] : data,
+        invitation_token: invitationToken,
+        token_notice:
+          "Copy this token now. It is stored only as a SHA-256 hash and cannot be retrieved again.",
+      });
+    }
+
+    if (action === "org_invitation_accept_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const invitationToken = String(body.invitation_token || "").trim()
+        .toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(invitationToken)) {
+        return sendResponse({ error: "Invitation token is invalid." }, 400);
+      }
+      const { data, error } = await supabase.rpc(
+        "shoir_org_invitation_accept",
+        {
+          p_actor: actor.username_lc,
+          p_token_hash: await sha256Hex(invitationToken),
+        },
+      );
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        membership: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_invitation_list_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.from(
+        "shoir_organization_invitations",
+      )
+        .select(
+          "invitation_id,target_username_lc,role,created_by_username_lc,expires_at,used_at,revoked_at,accepted_by_username_lc,created_at",
+        )
+        .eq("organization_id", String(membership.organization.organization_id))
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return sendResponse({ ok: true, invitations: data || [] });
+    }
+
+    if (action === "org_invitation_revoke_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const invitationId = validatedOrganizationId(body.invitation_id);
+      const { data, error } = await supabase.rpc(
+        "shoir_org_invitation_revoke",
+        {
+          p_actor: actor.username_lc,
+          p_organization_id: String(membership.organization.organization_id),
+          p_invitation_id: invitationId,
+        },
+      );
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_member_role_set_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      const newRole = String(body.role || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_member_role_set", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+        p_role: newRole,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_member_remove_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_member_remove", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_member_suspend_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_member_suspend", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_member_restore_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "Member username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_member_restore", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_owner_transfer_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const target = String(body.target_username_lc || "").trim().toLowerCase();
+      if (!target || target.length > 128) {
+        return sendResponse({ error: "New owner username is invalid." }, 400);
+      }
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      const { data, error } = await supabase.rpc("shoir_org_owner_transfer", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_target_username_lc: target,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_close_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+      );
+      if (membership.role !== "owner") {
+        return sendResponse({
+          error: "Only the organization owner may close the organization.",
+        }, 403);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_close", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_workspace_create_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const displayName = String(body.display_name || "").trim();
+      if (!displayName || displayName.length > 120) {
+        return sendResponse({
+          error: "Workspace name must contain 1 to 120 characters.",
+        }, 400);
+      }
+      const { data, error } = await supabase.rpc("shoir_org_workspace_create", {
+        p_actor: actor.username_lc,
+        p_organization_id: String(membership.organization.organization_id),
+        p_display_name: displayName,
+      });
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        workspace: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_workspace_archive_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const workspaceId = validatedOrganizationId(
+        body.organization_workspace_id,
+      );
+      const { data, error } = await supabase.rpc(
+        "shoir_org_workspace_archive",
+        {
+          p_actor: actor.username_lc,
+          p_organization_id: String(membership.organization.organization_id),
+          p_workspace_id: workspaceId,
+        },
+      );
+      if (error) throw error;
+      return sendResponse({
+        ok: true,
+        result: Array.isArray(data) ? data[0] : data,
+      });
+    }
+
+    if (action === "org_audit_list_session") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const membership = await organizationForActor(
+        actor.username_lc,
+        body.organization_id,
+        true,
+      );
+      const limit = Number(body.limit ?? 100);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return sendResponse({
+          error: "Audit event page size must be between 1 and 200.",
+        }, 400);
+      }
+      const { data, error } = await supabase.from(
+        "shoir_organization_audit_events",
+      )
+        .select(
+          "event_id,actor_username_lc,subject_username_lc,event_type,payload_json,created_at",
+        )
+        .eq("organization_id", String(membership.organization.organization_id))
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return sendResponse({ ok: true, events: data || [] });
+    }
+
+    if (action === "dataset_storage_sweep_session") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+        row as unknown as Record<string, unknown>,
+        body,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      // Shared workspaces require Owner/Admin through the database resolver.
+      // Personal workspace keys are derived from the authenticated account.
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "manage",
+      );
+      if (
+        body.confirm_delete !== undefined &&
+        typeof body.confirm_delete !== "boolean"
+      ) {
+        return sendResponse(
+          { error: "confirm_delete must be a boolean." },
+          400,
+        );
+      }
+
+      const MINIMUM_AGE_HOURS = 48;
+      const MINIMUM_AGE_MS = MINIMUM_AGE_HOURS * 60 * 60 * 1000;
+      const PAGE_SIZE = 100;
+      const MAX_DIRECTORIES = 200;
+      const MAX_OBJECTS = 500;
+      const MAX_REFERENCE_CHECKS = 100;
+      const MAX_DELETES_PER_RUN = 50;
+      const bucket = supabase.storage.from("shoir-industrial-datasets");
+      const listedObjects: Array<
+        Record<string, unknown> & {
+          storage_key: string;
+          kind: "immutable" | "temporary";
+          dataset_id: string;
+        }
+      > = [];
+      const visitedDirectories = new Set<string>();
+
+      // Enumerate only T020 dataset-id folders below this workspace.
+      // Any listing failure aborts the complete operation before deletion.
+      const scanDirectory = async (prefix: string): Promise<void> => {
+        if (visitedDirectories.has(prefix)) return;
+        visitedDirectories.add(prefix);
+        if (visitedDirectories.size > MAX_DIRECTORIES) {
+          throw new Error(
+            "Dataset storage sweep exceeded its bounded directory scan; no objects were deleted.",
+          );
+        }
+        let offset = 0;
+        while (true) {
+          const { data, error: listError } = await bucket.list(prefix, {
+            limit: PAGE_SIZE,
+            offset,
+            sortBy: { column: "name", order: "asc" },
+          });
+          if (listError) {
+            throw new Error(
+              "Dataset storage listing could not be completed; no objects were deleted.",
+            );
+          }
+          const page = Array.isArray(data) ? data : [];
+          for (const rawEntry of page) {
+            // Copy only the Storage fields used by the sweep into a plain record.
+            // Supabase's FileObject is a typed object, not an index-signature map.
+            const entry: Record<string, unknown> = {
+              name: rawEntry.name,
+              id: rawEntry.id,
+              created_at: rawEntry.created_at,
+              updated_at: rawEntry.updated_at,
+              last_accessed_at: rawEntry.last_accessed_at,
+            };
+            const name = String(entry.name || "");
+            if (
+              !name ||
+              name === "." ||
+              name === ".." ||
+              name.includes("/") ||
+              name.includes("\\")
+            ) {
+              continue;
+            }
+            const storageKey = prefix + "/" + name;
+            const isStoredFile = typeof entry.id === "string" &&
+              entry.id.length > 0;
+            if (!isStoredFile) {
+              if (/^DS-[A-F0-9]{12,32}$/.test(name)) {
+                await scanDirectory(storageKey);
+              }
+              continue;
+            }
+            const classified = classifyDatasetStorageSweepPath(
+              workspaceKey,
+              storageKey,
+            );
+            if (!classified) continue;
+            listedObjects.push({
+              ...entry,
+              storage_key: storageKey,
+              kind: classified.kind,
+              dataset_id: classified.datasetId,
+            });
+            if (listedObjects.length > MAX_OBJECTS) {
+              throw new Error(
+                "Dataset storage sweep exceeded its bounded object scan; no objects were deleted.",
+              );
+            }
+          }
+          if (page.length < PAGE_SIZE) break;
+          offset += page.length;
+        }
+      };
+
+      await scanDirectory(workspaceKey);
+      await scanDirectory("tmp/" + workspaceKey);
+
+      const nowMs = Date.now();
+      const oldObjects = listedObjects
+        .filter((entry) =>
+          isDatasetStorageSweepObjectOlderThan(entry, nowMs, MINIMUM_AGE_MS)
+        )
+        .map((entry) => {
+          const dateValues = [
+            entry.created_at,
+            entry.updated_at,
+            entry.last_accessed_at,
+          ].filter((value): value is string =>
+            typeof value === "string" && value.trim().length > 0
+          ).map((value) => Date.parse(value)).filter((value) =>
+            Number.isFinite(value)
+          );
+          const newest = Math.max(...dateValues);
+          return {
+            ...entry,
+            age_hours: Math.floor((nowMs - newest) / (60 * 60 * 1000)),
+          };
+        });
+      // Temporary and immutable objects share the same dataset lease with
+      // finalization and platform-record reference writes. The lease is acquired
+      // per candidate before either metadata ledger is checked or an object is
+      // removed, so a concurrent registration cannot race orphan cleanup.
+      const sweepCandidates = oldObjects
+        .sort((a, b) => b.age_hours - a.age_hours);
+      const dryRun = body.confirm_delete !== true;
+      let deletedCount = 0;
+      let deleteFailures = 0;
+      let auditFailures = 0;
+      let auditConfirmationFailures = 0;
+      let referenceCheckFailures = 0;
+      let referencedCount = 0;
+      let referenceChecksCompleted = 0;
+      let leaseBusyCount = 0;
+      let leaseAcquisitionFailures = 0;
+      let leaseRenewalFailures = 0;
+      let leaseReleaseFailures = 0;
+      let deferredDeleteCandidateCount = 0;
+      let eligibleTemporaryCount = 0;
+      let eligibleImmutableCount = 0;
+      const deletedPreview: string[] = [];
+
+      // A finalizer and a sweeper must never decide object liveness concurrently.
+      // Hold the same workspace/dataset lease across the no-reference checks,
+      // intent event, Storage removal and completion event. Lease acquisition
+      // uncertainty fails closed; expired leases are reclaimed by the SQL RPC.
+      const candidatesToCheck = sweepCandidates.slice(0, MAX_REFERENCE_CHECKS);
+      for (const candidate of candidatesToCheck) {
+        const leaseToken = crypto.randomUUID();
+        let leaseAcquired = false;
+        try {
+          const { data: leaseRows, error: leaseError } = await supabase.rpc(
+            "shoir_dataset_storage_lease_acquire",
+            {
+              p_workspace_key: workspaceKey,
+              p_dataset_id: candidate.dataset_id,
+              p_lease_token: leaseToken,
+              p_lease_operation: "sweep",
+              p_actor_username_lc: String(row.username_lc || ""),
+              p_lease_seconds: 600,
+            },
+          );
+          if (leaseError) {
+            leaseAcquisitionFailures += 1;
+            continue;
+          }
+          const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
+          if (lease?.acquired !== true) {
+            leaseBusyCount += 1;
+            continue;
+          }
+          leaseAcquired = true;
+          const initialLeaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            candidate.dataset_id,
+            leaseToken,
+            "sweep",
+            String(row.username_lc || ""),
+          );
+          if (!initialLeaseRenewed) {
+            leaseRenewalFailures += 1;
+            continue;
+          }
+
+          const [recordRefs, eventRefs] = await Promise.all([
+            supabase.from("shoir_platform_records")
+              .select("record_id")
+              .eq("workspace_key", workspaceKey)
+              .contains("payload_json", {
+                storage_key: candidate.storage_key,
+              })
+              .limit(1),
+            supabase.from("shoir_platform_events")
+              .select("event_id")
+              .eq("workspace_key", workspaceKey)
+              .contains("payload_json", {
+                storage_key: candidate.storage_key,
+              })
+              .limit(1),
+          ]);
+          referenceChecksCompleted += 1;
+          if (recordRefs.error || eventRefs.error) {
+            // Uncertain metadata is never permission to delete.
+            referenceCheckFailures += 1;
+            continue;
+          }
+          if (
+            (recordRefs.data || []).length > 0 ||
+            (eventRefs.data || []).length > 0
+          ) {
+            referencedCount += 1;
+            continue;
+          }
+
+          if (candidate.kind === "temporary") {
+            eligibleTemporaryCount += 1;
+          } else if (candidate.kind === "immutable") {
+            eligibleImmutableCount += 1;
+          } else {
+            continue;
+          }
+          if (dryRun) continue;
+          if (deletedCount >= MAX_DELETES_PER_RUN) {
+            deferredDeleteCandidateCount += 1;
+            continue;
+          }
+
+          const eventPrefix = candidate.kind === "temporary"
+            ? "dataset_temporary"
+            : "dataset_immutable";
+          const intentId = "SPE-" +
+            crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+          const auditTime = new Date().toISOString();
+          const auditIntent = await supabase.from("shoir_platform_events")
+            .insert({
+              event_id: intentId,
+              workspace_key: workspaceKey,
+              event_type: eventPrefix + "_delete_intent",
+              actor: String(row.username_lc || ""),
+              entity_key: candidate.dataset_id,
+              payload_json: {
+                action: "DELETE_INTENT",
+                storage_key: candidate.storage_key,
+                object_kind: candidate.kind,
+                age_hours: candidate.age_hours,
+                minimum_age_hours: MINIMUM_AGE_HOURS,
+                record_and_event_ledgers_confirmed_unreferenced: true,
+                lifecycle_lease_held: true,
+              },
+              created_at: auditTime,
+            });
+          if (auditIntent.error) {
+            auditFailures += 1;
+            continue;
+          }
+
+          const deletionLeaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            candidate.dataset_id,
+            leaseToken,
+            "sweep",
+            String(row.username_lc || ""),
+          );
+          if (!deletionLeaseRenewed) {
+            leaseRenewalFailures += 1;
+            continue;
+          }
+          const { error: removeError } = await bucket.remove([
+            candidate.storage_key,
+          ]);
+          if (removeError) {
+            deleteFailures += 1;
+            continue;
+          }
+          deletedCount += 1;
+          if (deletedPreview.length < 25) {
+            deletedPreview.push(candidate.dataset_id + " · " + candidate.kind);
+          }
+
+          const completionId = "SPE-" +
+            crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+          const completionAudit = await supabase.from("shoir_platform_events")
+            .insert({
+              event_id: completionId,
+              workspace_key: workspaceKey,
+              event_type: eventPrefix + "_object_deleted",
+              actor: String(row.username_lc || ""),
+              entity_key: candidate.dataset_id,
+              payload_json: {
+                action: "DELETE_CONFIRMED",
+                storage_key: candidate.storage_key,
+                object_kind: candidate.kind,
+                age_hours: candidate.age_hours,
+                intent_event_id: intentId,
+                lifecycle_lease_held: true,
+              },
+              created_at: new Date().toISOString(),
+            });
+          if (completionAudit.error) auditConfirmationFailures += 1;
+        } finally {
+          if (leaseAcquired) {
+            try {
+              const { data: released, error: releaseError } = await supabase
+                .rpc(
+                  "shoir_dataset_storage_lease_release",
+                  {
+                    p_workspace_key: workspaceKey,
+                    p_dataset_id: candidate.dataset_id,
+                    p_lease_token: leaseToken,
+                  },
+                );
+              if (releaseError || released !== true) {
+                leaseReleaseFailures += 1;
+              }
+            } catch {
+              leaseReleaseFailures += 1;
+            }
+          }
+        }
+      }
+      const deferredReferenceCheckCount = Math.max(
+        0,
+        sweepCandidates.length - candidatesToCheck.length,
+      );
+      return sendResponse({
+        ok: true,
+        dry_run: dryRun,
+        minimum_age_hours: MINIMUM_AGE_HOURS,
+        scanned_object_count: listedObjects.length,
+        stale_object_count: oldObjects.length,
+        stale_temporary_object_count: oldObjects.filter((entry) =>
+          entry.kind === "temporary"
+        ).length,
+        stale_immutable_object_count: oldObjects.filter((entry) =>
+          entry.kind === "immutable"
+        ).length,
+        reference_checks_completed: referenceChecksCompleted,
+        eligible_temporary_orphan_count: eligibleTemporaryCount,
+        eligible_immutable_orphan_count: eligibleImmutableCount,
+        referenced_object_count: referencedCount,
+        reference_check_failure_count: referenceCheckFailures,
+        lease_busy_count: leaseBusyCount,
+        lease_acquisition_failure_count: leaseAcquisitionFailures,
+        lease_renewal_failure_count: leaseRenewalFailures,
+        lease_release_failure_count: leaseReleaseFailures,
+        deferred_reference_check_count: deferredReferenceCheckCount,
+        deferred_delete_candidate_count: deferredDeleteCandidateCount,
+        deleted_count: deletedCount,
+        delete_failure_count: deleteFailures,
+        audit_intent_failure_count: auditFailures,
+        audit_confirmation_failure_count: auditConfirmationFailures,
+        maximum_deletions_per_run: MAX_DELETES_PER_RUN,
+        deleted_preview: deletedPreview,
+        next_step: dryRun
+          ? "Preview only. Both temporary and immutable objects are eligible only after the 48-hour age check, successful dual-ledger no-reference checks and an acquired dataset lifecycle lease. A separate explicit confirm_delete=true request is required to delete."
+          : "Review append-only intent and completion events, lease/release failures and deletion counts. Repeat a bounded dry run/deletion for remaining candidates.",
+      });
+    }
+
+    if (action === "dataset_download_url") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+        row as unknown as Record<string, unknown>,
+        body,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "read",
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const requestedVersion = body.version == null || body.version === ""
+        ? null
+        : Number(body.version);
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        (requestedVersion !== null &&
+          (!Number.isSafeInteger(requestedVersion) || requestedVersion < 1))
+      ) {
+        return sendResponse(
+          { error: "Dataset identifier or version is invalid." },
+          400,
+        );
+      }
+      const recordType = requestedVersion === null
+        ? "dataset"
+        : "dataset_version";
+      const entityKey = requestedVersion === null
+        ? datasetId
+        : datasetId + ":v" + requestedVersion;
+      const { data: record, error } = await supabase
+        .from("shoir_platform_records")
+        .select("payload_json")
+        .eq("workspace_key", workspaceKey)
+        .eq("record_type", recordType)
+        .eq("entity_key", entityKey)
+        .maybeSingle();
+      if (error) throw error;
+      if (!record?.payload_json) {
+        return sendResponse(
+          { error: "Dataset version was not found in this workspace." },
+          404,
+        );
+      }
+      const payload = record.payload_json as Record<string, unknown>;
+      const { data: headRecord, error: headError } = await supabase
+        .from("shoir_platform_records")
+        .select("payload_json")
+        .eq("workspace_key", workspaceKey)
+        .eq("record_type", "dataset")
+        .eq("entity_key", datasetId)
+        .maybeSingle();
+      if (headError) throw headError;
+      if (!headRecord?.payload_json) {
+        return sendResponse(
+          { error: "Dataset head was not found in this workspace." },
+          409,
+        );
+      }
+      const headPayload = headRecord.payload_json as Record<string, unknown>;
+      const currentVersion = Number(headPayload.version || 0);
+      if (!Number.isSafeInteger(currentVersion) || currentVersion < 1) {
+        return sendResponse(
+          { error: "Dataset head version metadata is invalid." },
+          409,
+        );
+      }
+      const storageKey = String(payload.storage_key || "");
+      const expectedPrefix = workspaceKey + "/" + datasetId + "/";
+      if (
+        !storageKey.startsWith(expectedPrefix) ||
+        !/^[0-9a-f]{64}\.csv$/.test(storageKey.slice(expectedPrefix.length))
+      ) {
+        return sendResponse(
+          { error: "Dataset storage reference is invalid." },
+          409,
+        );
+      }
+      const { data, error: signError } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .createSignedUrl(storageKey, 300, { download: true });
+      if (signError) throw signError;
+      if (!data?.signedUrl) {
+        throw new Error(
+          "Storage provider did not return a signed download URL.",
+        );
+      }
+      return sendResponse({
+        ok: true,
+        download_url: data.signedUrl,
+        data_hash: String(payload.data_hash || ""),
+        version_fingerprint: String(payload.version_fingerprint || ""),
+        name: String(payload.name || ""),
+        source_name: String(payload.source_name || ""),
+        version: Number(payload.version || requestedVersion || 1),
+        current_version: currentVersion,
+        is_current_version:
+          Number(payload.version || requestedVersion || 1) === currentVersion,
+        row_count: Number(payload.row_count || 0),
+        column_count: Number(payload.column_count || 0),
+        version_record_id: String(payload.version_record_id || ""),
+        registered_at: String(payload.registered_at || ""),
+      });
+    }
+
+    if (action === "dataset_upload_create") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+        row as unknown as Record<string, unknown>,
+        body,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      const dataHash = String(body.data_hash || "").toLowerCase();
+      if (
+        !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+        !/^[0-9a-f]{64}$/.test(dataHash)
+      ) {
+        return sendResponse(
+          { error: "Dataset upload identity is invalid." },
+          400,
+        );
+      }
+      const uploadPath = "tmp/" + workspaceKey + "/" + datasetId + "/" +
+        crypto.randomUUID().replace(/-/g, "") + ".csv";
+      const { data, error } = await supabase.storage
+        .from("shoir-industrial-datasets")
+        .createSignedUploadUrl(uploadPath, { upsert: false });
+      if (error) throw error;
+      if (!data?.signedUrl || !data?.token) {
+        throw new Error(
+          "Storage provider did not return a signed upload URL.",
+        );
+      }
+      return sendResponse({
+        ok: true,
+        upload_url: data.signedUrl,
+        upload_token: data.token,
+        upload_path: uploadPath,
+        max_bytes: 52428800,
+      });
+    }
+
+    if (action === "dataset_version_finalize") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+        row as unknown as Record<string, unknown>,
+        body,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
+      );
+      const datasetId = String(body.dataset_id || "").trim();
+      if (!/^DS-[A-F0-9]{12,32}$/.test(datasetId)) {
+        return sendResponse({ error: "Dataset identifier is invalid." }, 400);
+      }
+      const leaseToken = crypto.randomUUID();
+      const { data: leaseRows, error: leaseError } = await supabase.rpc(
+        "shoir_dataset_storage_lease_acquire",
+        {
+          p_workspace_key: workspaceKey,
+          p_dataset_id: datasetId,
+          p_lease_token: leaseToken,
+          p_lease_operation: "finalize",
+          p_actor_username_lc: String(row.username_lc || ""),
+          p_lease_seconds: 600,
+        },
+      );
+      if (leaseError) throw leaseError;
+      const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
+      if (lease?.acquired !== true) {
+        return sendResponse(
+          {
+            error:
+              "This dataset is busy with another storage operation. Retry shortly.",
+          },
+          409,
+        );
+      }
+
+      try {
+        const uploadPath = String(body.upload_path || "").trim();
+        const cleanupTemporaryUpload = async (): Promise<boolean> => {
+          const leaseRenewed = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
+          if (!leaseRenewed) {
+            console.warn(
+              "Temporary dataset object was retained because its finalization lease could not be renewed; the bounded staging sweep may inspect it after the retention threshold.",
+            );
+            return false;
+          }
+          const { error: cleanupError } = await supabase.storage
+            .from("shoir-industrial-datasets")
+            .remove([uploadPath]);
+          if (cleanupError) {
+            console.warn(
+              "Temporary dataset object cleanup was not confirmed; the bounded staging sweep may inspect it after the retention threshold.",
+            );
+            return false;
+          }
+          return true;
+        };
+        const name = String(body.name || "").trim();
+        const sourceName = String(body.source_name || "").trim();
+        const dataHash = String(body.data_hash || "").toLowerCase();
+        const fingerprint = String(body.version_fingerprint || "")
+          .toLowerCase();
+        const rowCount = Number(body.row_count);
+        const columnCount = Number(body.column_count);
+        const schema = body.schema;
+        const transformations = body.transformations || [];
+        if (
+          !/^DS-[A-F0-9]{12,32}$/.test(datasetId) ||
+          !uploadPath.startsWith(
+            "tmp/" + workspaceKey + "/" + datasetId + "/",
+          ) ||
+          uploadPath.includes("..") ||
+          uploadPath.length > 240 ||
+          !name ||
+          name.length > 200 ||
+          sourceName.length > 500 ||
+          !/^[0-9a-f]{64}$/.test(dataHash) ||
+          !/^[0-9a-f]{64}$/.test(fingerprint) ||
+          !Number.isSafeInteger(rowCount) ||
+          rowCount < 0 ||
+          rowCount > 100000000 ||
+          !Number.isSafeInteger(columnCount) ||
+          columnCount < 0 ||
+          columnCount > 5000 ||
+          !schema ||
+          typeof schema !== "object" ||
+          Array.isArray(schema) ||
+          new TextEncoder().encode(JSON.stringify(schema)).byteLength > 65536 ||
+          !Array.isArray(transformations) ||
+          transformations.length > 50 ||
+          new TextEncoder().encode(JSON.stringify(transformations)).byteLength >
+            16384
+        ) {
+          return sendResponse(
+            { error: "Dataset version metadata is invalid." },
+            400,
+          );
+        }
+        const expectedFingerprint = await sha256Hex(
+          stablePlatformJson({
+            dataset_id: datasetId,
+            data_hash: dataHash,
+            schema,
+            transformations,
+          }),
+        );
+        if (expectedFingerprint !== fingerprint) {
+          return sendResponse(
+            {
+              error:
+                "Dataset version fingerprint does not match the submitted metadata.",
+            },
+            422,
+          );
+        }
+        const { data: uploaded, error: downloadError } = await supabase.storage
+          .from("shoir-industrial-datasets")
+          .download(uploadPath);
+        if (downloadError || !uploaded) {
+          throw downloadError ||
+            new Error("Uploaded dataset file is missing.");
+        }
+        if (uploaded.size > 52428800) {
+          await cleanupTemporaryUpload();
+          return sendResponse(
+            { error: "Dataset file exceeds the 50 MiB storage limit." },
+            413,
+          );
+        }
+        const bytes = new Uint8Array(await uploaded.arrayBuffer());
+        const digest = await sha256Bytes(bytes);
+        if (digest !== dataHash) {
+          await cleanupTemporaryUpload();
+          return sendResponse(
+            {
+              error:
+                "Uploaded dataset content hash does not match the registered data hash.",
+            },
+            422,
+          );
+        }
+        let csvShape;
+        try {
+          csvShape = inspectCsvShape(bytes);
+        } catch (shapeError) {
+          await cleanupTemporaryUpload();
+          throw shapeError;
+        }
+        const schemaColumns = Object.keys(schema as Record<string, unknown>);
+        if (
+          csvShape.rowCount !== rowCount ||
+          csvShape.columnCount !== columnCount ||
+          schemaColumns.length !== csvShape.columnCount ||
+          csvShape.headers.some((header) => !schemaColumns.includes(header))
+        ) {
+          await cleanupTemporaryUpload();
+          return sendResponse(
+            {
+              error:
+                "Dataset row count, column count or schema does not match the uploaded CSV.",
+            },
+            422,
+          );
+        }
+        const leaseRenewedBeforeStorage =
+          await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
+        if (!leaseRenewedBeforeStorage) {
+          return sendResponse(
+            {
+              error: "Dataset finalization lease expired; retry the operation.",
+            },
+            409,
+          );
+        }
+        const storageKey = workspaceKey + "/" + datasetId + "/" + dataHash +
+          ".csv";
+        const bucket = supabase.storage.from("shoir-industrial-datasets");
+        let createdFinalObject = false;
+        const { data: existingFile, error: existingError } = await bucket
+          .download(storageKey);
+        if (!existingError && existingFile) {
+          const existingBytes = new Uint8Array(
+            await existingFile.arrayBuffer(),
+          );
+          const existingHash = await sha256Bytes(existingBytes);
+          if (existingHash !== dataHash) {
+            await cleanupTemporaryUpload();
+            throw new Error(
+              "Existing immutable dataset object does not match its content hash.",
+            );
+          }
+        } else {
+          const uploadBlob = new Blob(
+            [bytes.slice().buffer as ArrayBuffer],
+            { type: "text/csv" },
+          );
+          const { error: storeError } = await bucket.upload(
+            storageKey,
+            uploadBlob,
+            { contentType: "text/csv", upsert: false },
+          );
+          if (storeError) {
+            const { data: racedFile, error: racedError } = await bucket
+              .download(storageKey);
+            if (racedError || !racedFile) throw storeError;
+            const racedBytes = new Uint8Array(await racedFile.arrayBuffer());
+            const racedHash = await sha256Bytes(racedBytes);
+            if (racedHash !== dataHash) {
+              throw new Error(
+                "Concurrent immutable dataset upload has a different content hash.",
+              );
+            }
+          } else {
+            createdFinalObject = true;
+          }
+        }
+        const versionRecordId = "SPR-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const headRecordId = "SPR-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const eventId = "SPE-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const leaseRenewedBeforeRegistration =
+          await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            datasetId,
+            leaseToken,
+            "finalize",
+            String(row.username_lc || ""),
+          );
+        if (!leaseRenewedBeforeRegistration) {
+          return sendResponse(
+            {
+              error:
+                "Dataset finalization lease expired before metadata registration; retry the operation.",
+            },
+            409,
+          );
+        }
+        const { data, error } = await supabase.rpc(
+          "shoir_platform_register_dataset_version_with_storage_and_lease",
+          {
+            p_workspace_key: workspaceKey,
+            p_dataset_id: datasetId,
+            p_name: name,
+            p_source_name: sourceName,
+            p_data_hash: dataHash,
+            p_version_fingerprint: fingerprint,
+            p_row_count: rowCount,
+            p_column_count: columnCount,
+            p_schema_json: schema,
+            p_transformations_json: transformations,
+            p_actor: row.username_lc,
+            p_version_record_id: versionRecordId,
+            p_head_record_id: headRecordId,
+            p_event_id: eventId,
+            p_storage_key: storageKey,
+            p_lease_token: leaseToken,
+          },
+        );
+        if (error) {
+          // The RPC may have committed even if its response was lost. Cleanup
+          // is allowed only while this exact lease token is still live and both
+          // metadata ledgers independently confirm no reference.
+          if (createdFinalObject) {
+            try {
+              const cleanupLeaseRenewed =
+                await renewDatasetStorageLifecycleLease(
+                  workspaceKey,
+                  datasetId,
+                  leaseToken,
+                  "finalize",
+                  String(row.username_lc || ""),
+                );
+              if (!cleanupLeaseRenewed) {
+                console.warn(
+                  "Dataset metadata registration failed after the finalization lease expired; the immutable object was retained for the later reference-aware sweep.",
+                );
+              } else {
+                const [recordRefs, eventRefs] = await Promise.all([
+                  supabase.from("shoir_platform_records")
+                    .select("record_id")
+                    .eq("workspace_key", workspaceKey)
+                    .contains("payload_json", { storage_key: storageKey })
+                    .limit(1),
+                  supabase.from("shoir_platform_events")
+                    .select("event_id")
+                    .eq("workspace_key", workspaceKey)
+                    .contains("payload_json", { storage_key: storageKey })
+                    .limit(1),
+                ]);
+                if (recordRefs.error || eventRefs.error) {
+                  console.warn(
+                    "Dataset metadata registration failed; reference checks were unavailable, so the immutable object was retained.",
+                  );
+                } else if (
+                  (recordRefs.data || []).length === 0 &&
+                  (eventRefs.data || []).length === 0
+                ) {
+                  const finalCleanupLeaseRenewed =
+                    await renewDatasetStorageLifecycleLease(
+                      workspaceKey,
+                      datasetId,
+                      leaseToken,
+                      "finalize",
+                      String(row.username_lc || ""),
+                    );
+                  if (finalCleanupLeaseRenewed) {
+                    const { error: orphanRemoveError } = await bucket.remove([
+                      storageKey,
+                    ]);
+                    if (orphanRemoveError) {
+                      console.warn(
+                        "Dataset metadata registration failed; the confirmed-unreferenced object could not be removed.",
+                      );
+                    }
+                  } else {
+                    console.warn(
+                      "Dataset metadata registration failed; the finalization lease expired before orphan cleanup, so the object was retained.",
+                    );
+                  }
+                }
+              }
+            } catch {
+              // An uncertain lease/reference check must never authorize deletion.
+              console.warn(
+                "Dataset metadata registration failed; the immutable object was retained because lease or reference status was uncertain.",
+              );
+            }
+          }
+          try {
+            const tempCleanupLeaseRenewed =
+              await renewDatasetStorageLifecycleLease(
+                workspaceKey,
+                datasetId,
+                leaseToken,
+                "finalize",
+                String(row.username_lc || ""),
+              );
+            if (tempCleanupLeaseRenewed) {
+              const { error: tempRemoveError } = await bucket.remove([
+                uploadPath,
+              ]);
+              if (tempRemoveError) {
+                console.warn(
+                  "Dataset metadata registration failed; the temporary upload object still requires cleanup.",
+                );
+              }
+            } else {
+              console.warn(
+                "Dataset metadata registration failed after lease expiry; the temporary upload was retained for the later bounded sweep.",
+              );
+            }
+          } catch {
+            console.warn(
+              "Dataset metadata registration failed; temporary upload cleanup could not be confirmed.",
+            );
+          }
+          throw error;
+        }
+
+        const registration = Array.isArray(data) ? data[0] : data;
+        // Register the content-addressed object first. Temporary upload removal
+        // is best-effort after the atomic metadata transaction; cleanup failure
+        // must not tell the caller that an already-registered version failed.
+        let temporaryCleanupPending = false;
+        try {
+          const tempCleanupLeaseRenewed =
+            await renewDatasetStorageLifecycleLease(
+              workspaceKey,
+              datasetId,
+              leaseToken,
+              "finalize",
+              String(row.username_lc || ""),
+            );
+          if (!tempCleanupLeaseRenewed) {
+            temporaryCleanupPending = true;
+          } else {
+            const { error: tempRemoveError } = await bucket.remove([
+              uploadPath,
+            ]);
+            temporaryCleanupPending = Boolean(tempRemoveError);
+          }
+        } catch {
+          temporaryCleanupPending = true;
+        }
+        if (temporaryCleanupPending) {
+          console.warn(
+            "Dataset version registered successfully; temporary upload cleanup remains pending.",
+          );
+        }
+        return sendResponse({
+          ok: true,
+          registration,
+          temporary_cleanup_pending: temporaryCleanupPending,
+        });
+      } finally {
+        try {
+          const { data: released, error: releaseError } = await supabase.rpc(
+            "shoir_dataset_storage_lease_release",
+            {
+              p_workspace_key: workspaceKey,
+              p_dataset_id: datasetId,
+              p_lease_token: leaseToken,
+            },
+          );
+          if (releaseError || released !== true) {
+            console.warn(
+              "Dataset finalization lease release was not confirmed; its bounded expiry remains the recovery path.",
+            );
+          }
+        } catch {
+          console.warn(
+            "Dataset finalization lease release could not be confirmed; its bounded expiry remains the recovery path.",
+          );
+        }
+      }
+    }
+
+    if (action === "dataset_version_register") {
+      // The prior metadata-only route could advance a dataset head without
+      // storing downloadable bytes. New versions must use resumable upload and
+      // the lease-fenced finalizer so content, hash and metadata commit together.
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const entitlementResponse = await datasetEntitlementDenialForRequest(
+        row as unknown as Record<string, unknown>,
+        body,
+      );
+      if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      return sendResponse(
+        {
+          error:
+            "Metadata-only dataset version registration is retired. Use dataset_upload_create followed by dataset_version_finalize so uploaded content, hash verification, Storage reference and version metadata are committed together.",
+          required_actions: [
+            "dataset_upload_create",
+            "dataset_version_finalize",
+          ],
+        },
+        410,
+      );
+    }
+
+    if (action === "platform_record_save") {
+      const username = String(body.username || "").trim();
+      const token = String(body.token || "");
+      const row = await getSession(token, username, "workspace");
+      const recordType = String(body.record_type || "").trim().toLowerCase();
+      if (recordType === "dataset" || recordType === "dataset_version") {
+        const entitlementResponse = await datasetEntitlementDenialForRequest(
+          row as unknown as Record<string, unknown>,
+          body,
+        );
+        if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      }
+      const entityKey = String(body.entity_key || "").trim();
+      if (!PLATFORM_RECORD_TYPES.has(recordType)) {
+        return sendResponse(
+          { error: "Platform record type is not supported." },
+          400,
+        );
+      }
+      if (
+        !entityKey || entityKey.length > 240 ||
+        /[\\x00-\\x1f\\x7f]/.test(entityKey)
+      ) {
+        return sendResponse({ error: "Platform entity key is invalid." }, 400);
+      }
+      const payload = validatePlatformPayload(body.payload);
+      const canonical = stablePlatformJson(payload);
+      const contentHash = await sha256Hex(canonical);
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "write",
+      );
+      // The orphan sweeper checks this top-level payload field in the records
+      // ledger. Any valid T020 storage reference must use the same dataset lease
+      // while the record is created/updated, or cleanup could race the write.
+      const referencedStorageKey = typeof payload.storage_key === "string"
+        ? payload.storage_key.trim()
+        : "";
+      const classifiedStoragePath = referencedStorageKey
+        ? classifyDatasetStorageSweepPath(workspaceKey, referencedStorageKey)
+        : null;
+      const looksLikeDatasetStoragePath =
+        /^(?:[0-9a-f]{32}\/DS-[A-F0-9]{12,32}\/[^/]+|tmp\/[0-9a-f]{32}\/DS-[A-F0-9]{12,32}\/[^/]+)$/
+          .test(referencedStorageKey);
+      if (looksLikeDatasetStoragePath && !classifiedStoragePath) {
+        return sendResponse(
+          {
+            error:
+              "Dataset storage references must be valid and scoped to the active workspace.",
+          },
+          400,
+        );
+      }
+      const recordLeaseToken = classifiedStoragePath
+        ? crypto.randomUUID()
+        : null;
+      if (classifiedStoragePath && recordLeaseToken) {
+        const { data: leaseRows, error: leaseError } = await supabase.rpc(
+          "shoir_dataset_storage_lease_acquire",
+          {
+            p_workspace_key: workspaceKey,
+            p_dataset_id: classifiedStoragePath.datasetId,
+            p_lease_token: recordLeaseToken,
+            p_lease_operation: "register",
+            p_actor_username_lc: String(row.username_lc || ""),
+            p_lease_seconds: 600,
+          },
+        );
+        if (leaseError) throw leaseError;
+        const lease = Array.isArray(leaseRows) ? leaseRows[0] : leaseRows;
+        if (lease?.acquired !== true) {
+          return sendResponse(
+            {
+              error:
+                "This dataset is busy with another storage operation. Retry shortly.",
+            },
+            409,
+          );
+        }
+      }
+
+      try {
+        const recordId = "SPR-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        const eventId = "SPE-" +
+          crypto.randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+        let savedRecord: unknown;
+        if (classifiedStoragePath && recordLeaseToken) {
+          const stillOwned = await renewDatasetStorageLifecycleLease(
+            workspaceKey,
+            classifiedStoragePath.datasetId,
+            recordLeaseToken,
+            "register",
+            String(row.username_lc || ""),
+          );
+          if (!stillOwned) {
+            return sendResponse(
+              {
+                error:
+                  "Dataset reference registration lease expired; retry the write.",
+              },
+              409,
+            );
+          }
+          const fencedWrite = await supabase.rpc(
+            "shoir_platform_upsert_record_with_dataset_lease",
+            {
+              p_record_id: recordId,
+              p_workspace_key: workspaceKey,
+              p_record_type: recordType,
+              p_entity_key: entityKey,
+              p_payload: payload,
+              p_content_hash: contentHash,
+              p_actor: row.username_lc,
+              p_event_id: eventId,
+              p_dataset_id: classifiedStoragePath.datasetId,
+              p_lease_token: recordLeaseToken,
+            },
+          );
+          if (fencedWrite.error) throw fencedWrite.error;
+          savedRecord = Array.isArray(fencedWrite.data)
+            ? fencedWrite.data[0]
+            : fencedWrite.data;
+        } else {
+          const ordinaryWrite = await supabase.rpc(
+            "shoir_platform_upsert_record",
+            {
+              p_record_id: recordId,
+              p_workspace_key: workspaceKey,
+              p_record_type: recordType,
+              p_entity_key: entityKey,
+              p_payload: payload,
+              p_content_hash: contentHash,
+              p_actor: row.username_lc,
+              p_event_id: eventId,
+            },
+          );
+          if (ordinaryWrite.error) throw ordinaryWrite.error;
+          savedRecord = Array.isArray(ordinaryWrite.data)
+            ? ordinaryWrite.data[0]
+            : ordinaryWrite.data;
+        }
+        return sendResponse({ ok: true, record: savedRecord });
+      } finally {
+        if (classifiedStoragePath && recordLeaseToken) {
+          try {
+            const { data: released, error: releaseError } = await supabase.rpc(
+              "shoir_dataset_storage_lease_release",
+              {
+                p_workspace_key: workspaceKey,
+                p_dataset_id: classifiedStoragePath.datasetId,
+                p_lease_token: recordLeaseToken,
+              },
+            );
+            if (releaseError || released !== true) {
+              console.warn(
+                "Dataset reference registration lease release was not confirmed; its bounded expiry remains the recovery path.",
+              );
+            }
+          } catch {
+            console.warn(
+              "Dataset reference registration lease release could not be confirmed; its bounded expiry remains the recovery path.",
+            );
+          }
+        }
+      }
+    }
+    if (action === "platform_record_list") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(
+        String(body.token || ""),
+        username,
+        "workspace",
+      );
+      const workspaceKey = await resolveManagedWorkspaceKey(
+        row as Record<string, unknown>,
+        body,
+        "read",
+      );
+      const recordType = String(body.record_type || "").trim().toLowerCase();
+      if (recordType && !PLATFORM_RECORD_TYPES.has(recordType)) {
+        return sendResponse(
+          { error: "Platform record type is not supported." },
+          400,
+        );
+      }
+      if (recordType === "dataset" || recordType === "dataset_version") {
+        const entitlementResponse = await datasetEntitlementDenialForRequest(
+          row as unknown as Record<string, unknown>,
+          body,
+        );
+        if (entitlementResponse) return sendResponse(entitlementResponse, 403);
+      }
+      const entityKey = String(body.entity_key || "").trim();
+      if (entityKey.length > 240 || /[\\x00-\\x1f\\x7f]/.test(entityKey)) {
+        return sendResponse({ error: "Platform entity key is invalid." }, 400);
+      }
+      const requestedLimit = Number(body.limit || 100);
+      const requestedOffset = Number(body.offset || 0);
+      if (
+        !Number.isInteger(requestedLimit) || requestedLimit < 1 ||
+        requestedLimit > 200
+      ) {
+        return sendResponse({
+          error: "Platform record page size must be between 1 and 200.",
+        }, 400);
+      }
+      if (
+        !Number.isSafeInteger(requestedOffset) || requestedOffset < 0 ||
+        requestedOffset > 100000
+      ) {
+        return sendResponse(
+          { error: "Platform record offset is invalid." },
+          400,
+        );
+      }
+      let query = supabase.from("shoir_platform_records")
+        .select(
+          "record_id,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at",
+        )
+        .eq("workspace_key", workspaceKey)
+        .order("updated_at", { ascending: false })
+        .order("record_id", { ascending: true })
+        .range(requestedOffset, requestedOffset + requestedLimit);
+      if (recordType) query = query.eq("record_type", recordType);
+      if (entityKey) query = query.eq("entity_key", entityKey);
+      const { data, error } = await query;
+      if (error) throw error;
+      const page = data || [];
+      const hasMore = page.length > requestedLimit;
+      const records = hasMore ? page.slice(0, requestedLimit) : page;
+      return sendResponse({
+        ok: true,
+        records,
+        has_more: hasMore,
+        next_offset: requestedOffset + records.length,
+      });
+    }
+
     if (action === "workspace_load") {
-      await getSession(String(body.token), String(body.username));
+      const actor = await getSession(
+        String(body.token),
+        String(body.username),
+        "workspace",
+      );
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
+      if (organizationId || organizationWorkspaceId) {
+        if (!organizationId || !organizationWorkspaceId) {
+          return sendResponse({
+            error:
+              "Both organization_id and organization_workspace_id are required.",
+          }, 400);
+        }
+        const { data, error } = await supabase.rpc(
+          "shoir_org_workspace_state_load",
+          {
+            p_actor: actor.username_lc,
+            p_organization_id: organizationId,
+            p_workspace_id: organizationWorkspaceId,
+          },
+        );
+        if (error) throw error;
+        const state = Array.isArray(data) ? data[0] : data;
+        return sendResponse({
+          ok: true,
+          state_json: typeof state?.state_json === "string"
+            ? state.state_json
+            : null,
+          revision: Number.isSafeInteger(Number(state?.revision))
+            ? Number(state.revision)
+            : 0,
+          updated_at: state?.updated_at || null,
+        });
+      }
       const { data, error } = await supabase.from("shoir_workspace_states")
         .select("state_json,updated_at").eq(
           "username_lc",
-          String(body.username).trim().toLowerCase(),
+          actor.username_lc,
         ).maybeSingle();
       if (error) throw error;
       return sendResponse({
@@ -818,15 +3346,128 @@ Deno.serve(async (req) => {
       });
     }
     if (action === "workspace_save") {
-      await getSession(String(body.token), String(body.username));
+      const actor = await getSession(
+        String(body.token),
+        String(body.username),
+        "workspace",
+      );
       // Validate before upsert so malformed/oversized state never replaces the last valid save.
       const workspaceState = normalizeWorkspaceStateJson(body.state_json);
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
+      if (organizationId || organizationWorkspaceId) {
+        if (!organizationId || !organizationWorkspaceId) {
+          return sendResponse({
+            error:
+              "Both organization_id and organization_workspace_id are required.",
+          }, 400);
+        }
+        const rawRevision = body.expected_revision;
+        if (rawRevision === undefined || rawRevision === null) {
+          return sendResponse(
+            { error: "Workspace revision is required." },
+            400,
+          );
+        }
+        const parsedRevision = Number(rawRevision);
+        if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
+          return sendResponse(
+            { error: "Workspace revision is invalid." },
+            400,
+          );
+        }
+        const expectedRevision: number = parsedRevision;
+        const { data, error } = await supabase.rpc(
+          "shoir_org_workspace_state_save",
+          {
+            p_actor: actor.username_lc,
+            p_organization_id: organizationId,
+            p_workspace_id: organizationWorkspaceId,
+            p_state_json: workspaceState,
+            p_expected_revision: expectedRevision,
+          },
+        );
+        if (error?.code === "40001") {
+          return sendResponse({
+            error: "SHARED_WORKSPACE_REVISION_CONFLICT",
+          }, 409);
+        }
+        if (error) throw error;
+        const saved = Array.isArray(data) ? data[0] : data;
+        return sendResponse({
+          ok: true,
+          revision: Number(saved?.revision || 0),
+          updated_at: saved?.updated_at || null,
+        });
+      }
       const { error } = await supabase.from("shoir_workspace_states").upsert({
-        username_lc: String(body.username).trim().toLowerCase(),
+        username_lc: actor.username_lc,
         state_json: workspaceState,
         updated_at: new Date().toISOString(),
       }, { onConflict: "username_lc" });
       if (error) throw error;
+      return sendResponse({ ok: true });
+    }
+    if (action === "session_verify") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      return sendResponse({
+        ok: true,
+        username: String(actor.username_lc || ""),
+        role: String(actor.role || ""),
+        tier: String(actor.tier || "Starter"),
+        active: actor.active === true,
+      });
+    }
+    if (action === "workspace_manage_check") {
+      const actor = await getSession(
+        String(body.token || ""),
+        String(body.username || ""),
+        "workspace",
+      );
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
+      if (!organizationId || !organizationWorkspaceId) {
+        return sendResponse({
+          error:
+            "Both organization_id and organization_workspace_id are required.",
+        }, 400);
+      }
+      await resolveManagedWorkspaceKey(
+        actor as Record<string, unknown>,
+        body,
+        "manage",
+      );
+      return sendResponse({ ok: true });
+    }
+    if (action === "workspace_access_check") {
+      const actor = await getSession(
+        String(body.token),
+        String(body.username),
+        "workspace",
+      );
+      const organizationId = String(body.organization_id || "").trim();
+      const organizationWorkspaceId = String(
+        body.organization_workspace_id || "",
+      ).trim();
+      if (!organizationId || !organizationWorkspaceId) {
+        return sendResponse({
+          error:
+            "Both organization_id and organization_workspace_id are required.",
+        }, 400);
+      }
+      await resolveManagedWorkspaceKey(
+        actor as Record<string, unknown>,
+        body,
+        "read",
+      );
       return sendResponse({ ok: true });
     }
     if (action === "renew_request") {

@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -43,7 +44,7 @@ def test_schema_migration_is_idempotent_and_non_destructive():
         db = str(Path(td) / "shoir160.db")
         init_160_platform(db)
         init_160_platform(db)
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"os160_features", "os160_projects", "os160_entities", "os160_edges", "os160_datasets", "os160_decisions"} <= tables
 

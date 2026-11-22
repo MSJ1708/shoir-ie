@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
@@ -595,7 +596,7 @@ def persist_resilience_run(module: str, username: str, inputs: Mapping[str, pd.D
     digest = hashlib.sha256(payload_inputs.encode("utf-8")).hexdigest()
     run_id = uuid.uuid4().hex
     stamp = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(db_path, timeout=10) as conn:
+    with sqlite3.connect(db_path, timeout=10, factory=ClosingSQLiteConnection) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS resilience_scenario_runs (
                 run_id TEXT PRIMARY KEY, username TEXT NOT NULL, module TEXT NOT NULL,
@@ -613,7 +614,7 @@ def persist_resilience_run(module: str, username: str, inputs: Mapping[str, pd.D
 
 def list_resilience_runs(module: str, username: str, db_path: str = "enterprise_full_workspace.db", limit: int = 50) -> pd.DataFrame:
     """Only list snapshots owned by the current user for the current module."""
-    with sqlite3.connect(db_path, timeout=10) as conn:
+    with sqlite3.connect(db_path, timeout=10, factory=ClosingSQLiteConnection) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS resilience_scenario_runs (
                 run_id TEXT PRIMARY KEY, username TEXT NOT NULL, module TEXT NOT NULL,
@@ -629,7 +630,7 @@ def list_resilience_runs(module: str, username: str, db_path: str = "enterprise_
 
 def load_resilience_run(run_id: str, module: str, username: str, db_path: str = "enterprise_full_workspace.db") -> dict[str, Any] | None:
     """Load a snapshot only when both owner and immutable module identity match."""
-    with sqlite3.connect(db_path, timeout=10) as conn:
+    with sqlite3.connect(db_path, timeout=10, factory=ClosingSQLiteConnection) as conn:
         row = conn.execute(
             "SELECT run_id, created_at, input_sha256, inputs_json, results_json FROM resilience_scenario_runs WHERE run_id=? AND username=? AND module=?",
             (str(run_id), str(username or "unknown").casefold(), str(module)),

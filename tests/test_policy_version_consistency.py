@@ -9,7 +9,7 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8")
 EDGE = (ROOT / "supabase" / "functions" / "shoir-persistence" / "index.ts").read_text(encoding="utf-8")
 GATE = (ROOT / "scripts" / "authenticated_release_gate.py").read_text(encoding="utf-8")
 APPROVAL_MIGRATION = (
-    ROOT / "supabase" / "migrations" / "20261023130000_refresh_refund_policy_acceptance_version.sql"
+    ROOT / "supabase" / "migrations" / "20261025164602_20261023130000_refresh_refund_policy_acceptance_version.sql"
 ).read_text(encoding="utf-8")
 RISK_REGISTER = (ROOT / "docs" / "LEGAL_RISK_REGISTER.md").read_text(encoding="utf-8")
 

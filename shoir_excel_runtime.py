@@ -128,7 +128,7 @@ def _render_excel_dataframe(frame: pd.DataFrame, label: str) -> None:
     )
     preview = _safe_excel_display_frame(bounded)
     try:
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        st.dataframe(preview, width="stretch", hide_index=True)
     except Exception as exc:
         _log_excel_error("dataframe rendering", exc)
         st.warning(
@@ -179,7 +179,7 @@ def _render_excel_plotly_figure(figure: Any, label: str = "Analysis chart") -> N
                 "to protect the browser; the full result table and evidence remain available."
             )
             return
-        st.plotly_chart(figure, use_container_width=True)
+        st.plotly_chart(figure, width="stretch")
     except Exception as exc:
         _log_excel_error("chart rendering", exc)
         st.warning(
@@ -1160,7 +1160,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                     )
                 if upload is not None and st.button(
                     "Inspect source formulas",
-                    use_container_width=True,
+                    width="stretch",
                     key="excel_intelligence_scan_source_formulas",
                 ):
                     try:
@@ -1271,7 +1271,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
             if st.button(
                 "Build execution plan",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="excel_intelligence_copilot_build_plan",
             ):
                 try:
@@ -1331,7 +1331,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                         "Approve and run analysis",
                         type="primary",
                         disabled=(not approved or already_executed),
-                        use_container_width=True,
+                        width="stretch",
                         key="excel_intelligence_copilot_execute",
                     ):
                         try:
@@ -1428,7 +1428,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 "⚙️ Prepare Industrial Excel Workbook",
                 type="primary",
                 disabled=requires_fidelity_ack and not fidelity_acknowledged,
-                use_container_width=True,
+                width="stretch",
                 key="excel_studio_safe_prepare_export",
             ):
                 try:
@@ -1453,7 +1453,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                 file_name=f"shoir_ie_industrial_{safe_name}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="excel_studio_safe_download_xlsx",
             )
             if result.get("bundle") is not None:
@@ -1462,7 +1462,7 @@ def render_excel_intelligence_safe(tier: str, username: str, enable_copilot: boo
                     result["bundle"],
                     file_name=f"shoir_ie_industrial_{safe_name}.zip",
                     mime="application/zip",
-                    use_container_width=True,
+                    width="stretch",
                     key="excel_studio_safe_download_bundle",
                 )
             st.caption(

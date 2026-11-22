@@ -17,6 +17,7 @@ import json
 import zipfile
 import math
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -81,7 +82,7 @@ UNIT_MAP = {
 
 def _db():
     ensure_experience_db()
-    return sqlite3.connect("enterprise_full_workspace.db", timeout=30)
+    return sqlite3.connect("enterprise_full_workspace.db", timeout=30, factory=ClosingSQLiteConnection)
 
 
 def _now():

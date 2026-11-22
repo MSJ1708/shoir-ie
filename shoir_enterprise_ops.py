@@ -416,7 +416,8 @@ def render_control_tower_extension() -> None:
     # Persist an explicit action queue so the tower supports intervention, not only observation.
     try:
         import sqlite3
-        with sqlite3.connect("enterprise_full_workspace.db") as con:
+        from shoir_sqlite import ClosingSQLiteConnection
+        with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
             con.execute(
                 "CREATE TABLE IF NOT EXISTS control_tower_actions("
                 "action_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,domain TEXT,action TEXT,owner TEXT,status TEXT,"
@@ -453,7 +454,7 @@ def render_control_tower_extension() -> None:
         if st.button("➕ Create control-tower action",type="primary",use_container_width=True,key="ct_action_create"):
             import uuid,sqlite3
             action_id="CTA-"+uuid.uuid4().hex[:10].upper()
-            with sqlite3.connect("enterprise_full_workspace.db") as con:
+            with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
                 con.execute(
                     "INSERT INTO control_tower_actions(action_id,workspace,domain,action,owner,status,notes,created_at,updated_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (action_id,workspace,action_domain,action_type,action_owner.strip() or username,action_status,action_notes.strip(),_now(),_now(),username)
@@ -474,13 +475,73 @@ def render_control_tower_extension() -> None:
             update_note=st.text_input("Update note",key="ct_action_update_note")
             if st.button("✅ Update selected action",use_container_width=True,key="ct_action_update"):
                 import sqlite3
-                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                with sqlite3.connect("enterprise_full_workspace.db", factory=ClosingSQLiteConnection) as con:
                     con.execute("UPDATE control_tower_actions SET status=?,notes=?,updated_at=? WHERE action_id=? AND workspace=?",(new_status,update_note,_now(),selected_action,workspace))
                     con.commit()
                 st.success(f"{selected_action} updated.")
                 st.rerun()
     elif actions is not None:
         st.info("No control-tower actions have been created yet. Use the form above to turn an observed issue into tracked work.")
+
+    # Read-only operational context from the shared Industrial Intelligence
+    # workspace. Access is revalidated; inaccessible/other-tenant records are never
+    # queried or rendered by this surface.
+    try:
+        from shoir_industrial_intelligence import _session_authorize as _ii_authorize, _state_list as _ii_state_list
+        _ii_authorize(username, str(st.session_state.get("user_tier") or ""), "read")
+        _ii_events = _ii_state_list("events")
+        _ii_actions = _ii_state_list("actions")
+        _ii_risk = [item for item in _ii_state_list("records") if item.get("record_type") == "risk_barrier_assurance"]
+        _ii_open_actions = [
+            item for item in _ii_actions
+            if str(item.get("status") or "").upper() not in {"VERIFIED", "CLOSED"}
+        ]
+        with st.expander("Industrial Intelligence · Events, decisions and action assurance", expanded=bool(_ii_events or _ii_open_actions or _ii_risk)):
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Recorded events", len(_ii_events))
+            c2.metric("Open actions", len(_ii_open_actions))
+            c3.metric("Risk screens", len(_ii_risk))
+            if _ii_events:
+                st.markdown("#### Recent operational events")
+                st.dataframe(pd.DataFrame([
+                    {
+                        "Event ID": row.get("record_id"),
+                        "Event": row.get("name"),
+                        "Occurred": row.get("event_timestamp"),
+                        "Entity": row.get("entity_id"),
+                        "Provenance": row.get("provenance"),
+                    }
+                    for row in sorted(_ii_events, key=lambda item: str(item.get("event_timestamp") or ""), reverse=True)[:20]
+                ]), use_container_width=True, hide_index=True)
+            if _ii_open_actions:
+                st.markdown("#### Actions awaiting resolution or verification")
+                st.dataframe(pd.DataFrame([
+                    {
+                        "Action ID": row.get("action_id"),
+                        "Action": row.get("title"),
+                        "Owner": row.get("owner"),
+                        "Due": row.get("due_date"),
+                        "Priority": row.get("priority"),
+                        "Status": row.get("status"),
+                    }
+                    for row in _ii_open_actions[:50]
+                ]), use_container_width=True, hide_index=True)
+            if _ii_risk:
+                st.markdown("#### Risk/barrier screens requiring formal review")
+                st.dataframe(pd.DataFrame([
+                    {
+                        "Record ID": row.get("record_id"),
+                        "Hazard": row.get("name"),
+                        "Status": row.get("payload", {}).get("status", "SCREENING_ONLY"),
+                        "Provenance": row.get("provenance"),
+                    }
+                    for row in _ii_risk[:30]
+                ]), use_container_width=True, hide_index=True)
+            st.caption("This view is sourced from the active workspace. Display does not approve actions or safety controls; complete review in the Industrial Intelligence Suite.")
+    except Exception:
+        # Non-Enterprise users and workspaces without the feature must not see
+        # data or receive a privilege-escalation fallback.
+        pass
 
     st.markdown("### 🔗 Decision Operating Loop")
     st.caption("Observe → prioritize → assign → mitigate → verify. Control actions are stored with the workspace record.")
@@ -1374,7 +1435,7 @@ def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) 
 def _load_persisted_telemetry(limit: int = 500) -> pd.DataFrame:
     try:
         import sqlite3
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite3.connect("enterprise_full_workspace.db", timeout=10, factory=ClosingSQLiteConnection) as conn:
             data = pd.read_sql(
                 "SELECT asset_id AS Asset, ts AS Timestamp, metric AS Metric, value AS Value, source AS Source "
                 "FROM telemetry_events ORDER BY id DESC LIMIT ?",

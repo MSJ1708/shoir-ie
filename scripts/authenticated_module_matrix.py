@@ -23,6 +23,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from staging_e2e_guard import validate_app_from_env
+from authenticated_release_gate import EdgeAPI, login_failure_detail
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "docs" / "MODULE_TIER_INVENTORY.csv"
@@ -192,6 +193,45 @@ def fill_signin_credentials(frame, username: str, password: str) -> None:
     password_inputs.first.fill(password)
 
 
+def verify_edge_test_login(account_class: str, username: str, password: str, expected_tier: str) -> None:
+    """Verify the supplied module-matrix credentials against the live staging Edge API.
+
+    This makes bad secret/account drift explicit before a 60-second browser wait.
+    Any successful temporary session is revoked immediately.
+    """
+    edge_url = os.environ.get("SHOIR_E2E_EDGE_URL", "").strip()
+    publishable_key = os.environ.get("SHOIR_E2E_PUBLISHABLE_KEY", "").strip()
+    if not edge_url or not publishable_key:
+        raise RuntimeError(f"{account_class}: staging Edge login preflight is not configured.")
+    api = EdgeAPI(edge_url, publishable_key)
+    try:
+        status, data = api.call("login", {"username": username, "password": password})
+    except Exception as exc:
+        raise RuntimeError(
+            f"{account_class}: staging Edge login preflight failed ({type(exc).__name__}); response body suppressed."
+        ) from exc
+    token = str(data.get("token") or "")
+    if (
+        status != 200
+        or data.get("ok") is not True
+        or data.get("tier") != expected_tier
+        or str(data.get("username") or "").casefold() != username.casefold()
+        or not token
+    ):
+        detail = login_failure_detail(status, data, "Expected a dedicated authenticated module-matrix account.")
+        raise RuntimeError(f"{account_class}: {detail}")
+    try:
+        logout_status, logout_data = api.call("logout", {"username": username, "token": token})
+    except Exception as exc:
+        raise RuntimeError(
+            f"{account_class}: temporary Edge login session could not be revoked ({type(exc).__name__})."
+        ) from exc
+    if logout_status != 200 or logout_data.get("ok") is not True:
+        raise RuntimeError(
+            f"{account_class}: temporary Edge login session revocation was not confirmed."
+        )
+
+
 def login_test_account(page, account_class: str, username: str, password: str) -> Any:
     response = page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
     if response is None or response.status != 200:
@@ -215,7 +255,26 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
     fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
-    frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
+    try:
+        frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
+    except PlaywrightError as exc:
+        # Keep the evidence useful without writing usernames, passwords, tokens,
+        # payment details or arbitrary page contents into the CI artifact.
+        try:
+            body = frame.locator("body").inner_text(timeout=5_000).casefold()
+        except Exception:
+            body = ""
+        if "invalid username or password" in body:
+            diagnostic = "the app displayed the generic invalid-credentials message"
+        elif "subscription has expired" in body or "subscription_expired" in body:
+            diagnostic = "the app displayed the expired-subscription renewal-only surface"
+        elif "sign in to your workspace" in body:
+            diagnostic = "the app remained on the sign-in surface with no recognized error text"
+        else:
+            diagnostic = "no recognized authentication error marker was visible"
+        raise RuntimeError(
+            f"{account_class}: authenticated workspace controls did not appear after sign-in; {diagnostic}."
+        ) from exc
     marker_deadline = time.monotonic() + 10
     active_label = ""
     while time.monotonic() < marker_deadline:
@@ -231,6 +290,23 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     return frame
 
 
+def authenticated_surface_issue(frame) -> str:
+    """Return a sanitized explanation when the app has fallen out of its authenticated shell."""
+    try:
+        body = frame.locator("body").inner_text(timeout=3_000).casefold()
+    except Exception:
+        return "The authenticated page could not be read after a Streamlit rerun."
+    if "your 30-day subscription has expired" in body or "subscription_expired" in body:
+        return (
+            "The UI returned to the expired-subscription screen even though the direct "
+            "staging Edge login preflight accepted this account. The app is likely using "
+            "a stale local subscription-expiry cache; deploy the candidate server-expiry fix."
+        )
+    if "sign in to your workspace" in body and "lock / logout workspace" not in body:
+        return "The app returned to the unauthenticated sign-in screen before module traversal completed."
+    return ""
+
+
 def route_module(page, frame, module_name: str, account_class: str) -> dict[str, Any]:
     case: dict[str, Any] = {
         "case_id": f"MODULE-ROUTE-{account_class.upper()}",
@@ -244,6 +320,9 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
         "failure_reason": "",
     }
     try:
+        surface_issue = authenticated_surface_issue(frame)
+        if surface_issue:
+            raise RuntimeError(surface_issue)
         search = frame.get_by_placeholder(MODULE_SEARCH)
         main = frame.get_by_role("main")
         active_text = ""
@@ -370,6 +449,16 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
 
 
 def run_account(browser, account_class: str, username: str, password: str, rows: list[dict[str, str]], cases: list[dict[str, Any]]) -> None:
+    expected_tier = "Enterprise Plus Tier ($399)" if account_class == "enterprise_plus" else "Research Pack ($30 add-on)"
+    verify_edge_test_login(account_class, username, password, expected_tier)
+    cases.append({
+        "case_id": f"MODULE-EDGE-LOGIN-{account_class.upper()}",
+        "module_name": None,
+        "account_class": account_class,
+        "status": "PASS",
+        "failure_reason": "",
+        "detail": "Staging Edge accepted the dedicated account and the temporary session was revoked.",
+    })
     context = browser.new_context(viewport={"width": 1440, "height": 1000}, accept_downloads=False)
     page = context.new_page()
     page_errors: list[str] = []
@@ -391,8 +480,30 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
             return
 
         for row in rows:
+            surface_issue = authenticated_surface_issue(frame)
+            if surface_issue:
+                cases.append({
+                    "case_id": f"MODULE-SESSION-LOST-{account_class.upper()}",
+                    "module_name": None,
+                    "account_class": account_class,
+                    "status": "FAIL",
+                    "failure_reason": surface_issue,
+                })
+                break
             module_name = row["module_name"].strip()
-            cases.append(route_module(page, frame, module_name, account_class))
+            route_case = route_module(page, frame, module_name, account_class)
+            cases.append(route_case)
+            if route_case.get("status") != "PASS":
+                surface_issue = authenticated_surface_issue(frame)
+                if surface_issue:
+                    cases.append({
+                        "case_id": f"MODULE-SESSION-LOST-{account_class.upper()}",
+                        "module_name": None,
+                        "account_class": account_class,
+                        "status": "FAIL",
+                        "failure_reason": surface_issue,
+                    })
+                    break
         if page_errors:
             cases.append({
                 "case_id": f"MODULE-JS-{account_class.upper()}",
@@ -415,6 +526,12 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
             try:
                 # Let the last module rerun finish before dispatching logout.
                 page.wait_for_timeout(1_000)
+                surface_issue = authenticated_surface_issue(frame)
+                if surface_issue:
+                    raise RuntimeError(
+                        "Logout could not be attempted because the app had already left "
+                        f"the authenticated surface: {surface_issue}"
+                    )
                 visible_logout_button(frame).click(timeout=15_000)
                 try:
                     frame.get_by_text(

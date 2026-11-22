@@ -1,5 +1,7 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import json
 import pandas as pd
+import pytest
 
 from benchmark_harness import calculate_roi_evidence, benchmark_callable
 from shoir_digital_thread import CANONICAL_LIFECYCLE, canonical_flow_figure
@@ -42,6 +44,182 @@ def test_canonical_lifecycle_flow_is_renderable():
     assert "Asset" in CANONICAL_LIFECYCLE and "Outcome" in CANONICAL_LIFECYCLE
     assert canonical_flow_figure(nodes, edges) is not None
 
+def test_local_dataset_version_change_invalidates_decision_mirror_and_outcomes(tmp_path, monkeypatch):
+    import hashlib
+    import sqlite3
+    import durable_account_store
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "decision-lineage.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    first = pd.DataFrame({"Throughput": [100.0, 105.0], "Energy": [4.0, 4.2]})
+    dataset_id = platform.register_dataset(
+        "Decision input", "decision-input.csv", first,
+        db_path=db, username="alice",
+    )
+    first_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+    with sqlite_connection(db) as conn:
+        version = conn.execute(
+            "SELECT version,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    dependencies = [{
+        "dataset_id": dataset_id,
+        "version": int(version[0]),
+        "data_hash": first_hash,
+        "version_fingerprint": version[1],
+    }]
+    card = {
+        "title": "Dataset-linked decision",
+        "module": "Engineering Decision Center",
+        "metrics": {"Throughput": 105.0},
+        "assumptions": {"unit": "units/hour"},
+        "uncertainty": {"status": "synthetic test"},
+        "status": "Proposed",
+        "created_at": "2026-10-26T10:00:00Z",
+        "dataset_dependencies": dependencies,
+    }
+    decision_id = platform.save_decision_card(card, "alice", db_path=db)
+    outcome_id = exp.record_decision_outcome(
+        decision_id, "alice", "Implemented",
+        {"Throughput": 105.0}, {"Throughput": 102.0},
+        lesson="Synthetic regression fixture",
+        db_path=db, persist_artifact=False,
+    )
+
+    second = pd.DataFrame({"Throughput": [100.0, 105.0], "Energy": [4.0, 4.8]})
+    platform.register_dataset(
+        "Decision input", "decision-input.csv", second,
+        db_path=db, username="alice",
+    )
+
+    with sqlite_connection(db) as conn:
+        platform_status = conn.execute(
+            "SELECT dataset_dependency_status FROM platform_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()[0]
+        experience_decision = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        outcome = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json FROM experience_decision_outcomes WHERE outcome_id=?",
+            (outcome_id,),
+        ).fetchone()
+    assert platform_status == "STALE"
+    assert experience_decision[0] == "STALE"
+    assert len(json.loads(experience_decision[1])) == 1
+    assert outcome[0] == "STALE"
+    assert len(json.loads(outcome[1])) == 1
+    with pytest.raises(ValueError, match="source dataset version is no longer current"):
+        exp.record_decision_outcome(
+            decision_id, "alice", "Verified",
+            {"Throughput": 105.0}, {"Throughput": 105.0},
+            lesson="Must be blocked until decision is rerun",
+            db_path=db, persist_artifact=False,
+        )
+
+
+def test_standalone_experience_decision_inherits_dataset_dependencies_and_blocks_stale_transition(tmp_path, monkeypatch):
+    import hashlib
+    import sqlite3
+    import durable_account_store
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "experience-decision-lineage.db")
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(db, timeout=30))
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: {})
+    first = pd.DataFrame({"Demand": [100.0, 110.0]})
+    dataset_id = platform.register_dataset(
+        "Demand history", "demand.csv", first, db_path=db, username="alice"
+    )
+    data_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+    with sqlite_connection(db) as conn:
+        version, fingerprint = conn.execute(
+            "SELECT version,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    decision_id = exp.create_decision(
+        "Dataset-linked demand decision",
+        "Demand Planning",
+        {"Demand": 110.0},
+        {"unit": "units"},
+        {"note": "Synthetic test fixture"},
+        "alice",
+        db_path=db,
+        dataset_dependencies=[{
+            "dataset_id": dataset_id,
+            "version": int(version),
+            "data_hash": data_hash,
+            "version_fingerprint": fingerprint,
+        }],
+    )
+    with sqlite_connection(db) as conn:
+        before = conn.execute(
+            "SELECT dataset_dependency_status,dataset_dependencies_json FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+    assert before[0] == "CURRENT"
+    assert json.loads(before[1])[0]["version"] == 1
+
+    second = pd.DataFrame({"Demand": [100.0, 115.0]})
+    platform.register_dataset(
+        "Demand history", "demand.csv", second, db_path=db, username="alice"
+    )
+    with sqlite_connection(db) as conn:
+        after = conn.execute(
+            "SELECT dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()[0]
+    assert after == "STALE"
+    with pytest.raises(ValueError, match="stale dataset-linked decision"):
+        exp.transition_decision(decision_id, "alice", "Approved")
+
+
+def test_unverified_dataset_reference_cannot_approve_or_record_decision_outcome(tmp_path, monkeypatch):
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "unverified-experience-decision.db")
+    platform.init_platform_db(db)
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(db, timeout=30))
+    decision_id = exp.create_decision(
+        "Decision with unverified source",
+        "Reliability",
+        {"Failure rate": 0.02},
+        {"unit": "failures/hour"},
+        {"note": "Unverified reference fixture"},
+        "alice",
+        db_path=db,
+        dataset_dependencies=[{
+            "dataset_id": "DS-ABCDEF778899",
+            "version": 4,
+            "data_hash": "a" * 64,
+            "version_fingerprint": "b" * 64,
+        }],
+    )
+    with sqlite_connection(db) as conn:
+        row = conn.execute(
+            "SELECT dataset_dependency_status FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+    assert row[0] == "UNVERIFIED_REFERENCE"
+    with pytest.raises(ValueError, match="dataset lineage is stale or unverified"):
+        exp.transition_decision(decision_id, "alice", "Approved")
+    with pytest.raises(ValueError, match="dataset lineage is stale or unverified"):
+        exp.record_decision_outcome(
+            decision_id, "alice", "Implemented",
+            {"Failure rate": 0.02}, {"Failure rate": 0.01},
+            db_path=db, persist_artifact=False,
+        )
+
+
 def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
     import sqlite3
     import industrial_platform as platform
@@ -60,7 +238,7 @@ def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
     }
     did = platform.save_decision_card(card, "alice", db_path=db)
 
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         row = conn.execute(
             "SELECT decision_id,status,owner FROM experience_decisions WHERE decision_id=?",
             (did,),
@@ -87,7 +265,7 @@ def test_decision_outcome_persistence_and_variance(tmp_path, monkeypatch):
     import sqlite3
     import industrial_experience as exp
     db = str(tmp_path / "experience.db")
-    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite3.connect(db, timeout=30))
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(db, timeout=30))
     exp.ensure_experience_db(db)
     did = exp.create_decision("Test decision", "Testing", {"Throughput": 100}, {}, {}, "owner")
     oid = exp.record_decision_outcome(
@@ -126,7 +304,7 @@ def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
     import sqlite3
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         conn.execute("select 1")
     monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
     monkeypatch.setattr(ent, "_remote", lambda: False)
@@ -182,7 +360,7 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
     import sqlite3
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         conn.execute("create table t(x integer)")
         conn.execute("insert into t values(1)")
         conn.commit()
@@ -190,7 +368,7 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
     monkeypatch.setattr(ent, "_remote", lambda: False)
     tested = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", f"sqlite:///{db}", workspace="plant-a")
     schedule_id = ent.schedule_connector_sync("alice", tested["connector_id"], 60, "plant-a", enabled=True)
-    with sqlite3.connect(str(ent.DEFAULT_DB)) as conn:
+    with sqlite_connection(str(ent.DEFAULT_DB)) as conn:
         conn.execute("update shoir_ent_connector_schedules set next_run_at=? where schedule_id=?",
                      ("2000-01-01T00:00:00+00:00", schedule_id))
         conn.commit()
@@ -226,7 +404,7 @@ def test_decision_to_value_is_canonical_and_traceable(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     experience_db = str(tmp_path / "experience.db")
     enterprise_db = str(tmp_path / "enterprise.db")
-    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite3.connect(experience_db, timeout=30))
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite_connection(experience_db, timeout=30))
     monkeypatch.setattr(ent, "DEFAULT_DB", enterprise_db)
     monkeypatch.setattr(ent, "_remote", lambda: False)
     exp.ensure_experience_db(experience_db)

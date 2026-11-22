@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import streamlit as st
 
-from shoir_visual_system import apply_shoir_design_system, render_workspace_status
+from shoir_visual_system import SHOIR_CSS, apply_shoir_design_system, render_workspace_status
 
 
 def test_design_system_is_injected_once(monkeypatch):
@@ -37,3 +37,12 @@ def test_workspace_status_escapes_user(monkeypatch):
     assert "<script>" not in calls[0]
     assert "Cloud workspace" in calls[0]
     assert "Autosave active" in calls[0]
+
+
+def test_mobile_tabs_wrap_without_horizontal_overflow():
+    assert '@media (max-width: 620px)' in SHOIR_CSS
+    assert 'div[data-baseweb="tab-list"]' in SHOIR_CSS
+    assert 'flex-wrap: wrap !important;' in SHOIR_CSS
+    assert 'flex: 1 1 0 !important;' in SHOIR_CSS
+    assert 'white-space: normal !important;' in SHOIR_CSS
+    assert 'overflow-wrap: anywhere !important;' in SHOIR_CSS

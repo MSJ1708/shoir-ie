@@ -2,18 +2,19 @@ name: Shoir-IE Edge Function verification
 
 on:
   push:
-    branches: ["main", "feature/**", "feat/**"]
+    branches: ["main", "staging-e2e-20261019"]
     paths:
       - "supabase/functions/**"
       - ".github/workflows/edge-function-check.yml"
   pull_request:
-    branches: ["main", "staging-e2e-20261019", "feat/shoir-100-tools-integration-20261025"]
-    paths:
-      - "supabase/functions/**"
-      - ".github/workflows/edge-function-check.yml"
+    branches: ["main", "staging-e2e-20261019"]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   edge-function:
@@ -26,8 +27,10 @@ jobs:
         with:
           deno-version: v2.x
       - name: Check Edge Function and security helper formatting
-        run: deno fmt --check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security.ts supabase/functions/shoir-persistence/security_test.ts
+        run: deno fmt --check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security.ts supabase/functions/shoir-persistence/security_test.ts supabase/functions/shoir-persistence/oidc.ts supabase/functions/shoir-persistence/oidc_test.ts
       - name: Type-check Edge Function and security helper tests
-        run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security_test.ts
+        run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security_test.ts supabase/functions/shoir-persistence/oidc_test.ts
       - name: Test bounded request parsing and safe error mapping
         run: deno test supabase/functions/shoir-persistence/security_test.ts
+      - name: Test OIDC signature, claims, replay bounds and MFA enforcement
+        run: deno test supabase/functions/shoir-persistence/oidc_test.ts

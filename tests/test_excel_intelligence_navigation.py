@@ -115,7 +115,7 @@ def test_excel_intelligence_renderer_requires_authenticated_non_guest_session():
     route = platform.split('if module=="Excel Intelligence":', 1)[1].split(
         'if module=="Excel Data Cleaning & Import":', 1
     )[0]
-    assert 'st.session_state.get("authenticated") is not True' in route
+    assert '_industrial_platform_session_state().get("authenticated") is not True' in route
     assert 'actor.casefold() in {"", "guest", "guest visitor", "anonymous"}' in route
     assert 'session_actor.casefold() != actor.casefold()' in route
     assert 'Sign in with an active Shoir-IE account' in route
@@ -145,6 +145,17 @@ def test_enterprise_user_can_open_excel_intelligence_from_workbench_data(monkeyp
     app.session_state["user_tier"] = "Enterprise"
     app.session_state["remote_session_token"] = "synthetic-session-token"
     app.run(timeout=90)
+    assert app.session_state.get("shoir_tool_result_T001") is None
+
+    # Activate a focused tool, then navigate away through the established module selector.
+    app.selectbox(key="shoir_100_tool_inspector").select("T001 · Personalized Engineering Home")
+    app.run(timeout=90)
+    assert not app.exception, "\n".join(str(error.value) for error in app.exception)
+    assert app.session_state.get("shoir_tool_result_T001") is None
+    app.button(key="canonical_run_T001").click()
+    app.run(timeout=90)
+    assert not app.exception, "\n".join(str(error.value) for error in app.exception)
+    assert app.session_state.get("shoir_tool_result_T001") is not None
     assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
 
     app.selectbox(key="workbench_category").select("Data")
@@ -158,7 +169,14 @@ def test_enterprise_user_can_open_excel_intelligence_from_workbench_data(monkeyp
 
     assert not app.exception, "\\n".join(str(error.value) for error in app.exception)
     assert app.session_state["workbench_module_selector"] == "Data · Excel Intelligence"
-    assert any("No workbook" in str(item.value) or "Upload" in str(item.value) for item in app.info)
+    assert app.session_state["shoir_100_tool_inspector"] == "— Select a tool to inspect —"
+    assert any("Available in this staging implementation" in str(item.value) for item in app.info), (
+    "Excel Intelligence content was not rendered. "
+    f"info={[str(item.value) for item in app.info]} "
+    f"warning={[str(item.value) for item in app.warning]} "
+    f"error={[str(item.value) for item in app.error]} "
+    f"markdown={[str(item.value)[:180] for item in app.markdown[-12:]]}"
+)
 
 
 def test_professional_user_sees_excel_intelligence_locked_in_workbench_data():

@@ -12,6 +12,7 @@ import html
 import io
 import json
 import sqlite3
+from shoir_sqlite import ClosingSQLiteConnection
 import time
 import uuid
 import zipfile
@@ -82,7 +83,7 @@ def _now() -> str:
 
 
 def _db(path: str = "enterprise_full_workspace.db"):
-    return sqlite3.connect(path, timeout=30)
+    return sqlite3.connect(path, timeout=30, factory=ClosingSQLiteConnection)
 
 
 def _key(value: str) -> str:

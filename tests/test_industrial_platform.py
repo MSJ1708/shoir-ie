@@ -1,3 +1,4 @@
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import sqlite3
 import pandas as pd
 import pytest
@@ -23,7 +24,7 @@ def test_catalog_and_tiers():
 def test_db_migration(tmp_path):
     db=tmp_path/"platform.db"
     assert init_platform_db(str(db))
-    with sqlite3.connect(db) as c:
+    with sqlite_connection(db) as c:
         tables={r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     assert {"industrial_entities","platform_datasets","platform_models","platform_experiments","platform_decisions"} <= tables
 
@@ -154,7 +155,7 @@ def test_save_experiment_persists_all_seven_columns(tmp_path):
     )
 
     assert experiment_id.startswith("EXP-")
-    with sqlite3.connect(db) as conn:
+    with sqlite_connection(db) as conn:
         row = conn.execute(
             """SELECT experiment_id, name, module, scenarios_json, results_json, created_by, created_at
                FROM platform_experiments WHERE experiment_id=?""",
@@ -172,3 +173,1136 @@ def test_unique_modules_preserves_order_and_removes_duplicates():
     assert unique_modules(["MILP Solvers", "AI Copilot", "MILP Solvers", "", None, "AI Copilot"]) == [
         "MILP Solvers", "AI Copilot"
     ]
+
+
+
+def test_staging_dataset_registration_uses_immutable_version_registry(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    calls = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 3,
+                "data_hash": kwargs["data_hash"],
+                "version_fingerprint": kwargs["version_fingerprint"],
+                "created_new_version": True,
+            },
+        },
+    )
+    state = {}
+    monkeypatch.setattr(
+        platform, "_industrial_platform_session_state", lambda: state
+    )
+    frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "throughput_tph": [12.5, 14.0]})
+    first = platform.register_dataset(
+        "Production", "production.csv", frame,
+        username="synthetic-user", workspace="plant-a", token="session-token",
+    )
+    second = platform.register_dataset(
+        "Production", "production.csv", frame.copy(deep=True),
+        username="synthetic-user", workspace="plant-a", token="session-token",
+    )
+    assert first == second
+    assert len(calls) == 2
+    assert calls[0]["dataset_id"] == first
+    assert calls[0]["file_bytes"] == calls[1]["file_bytes"]
+    assert calls[0]["data_hash"] == calls[1]["data_hash"]
+    assert calls[0]["version_fingerprint"] == calls[1]["version_fingerprint"]
+    assert calls[0]["row_count"] == 2
+    assert calls[0]["column_count"] == 2
+    assert state["data_platform_latest_version"] == 3
+
+
+def test_staging_dataset_registration_fails_closed_without_session(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: pytest.fail("must not call the API without an authenticated session"),
+    )
+    with pytest.raises(PermissionError, match="authenticated staging session"):
+        platform.register_dataset(
+            "Production", "production.csv",
+            pd.DataFrame({"units": [1, 2]}),
+            username="synthetic-user", workspace="plant-a", token="",
+        )
+
+
+def test_staging_dataset_registration_rejects_too_many_transformations(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    with pytest.raises(ValueError, match="50 entries"):
+        platform.register_dataset(
+            "Production", "production.csv",
+            pd.DataFrame({"units": [1]}),
+            transformations=[{"operation": "clean"}] * 51,
+        )
+
+
+
+def test_load_registered_dataset_activates_verified_shared_frame(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    raw = b"asset_id,throughput_tph\nA-1,12.5\nA-2,14.0\n"
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_download_dataset_version",
+        lambda **kwargs: (raw, {
+            "data_hash": "f" * 64, "version": 2, "row_count": 2, "column_count": 2
+        }),
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    monkeypatch.setattr(
+        platform,
+        "_activate_dataset_for_shared_workspace",
+        lambda df, filename, sheet, signature: state.update({
+            "universal_active_dataset": df.copy(deep=True),
+            "data_platform_latest_df": df.copy(deep=True),
+            "shoir_data_status": "IMPORTED",
+            "shoir_data_source": f"{filename} · {sheet}",
+            "shoir_data_version": signature[:12],
+            "shoir_data_hash": signature,
+        }),
+    )
+    frame = platform.load_registered_dataset(
+        "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
+    )
+    assert list(frame.columns) == ["asset_id", "throughput_tph"]
+    assert len(frame) == 2
+    assert state["universal_active_dataset"].equals(frame)
+    assert state["data_platform_latest_version"] == 2
+
+
+def test_load_registered_dataset_rejects_metadata_row_count_mismatch(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_download_dataset_version",
+        lambda **kwargs: (
+            b"asset_id\nA-1\n",
+            {"data_hash": "f" * 64, "version": 1, "row_count": 2, "column_count": 1},
+        ),
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    with pytest.raises(RuntimeError, match="row count"):
+        platform.load_registered_dataset(
+            "DS-ABCDEF012345", "synthetic-user", "plant-a", "session-token"
+        )
+
+
+
+def test_dataset_profile_figures_render_real_missingness_and_numeric_distributions():
+    from industrial_platform import _dataset_profile_figures
+
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2", "A-3", "A-4"],
+        "throughput_tph": [10.0, 12.0, None, 18.0],
+        "temperature_c": [40.0, 42.0, 43.0, 47.0],
+    })
+    figures = _dataset_profile_figures(frame, "Synthetic production")
+    assert len(figures) == 3
+    assert figures[0][0] == "Missingness"
+    assert len(figures[0][1].data) >= 1
+    assert any("throughput_tph" in label for label, _ in figures[1:])
+    for label, figure in figures:
+        assert figure.data, label
+        assert figure.layout.title.text
+        assert figure.layout.xaxis.title.text
+        assert figure.layout.yaxis.title.text
+
+
+def test_dataset_profile_figures_handle_empty_and_non_numeric_data():
+    from industrial_platform import _dataset_profile_figures
+
+    assert _dataset_profile_figures(pd.DataFrame(), "Empty") == []
+    frame = pd.DataFrame({"asset_id": ["A-1", "A-2"], "status": ["Run", "Stop"]})
+    figures = _dataset_profile_figures(frame, "Categorical only")
+    assert len(figures) == 1
+    assert figures[0][0] == "Missingness"
+    assert figures[0][1].data
+
+
+def test_data_platform_route_has_stable_t020_entitlement_guard_and_visual_panel():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "industrial_platform.py").read_text(encoding="utf-8")
+    assert 'require_tool_access(tier, "T020")' in source
+    assert "def _render_dataset_profile(" in source
+    assert "st.plotly_chart(" in source
+    assert "data_platform_processed_upload_fingerprint" in source
+
+
+
+def test_dataset_profile_renderer_calls_plotly_for_each_generated_figure(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from industrial_platform import _dataset_profile_figures, _render_dataset_profile
+
+    rendered = []
+    metrics = []
+    def metric(label, value):
+        metrics.append((label, value))
+    fake_streamlit = SimpleNamespace(
+        columns=lambda count: [SimpleNamespace(metric=metric) for _ in range(count)],
+        warning=lambda message: None,
+        success=lambda message: None,
+        caption=lambda message: None,
+        plotly_chart=lambda figure, **kwargs: rendered.append((figure, kwargs)),
+    )
+    monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2", "A-3"],
+        "throughput_tph": [8.0, 11.0, None],
+    })
+    _render_dataset_profile(frame, "Production", "render-test")
+    assert len(metrics) == 4
+    assert len(rendered) == len(_dataset_profile_figures(frame, "Production"))
+    assert len(rendered) == 2
+    assert all(call[1]["use_container_width"] is True for call in rendered)
+    assert all(call[1]["key"].startswith("render-test_") for call in rendered)
+
+
+def test_industrial_data_platform_is_reachable_from_original_app_and_workbench():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+    workbench_source = (
+        root / "pages" / "Industrial_Engineering_Workbench.py"
+    ).read_text(encoding="utf-8")
+    platform_source = (root / "industrial_platform.py").read_text(encoding="utf-8")
+
+    assert "PLATFORM_CATALOG" in app_source
+    assert "render_industrial_module(mod" in app_source
+    assert '"Industrial Data Platform"' in platform_source
+    assert "from industrial_platform import render_module" in workbench_source
+    assert "render_module(selected, RAW_TIER, USER)" in workbench_source
+    assert 'elif module=="Industrial Data Platform":' in platform_source
+
+
+
+def test_shared_dataset_activation_delegates_to_existing_application_shell(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import industrial_platform as platform
+
+    calls = []
+    fake_shell = SimpleNamespace(
+        _activate_shared_dataset=lambda df, **kwargs: calls.append(
+            (df.copy(deep=True), dict(kwargs))
+        )
+    )
+    monkeypatch.setitem(sys.modules, "shoir_application_shell", fake_shell)
+    frame = pd.DataFrame({"asset_id": ["A-1"], "rate_tph": [9.5]})
+    platform._activate_dataset_for_shared_workspace(
+        frame,
+        filename="production.xlsx",
+        sheet="Line 1",
+        signature="a" * 64,
+    )
+    assert len(calls) == 1
+    assert calls[0][0].equals(frame)
+    assert calls[0][1] == {
+        "filename": "production.xlsx",
+        "sheet": "Line 1",
+        "signature": "a" * 64,
+    }
+
+
+def test_industrial_data_platform_entitlement_matches_existing_catalog_and_tool():
+    from industrial_platform import PLATFORM_CATALOG, tier_allows
+    from shoir_tool_registry import get_tool, require_tool_access
+
+    entry = next(
+        item for item in PLATFORM_CATALOG
+        if item["name"] == "Industrial Data Platform"
+    )
+    tool = get_tool("T020")
+    assert entry["tier"] == "Enterprise"
+    assert tool is not None
+    assert tool["target_minimum_tier"] == "Enterprise"
+    assert tier_allows("Enterprise", entry["tier"])
+    with pytest.raises(PermissionError):
+        require_tool_access("Professional", "T020")
+    require_tool_access("Enterprise", "T020")
+
+
+
+def test_staging_dataset_registration_can_append_version_to_existing_logical_id(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    calls = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 4,
+                "created_new_version": True,
+            },
+        },
+    )
+    state = {}
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    frame = pd.DataFrame({"asset_id": ["A-1"], "throughput_tph": [15.0]})
+    saved_id = platform.register_dataset(
+        "Renamed production view",
+        "production-export-2026-11.csv",
+        frame,
+        username="synthetic-user",
+        workspace="plant-a",
+        token="session-token",
+        dataset_id="DS-AABBCCDDEEFF",
+        transformations=[{"operation": "normalize_sheet_to_csv", "status": "completed"}],
+    )
+    assert saved_id == "DS-AABBCCDDEEFF"
+    assert calls[0]["dataset_id"] == "DS-AABBCCDDEEFF"
+    assert state["data_platform_latest_version"] == 4
+
+
+def test_dataset_registration_rejects_malformed_existing_dataset_id_before_network(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: pytest.fail("invalid logical ID must be rejected before network"),
+    )
+    with pytest.raises(ValueError, match="canonical DS- identifier"):
+        platform.register_dataset(
+            "Production",
+            "production.csv",
+            pd.DataFrame({"asset_id": ["A-1"]}),
+            username="synthetic-user",
+            workspace="plant-a",
+            token="session-token",
+            dataset_id="../OTHER-WORKSPACE",
+        )
+
+
+
+def test_local_dataset_versions_stale_linked_legacy_artifacts_without_losing_history(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    import durable_account_store
+    import industrial_platform as platform
+
+    db = str(tmp_path / "legacy-lineage.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    first = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 4.5]})
+    dataset_id = platform.register_dataset(
+        "Line A measurements", "line-a.csv", first, db_path=db, username="engineer-a"
+    )
+    first_hash = hashlib.sha256(first.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+
+    with sqlite_connection(db) as conn:
+        version_one = conn.execute(
+            """SELECT version,data_hash,version_fingerprint
+               FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version""",
+            (dataset_id,),
+        ).fetchone()
+        head_one = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    assert version_one[0] == 1
+    assert version_one[1] == first_hash
+    assert head_one[0] == 1
+
+    model_id = platform.save_model_snapshot(
+        "Line A energy model", "Regression", {"target": "Energy"}, first_hash,
+        "engineer-a", {"unit": "kWh"}, db_path=db, dataset_id=dataset_id,
+    )
+    dependencies = [{
+        "dataset_id": dataset_id,
+        "version": 1,
+        "data_hash": first_hash,
+        "version_fingerprint": version_one[2],
+    }]
+    scenario_id = platform.save_scenario(
+        "Line A baseline", "", {"dataset_dependencies": dependencies, "period": "2026-10"},
+        {"Energy": 4.25}, "engineer-a", db,
+    )
+    experiment_id = platform.save_experiment(
+        "Line A alternatives", "Experiment Lab",
+        [{"Scenario": "Baseline", "dataset_dependencies": dependencies}],
+        {"comparison": "synthetic fixture"}, "engineer-a", db,
+    )
+    decision_id = platform.save_decision_card(
+        {
+            "title": "Line A energy decision",
+            "module": "Engineering Decision Center",
+            "metrics": {"Energy": 4.25},
+            "assumptions": {"unit": "kWh"},
+            "uncertainty": {"status": "test only"},
+            "status": "Proposed",
+            "created_at": "2026-10-26T10:00:00Z",
+            "dataset_dependencies": dependencies,
+        },
+        "engineer-a",
+        db,
+    )
+
+    # An outcome created by an older release may not carry its own dependency
+    # snapshot. The parent decision remains the authoritative lineage source.
+    from industrial_experience import record_decision_outcome
+    outcome_id = record_decision_outcome(
+        decision_id,
+        "engineer-a",
+        "Implemented",
+        predicted={"Energy": 4.25},
+        actual={"Energy": 4.5},
+        lesson="Synthetic validation outcome.",
+        db_path=db,
+        persist_artifact=False,
+    )
+    with sqlite_connection(db) as conn:
+        conn.execute(
+            "UPDATE experience_decision_outcomes "
+            "SET dataset_dependencies_json='[]', dataset_dependency_status='NOT_LINKED', "
+            "stale_dataset_dependencies_json='[]' WHERE outcome_id=?",
+            (outcome_id,),
+        )
+        conn.commit()
+
+    # Re-registering identical content must not create a new version or stale
+    # artifacts. Changing content under the same logical dataset identity must.
+    assert platform.register_dataset(
+        "Line A measurements", "line-a.csv", first.copy(),
+        db_path=db, username="engineer-a",
+    ) == dataset_id
+    with sqlite_connection(db) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()[0] == 1
+
+    second = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 5.0]})
+    second_hash = hashlib.sha256(second.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+    assert platform.register_dataset(
+        "Line A measurements", "line-a.csv", second,
+        db_path=db, username="engineer-a",
+    ) == dataset_id
+
+    with sqlite_connection(db) as conn:
+        head = conn.execute(
+            "SELECT current_version,sha256 FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        versions = conn.execute(
+            "SELECT version,data_hash FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
+            (dataset_id,),
+        ).fetchall()
+        model = conn.execute(
+            "SELECT dataset_dependency_status,dataset_dependencies_json,stale_dataset_dependencies_json FROM platform_models WHERE model_id=?",
+            (model_id,),
+        ).fetchone()
+        scenario = conn.execute(
+            "SELECT dataset_dependency_status,parameters_json,stale_dataset_dependencies_json FROM platform_scenarios WHERE scenario_id=?",
+            (scenario_id,),
+        ).fetchone()
+        experiment = conn.execute(
+            "SELECT dataset_dependency_status,scenarios_json,stale_dataset_dependencies_json FROM platform_experiments WHERE experiment_id=?",
+            (experiment_id,),
+        ).fetchone()
+        decision = conn.execute(
+            "SELECT dataset_dependency_status,metrics_json,stale_dataset_dependencies_json FROM platform_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        experience_decision = conn.execute(
+            "SELECT dataset_dependency_status,metrics_json,stale_dataset_dependencies_json "
+            "FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        outcome = conn.execute(
+            "SELECT dataset_dependency_status,actual_json,stale_dataset_dependencies_json "
+            "FROM experience_decision_outcomes WHERE outcome_id=?",
+            (outcome_id,),
+        ).fetchone()
+
+    assert head == (2, second_hash)
+    assert versions == [(1, first_hash), (2, second_hash)]
+    for artifact in (model, scenario, experiment, decision, experience_decision, outcome):
+        assert artifact[0] == "STALE"
+        stale_markers = json.loads(artifact[2])
+        assert len(stale_markers) == 1
+        assert stale_markers[0]["previous_version"] == 1
+        assert stale_markers[0]["current_version"] == 2
+        assert stale_markers[0]["current_data_hash"] == second_hash
+    assert json.loads(outcome[1])["Energy"] == 4.5
+    assert "parent decision" in json.loads(outcome[2])[0]["reason"]
+    # Historical model/scenario/experiment/decision content remains unchanged.
+    assert json.loads(scenario[1])["period"] == "2026-10"
+    assert json.loads(experiment[1])[0]["Scenario"] == "Baseline"
+    assert json.loads(decision[1])["Energy"] == 4.25
+    assert json.loads(model[1])[0]["version"] == 1
+
+    # Reverting to identical historical content creates a third immutable
+    # version rather than colliding with the version-1 content hash.
+    assert platform.register_dataset(
+        "Line A measurements", "line-a.csv", first.copy(),
+        db_path=db, username="engineer-a",
+    ) == dataset_id
+    with sqlite_connection(db) as conn:
+        reverted_head = conn.execute(
+            "SELECT current_version,sha256 FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        reverted_versions = conn.execute(
+            "SELECT version,data_hash FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
+            (dataset_id,),
+        ).fetchall()
+    assert reverted_head == (3, first_hash)
+    assert reverted_versions == [(1, first_hash), (2, second_hash), (3, first_hash)]
+
+
+def test_module_run_snapshots_are_version_linked_and_invalidated(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+    from industrial_experience import load_module_analysis_run, save_module_analysis_run
+
+    db = str(tmp_path / "module-run-lineage.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    first = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 4.5]})
+    dataset_id = platform.register_dataset(
+        "Module run source", "module-run.csv", first,
+        db_path=db, username="module-run-owner",
+    )
+    with sqlite_connection(db) as conn:
+        version = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint "
+            "FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+    dependency = {
+        "dataset_id": dataset_id,
+        "version": int(version[0]),
+        "data_hash": version[1],
+        "version_fingerprint": version[2],
+        "current_version_verified": True,
+    }
+    profile = {"display_name": "Energy analysis", "project_name": "Line A"}
+    analysis = {
+        "result": first.assign(Energy_Index=[0.4, 0.375]),
+        "metrics": {"Mean energy": 4.25},
+        "method": "Synthetic module-run fixture",
+        "guardrail": "Synthetic evidence only.",
+    }
+    saved = save_module_analysis_run(
+        "Energy Performance",
+        "module-run-owner",
+        profile,
+        first,
+        analysis,
+        db_path=db,
+        dataset_dependencies=[dependency],
+    )
+    loaded = load_module_analysis_run(saved["run_id"], "module-run-owner", db_path=db)
+    assert loaded is not None
+    assert loaded["dataset_dependency_status"] == "CURRENT"
+    assert loaded["is_stale"] is False
+    assert loaded["dataset_dependencies"][0]["version"] == 1
+
+    second = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 5.0]})
+    platform.register_dataset(
+        "Module run source", "module-run.csv", second,
+        db_path=db, username="module-run-owner",
+    )
+    stale = load_module_analysis_run(saved["run_id"], "module-run-owner", db_path=db)
+    assert stale is not None
+    assert stale["dataset_dependency_status"] == "STALE"
+    assert stale["is_stale"] is True
+    assert stale["stale_dataset_dependencies"][0]["previous_version"] == 1
+    assert "input_df" in stale and "result_df" in stale
+    assert stale["input_df"]["Energy"].tolist() == [4.0, 4.5]
+
+    with pytest.raises(ValueError, match="stale dataset version"):
+        save_module_analysis_run(
+            "Energy Performance",
+            "module-run-owner",
+            profile,
+            first,
+            analysis,
+            db_path=db,
+            dataset_dependencies=[dependency],
+        )
+
+    unlinked = save_module_analysis_run(
+        "Energy Performance",
+        "module-run-owner",
+        profile,
+        second,
+        analysis,
+        db_path=db,
+    )
+    unlinked_loaded = load_module_analysis_run(
+        unlinked["run_id"], "module-run-owner", db_path=db
+    )
+    assert unlinked_loaded is not None
+    assert unlinked_loaded["dataset_dependency_status"] == "NOT_LINKED"
+    assert unlinked_loaded["is_stale"] is False
+
+
+def test_module_parity_links_only_explicit_verified_active_dataset(monkeypatch):
+    import shoir_module_parity as parity
+
+    state = {}
+    monkeypatch.setattr(parity.st, "session_state", state, raising=False)
+    assert parity._current_dataset_dependencies() == []
+
+    state.update({
+        "shoir_dataset_dependency_tracking_enabled": True,
+        "shoir_dataset_lineage_blocked": False,
+        "shoir_active_dataset_dependency": {
+            "dataset_id": "DS-ABCDEF123456",
+            "version": 2,
+            "data_hash": "a" * 64,
+            "version_fingerprint": "b" * 64,
+            "current_version_verified": True,
+        },
+    })
+    linked = parity._current_dataset_dependencies()
+    assert len(linked) == 1
+    assert linked[0]["dataset_id"] == "DS-ABCDEF123456"
+    assert linked[0]["version"] == 2
+
+    state["shoir_dataset_lineage_blocked"] = True
+    with pytest.raises(PermissionError, match="lineage could not be revalidated"):
+        parity._current_dataset_dependencies()
+
+    state["shoir_dataset_lineage_blocked"] = False
+    state["shoir_active_dataset_dependency"]["current_version_verified"] = False
+    with pytest.raises(PermissionError, match="not verified as current"):
+        parity._current_dataset_dependencies()
+
+
+def test_module_run_schema_migrates_legacy_snapshots_to_not_linked(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from industrial_experience import ensure_experience_db, load_module_analysis_run
+
+    db = str(tmp_path / "legacy-module-runs.db")
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE experience_module_runs(
+                run_id TEXT PRIMARY KEY,
+                module TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                project_name TEXT,
+                site_name TEXT,
+                input_hash TEXT NOT NULL,
+                input_rows INTEGER NOT NULL,
+                input_columns_json TEXT NOT NULL,
+                result_columns_json TEXT NOT NULL,
+                input_snapshot_gzip BLOB,
+                result_snapshot_gzip BLOB,
+                profile_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                method TEXT,
+                guardrail TEXT,
+                duration_ms REAL NOT NULL,
+                status TEXT NOT NULL,
+                snapshot_status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO experience_module_runs(
+                run_id,module,owner,display_name,input_hash,input_rows,
+                input_columns_json,result_columns_json,profile_json,metrics_json,
+                duration_ms,status,snapshot_status,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "MRUN-LEGACY-001", "Quality", "legacy-owner", "Legacy quality run",
+                "a" * 64, 0, "[]", "[]", "{}", "{}", 0.0, "Completed",
+                "Input and result snapshots omitted (size limit)", "2026-10-01T00:00:00Z",
+            ),
+        )
+        conn.commit()
+
+    ensure_experience_db(db)
+    loaded = load_module_analysis_run("MRUN-LEGACY-001", "legacy-owner", db_path=db)
+    assert loaded is not None
+    assert loaded["dataset_dependencies"] == []
+    assert loaded["dataset_dependency_status"] == "NOT_LINKED"
+    assert loaded["stale_dataset_dependencies"] == []
+    assert loaded["is_stale"] is False
+
+
+def test_dataset_registration_migrates_legacy_outcome_schema_and_inherits_parent_lineage(tmp_path, monkeypatch):
+    import json
+    import durable_account_store
+    import industrial_platform as platform
+
+    db = str(tmp_path / "legacy-experience-outcomes.db")
+    session = {}
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+
+    original = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 4.5]})
+    dataset_id = platform.register_dataset(
+        "Legacy outcome source", "legacy-outcome.csv", original,
+        db_path=db, username="legacy-engineer",
+    )
+    with sqlite_connection(db) as conn:
+        registered = conn.execute(
+            "SELECT current_version,sha256,version_fingerprint "
+            "FROM platform_datasets WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        conn.commit()
+
+    dependencies = json.dumps([{
+        "dataset_id": dataset_id,
+        "version": int(registered[0]),
+        "data_hash": registered[1],
+        "version_fingerprint": registered[2],
+    }], sort_keys=True)
+
+    # Simulate an older experience database: the parent decision has explicit
+    # lineage metadata, while outcomes predate the three additive lineage columns.
+    with sqlite_connection(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE experience_decisions(
+                decision_id TEXT PRIMARY KEY,
+                title TEXT,
+                module TEXT,
+                status TEXT,
+                metrics_json TEXT,
+                assumptions_json TEXT,
+                uncertainty_json TEXT,
+                owner TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                dataset_dependencies_json TEXT NOT NULL DEFAULT '[]',
+                dataset_dependency_status TEXT NOT NULL DEFAULT 'NOT_LINKED',
+                stale_dataset_dependencies_json TEXT NOT NULL DEFAULT '[]'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE experience_decision_outcomes(
+                outcome_id TEXT PRIMARY KEY,
+                decision_id TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                implementation_status TEXT NOT NULL,
+                predicted_json TEXT NOT NULL,
+                actual_json TEXT NOT NULL,
+                variance_json TEXT NOT NULL,
+                lesson TEXT,
+                verified_at TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO experience_decisions(
+                decision_id,title,module,status,metrics_json,assumptions_json,
+                uncertainty_json,owner,created_at,updated_at,dataset_dependencies_json,
+                dataset_dependency_status,stale_dataset_dependencies_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "DEC-LEGACY-1", "Legacy linked decision", "Engineering",
+                "Implemented", '{"Energy":4.5}', '{}', '{}', "legacy-engineer",
+                "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z",
+                dependencies, "CURRENT", "[]",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO experience_decision_outcomes(
+                outcome_id,decision_id,owner,implementation_status,predicted_json,
+                actual_json,variance_json,lesson,verified_at,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "OUT-LEGACY-1", "DEC-LEGACY-1", "legacy-engineer",
+                "Implemented", '{"Energy":4.25}', '{"Energy":4.5}', '[]',
+                "Existing historical outcome", None, "2026-10-02T00:00:00Z",
+            ),
+        )
+        conn.commit()
+
+    revised = pd.DataFrame({"Output": [10.0, 12.0], "Energy": [4.0, 5.0]})
+    platform.register_dataset(
+        "Legacy outcome source", "legacy-outcome.csv", revised,
+        db_path=db, username="legacy-engineer",
+    )
+
+    with sqlite_connection(db) as conn:
+        decision = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json "
+            "FROM experience_decisions WHERE decision_id='DEC-LEGACY-1'"
+        ).fetchone()
+        outcome_columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(experience_decision_outcomes)"
+            ).fetchall()
+        }
+        outcome = conn.execute(
+            "SELECT dataset_dependency_status,stale_dataset_dependencies_json "
+            "FROM experience_decision_outcomes WHERE outcome_id='OUT-LEGACY-1'"
+        ).fetchone()
+
+    assert {"dataset_dependencies_json", "dataset_dependency_status", "stale_dataset_dependencies_json"} <= outcome_columns
+    assert decision[0] == "STALE"
+    assert outcome[0] == "STALE"
+    decision_markers = json.loads(decision[1])
+    outcome_markers = json.loads(outcome[1])
+    assert decision_markers[0]["dataset_id"] == dataset_id
+    assert outcome_markers[0]["dataset_id"] == dataset_id
+    assert "parent decision" in outcome_markers[0]["reason"]
+
+
+def test_platform_database_migrates_existing_dataset_and_artifact_tables_without_claiming_old_lineage(tmp_path):
+    import sqlite3
+    import re
+    from contextlib import closing
+    from industrial_platform import init_platform_db
+
+    db = str(tmp_path / "pre-lineage-schema.db")
+    dataset_id = "DS-ABCDEF998877"
+    old_hash = "a" * 64
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute(
+            """CREATE TABLE platform_datasets(
+                dataset_id TEXT PRIMARY KEY,name TEXT,source_name TEXT,row_count INTEGER,
+                column_count INTEGER,sha256 TEXT,created_at TEXT,schema_json TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_dataset_versions(
+                dataset_id TEXT NOT NULL,version INTEGER NOT NULL,data_hash TEXT NOT NULL,
+                version_fingerprint TEXT NOT NULL,schema_json TEXT NOT NULL,
+                transformations_json TEXT NOT NULL DEFAULT '[]',row_count INTEGER NOT NULL,
+                column_count INTEGER NOT NULL,created_by TEXT,created_at TEXT NOT NULL,
+                PRIMARY KEY(dataset_id,version),
+                UNIQUE(dataset_id,data_hash,version_fingerprint)
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_models(
+                model_id TEXT PRIMARY KEY,name TEXT,version TEXT,model_type TEXT,
+                parameters_json TEXT,data_hash TEXT,assumptions_json TEXT,created_by TEXT,
+                created_at TEXT,status TEXT,solver_version TEXT,result_hash TEXT,
+                dataset_id TEXT,run_id TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_experiments(
+                experiment_id TEXT PRIMARY KEY,name TEXT,module TEXT,scenarios_json TEXT,
+                results_json TEXT,created_by TEXT,created_at TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_scenarios(
+                scenario_id TEXT PRIMARY KEY,name TEXT UNIQUE,parent_name TEXT,
+                parameters_json TEXT,kpis_json TEXT,created_by TEXT,created_at TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE platform_decisions(
+                decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,metrics_json TEXT,
+                assumptions_json TEXT,uncertainty_json TEXT,created_by TEXT,created_at TEXT,status TEXT
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",
+            (dataset_id, "Existing dataset", "legacy.csv", 2, 1, old_hash,
+             "2026-10-01T00:00:00Z", '{"Energy":{"dtype":"float64","nullable":false}}'),
+        )
+        conn.execute(
+            "INSERT INTO platform_models VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("MOD-LEGACY-1","Legacy model","1.0","Regression","{}",
+             old_hash,"{}","alice","2026-10-01T00:00:00Z","Saved","legacy","result",
+             dataset_id,"RUN-LEGACY-1"),
+        )
+        conn.commit()
+
+    assert init_platform_db(db) is True
+    with closing(sqlite3.connect(db)) as conn:
+        version = conn.execute(
+            "SELECT version,data_hash,version_fingerprint FROM platform_dataset_versions WHERE dataset_id=?",
+            (dataset_id,),
+        ).fetchone()
+        model = conn.execute(
+            "SELECT dataset_dependencies_json,dataset_dependency_status FROM platform_models WHERE model_id=?",
+            ("MOD-LEGACY-1",),
+        ).fetchone()
+        table_columns = {
+            table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for table in ("platform_experiments","platform_scenarios","platform_decisions")
+        }
+        unique_content_indexes = []
+        for index_row in conn.execute("PRAGMA index_list('platform_dataset_versions')").fetchall():
+            if bool(index_row[2]):
+                index_name = str(index_row[1]).replace('"', '""')
+                columns = tuple(
+                    row[2] for row in conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
+                )
+                if set(columns) == {"dataset_id","data_hash","version_fingerprint"} and len(columns) == 3:
+                    unique_content_indexes.append(columns)
+    assert version[0] == 1
+    assert version[1] == old_hash
+    assert re.fullmatch(r"[0-9a-f]{64}", version[2])
+    # The migration records the dataset baseline but does not invent which
+    # dataset version the historical model actually consumed.
+    assert model == ("[]", "NOT_LINKED")
+    for columns in table_columns.values():
+        assert {"dataset_dependencies_json","dataset_dependency_status","stale_dataset_dependencies_json"}.issubset(columns)
+    assert unique_content_indexes == []
+
+
+def test_legacy_artifact_with_unregistered_dataset_reference_is_not_claimed_current(tmp_path):
+    from industrial_platform import init_platform_db, save_model_snapshot
+
+    db = str(tmp_path / "unverified-lineage.db")
+    init_platform_db(db)
+    model_id = save_model_snapshot(
+        "Unregistered source model", "Regression", {"target": "Y"}, "not-a-sha256",
+        "engineer-a", {}, db_path=db, dataset_id="DS-ABCDEF123456",
+    )
+    with sqlite_connection(db) as conn:
+        row = conn.execute(
+            "SELECT dataset_dependency_status,dataset_dependencies_json FROM platform_models WHERE model_id=?",
+            (model_id,),
+        ).fetchone()
+    assert row[0] == "UNVERIFIED_REFERENCE"
+    assert row[1] == "[]"
+
+
+def test_reopening_same_dataset_version_retries_failed_lineage_save(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+    import shoir_industrial_intelligence as ii
+
+    db = str(tmp_path / "retry-lineage.db")
+    username = "synthetic-retry-owner"
+    session = {
+        "authenticated": True,
+        "current_user": username,
+        "user_role": "owner",
+        "user_tier": "Enterprise",
+    }
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: session)
+    monkeypatch.setattr(ii.st, "session_state", session, raising=False)
+    frame = pd.DataFrame({"Output": [10.0], "Energy": [4.0]})
+
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", lambda _username, _state: False)
+    dataset_id = platform.register_dataset(
+        "Retry lineage dataset", "retry.csv", frame, db_path=db,
+        username=username, workspace="personal",
+    )
+    assert session["shoir_dataset_lineage_blocked"] is True
+    assert session["shoir_dataset_thread_sync_status"] == "SAVE_FAILED"
+
+    # Simulate a fresh authenticated session loading the same immutable head.
+    fresh_session = {
+        "authenticated": True,
+        "current_user": username,
+        "user_role": "owner",
+        "user_tier": "Enterprise",
+    }
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: fresh_session)
+    monkeypatch.setattr(ii.st, "session_state", fresh_session, raising=False)
+    persisted_snapshots = []
+    def capture_lineage_snapshot(_username, state):
+        persisted_snapshots.append(dict(state))
+        return True
+    monkeypatch.setattr("workspace_persistence.save_user_workspace", capture_lineage_snapshot)
+
+    assert platform.register_dataset(
+        "Retry lineage dataset", "retry.csv", frame.copy(), db_path=db,
+        username=username, workspace="personal",
+    ) == dataset_id
+    assert fresh_session["shoir_dataset_lineage_blocked"] is False
+    assert fresh_session["shoir_dataset_thread_sync_status"] == "SAVED"
+    assert fresh_session["shoir_active_dataset_thread_node_id"]
+    assert len(persisted_snapshots) == 1
+    assert persisted_snapshots[0]["shoir_active_dataset_dependency"]["version"] == 1
+    assert persisted_snapshots[0]["shoir_active_dataset_thread_node_id"] == fresh_session["shoir_active_dataset_thread_node_id"]
+    assert persisted_snapshots[0]["shoir_dataset_lineage_blocked"] is False
+    with sqlite_connection(db) as conn:
+        version_rows = conn.execute(
+            "SELECT version FROM platform_dataset_versions WHERE dataset_id=? ORDER BY version",
+            (dataset_id,),
+        ).fetchall()
+    assert version_rows == [(1,)]
+
+
+def test_dataset_registration_refuses_local_sqlite_fallback_in_production(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    db = tmp_path / "must-not-create-production-local-db.sqlite"
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "production")
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: {})
+    frame = pd.DataFrame({"Output": [10.0]})
+    with pytest.raises(RuntimeError, match="local SQLite fallback is disabled"):
+        platform.register_dataset("Production dataset", "input.csv", frame, db_path=str(db))
+    assert not db.exists()
+
+
+def test_local_dataset_registration_returns_stable_generated_id(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    frame = pd.DataFrame({"asset_id": ["A-1"], "throughput_tph": [10.0]})
+    first = platform.register_dataset(
+        "Production", "source.csv", frame,
+        db_path=str(tmp_path / "local-datasets.db"),
+    )
+    second = platform.register_dataset(
+        "Production renamed", "source-renamed.csv", frame,
+        db_path=str(tmp_path / "local-datasets.db"),
+        dataset_id=first,
+    )
+    assert first.startswith("DS-")
+    assert second == first
+
+
+
+def test_local_dataset_registration_initializes_missing_sqlite_schema(tmp_path, monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "local")
+    db_path = str(tmp_path / "dataset.db")
+    frame = pd.DataFrame({
+        "asset_id": ["A-1", "A-2"],
+        "throughput_tph": [12.5, 14.0],
+    })
+
+    dataset_id = platform.register_dataset(
+        "Production",
+        "production.csv",
+        frame,
+        db_path=db_path,
+    )
+
+    with sqlite_connection(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT dataset_id, name, source_name, row_count, column_count, sha256
+            FROM platform_datasets
+            WHERE dataset_id = ?
+            """,
+            (dataset_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == dataset_id
+    assert row[1:5] == ("Production", "production.csv", 2, 2)
+    assert len(row[5]) == 64
+
+
+def test_staging_dataset_registration_uses_active_organization_workspace_scope(monkeypatch):
+    import durable_account_store
+    import industrial_platform as platform
+
+    captured = []
+    monkeypatch.setattr(durable_account_store, "APP_ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        durable_account_store,
+        "validate_remote_organization_workspace_access",
+        lambda _username: True,
+    )
+    monkeypatch.setattr(
+        durable_account_store,
+        "edge_organization_action",
+        lambda _action, _actor, _token, **_kwargs: {
+            "organizations": [{
+                "organization_id": "00000000-0000-4000-8000-000000000001",
+                "role": "owner",
+                "status": "active",
+            }]
+        },
+    )
+    monkeypatch.setattr(
+        "workspace_persistence.save_user_workspace",
+        lambda _username, _state: True,
+    )
+    monkeypatch.setattr(
+        durable_account_store, "edge_upload_and_register_dataset_version",
+        lambda **kwargs: captured.append(kwargs) or {
+            "ok": True,
+            "registration": {
+                "dataset_id": kwargs["dataset_id"],
+                "version": 1,
+                "data_hash": kwargs["data_hash"],
+                "version_fingerprint": kwargs["version_fingerprint"],
+                "created_new_version": False,
+            },
+        },
+    )
+    state = {
+        "authenticated": True,
+        "current_user": "synthetic-owner",
+        "user_tier": "Enterprise",
+        "remote_session_token": "session-token",
+        "shoir_active_organization_workspace": {
+            "organization_id": "00000000-0000-4000-8000-000000000001",
+            "organization_workspace_id": "00000000-0000-4000-8000-000000000002",
+        },
+    }
+    monkeypatch.setattr(platform, "_industrial_platform_session_state", lambda: state)
+    import shoir_industrial_intelligence as intelligence
+    monkeypatch.setattr(
+        intelligence,
+        "invalidate_dataset_dependents",
+        lambda *args, **kwargs: {
+            "status": "NO_STALE_DEPENDENTS",
+            "current_dataset_thread_node_id": "THREAD-SYNTHETIC-DATASET-001",
+        },
+    )
+    dataset_id = platform.register_dataset(
+        "Production", "production.csv",
+        pd.DataFrame({"asset_id": ["A-1"], "units": [10]}),
+        username="synthetic-owner", workspace="plant-a", token="session-token",
+    )
+    assert captured[0]["organization_id"].endswith("0001")
+    assert captured[0]["organization_workspace_id"].endswith("0002")
+    dependency = state["shoir_active_dataset_dependency"]
+    assert dependency["dataset_id"] == dataset_id
+    assert dependency["organization_id"].endswith("0001")
+    assert dependency["workspace_id"].endswith("0002")
+    assert dependency["current_version_verified"] is True
+    assert state["shoir_dataset_dependency_tracking_enabled"] is True
+    assert state["shoir_dataset_lineage_blocked"] is False
+

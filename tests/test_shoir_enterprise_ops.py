@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from shoir_sqlite import sqlite_connect as sqlite_connection
 import tempfile
 
 import numpy as np
@@ -147,7 +148,7 @@ def test_model_registry_persists_reproducibility_columns():
             dataset_id="DS-1",
             run_id="RUN-1",
         )
-        with sqlite3.connect(db) as conn:
+        with sqlite_connection(db) as conn:
             row = conn.execute(
                 "SELECT version,solver_version,result_hash,dataset_id,run_id FROM platform_models WHERE model_id=?",
                 (model_id,),

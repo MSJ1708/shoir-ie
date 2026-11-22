@@ -253,9 +253,9 @@ def test_all_app_subscription_features_have_explicit_matching_shared_policies():
     minimum = _app_minimum_tier_by_module()
     report = audit_module_entitlement_coverage(minimum.keys())
 
-    assert len(minimum) == 96
+    assert len(minimum) == 97
     assert report["status"] == "COMPLETE"
-    assert report["total_modules"] == 96
+    assert report["total_modules"] == 97
     assert report["unmapped_modules"] == []
     assert report["invalid_policy_modules"] == []
     assert all(
@@ -268,7 +268,7 @@ def test_runtime_module_catalog_matches_the_tiered_module_inventory():
     catalog_names = _app_runtime_catalog_names()
     minimum = _app_minimum_tier_by_module()
 
-    assert len(catalog_names) == 96
+    assert len(catalog_names) == 97
     assert catalog_names == set(minimum)
 
 
@@ -280,8 +280,8 @@ def test_checked_in_module_tier_inventory_matches_live_source_declarations():
         rows = list(csv.DictReader(handle))
 
     minimum = _app_minimum_tier_by_module()
-    assert len(rows) == 96
-    assert len({row["module_name"] for row in rows}) == 96
+    assert len(rows) == 97
+    assert len({row["module_name"] for row in rows}) == 97
     assert {row["module_name"] for row in rows} == set(minimum)
     assert {
         row["module_name"]: row["minimum_tier"] for row in rows
@@ -300,7 +300,7 @@ def test_every_app_module_follows_the_shared_allow_deny_matrix_for_all_tiers():
     catalog = list(minimum)
     tiers = ["Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus", "Research Pack"]
 
-    assert len(catalog) == 96
+    assert len(catalog) == 97
     for current_tier in tiers:
         actual = set(available_modules(current_tier, catalog))
         expected = {

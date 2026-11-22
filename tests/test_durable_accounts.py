@@ -9,7 +9,7 @@ def _source_contract_contains(source: str, fragment: str) -> bool:
     return normalized_fragment in normalized_source
 
 
-from durable_account_store import account_is_expired, renewed_expiry
+from durable_account_store import account_is_expired, renewed_expiry, session_subscription_expiry
 import durable_account_store as das
 
 
@@ -17,6 +17,35 @@ def test_account_is_expired_at_boundary():
     now = datetime(2026, 9, 22, tzinfo=timezone.utc)
     assert account_is_expired(now, now)
     assert not account_is_expired(now + timedelta(seconds=1), now)
+
+
+def test_server_expiry_overrides_stale_local_cache():
+    now = datetime(2026, 11, 22, 13, 0, tzinfo=timezone.utc)
+    stale_local_expiry = now - timedelta(days=3)
+    active_server_expiry = now + timedelta(days=30)
+
+    effective = session_subscription_expiry(active_server_expiry, stale_local_expiry)
+
+    assert effective == active_server_expiry
+    assert not account_is_expired(effective, now)
+
+
+def test_session_expiry_uses_local_fallback_only_when_server_value_is_missing():
+    now = datetime(2026, 11, 22, 13, 0, tzinfo=timezone.utc)
+    cached_expiry = now + timedelta(days=2)
+
+    assert session_subscription_expiry(None, cached_expiry) == cached_expiry
+    assert session_subscription_expiry("", cached_expiry) == cached_expiry
+
+
+def test_app_expiry_gate_uses_authoritative_server_session_expiry():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "app.py").read_text(encoding="utf-8")
+    assert '"session_subscription_expiry",' in source
+    assert "effective_expiry = session_subscription_expiry(server_expiry, cached_expiry)" in source
+    assert "account_is_expired(effective_expiry)" in source
 
 
 def test_renewal_starts_from_later_of_now_or_expiry():

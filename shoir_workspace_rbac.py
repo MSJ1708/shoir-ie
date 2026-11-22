@@ -7,6 +7,8 @@ require a workspace Owner or Admin and preserve the existing Owner identity.
 from __future__ import annotations
 
 import sqlite3
+from shoir_sqlite import sqlite_connect as sqlite_connection
+from shoir_sqlite import ClosingSQLiteConnection
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -41,7 +43,7 @@ def _authenticated_actor(username: str) -> tuple[str, str]:
 def ensure_workspace_members_schema(db_path: str = DEFAULT_DB_PATH) -> None:
     """Create the compatible local membership table if it is not present."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path, timeout=15) as conn:
+    with sqlite_connection(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS workspace_members(
                 workspace TEXT NOT NULL,
@@ -124,7 +126,7 @@ def list_workspace_members(
     actor, _account_role = _authenticated_actor(username)
     requested_workspace = _workspace_name(workspace)
     ensure_workspace_members_schema(db_path)
-    with sqlite3.connect(db_path, timeout=15) as conn:
+    with sqlite_connection(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
         rows = _read_members(conn, requested_workspace)
     if not rows:
         if not allow_draft:
@@ -189,7 +191,7 @@ def save_workspace_members(
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     ensure_workspace_members_schema(db_path)
 
-    with sqlite3.connect(db_path, timeout=15) as conn:
+    with sqlite_connection(db_path, timeout=15, factory=ClosingSQLiteConnection) as conn:
         conn.execute("BEGIN IMMEDIATE")
         existing = _read_members(conn, requested_workspace)
         if not existing:

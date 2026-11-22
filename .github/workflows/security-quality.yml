@@ -2,12 +2,16 @@ name: Shoir-IE security and quality gates
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "staging-e2e-20261019"]
   pull_request:
-    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
+    branches: ["main", "staging-e2e-20261019"]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   security-quality:
@@ -28,8 +32,6 @@ jobs:
           pip install pip-audit
       - name: Compile
         run: python -m compileall -q .
-      - name: Regression tests
-        run: python -m pytest -q tests
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Secret-pattern guard

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Recover credentials for the six existing Shoir-IE staging E2E accounts.
+"""Recover credentials for the seven existing Shoir-IE staging E2E accounts.
 
 This fail-closed helper is pinned to the staging Supabase project. It never
 creates or deletes accounts, never touches the production project, and never
 prints or writes passwords, password hashes, API keys, or session tokens.
 
-The six passwords are generated in memory, reset for the matching existing
+The seven passwords are generated in memory, reset for the matching existing
 staging rows, and synchronized to GitHub Actions secrets. If it is interrupted,
-rerunning is safe: it resets those same six identities again and synchronizes
+rerunning is safe: it resets those same seven identities again and synchronizes
 their secrets rather than attempting to provision duplicate accounts.
 """
 from __future__ import annotations
@@ -42,6 +42,7 @@ ACCOUNT_SPECS = (
     {"prefix": "expired", "username": "shoir-e2e-expired", "tier": "Starter Tier ($29)", "expired": True},
     {"prefix": "module", "username": "shoir-e2e-module", "tier": "Enterprise Plus Tier ($399)", "expired": False},
     {"prefix": "research_module", "username": "shoir-e2e-research", "tier": "Research Pack ($30 add-on)", "expired": False},
+    {"prefix": "inactive", "username": "shoir-e2e-inactive", "tier": "Starter Tier ($29)", "expired": False, "active": False},
 )
 
 
@@ -176,8 +177,10 @@ def validate_existing_account(row: dict[str, Any], spec: dict[str, Any], now: da
     now = now or datetime.now(timezone.utc)
     if row.get("username_lc") != spec["username"]:
         raise ValueError("Staging account identity did not match the allowlisted username.")
-    if row.get("role") != "User" or row.get("active") is not True:
-        raise ValueError(f"{spec['prefix']} must be an active non-administrator test account.")
+    expected_active = spec.get("active", True)
+    if row.get("role") != "User" or row.get("active") is not expected_active:
+        state = "disabled" if not expected_active else "active"
+        raise ValueError(f"{spec['prefix']} must be a {state} non-administrator test account.")
     if row.get("tier") != spec["tier"]:
         raise ValueError(f"{spec['prefix']} has an unexpected tier; no password was changed.")
     if not isinstance(row.get("password_hash"), str) or "$" not in row["password_hash"]:
@@ -223,6 +226,7 @@ def _password_secret_names(prefix: str) -> tuple[str, str]:
         "expired": ("SHOIR_E2E_EXPIRED_USERNAME", "SHOIR_E2E_EXPIRED_PASSWORD"),
         "module": ("SHOIR_E2E_MODULE_USERNAME", "SHOIR_E2E_MODULE_PASSWORD"),
         "research_module": ("SHOIR_E2E_RESEARCH_MODULE_USERNAME", "SHOIR_E2E_RESEARCH_MODULE_PASSWORD"),
+        "inactive": ("SHOIR_E2E_INACTIVE_USERNAME", "SHOIR_E2E_INACTIVE_PASSWORD"),
     }
     return mapping[prefix]
 
@@ -259,7 +263,7 @@ def run_recovery() -> int:
 
     print("Staging E2E credential recovery")
     print(f"Fixed project: {STAGING_PROJECT_REF}")
-    print("Scope: six already-existing shoir-e2e-* accounts. No account creation or deletion.")
+    print("Scope: seven already-existing shoir-e2e-* accounts. No account creation or deletion.")
 
     # Validate the publishable key against the public Auth settings endpoint.
     # Do not use /rest/v1/ for this check: that exact PostgREST OpenAPI root
@@ -306,14 +310,14 @@ def run_recovery() -> int:
 
     credentials: dict[str, dict[str, str]] = {}
     # Updating one row and immediately synchronizing its secret makes a retry
-    # safe if PowerShell closes mid-run. A retry rotates the same six users only.
+    # safe if PowerShell closes mid-run. A retry rotates the same seven users only.
     for spec in ACCOUNT_SPECS:
         password = secrets.token_urlsafe(32)
         password_hash = hash_password(password)
         query = urlencode({
             "username_lc": f"eq.{spec['username']}",
             "role": "eq.User",
-            "active": "eq.true",
+            "active": "eq.false" if spec.get("active") is False else "eq.true",
             "select": "username_lc,role,tier,active,subscription_expires_at,password_hash",
         })
         url = f"{PROJECT_URL}/rest/v1/shoir_accounts?{query}"
@@ -330,7 +334,7 @@ def run_recovery() -> int:
         if (
             row.get("username_lc") != spec["username"]
             or row.get("role") != "User"
-            or row.get("active") is not True
+            or row.get("active") is not spec.get("active", True)
             or row.get("tier") != spec["tier"]
             or not hmac.compare_digest(str(row.get("password_hash") or ""), password_hash)
         ):
@@ -358,7 +362,13 @@ def run_recovery() -> int:
 
             token = str(result.get("token") or "")
             valid_common = bool(token) and result.get("username", "").casefold() == spec["username"]
-            if spec["expired"]:
+            if spec.get("active") is False:
+                valid = (
+                    status == 401
+                    and result.get("error") == "Invalid username or password."
+                    and not token
+                )
+            elif spec["expired"]:
                 valid = (
                     status == 403 and result.get("error") == "SUBSCRIPTION_EXPIRED"
                     and result.get("renewal_only") is True and valid_common
@@ -386,7 +396,7 @@ def run_recovery() -> int:
         if cleanup_failed:
             raise RuntimeError("A temporary staging recovery session could not be confirmed revoked.")
 
-    print("[PASS] All six existing staging E2E accounts reset and verified.")
+    print("[PASS] All seven existing staging E2E accounts reset and verified.")
     print("[PASS] Matching GitHub Actions username/password secrets synchronized.")
     print("No passwords, hashes, API keys, or session tokens were printed or saved to disk.")
     print("Next: let PowerShell wait for ordinary CI, then launch a new authenticated release gate.")

@@ -1,0 +1,244 @@
+name: Staging Backup and Recovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shoir-staging-backup-recovery
+  cancel-in-progress: false
+
+jobs:
+  encrypted-staging-backup:
+    name: Export and verify staging database and Storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    # Configure this GitHub Environment with required reviewers and the
+    # secrets documented in docs/SHOIR_IE_STAGING_BACKUP_RECOVERY_RUNBOOK.md.
+    environment:
+      name: staging-recovery
+    env:
+      SHOIR_STAGING_DB_URL: ${{ secrets.SHOIR_STAGING_DB_URL }}
+      SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID }}
+      SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY }}
+      SHOIR_RECOVERY_S3_ENDPOINT: ${{ secrets.SHOIR_RECOVERY_S3_ENDPOINT }}
+      SHOIR_RECOVERY_S3_REGION: ${{ secrets.SHOIR_RECOVERY_S3_REGION }}
+      SHOIR_RECOVERY_S3_BUCKET: ${{ secrets.SHOIR_RECOVERY_S3_BUCKET }}
+      SHOIR_RECOVERY_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
+      SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
+      SHOIR_BACKUP_AGE_RECIPIENT: ${{ secrets.SHOIR_BACKUP_AGE_RECIPIENT }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
+      SHOIR_STAGING_PROJECT_REF: hfhrosthswcybccepmak
+    steps:
+      - name: Check out the reviewed candidate
+        uses: actions/checkout@v7
+
+      - name: Install pinned Supabase CLI v2
+        uses: supabase/setup-cli@v3
+        with:
+          version: v2.stable
+
+      - name: Install backup utilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes age postgresql-client rclone jq
+
+      - name: Validate staging-only targets and recovery configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from urllib.parse import urlparse
+
+          project_ref = "hfhrosthswcybccepmak"
+          db_url = os.environ.get("SHOIR_STAGING_DB_URL", "").strip()
+          if not db_url:
+              raise SystemExit("Missing environment secret: SHOIR_STAGING_DB_URL")
+          parsed = urlparse(db_url)
+          if parsed.scheme not in {"postgres", "postgresql"}:
+              raise SystemExit("The staging DB URL must use postgres:// or postgresql://.")
+          if parsed.hostname != f"db.{project_ref}.supabase.co":
+              raise SystemExit("Refusing a database host outside the fixed Shoir-IE staging project.")
+          if parsed.path.rstrip("/") != "/postgres":
+              raise SystemExit("The staging DB URL must target the postgres database.")
+
+          required = (
+              "SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID",
+              "SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY",
+              "SHOIR_RECOVERY_S3_ENDPOINT",
+              "SHOIR_RECOVERY_S3_REGION",
+              "SHOIR_RECOVERY_S3_BUCKET",
+              "SHOIR_RECOVERY_S3_ACCESS_KEY_ID",
+              "SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY",
+              "SHOIR_BACKUP_AGE_RECIPIENT",
+              "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD",
+              "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2",
+          )
+          for name in required:
+              if not os.environ.get(name, "").strip():
+                  raise SystemExit(f"Missing required GitHub Environment secret: {name}")
+
+          endpoint = urlparse(os.environ["SHOIR_RECOVERY_S3_ENDPOINT"])
+          if endpoint.scheme != "https" or not endpoint.hostname:
+              raise SystemExit("The off-site S3 endpoint must be a valid HTTPS URL.")
+          if endpoint.hostname.endswith("supabase.co") or endpoint.hostname.endswith("supabase.com"):
+              raise SystemExit("The recovery destination must be outside Supabase.")
+          bucket = os.environ["SHOIR_RECOVERY_S3_BUCKET"]
+          if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
+              raise SystemExit("The off-site S3 bucket name is invalid.")
+          for name in ("SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD", "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"):
+              if len(os.environ[name]) < 32:
+                  raise SystemExit(f"{name} must contain at least 32 characters.")
+          if os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD"] == os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"]:
+              raise SystemExit("The two rclone crypt secrets must be different.")
+          print("PASS: fixed staging database target and required encrypted off-site backup configuration are present.")
+          PY
+          supabase --version
+          rclone version | head -n 1
+          age --version
+
+      - name: Export Shoir-IE database and Storage metadata
+        id: export
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          backup_dir="$RUNNER_TEMP/shoir-staging-backup"
+          mkdir -p "$backup_dir"
+          export RUN_STARTED_AT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          : > "$backup_dir/storage-objects.ndjson"
+
+          # CLI v2 is pinned because v3 changed db dump's remote-selection
+          # defaults. The direct database hostname is checked above.
+          supabase db dump --db-url "$SHOIR_STAGING_DB_URL" --role-only --file "$backup_dir/roles.sql"
+          supabase db dump --db-url "$SHOIR_STAGING_DB_URL" --schema public,shoir_internal --file "$backup_dir/schema.sql"
+          supabase db dump --db-url "$SHOIR_STAGING_DB_URL" --schema public,shoir_internal --data-only --use-copy --file "$backup_dir/data.sql"
+
+          # Supabase CLI intentionally omits managed Storage schemas. Export
+          # bucket/object metadata separately; object bytes are copied below
+          # through the S3-compatible API.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "select coalesce(jsonb_agg(to_jsonb(b) order by b.id), '[]'::jsonb) from storage.buckets b" \
+            > "$backup_dir/storage-buckets.json"
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 \
+            --command "\\copy (select to_jsonb(o) from storage.objects o order by bucket_id, name) to '$backup_dir/storage-objects.ndjson' with (format text)"
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "select coalesce(jsonb_agg(to_jsonb(p) order by tablename, policyname), '[]'::jsonb) from pg_policies p where schemaname = 'storage'" \
+            > "$backup_dir/storage-policies.json"
+
+          test -s "$backup_dir/roles.sql"
+          test -s "$backup_dir/schema.sql"
+          test -s "$backup_dir/data.sql"
+          test -s "$backup_dir/storage-buckets.json"
+          test -s "$backup_dir/storage-policies.json"
+
+          tar --create --gzip --file "$backup_dir/database-bundle.tar.gz" \
+            --directory "$backup_dir" roles.sql schema.sql data.sql \
+            storage-buckets.json storage-objects.ndjson storage-policies.json
+          age --encrypt --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
+            --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
+          sha256sum "$backup_dir/database-bundle.tar.gz.age" > "$backup_dir/database-bundle.tar.gz.age.sha256"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-backup"
+          buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
+          object_file = root / "storage-objects.ndjson"
+          object_count = sum(1 for line in object_file.open("rb") if line.strip())
+          manifest = {
+              "schema_version": 1,
+              "project_ref": "hfhrosthswcybccepmak",
+              "database_scope": ["public", "shoir_internal", "custom_roles"],
+              "storage_metadata": ["storage.buckets", "storage.objects", "storage_policies"],
+              "storage_bucket_count": len(buckets),
+              "storage_object_metadata_count": object_count,
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "created_at_utc": os.environ["RUN_STARTED_AT_UTC"],
+              "database_archive_sha256": (root / "database-bundle.tar.gz.age.sha256").read_text(encoding="utf-8").split()[0],
+          }
+          (root / "backup-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Copy every Storage bucket to the encrypted off-site destination
+        id: storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          config="$RUNNER_TEMP/rclone.conf"
+          export RCLONE_CONFIG="$config"
+          umask 077
+
+          source_endpoint="https://${SHOIR_STAGING_PROJECT_REF}.storage.supabase.co/storage/v1/s3"
+          rclone config create staging-storage s3 \
+            provider Other env_auth false \
+            access_key_id "$SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID" \
+            secret_access_key "$SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY" \
+            endpoint "$source_endpoint" region eu-central-1 force_path_style true
+          rclone config create recovery-destination s3 \
+            provider Other env_auth false \
+            access_key_id "$SHOIR_RECOVERY_S3_ACCESS_KEY_ID" \
+            secret_access_key "$SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY" \
+            endpoint "$SHOIR_RECOVERY_S3_ENDPOINT" \
+            region "$SHOIR_RECOVERY_S3_REGION" force_path_style true
+
+          crypt_password="$(rclone obscure "$SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD")"
+          crypt_password2="$(rclone obscure "$SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2")"
+          prefix="shoir-ie/staging/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rclone config create encrypted-storage crypt \
+            remote "recovery-destination:${SHOIR_RECOVERY_S3_BUCKET}/${prefix}/storage" \
+            filename_encryption standard directory_name_encryption true \
+            password "$crypt_password" password2 "$crypt_password2"
+
+          rclone lsf staging-storage: --dirs-only > "$RUNNER_TEMP/storage-buckets.txt"
+          if [[ ! -s "$RUNNER_TEMP/storage-buckets.txt" ]]; then
+            echo "::error::The staging Storage endpoint returned no buckets; refusing an empty backup."
+            exit 2
+          fi
+
+          while IFS= read -r bucket_entry; do
+            bucket="${bucket_entry%/}"
+            [[ -n "$bucket" ]] || continue
+            echo "Backing up Storage bucket: $bucket"
+            rclone copy "staging-storage:$bucket" "encrypted-storage:$bucket" \
+              --create-empty-src-dirs --fast-list --transfers 4 --checkers 8 --stats 30s
+            rclone cryptcheck "staging-storage:$bucket" "encrypted-storage:$bucket"
+          done < "$RUNNER_TEMP/storage-buckets.txt"
+
+          # Store the database archive and the non-sensitive manifest beside
+          # the encrypted Storage tree. The DB archive is age-encrypted before
+          # leaving the runner; the manifest contains no object names or secrets.
+          db_dir="$RUNNER_TEMP/shoir-staging-backup"
+          db_target="recovery-destination:${SHOIR_RECOVERY_S3_BUCKET}/${prefix}"
+          rclone copyto "$db_dir/database-bundle.tar.gz.age" "$db_target/database-bundle.tar.gz.age"
+          rclone copyto "$db_dir/database-bundle.tar.gz.age.sha256" "$db_target/database-bundle.tar.gz.age.sha256"
+          rclone copyto "$db_dir/backup-manifest.json" "$db_target/backup-manifest.json"
+          rclone check --download "$db_dir/database-bundle.tar.gz.age" "$db_target/database-bundle.tar.gz.age"
+          rclone check --download "$db_dir/backup-manifest.json" "$db_target/backup-manifest.json"
+
+          mkdir -p "$RUNNER_TEMP/backup-evidence"
+          cp "$db_dir/backup-manifest.json" "$RUNNER_TEMP/backup-evidence/"
+          cp "$db_dir/database-bundle.tar.gz.age.sha256" "$RUNNER_TEMP/backup-evidence/"
+
+      - name: Upload safe backup evidence only
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-staging-backup-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/backup-evidence/
+          if-no-files-found: warn
+          retention-days: 14

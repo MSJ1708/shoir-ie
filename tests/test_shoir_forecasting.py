@@ -17,3 +17,18 @@ def test_engineering_forecast_supports_operational_targets():
     assert "Holdout R2" in metrics
     assert {"Forecast","Lower 95%","Upper 95%"} <= set(result.columns)
     assert infer_forecast_target(df.columns, "Capacity") == "Capacity"
+
+
+
+def test_infer_datetime_frequency_is_warning_free_and_supports_daily_series():
+    import warnings
+
+    from shoir_forecasting import infer_datetime_frequency
+
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        frequency = infer_datetime_frequency(dates)
+
+    assert frequency == "D"
+    assert captured == []
