@@ -140,11 +140,13 @@ _ACTION_KEYS = {
 }
 
 def _excluded(key: str) -> bool:
-    lowered = str(key).lower()
+    # Normalize names before exact/prefix comparisons so differently-cased
+    # credential keys cannot bypass the snapshot filter.
+    lowered = str(key).casefold()
+    exact_exclusions = {item.casefold() for item in _EXACT_EXCLUDE | _ACTION_KEYS}
     return (
-        key in _EXACT_EXCLUDE
-        or key in _ACTION_KEYS
-        or any(key.startswith(p) for p in _PREFIX_EXCLUDE)
+        lowered in exact_exclusions
+        or any(lowered.startswith(prefix.casefold()) for prefix in _PREFIX_EXCLUDE)
         or lowered.startswith(("download_", "upload_"))
         or lowered.endswith(("_button", "_btn", "_submit"))
     )
@@ -174,7 +176,7 @@ def _pack(value: Any) -> Any:
     if isinstance(value, dict):
         return {
             "__type__": "dict",
-            "value": {str(k): _pack(v) for k, v in value.items()},
+            "value": {str(k): _pack(v) for k, v in value.items() if not _excluded(str(k))},
         }
     if isinstance(value, list):
         return {"__type__": "list", "value": [_pack(v) for v in value]}
