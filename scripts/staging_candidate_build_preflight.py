@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright
 
 from staging_e2e_guard import validate_app_from_env
 
-EXPECTED_MARKER = "SHOIR-IE SHELL VERSION: 3.2"
+EXPECTED_MARKER = "SHOIR-IE SHELL VERSION: 3.3"
 WAIT_SECONDS = 90
 POLL_SECONDS = 5
 REPORT = Path(os.environ.get(
