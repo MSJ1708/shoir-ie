@@ -1,6 +1,16 @@
 name: Staging Encrypted Backup Export
 
 on:
+  # Keep this workflow staging-only without adding the file to production main.
+  # A deliberate update to the trigger marker on the protected staging branch
+  # launches the export after the workflow itself has been merged to staging.
+  push:
+    branches:
+      - staging-e2e-20261019
+    paths:
+      - ".github/backup-triggers/staging-recovery.txt"
+  # GitHub only offers workflow_dispatch when the file also exists on the
+  # repository default branch. Retained for a future, separately approved use.
   workflow_dispatch:
 
 permissions:
