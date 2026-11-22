@@ -35,6 +35,7 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
                 {"REFRESH_TOKEN": "nested-old-refresh", "label": "keep this item"},
             ],
             "Password_HASH": "nested-password-hash",
+            "metadata": {"_workspace_persistence": "keep durable workspace marker"},
         },
     }
 
@@ -62,6 +63,7 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     assert restored["nested_state"] == {
         "AUTH": {"scenario": "keep this workspace value"},
         "items": [{"label": "keep this item"}],
+        "metadata": {"_workspace_persistence": "keep durable workspace marker"},
     }
     for secret_key in (
         "access_token",
