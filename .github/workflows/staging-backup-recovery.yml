@@ -150,8 +150,9 @@ jobs:
           psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
             --command "select coalesce(jsonb_agg(to_jsonb(b) order by b.id), '[]'::jsonb) from storage.buckets b" \
             > "$backup_dir/storage-buckets.json"
-          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 \
-            --command "\\copy (select to_jsonb(o) from storage.objects o order by bucket_id, name) to '$backup_dir/storage-objects.ndjson' with (format text)"
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 <<SQL
+          \\copy (select to_jsonb(o) from storage.objects o order by bucket_id, name) to '$backup_dir/storage-objects.ndjson' with (format text)
+          SQL
           psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
             --command "select coalesce(jsonb_agg(to_jsonb(p) order by tablename, policyname), '[]'::jsonb) from pg_policies p where schemaname = 'storage'" \
             > "$backup_dir/storage-policies.json"
