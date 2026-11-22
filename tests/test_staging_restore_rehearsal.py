@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from scripts.staging_restore_rehearsal import load_objects, parse_utc, safe_object_path
+from scripts.staging_restore_rehearsal import (
+    load_objects,
+    parse_utc,
+    safe_object_path,
+    validate_migration_history,
+)
 
 
 def test_safe_object_path_resolves_nested_storage_key(tmp_path: Path) -> None:
@@ -84,3 +89,68 @@ def test_validate_local_target_urls_rejects_nonlocal_targets(
 
     with pytest.raises(RuntimeError):
         validate_local_target_urls(db_url, api_url)
+
+
+def test_validate_migration_history_requires_exact_version_and_name_match(tmp_path: Path) -> None:
+    migration_dir = tmp_path / "migrations"
+    migration_dir.mkdir()
+    (migration_dir / "20261025164602_refresh_refund_policy.sql").write_text(
+        "-- migration\n", encoding="utf-8"
+    )
+    (migration_dir / "20261107120637_shoir_organization_workspaces.sql").write_text(
+        "-- migration\n", encoding="utf-8"
+    )
+    history = [
+        {"version": "20261025164602", "name": "refresh_refund_policy"},
+        {"version": "20261107120637", "name": "shoir_organization_workspaces"},
+    ]
+
+    result = validate_migration_history(history, migration_dir, expected_count=2)
+
+    assert result == {
+        "migration_history_count": 2,
+        "repository_migration_file_count": 2,
+        "migration_history_matches_repository": True,
+    }
+
+
+def test_validate_migration_history_rejects_missing_or_extra_sql_files(tmp_path: Path) -> None:
+    migration_dir = tmp_path / "migrations"
+    migration_dir.mkdir()
+    (migration_dir / "20261025164602_refresh_refund_policy.sql").write_text(
+        "-- migration\n", encoding="utf-8"
+    )
+    history = [
+        {"version": "20261025164602", "name": "refresh_refund_policy"},
+        {"version": "20261107120637", "name": "shoir_organization_workspaces"},
+    ]
+
+    with pytest.raises(RuntimeError, match="does not exactly match"):
+        validate_migration_history(history, migration_dir, expected_count=2)
+
+
+def test_validate_migration_history_rejects_filename_name_mismatch(tmp_path: Path) -> None:
+    migration_dir = tmp_path / "migrations"
+    migration_dir.mkdir()
+    (migration_dir / "20261025164602_wrong_name.sql").write_text(
+        "-- migration\n", encoding="utf-8"
+    )
+    history = [{"version": "20261025164602", "name": "actual_name"}]
+
+    with pytest.raises(RuntimeError, match="name_mismatch"):
+        validate_migration_history(history, migration_dir, expected_count=1)
+
+
+def test_validate_migration_history_rejects_duplicate_ledger_versions(tmp_path: Path) -> None:
+    migration_dir = tmp_path / "migrations"
+    migration_dir.mkdir()
+    (migration_dir / "20261025164602_refresh_refund_policy.sql").write_text(
+        "-- migration\n", encoding="utf-8"
+    )
+    history = [
+        {"version": "20261025164602", "name": "refresh_refund_policy"},
+        {"version": "20261025164602", "name": "refresh_refund_policy"},
+    ]
+
+    with pytest.raises(RuntimeError, match="Duplicate source migration"):
+        validate_migration_history(history, migration_dir, expected_count=2)
