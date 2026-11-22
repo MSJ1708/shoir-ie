@@ -25,6 +25,17 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
         "copilot_messages": [{"role": "user", "content": "run my scenario"}],
         "df": pd.DataFrame({"SKU": ["A", "B"], "Demand": [10, 20]}),
         "signin_password_input": "must-not-persist",
+        "nested_state": {
+            "AUTH": {
+                "remote_session_token": "nested-old-session",
+                "API_SECRET": "nested-secret",
+                "scenario": "keep this workspace value",
+            },
+            "items": [
+                {"REFRESH_TOKEN": "nested-old-refresh", "label": "keep this item"},
+            ],
+            "Password_HASH": "nested-password-hash",
+        },
     }
 
     assert save_user_workspace("Alice", source, db)
@@ -48,6 +59,10 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     assert "signin_password_input" not in restored
     assert restored["remote_session_token"] == "fresh-session-token"
     assert restored["renewal_session_token"] == "fresh-renewal-token"
+    assert restored["nested_state"] == {
+        "AUTH": {"scenario": "keep this workspace value"},
+        "items": [{"label": "keep this item"}],
+    }
     for secret_key in (
         "access_token",
         "refresh_token",
