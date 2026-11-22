@@ -13,11 +13,11 @@ Never point this procedure at production project `gcsamrdaeraxieaagsta`. Never p
 
 ## 1. What the workflow does
 
-The manual GitHub Actions workflow is:
+The GitHub Actions workflow is:
 
 `.github/workflows/staging-backup-recovery.yml`
 
-It is deliberately **manual only** and requires the protected GitHub Environment named `staging-recovery`.
+It requires the protected GitHub Environment named `staging-recovery`. To preserve the production `main` branch, the supported owner-trigger for the staging-only workflow is a deliberate change to `.github/backup-triggers/staging-recovery.txt` on `staging-e2e-20261019`. That `push` trigger is available once the workflow file has been merged into the staging branch. The optional `workflow_dispatch` trigger is only exposed by GitHub when the workflow file also exists on the repository default branch; this runbook does not authorize adding it to `main`.
 
 When all required environment secrets are configured, it:
 
@@ -76,7 +76,7 @@ In GitHub repository `MSJ1708/shoir-ie`:
 
 1. Open **Settings → Environments** and create `staging-recovery`.
 2. Add at least one required reviewer (an authorized repository administrator/recovery owner) before deployments are allowed.
-3. Restrict deployment branches to the reviewed staging backup workflow branch and, after approval/merge, the dedicated staging branch only. Do not allow `main` or production-release branches for this staging backup job.
+3. Restrict deployment branches to **only** `staging-e2e-20261019`. Do not allow feature branches, `main`, or production-release branches for this staging backup job.
 4. Add these as **Environment secrets**, not repository-wide secrets:
 
 | Secret | Contents |
@@ -97,13 +97,13 @@ Do not add a Supabase service-role API key. The workflow uses the DB URL and ded
 
 ## 6. Run one staging backup export
 
-After the environment has been configured and independently reviewed:
+After the environment secrets and bucket have been configured, and after PR #236 has been merged into `staging-e2e-20261019`:
 
-1. Open **Actions → Staging Encrypted Backup Export**.
-2. Choose the reviewed staging backup workflow branch, then select **Run workflow** once.
-3. Confirm the environment approval request in GitHub as an authorized recovery operator.
-4. Wait for the workflow to complete. A failed or cancelled run is not a backup.
-5. Inspect the redacted `backup-manifest.json` and archive SHA-256 artifact. Confirm the expected bucket count and Storage object metadata count (the current live inventory has two private buckets and one payment-proof object).
+1. Create or update a file named `.github/backup-triggers/staging-recovery.txt` in a small pull request targeting **only** `staging-e2e-20261019`. Put a unique UTC timestamp and change reference in the file. Do not change this marker on `main`.
+2. Merge that trigger PR only after the active staging ruleset is satisfied. The resulting push to the staging branch, which changes this exact marker path, launches **Staging Encrypted Backup Export**. This is intentionally explicit and auditable; ordinary staging pushes do not start a backup.
+3. In the Actions run, verify the event is `push`, the branch is `staging-e2e-20261019`, and the job references the protected `staging-recovery` Environment. Approve the Environment gate as the authorized recovery operator.
+4. Wait for the workflow to complete. A failed or cancelled run is not a backup. If configuration validation fails, fix the named missing/invalid setting and create a new marker change through a staging-only PR; do not rerun by changing production.
+5. Inspect the redacted `backup-manifest.json` and archive SHA-256 artifact. Confirm the expected bucket count and Storage object metadata count (re-inventory at run time; the previous point-in-time inventory found two private buckets and one payment-proof object).
 6. In the off-project provider console, confirm the encrypted database archive and encrypted Storage prefix exist. Do not open or download the raw payment-proof object into chat or a public artifact.
 
 The backup destination should have a unique run prefix; do not overwrite a previous recovery point. The workflow's GitHub artifact is only short-retention evidence, not the backup itself.
