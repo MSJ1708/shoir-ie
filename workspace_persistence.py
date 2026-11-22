@@ -240,7 +240,14 @@ def _unpack(value: Any) -> Any:
         except ValueError:
             return payload
     if kind == "dict":
-        return {k: _unpack(v) for k, v in payload.items()}
+        # Older workspace snapshots may contain nested credentials written
+        # before save-time filtering was added. Apply the same denylist during
+        # hydration so legacy data cannot reintroduce stale tokens or secrets.
+        return {
+            k: _unpack(v)
+            for k, v in payload.items()
+            if not _excluded_nested(str(k))
+        }
     if kind == "list":
         return [_unpack(v) for v in payload]
     if kind == "tuple":
