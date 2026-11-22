@@ -3,10 +3,6 @@ name: Shoir-IE clean migration-history replay
 on:
   pull_request:
     branches: ["main", "staging-e2e-20261019"]
-    paths:
-      - "supabase/migrations/**"
-      - "tests/test_full_migration_history_postgres.py"
-      - ".github/workflows/migration-history-integration.yml"
   push:
     branches: ["main", "staging-e2e-20261019"]
     paths:
