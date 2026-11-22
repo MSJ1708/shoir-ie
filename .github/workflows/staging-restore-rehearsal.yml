@@ -154,6 +154,7 @@ jobs:
           allowed = {
               "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
               "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
+              "database-contract.json",
           }
           with tarfile.open(source, "r:gz") as archive:
               members = archive.getmembers()
@@ -257,6 +258,15 @@ jobs:
           test -n "$API_URL"
           test -n "$ANON_KEY"
           test -n "$SERVICE_ROLE_KEY"
+
+          # Revoke default target grants that would otherwise be inherited
+          # by restored tables; the dump's explicit GRANT statements then
+          # reconstruct the source ACLs on the isolated target.
+          psql "$DB_URL" -X --set ON_ERROR_STOP=1 <<'SQL'
+          CREATE SCHEMA IF NOT EXISTS shoir_internal;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA shoir_internal REVOKE ALL ON TABLES FROM anon, authenticated;
+          SQL
 
           # Restore only custom application schemas and custom roles. Supabase
           # platform schemas (auth/storage/extensions) are initialized locally.
