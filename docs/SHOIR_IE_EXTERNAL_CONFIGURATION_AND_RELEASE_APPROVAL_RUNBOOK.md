@@ -288,6 +288,8 @@ Do not represent the repository beta SDK or existing persistence Edge Function a
 
 ## 8. Configure and accept T099 — backup and disaster recovery
 
+**Live staging finding on 2026-11-22 — NOT ACCEPTED:** the authenticated dashboard for `hfhrosthswcybccepmak` reports the Shoir-IE organization/project on Free / Nano, and the Backups page displays **No backups**. Scheduled backups, retention, PITR and managed restore are unavailable on this plan. No plan upgrade was made. No full database export, no separate Storage object-byte export, no off-project encrypted copy and no isolated restore have been completed. A single private object (one JPEG payment-proof object) was found in `subscription-payment-proofs`; its raw bytes were not safely exported into the recovery workspace. Do not treat a metadata listing, a signed-URL attempt or the local hash-manifest utility as an actual backup. T099 remains **NOT ACCEPTED**.
+
 A workspace JSON export is not a database backup, PITR guarantee or Storage object backup. In Supabase Dashboard, inspect the actual plan and project settings; do not infer backup capability from plan labels.
 
 For staging:
@@ -338,9 +340,11 @@ Record independent named approvals (not self-certification) for:
 
 ### GitHub branch protection
 
-Both `main` and `staging-e2e-20261019` have active repository rulesets requiring PR workflow and at least one independent approval, latest-push approval and resolved review threads, with no bypass actors. Staging requires eight CI contexts. Main currently requires only `test`, `edge-function`, `engine-regression` and `security-quality`; it is not production-strength until `clean-postgres-migration-replay`, `postgres-transaction-contract`, `production-v9-security-backport`, and `excel-intelligence` are also required.
+Both `main` and `staging-e2e-20261019` have active repository rulesets requiring PR workflow and at least one independent approval, latest-push approval and resolved review threads, with no bypass actors. Staging and main now both require the same eight CI contexts: `test`, `edge-function`, `engine-regression`, `security-quality`, `clean-postgres-migration-replay`, `postgres-transaction-contract`, `production-v9-security-backport`, and `excel-intelligence`.
 
-A repository administrator can apply the additive, idempotent change from an administrator-authenticated computer with GitHub CLI installed:
+**Verified on 2026-11-22:** main ruleset `26065188` (`Protect main — release gates`) was updated from the GitHub Settings UI by choosing the actual GitHub Actions source suggestions for each missing context (never the manual `Any source` option). A separate reload confirmed exactly eight required contexts, all bound to GitHub Actions. Target branch, active enforcement, PR requirement, at least one approval, stale-review dismissal, latest-push approval, review-thread resolution, strict/up-to-date checks, deletion/force-push restrictions, unattributed-Copilot extra approval and no-bypass state were preserved. Do not reapply or weaken the ruleset unless a fresh read shows drift.
+
+The script below remains as an idempotent administrator-side verification/repair option; a GitHub CLI update is no longer required unless a future drift is detected:
 
 ```bash
 gh auth status
@@ -377,3 +381,20 @@ The release owner should be able to locate, for one exact candidate SHA:
 - separate main branch protections, production PR approval, approved deployment/rollback record and production post-deploy verification.
 
 Until every mandatory item has evidence, the final decision remains **BETA / NO-GO**. Preserve all failures/skips as blockers and do not advertise measured savings, ROI, live integrations, disaster-recovery readiness or legal clearance without the underlying evidence.
+
+
+
+## 2026-11-22 staging acceptance update — current known blockers
+
+- The live staging E2E identities were repaired without changing production, creating new users, inventing payment references, changing the intentionally expired/inactive fixtures, or touching the reserved `sho` account. Five explicitly allowlisted non-admin staging test accounts have the expected tier/status and a test-only expiry through **2026-12-22**.
+- Authenticated run [#134](https://github.com/MSJ1708/shoir-ie/actions/runs/45028395817) confirms candidate-build preflight and app shell/Excel/logout browser checks passed; however backend organization lifecycle tests failed because deployed staging persistence Edge v14 does not expose the candidate `org_member_suspend_session`, `org_member_restore_session` and `org_close_session` handlers or corresponding SQL RPCs/migrations. The failing run left two named synthetic organizations under `shoir-e2e-active`; they are recorded for cleanup after the reviewed candidate lifecycle functions are installed. Do not delete them with direct SQL or bypass RPC authorization.
+- The same run found that staging Edge login accepted the Enterprise Plus test account with a future expiry, but Streamlit then fell back to a stale local SQLite expiry and displayed the renewal-only page. Candidate source now prefers the authoritative Edge/server session expiry over the SQLite compatibility cache, and unit/source regression tests cover this case. This fix is **candidate-only** until the complete candidate app is deployed to staging and the authenticated browser matrix passes.
+- The module matrix showed **21/21 Research Pack routes passed**. The Enterprise Plus session reached 12 module routes before the stale-expiry UI reset caused later route checks to fail/cascade. Those remaining failures are not accepted as module defects or passes; re-run after staging deploys the candidate app fix. A new guard in the script detects loss of authenticated state and stops rather than generating dozens of misleading timeout failures.
+- A new backend deployment preflight probes the three candidate organization lifecycle handlers using an invalid session (no write possible). If they are missing, it skips organisation mutations and records a deployment blocker instead of creating test organisations that the deployed function cannot clean up. Unit tests cover supported, missing and unexpected handler responses.
+- The current candidate SHA for this update is `179d1857cac4bd1a9e6e9d5b7c7a0cb9c5c4a1d5`; refresh all exact-head CI and authenticated runs if the branch changes. The latest check query at update time shows six of eight CI workflows passed and Engine Regression/full validation still running; in-progress is not PASS.
+- Staging Supabase has 24 migrations applied only through `20261107120637_shoir_organization_workspaces`; candidate org suspend/restore/close, workspace-state, OIDC audit and T020 lease migrations remain unapplied. Staging persistence Edge remains v14. Candidate migration/Edge deployment remains gated on a recoverable staging backup, exact-head CI, independent review and explicit staging deployment approval.
+- Main ruleset `26065188` is now confirmed with all eight required GitHub Actions contexts and original safeguards retained.
+- Supabase Free has no automated backup/restore. No database or Storage-byte archive or isolated restore was completed. Set owner-approved RPO/RTO and provide a secure off-project backup destination and database export method before claiming T099.
+- External T096 SAP/Oracle access, T097 separately hosted public API/gateway and external SDK, and T098 real OIDC/MFA IdP are still owner/provider configuration dependencies. Do not mark them complete from source code or repository tests.
+
+**Current decision remains BETA / NO-GO.** Do not merge PR #232, deploy candidate migrations/Edge code or alter production from this status note.
