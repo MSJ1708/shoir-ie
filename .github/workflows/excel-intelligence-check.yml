@@ -20,6 +20,9 @@ on:
       - "tests/test_excel_*.py"
       - "tests/excel_addin_planner.test.cjs"
       - "tests/test_module_catalog_categories.py"
+      - "workspace_persistence.py"
+      - "shoir_application_shell.py"
+      - "tests/test_workspace_persistence.py"
       - ".github/workflows/excel-intelligence-check.yml"
   pull_request:
     branches:
