@@ -39,6 +39,7 @@ jobs:
       SHOIR_RECOVERY_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
       SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
       SHOIR_BACKUP_AGE_RECIPIENT: ${{ secrets.SHOIR_BACKUP_AGE_RECIPIENT }}
+      SHOIR_BACKUP_AGE_RESTORE_RECIPIENT: ${{ secrets.SHOIR_BACKUP_AGE_RESTORE_RECIPIENT }}
       SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
       SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
       SHOIR_STAGING_PROJECT_REF: hfhrosthswcybccepmak
@@ -99,6 +100,7 @@ jobs:
               "SHOIR_RECOVERY_S3_ACCESS_KEY_ID",
               "SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY",
               "SHOIR_BACKUP_AGE_RECIPIENT",
+              "SHOIR_BACKUP_AGE_RESTORE_RECIPIENT",
               "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD",
               "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2",
           )
@@ -225,7 +227,12 @@ jobs:
             --directory "$backup_dir" roles.sql schema.sql data.sql \
             storage-buckets.json storage-objects.ndjson storage-policies.json \
             app-table-counts.json database-contract.json migration-history.json
-          age --encrypt --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
+          # Encrypt for both the offline recovery owner and the separate
+          # protected GitHub restore-runner key. The offline private identity
+          # is never uploaded to GitHub.
+          age --encrypt \
+            --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
+            --recipient "$SHOIR_BACKUP_AGE_RESTORE_RECIPIENT" \
             --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
           (cd "$backup_dir" && sha256sum database-bundle.tar.gz.age > database-bundle.tar.gz.age.sha256)
 
