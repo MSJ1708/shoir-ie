@@ -308,6 +308,27 @@ jobs:
             echo "::error::The staging Storage endpoint returned no buckets; refusing an empty backup."
             exit 2
           fi
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-backup"
+          database_buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
+          database_ids = sorted(str(row["id"]) for row in database_buckets)
+          s3_ids = sorted(
+              line.strip().rstrip("/")
+              for line in Path(os.environ["RUNNER_TEMP"], "storage-buckets.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          )
+          if len(database_ids) != len(set(database_ids)):
+              raise SystemExit("Database Storage bucket metadata contains duplicate IDs.")
+          if database_ids != s3_ids:
+              raise SystemExit(
+                  f"Storage bucket inventory mismatch: database={database_ids}, S3={s3_ids}"
+              )
+          print(f"PASS: database and Storage S3 bucket inventories match ({len(database_ids)} buckets).")
+          PY
 
           while IFS= read -r bucket_entry; do
             bucket="${bucket_entry%/}"
