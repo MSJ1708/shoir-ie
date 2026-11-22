@@ -214,7 +214,7 @@ jobs:
             app-table-counts.json
           age --encrypt --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
             --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
-          sha256sum "$backup_dir/database-bundle.tar.gz.age" > "$backup_dir/database-bundle.tar.gz.age.sha256"
+          (cd "$backup_dir" && sha256sum database-bundle.tar.gz.age > database-bundle.tar.gz.age.sha256)
 
           python - <<'PY'
           import json
