@@ -44,7 +44,7 @@ jobs:
       - name: Compile
         run: python -m compileall -q .
       - name: Regression tests
-        run: python -W error -m pytest -q tests
+        run: python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q tests
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Secret-pattern guard

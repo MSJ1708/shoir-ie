@@ -4938,16 +4938,61 @@ def run_solver_diagnostics(
             "data_provenance": "USER_ENTERED_UNVERIFIED",
         }
 
-    solver_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
+    solver_reported_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
+    solver_status = solver_reported_status
     solution_status_code = getattr(problem, "sol_status", None)
     solution_status = pulp.LpSolution.get(solution_status_code, "UNKNOWN_SOLUTION_STATUS")
+
+    # A one-variable linear constraint can sometimes be proved infeasible
+    # directly from that variable's finite bounds. This is a mathematical
+    # interval proof, not an inference from a missing solver solution.
+    infeasibility_witnesses: list[str] = []
+    for item in normalized_constraints:
+        if len(item["coefficients"]) != 1:
+            continue
+        variable_name, coefficient = next(iter(item["coefficients"].items()))
+        spec = normalized_specs[variable_name]
+        low, high = spec["low"], spec["up"]
+        if coefficient > 0:
+            lhs_min = -math.inf if low is None else coefficient * low
+            lhs_max = math.inf if high is None else coefficient * high
+        elif coefficient < 0:
+            lhs_min = -math.inf if high is None else coefficient * high
+            lhs_max = math.inf if low is None else coefficient * low
+        else:
+            lhs_min = lhs_max = 0.0
+
+        if item["sense"] == pulp.LpConstraintLE:
+            impossible = lhs_min > item["rhs"] + tolerance
+        elif item["sense"] == pulp.LpConstraintGE:
+            impossible = lhs_max < item["rhs"] - tolerance
+        else:
+            impossible = (
+                item["rhs"] < lhs_min - tolerance
+                or item["rhs"] > lhs_max + tolerance
+            )
+        if impossible:
+            infeasibility_witnesses.append(
+                f"Constraint '{item['name']}' cannot be satisfied: variable '{variable_name}' "
+                f"bounds restrict its left-hand side to [{lhs_min:g}, {lhs_max:g}], "
+                f"but the required relation is {item['sense_label']} {item['rhs']:g}."
+            )
+
+    solver_status_source = "CBC"
+    if infeasibility_witnesses:
+        # Keep the raw solver response visible, but use the independently
+        # proven mathematical contradiction as the authoritative diagnosis.
+        solver_status = "Infeasible"
+        solution_status = "INFEASIBLE_BY_BOUND_PRECHECK"
+        solver_status_source = "INDEPENDENT_BOUND_PRECHECK"
+
     variable_rows: list[dict[str, Any]] = []
-    violations: list[str] = []
+    violations: list[str] = list(infeasibility_witnesses)
     all_values_assigned = True
     all_bounds_ok = True
 
     for name, variable in variables.items():
-        raw_value = variable.varValue
+        raw_value = None if infeasibility_witnesses else variable.varValue
         value = None if raw_value is None else float(raw_value)
         spec = normalized_specs[name]
         bound_violation = 0.0
@@ -5020,7 +5065,13 @@ def run_solver_diagnostics(
 
     if solver_status == "Infeasible":
         interpretation_status = "INFEASIBLE"
-        warnings = ["The solver reported infeasibility; no feasible decision should be inferred from any leftover variable values."]
+        if infeasibility_witnesses:
+            warnings = [
+                "An independent variable-bound interval check proved the model infeasible. "
+                "The raw CBC status is retained separately; no leftover solver values are used."
+            ]
+        else:
+            warnings = ["The solver reported infeasibility; no feasible decision should be inferred from any leftover variable values."]
         objective_value = None
     elif solver_status == "Unbounded":
         interpretation_status = "UNBOUNDED"
@@ -5041,6 +5092,9 @@ def run_solver_diagnostics(
     return {
         "status": interpretation_status,
         "solver_status": solver_status,
+        "solver_reported_status": solver_reported_status,
+        "solver_status_source": solver_status_source,
+        "infeasibility_witnesses": infeasibility_witnesses,
         "solution_status": solution_status,
         "objective_direction": "minimize" if direction_value in {"minimize", "min"} else "maximize",
         "objective_value": objective_value,
