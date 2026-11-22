@@ -74,7 +74,7 @@ jobs:
           fi
       - name: Upload sanitized report-export validation artifacts and rendered pages
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-report-export-validation
           path: artifacts/report-export-validation/
@@ -125,7 +125,7 @@ jobs:
         run: python scripts/live_deployment_smoke.py
       - name: Upload local runtime smoke evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-local-runtime-smoke
           path: artifacts/live-deployment-smoke/
@@ -160,7 +160,7 @@ jobs:
         run: python scripts/live_deployment_smoke.py
       - name: Save live browser screenshots and result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-live-deployment-smoke
           path: artifacts/live-deployment-smoke/
