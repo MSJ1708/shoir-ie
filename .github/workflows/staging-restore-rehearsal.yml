@@ -24,14 +24,14 @@ jobs:
     environment:
       name: staging-recovery
     env:
-      SHOIR_RECOVERY_S3_ENDPOINT: \${{ secrets.SHOIR_RECOVERY_S3_ENDPOINT }}
-      SHOIR_RECOVERY_S3_REGION: \${{ secrets.SHOIR_RECOVERY_S3_REGION }}
-      SHOIR_RECOVERY_S3_BUCKET: \${{ secrets.SHOIR_RECOVERY_S3_BUCKET }}
-      SHOIR_RECOVERY_S3_ACCESS_KEY_ID: \${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
-      SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: \${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
-      SHOIR_BACKUP_AGE_IDENTITY: \${{ secrets.SHOIR_BACKUP_AGE_IDENTITY }}
-      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: \${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
-      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: \${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
+      SHOIR_RECOVERY_S3_ENDPOINT: ${{ secrets.SHOIR_RECOVERY_S3_ENDPOINT }}
+      SHOIR_RECOVERY_S3_REGION: ${{ secrets.SHOIR_RECOVERY_S3_REGION }}
+      SHOIR_RECOVERY_S3_BUCKET: ${{ secrets.SHOIR_RECOVERY_S3_BUCKET }}
+      SHOIR_RECOVERY_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
+      SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
+      SHOIR_BACKUP_AGE_IDENTITY: ${{ secrets.SHOIR_BACKUP_AGE_IDENTITY }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
     steps:
       - name: Check out the reviewed staging branch
         uses: actions/checkout@v7
@@ -270,6 +270,8 @@ jobs:
           supabase functions serve shoir-persistence --no-verify-jwt \
             > "$RUNNER_TEMP/shoir-local-edge-function.log" 2>&1 &
           function_pid=$!
+          printf '%s\n' "$function_pid" > "$RUNNER_TEMP/shoir-local-edge-function.pid"
+          chmod 600 "$RUNNER_TEMP/shoir-local-edge-function.pid"
           function_ready=false
           for attempt in $(seq 1 60); do
             if ! kill -0 "$function_pid" 2>/dev/null; then
@@ -319,6 +321,7 @@ jobs:
 
           kill "$function_pid" 2>/dev/null || true
           wait "$function_pid" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/shoir-local-edge-function.pid"
           rm -f "$RUNNER_TEMP/shoir-local-edge-function.log"
           mkdir -p "$RUNNER_TEMP/staging-restore-evidence"
           cp "$RUNNER_TEMP/staging-restore-evidence.json" "$RUNNER_TEMP/staging-restore-evidence/"
@@ -327,8 +330,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: shoir-ie-staging-restore-evidence-\${{ github.run_id }}
-          path: \${{ runner.temp }}/staging-restore-evidence/
+          name: shoir-ie-staging-restore-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/staging-restore-evidence/
           if-no-files-found: warn
           retention-days: 30
 
@@ -337,9 +340,15 @@ jobs:
         shell: bash
         run: |
           set +e
+          if [[ -f "$RUNNER_TEMP/shoir-local-edge-function.pid" ]]; then
+            function_pid="$(cat "$RUNNER_TEMP/shoir-local-edge-function.pid")"
+            kill "$function_pid" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/shoir-local-edge-function.pid"
+          fi
           if [[ -f "$RUNNER_TEMP/shoir-supabase-local/supabase/config.toml" ]]; then
             cd "$RUNNER_TEMP/shoir-supabase-local"
             supabase stop --no-backup
           fi
           rm -f "$RUNNER_TEMP/shoir-staging-age-identity.txt"
           rm -f "$RUNNER_TEMP/shoir-local-supabase.env"
+          rm -f "$RUNNER_TEMP/shoir-local-edge-function.log"
