@@ -427,6 +427,14 @@ def main() -> int:
             restored_policy_count = cursor.fetchone()[0]
         if restored_bucket_count != len(source_buckets):
             raise RuntimeError("Restored Storage bucket count does not match source.")
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, public FROM storage.buckets")
+            restored_bucket_privacy = {row[0]: row[1] for row in cursor.fetchall()}
+        expected_bucket_privacy = {
+            row["id"]: bool(row.get("public", False)) for row in source_buckets
+        }
+        if restored_bucket_privacy != expected_bucket_privacy:
+            raise RuntimeError("Restored Storage bucket privacy flags do not match source.")
         if restored_policy_count != len(source_policies):
             raise RuntimeError("Restored Storage policy count does not match source.")
 
