@@ -141,7 +141,7 @@ _ACTION_KEYS = {
 
 def _excluded(key: str) -> bool:
     # Normalize names before exact/prefix comparisons so differently-cased
-    # credential keys cannot bypass the snapshot filter.
+    # credential keys cannot bypass the top-level snapshot filter.
     lowered = str(key).casefold()
     exact_exclusions = {item.casefold() for item in _EXACT_EXCLUDE | _ACTION_KEYS}
     return (
@@ -149,6 +149,28 @@ def _excluded(key: str) -> bool:
         or any(lowered.startswith(prefix.casefold()) for prefix in _PREFIX_EXCLUDE)
         or lowered.startswith(("download_", "upload_"))
         or lowered.endswith(("_button", "_btn", "_submit"))
+    )
+
+
+def _excluded_nested(key: str) -> bool:
+    """Remove credential-like nested keys without dropping workspace metadata."""
+    lowered = str(key).casefold()
+    exact_credentials = {
+        "remote_session_token", "renewal_session_token", "access_token",
+        "refresh_token", "session_token", "id_token", "api_secret",
+        "client_secret", "password", "password_hash", "secret",
+        "service_role_key", "supabase_service_role_key",
+    }
+    return (
+        lowered in exact_credentials
+        or lowered.startswith((
+            "token_", "secret_", "password_", "credential_",
+            "authorization_", "cookie_", "private_key_",
+        ))
+        or lowered.endswith((
+            "_token", "_secret", "_password", "_credential",
+            "_client_secret", "_service_role_key",
+        ))
     )
 
 def _pack(value: Any) -> Any:
@@ -176,7 +198,7 @@ def _pack(value: Any) -> Any:
     if isinstance(value, dict):
         return {
             "__type__": "dict",
-            "value": {str(k): _pack(v) for k, v in value.items() if not _excluded(str(k))},
+            "value": {str(k): _pack(v) for k, v in value.items() if not _excluded_nested(str(k))},
         }
     if isinstance(value, list):
         return {"__type__": "list", "value": [_pack(v) for v in value]}
