@@ -99,6 +99,7 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "insert_remote_request",
     "remote_account",
     "account_is_expired",
+    "session_subscription_expiry",
     "renewed_expiry",
 )
 _DURABLE_STORE_IMPORT_ERROR_TYPE = None
@@ -1512,7 +1513,9 @@ if is_free_mode and not st.session_state.get("current_user"):
     st.session_state["user_tier"] = "Enterprise Tier"
     st.session_state["authenticated"] = True
 
-# Enforce the explicit 30-day subscription expiry timestamp.
+# Enforce the subscription expiry using the authoritative server entitlement.
+# SQLite is only a compatibility cache: an old local expiry must not override
+# the future expiry already returned by the staging Edge login service.
 if st.session_state.get("authenticated") and st.session_state.get("current_user") != "Guest Visitor":
     try:
         active_user = st.session_state.get("current_user", "")
@@ -1522,7 +1525,10 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
             (active_user.lower(),),
         ).fetchone()
         conn.close()
-        if row and row[0] and active_user.lower() != "sho" and account_is_expired(row[0]):
+        cached_expiry = row[0] if row else None
+        server_expiry = st.session_state.get("subscription_expires_at")
+        effective_expiry = session_subscription_expiry(server_expiry, cached_expiry)
+        if effective_expiry and active_user.lower() != "sho" and account_is_expired(effective_expiry):
             save_user_workspace(active_user, st.session_state)
             st.session_state["authenticated"] = False
             st.session_state["current_user"] = ""
