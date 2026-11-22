@@ -522,11 +522,11 @@ def validate_migration_history(
         name = row.get("name")
         if (
             not isinstance(version, str)
-            or not re.fullmatch(r"\\d{14}", version)
+            or not re.fullmatch(r"\d{14}", version)
             or not isinstance(name, str)
             or not name
             or "/" in name
-            or "\\\\" in name
+            or "\\" in name
         ):
             raise RuntimeError("Source migration ledger contains an invalid version or name.")
         if version in history_by_version:
@@ -640,6 +640,8 @@ def main() -> int:
     )
     if int(manifest.get("migration_history_count", -1)) != migration_validation["migration_history_count"]:
         raise RuntimeError("Backup manifest migration count does not match encrypted migration ledger.")
+    if int(manifest.get("source_migration_count", -1)) != int(source_database_contract["source_migration_count"]):
+        raise RuntimeError("Backup manifest migration count differs from the source database contract.")
 
     # Only a local DB connection is supplied by the workflow. No remote project
     # URL or service credential for the hosted staging/production projects is accepted.
