@@ -21,8 +21,14 @@ EXPECTED_VERSIONS = [
     "20261019140600",
     "20261021130000",
     "20261022110000",
-    "20261023130000",
-    "20261026110000",
+    "20261025164602",
+    "20261104183132",
+    "20261104184453",
+    "20261104192112",
+    "20261104192857",
+    "20261105101231",
+    "20261105111832",
+    "20261107120637",
 ]
 
 
@@ -66,14 +72,14 @@ def test_beta_acceptance_guard_migration_enforces_all_current_notice_versions():
 
 
 def test_refund_policy_v2_guard_migration_requires_current_refund_version():
-    source = (MIGRATIONS / "20261023130000_refresh_refund_policy_acceptance_version.sql").read_text(encoding="utf-8")
+    source = (MIGRATIONS / "20261025164602_20261023130000_refresh_refund_policy_acceptance_version.sql").read_text(encoding="utf-8")
     assert "refund_policy_version IS DISTINCT FROM '2026-10-23-v2'" in source
     assert "BEFORE UPDATE OF status" in source
 
 
 def test_additive_referral_migration_does_not_rewrite_existing_account_identifiers():
     source = (
-        MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
+        MIGRATIONS / "20261105101231_safe_beta_legal_referrals_20261105.sql"
     ).read_text(encoding="utf-8").casefold()
     # Comments and safe lookup indexes may mention the existing code column.
     # The invariant is that this additive migration performs no data rewrite.
