@@ -17,7 +17,7 @@ class FakeEdgeAPI:
         self.calls.append((action, payload))
         if action in self.supported_actions:
             return 401, {"error": "Unauthorized session."}
-        return 400, {"error": "Unsupported action."}
+        return 400, {"error": "Unknown action."}
 
 
 REQUIRED_ACTIONS = {
@@ -64,3 +64,13 @@ def test_candidate_organization_preflight_fails_closed_on_unexpected_status():
     assert ready is False
     assert "expected invalid-session guard" in detail
     assert api.calls == ["org_member_suspend_session"]
+
+def test_supabase_unknown_action_response_is_classified_as_missing_handler():
+    api = FakeEdgeAPI(REQUIRED_ACTIONS - {"org_close_session"})
+
+    ready, detail = preflight_candidate_organization_actions(api, "shoir-e2e-active")
+
+    assert ready is False
+    assert "org_close_session" in detail
+    assert "Unknown action." in detail
+    assert len(api.calls) == 3
