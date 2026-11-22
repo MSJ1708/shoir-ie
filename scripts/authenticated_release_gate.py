@@ -90,6 +90,7 @@ REQUIRED_CASES = frozenset({
     ("session_revocation", "second"),
     ("session_revocation", "starter"),
     ("session_revocation", "expired"),
+    ("organization_deployment_preflight", "deployment"),
 })
 
 
@@ -128,6 +129,51 @@ def validate_test_username(name: str, label: str) -> str:
     if not value.casefold().startswith(PREFIX):
         raise ValueError(f"{label} must start with {PREFIX!r}; refusing to risk a customer/admin account.")
     return value
+
+
+def preflight_candidate_organization_actions(
+    api: EdgeAPI,
+    username: str,
+) -> tuple[bool, str]:
+    """Confirm the deployed Edge Function exposes candidate-only RBAC lifecycle actions.
+
+    Invalid-session calls stop in getSession before any organization or database
+    mutation. HTTP 401 therefore means the action handler exists. An unsupported
+    action means staging is still running an older function; do not create E2E
+    organizations that cannot later be closed by the deployed function.
+    """
+    probe = {
+        "username": username,
+        "token": "shoir-e2e-invalid-deployment-probe-token",
+        "organization_id": "00000000-0000-0000-0000-000000000000",
+        "target_username_lc": "shoir-e2e-deployment-probe",
+    }
+    for action in (
+        "org_member_suspend_session",
+        "org_member_restore_session",
+        "org_close_session",
+    ):
+        try:
+            status, data = api.call(action, probe)
+        except Exception as exc:
+            return False, (
+                f"Could not verify the staging Edge action {action} "
+                f"({type(exc).__name__}); no organization test data was created."
+            )
+        if status == 401:
+            continue
+        error = str(data.get("error") or "")
+        if status == 400 and "unsupported" in error.casefold():
+            return False, (
+                f"Staging Edge Function does not expose {action}; deploy the "
+                "reviewed candidate function and its required organization "
+                "migrations before running organization suspension/restore/close tests."
+            )
+        return False, (
+            f"Staging Edge action {action} did not stop at the expected invalid-session "
+            f"guard (HTTP {status}); no organization test data was created."
+        )
+    return True, "Required suspension, restore and close handlers are exposed by the staging Edge Function."
 
 
 class EdgeAPI:
@@ -679,6 +725,13 @@ def main() -> int:
         return 2
 
     api = EdgeAPI(edge_url, key)
+    org_handlers_ready, org_handlers_detail = preflight_candidate_organization_actions(api, active_user)
+    record(
+        "organization_deployment_preflight",
+        "deployment",
+        org_handlers_ready if org_handlers_ready else None,
+        org_handlers_detail,
+    )
 
     # Non-persistent integration probes for the new legal/referral contract.
     # Missing/stale notice versions and unknown referral codes must be rejected
@@ -802,23 +855,37 @@ def main() -> int:
                and str(data3.get("role") or "") != "Enterprise Admin",
                "Starter tier is returned for the dedicated Starter test identity." if (status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold() and str(data3.get("role") or "") != "Enterprise Admin") else login_failure_detail(status3, data3, "Starter account login failed"))
 
-        try:
-            verify_organization_lifecycle(
-                api,
-                active_user,
-                active_token,
-                second_user,
-                second_token,
-                starter_user,
-                created_organization_ids,
-            )
-        except Exception as exc:
-            record(
-                "organization_lifecycle_unhandled_error",
-                "active",
-                False,
-                f"Organization acceptance aborted safely ({type(exc).__name__}); response details suppressed.",
-            )
+        if org_handlers_ready:
+            try:
+                verify_organization_lifecycle(
+                    api,
+                    active_user,
+                    active_token,
+                    second_user,
+                    second_token,
+                    starter_user,
+                    created_organization_ids,
+                )
+            except Exception as exc:
+                record(
+                    "organization_lifecycle_unhandled_error",
+                    "active",
+                    False,
+                    f"Organization acceptance aborted safely ({type(exc).__name__}); response details suppressed.",
+                )
+        else:
+            for case, account_class in sorted(REQUIRED_CASES):
+                if case.startswith("organization_") and case != "organization_deployment_preflight":
+                    if not any(
+                        item["case"] == case and item["account_class"] == account_class
+                        for item in RESULTS
+                    ):
+                        record(
+                            case,
+                            account_class,
+                            None,
+                            "Skipped safely: the deployed staging Edge Function is missing required candidate organization lifecycle handlers.",
+                        )
 
         # An active non-admin must not invoke administrator APIs even with a valid token.
         if active_token:
