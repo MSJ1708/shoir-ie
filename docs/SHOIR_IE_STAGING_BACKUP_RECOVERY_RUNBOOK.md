@@ -1,6 +1,6 @@
 # Shoir-IE staging backup export setup and acceptance
 
-**Status:** export workflow prepared; **T099 remains NOT ACCEPTED** until a real isolated restore succeeds and RPO/RTO are measured.
+**Status:** encrypted export and isolated restore workflows are implemented on the PR branch; **T099 remains NOT ACCEPTED** until owner infrastructure setup is completed and both workflows actually pass against a real R2 backup.
 
 This guide is for the staging project only:
 
@@ -13,11 +13,12 @@ Never point this procedure at production project `gcsamrdaeraxieaagsta`. Never p
 
 ## 1. What the workflow does
 
-The GitHub Actions workflow is:
+The GitHub Actions workflows are:
 
-`.github/workflows/staging-backup-recovery.yml`
+- `.github/workflows/staging-backup-recovery.yml` — encrypted staging export to R2
+- `.github/workflows/staging-restore-rehearsal.yml` — authenticated restore into an ephemeral local Supabase stack
 
-It requires the protected GitHub Environment named `staging-recovery`. To preserve the production `main` branch, the supported owner-trigger for the staging-only workflow is a deliberate change to `.github/backup-triggers/staging-recovery.txt` on `staging-e2e-20261019`. That `push` trigger is available once the workflow file has been merged into the staging branch. The optional `workflow_dispatch` trigger is only exposed by GitHub when the workflow file also exists on the repository default branch; this runbook does not authorize adding it to `main`.
+Both require the protected GitHub Environment named `staging-recovery`. To preserve production `main`, each workflow is triggered by a deliberate change to a separate marker path on `staging-e2e-20261019`: `.github/backup-triggers/staging-recovery.txt` for export and `.github/restore-triggers/staging-recovery.txt` for restore. Each workflow becomes available after it has been merged into staging. Neither trigger file should be added to `main`.
 
 When all required environment secrets are configured, it:
 
@@ -27,23 +28,23 @@ When all required environment secrets are configured, it:
 4. Encrypts the database bundle using an `age` public recipient before upload.
 5. Copies **every** staging Storage bucket's object bytes to an off-Supabase S3-compatible destination through an encrypted `rclone crypt` remote.
 6. Checks the remote Storage copy against the live source and checks the uploaded encrypted database archive.
-7. Uploads only a redacted manifest and archive checksum to the short-retention GitHub artifact. Raw database data, Storage object bytes and encryption material are not uploaded as GitHub artifacts.
+7. Records application-table row counts inside the encrypted database bundle and uploads only a redacted manifest and archive checksum to the short-retention GitHub artifact. Raw database data, Storage object bytes and encryption material are not uploaded as GitHub artifacts.
 
 The workflow does **not** yet restore the database or Storage into a separate Supabase project. There is also a managed-schema limitation: Supabase CLI `db dump` excludes Supabase-managed schemas such as `auth` and `storage`; this workflow explicitly dumps only `public` and `shoir_internal`. Storage metadata and object bytes are copied separately, but **Auth user records are not exported**.
 
-A read-only staging inventory on 2026-11-22 found zero rows in every `auth` data table (including users, identities, sessions, refresh tokens, MFA, OAuth, SSO and WebAuthn tables); the only populated Auth table was `auth.schema_migrations` (84 platform migration records). To prevent silent future omission, the export workflow now checks every non-`schema_migrations` Auth table and fails the backup if any row exists. It records the Auth schema-migration count in the manifest but does not export or restore platform-managed migration history.
+A read-only staging inventory on 2026-11-22 found zero rows in every `auth` data table (including users, identities, sessions, refresh tokens, MFA, OAuth, SSO and WebAuthn tables); the only populated Auth table was `auth.schema_migrations` (84 platform migration records). The export workflow checks every non-`schema_migrations` Auth table and fails if any row exists. It records `auth_data_exported: false`, `auth_non_migration_rows: 0`, and the Auth schema-migration count in the manifest, but does not export or restore platform-managed migration history. The restore verifier refuses to continue unless those exact Auth-scope assertions are present.
 
 This makes the current backup design conditional: it can proceed only while the source has no Auth data rows. If any Auth user, identity, MFA or other Auth data is added later, the workflow must stop and a compatible encrypted Auth-data export/restore must be implemented before another backup is accepted. A successful upload alone is still not disaster-recovery proof. T099 stays **NOT ACCEPTED** until the guard passes at backup time, the isolated restore steps in section 7 pass, and RPO/RTO are measured. Do not treat newly created test users on the restore target as proof that existing user identities were recovered.
 
 ## 2. Select an off-project destination
 
-Choose an S3-compatible provider that is separate from the Supabase staging project and preferably a separate account/failure domain. Supported examples include AWS S3 or Cloudflare R2.
+Use the owner's Cloudflare account and create the dedicated **private Cloudflare R2 bucket `shoir-ie-staging-recovery`**. The workflow rejects any other bucket name, requires the endpoint to end in `.r2.cloudflarestorage.com`, and requires R2 region `auto`.
 
 Create a private bucket dedicated to Shoir-IE staging recovery. Do not use a public bucket. Enable the provider's encryption-at-rest and access logging where available. Set an owner-approved retention/lifecycle policy and protect backups from accidental overwrite/deletion. Confirm the bucket is in a region and legal jurisdiction approved by the data owner.
 
-Create credentials restricted to this recovery bucket. The workflow needs list/read/write access to its recovery prefix; it does not intentionally delete backups. Do not use a root account or a general administrator key.
+Create an R2 API token with **Object Read & Write** permission and apply it to **only** `shoir-ie-staging-recovery`. The workflow needs list/read/write access to its recovery prefix; it does not intentionally delete backups. Do not use an account-wide administrative key.
 
-Record the provider's HTTPS S3 endpoint and region. For Cloudflare R2, the endpoint is the account's R2 endpoint and the region is normally `auto`. For AWS S3, use the endpoint/region supplied by AWS. Do not guess or copy a placeholder literally.
+Record the account's HTTPS R2 endpoint from the Cloudflare dashboard and use region `auto`. Do not guess or copy a placeholder literally.
 
 ## 3. Create the encryption material
 
@@ -55,7 +56,7 @@ age-keygen -o shoir-staging-backup-identity.txt
 
 The command writes a private identity file and prints an `age1...` public recipient. Keep the private identity file offline/in an approved secret manager with a recovery copy held by the authorized recovery owner. The backup workflow only needs the **public recipient**; never put the private identity into the export workflow or source code.
 
-Generate two different random rclone crypt passwords (at least 32 characters each). Keep them in the same approved secret manager as the recovery identity, with separate access control. These passwords are needed to decrypt Storage objects later. Do not use a human password or reuse another service's password.
+Generate two different random rclone crypt passwords (at least 32 characters each). Keep them in the same approved secret manager as the recovery identity, with separate access control. These passwords are needed to decrypt Storage objects later. Do not use a human password or reuse another service's password. Keep the private age identity's offline recovery copy in the owner's custody; a protected Environment secret copy is also required for the restore runner, because restore decryption occurs inside GitHub Actions.
 
 ## 4. Configure the staging source credentials
 
@@ -89,15 +90,16 @@ In GitHub repository `MSJ1708/shoir-ie`:
 | `SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID` | Staging Supabase Storage S3 access key ID |
 | `SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY` | Staging Supabase Storage S3 secret key |
 | `SHOIR_RECOVERY_S3_ENDPOINT` | HTTPS endpoint of the separate recovery provider |
-| `SHOIR_RECOVERY_S3_REGION` | Provider region |
-| `SHOIR_RECOVERY_S3_BUCKET` | Private destination bucket name |
+| `SHOIR_RECOVERY_S3_REGION` | Exactly `auto` for Cloudflare R2 |
+| `SHOIR_RECOVERY_S3_BUCKET` | Exactly `shoir-ie-staging-recovery` |
 | `SHOIR_RECOVERY_S3_ACCESS_KEY_ID` | Restricted destination key ID |
 | `SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY` | Restricted destination secret |
 | `SHOIR_BACKUP_AGE_RECIPIENT` | The public `age1...` recipient only |
 | `SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD` | First random rclone crypt password |
 | `SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2` | Different second random rclone crypt password |
+| `SHOIR_BACKUP_AGE_IDENTITY` | Private age identity text, used only by the protected isolated-restore workflow; retain a separate offline recovery copy |
 
-Do not add a Supabase service-role API key. The workflow uses the DB URL and dedicated Storage S3 credentials; its target check is hard-pinned to the staging database.
+Do not add a Supabase service-role API key as a secret for the export workflow. The export uses the DB URL and dedicated Storage S3 credentials; its source target is hard-pinned to staging. The local restore workflow generates its own temporary local service-role key from the ephemeral Supabase stack.
 
 ## 6. Run one staging backup export
 
@@ -110,35 +112,35 @@ After the environment secrets and bucket have been configured, and after PR #236
 5. Inspect the redacted `backup-manifest.json` and archive SHA-256 artifact. Confirm the expected bucket count and Storage object metadata count (re-inventory at run time; the previous point-in-time inventory found two private buckets and one payment-proof object).
 6. In the off-project provider console, confirm the encrypted database archive and encrypted Storage prefix exist. Do not open or download the raw payment-proof object into chat or a public artifact.
 
-The backup destination should have a unique run prefix; do not overwrite a previous recovery point. The workflow's GitHub artifact is only short-retention evidence, not the backup itself.
+The backup destination uses a unique run prefix `shoir-ie/staging/<workflow-run-id>-<attempt>`; do not overwrite a previous recovery point. The workflow's GitHub artifact is only short-retention evidence, not the backup itself.
 
-## 7. Required isolated restore before T099 can pass
+## 7. Isolated local Supabase restore rehearsal
 
-The restore operator must provision a **separate disposable Supabase project** or a supported isolated Supabase restore target. It must not be the production or live staging project and must have no production integration credentials.
+The second workflow is `.github/workflows/staging-restore-rehearsal.yml`. It uses a **fresh ephemeral local Supabase stack on a GitHub-hosted runner**; it does not create a third hosted Supabase project, does not connect to the live staging or production database, and does not incur a new Supabase project charge. The restore utility explicitly rejects any database URL other than `127.0.0.1`/`localhost:54322` and any API URL other than `127.0.0.1`/`localhost:54321`.
 
-The restore procedure must:
+After a real backup export has succeeded and its run prefix has been confirmed in R2:
 
-1. Retrieve the encrypted database bundle and encrypted Storage prefix from the off-project destination.
-2. Verify the database archive SHA-256 before decrypting it with the offline `age` identity.
-3. Restore roles, schema and data into the isolated target using the matching PostgreSQL/Supabase versions; reconcile Supabase-managed schemas and Storage bucket/object metadata using supported Supabase restore methods, not unsupported direct filesystem edits.
-4. Decrypt the Storage prefix using the rclone crypt passwords and restore all bucket contents into the isolated Storage service.
-5. Compare bucket/object counts, paths, file sizes and SHA-256 hashes against the source-time manifest. Verify private bucket policies and object access.
-6. Verify migration versions, table counts, constraints, RLS, grants, RPC execute rights, critical subscription/account/workspace rows and tenant isolation.
-7. Confirm that the backup manifest records `auth_data_exported: false` and the Auth zero-row guard passed. Re-run the read-only Auth table count check against the source at backup time and the isolated target after restore. Any nonzero source Auth data row means the export must be rejected until a compatible encrypted Auth-data export/restoration path has been implemented. Do not copy platform `auth.schema_migrations` into the target; its Supabase-managed Auth version must remain native to the target stack.
-8. Point a disposable Streamlit instance at the isolated restore and test fresh synthetic-user login, workspace load/save, dataset download, private payment-proof access and exports. A fresh-user login proves the isolated Auth service works, not recovery of existing source identities. If source Auth rows become nonzero in future, test their supported recovery separately.
-9. Record recovery start/end time, recovery point timestamp, achieved RPO/RTO, failures and rollback. Obtain independent infrastructure/security approval.
+1. Create or update `.github/restore-triggers/staging-recovery.txt` through a separate PR targeting only `staging-e2e-20261019`. The file must contain the exact backup prefix, for example `backup_prefix=shoir-ie/staging/123456789-1`. Replace the example with the actual successful backup run ID and attempt; never guess it.
+2. Merge that trigger PR only after the active staging ruleset is satisfied. The staging push to this exact file launches **Staging Encrypted Backup Restore Rehearsal**. Confirm its branch, event and protected Environment before approving the Environment gate.
+3. The workflow downloads the encrypted database archive and encrypted Storage tree from the exact R2 prefix, checks the SHA-256 checksum, decrypts within the ephemeral runner, and restores custom roles/schema/data into a clean local PostgreSQL 17 stack.
+4. It restores bucket metadata and policies, uploads each decrypted Storage object to local Supabase Storage, then downloads each object again and compares SHA-256 and byte length. It compares every application table's restored row count with the source-time counts in the encrypted bundle.
+5. It creates a synthetic local Supabase Auth user, signs it in successfully, deletes it, and confirms no test Auth user remains. The staging source had zero Auth data rows; existing identity migration is not tested or claimed. The restore stops if future source Auth rows are nonzero, or if bucket ownership metadata cannot be reconstructed.
+6. It emits a redacted evidence JSON containing counts, hash-verification totals, success status and measured RPO/RTO, uploads that evidence artifact, and destroys the ephemeral local Supabase stack. It never uploads the decrypted database, object bytes, age identity, passwords or access tokens.
 
-The current workflow does **not** perform this isolated restore automatically. Do not claim T099 accepted until the complete test is documented and independently reviewed. Do not create a new Supabase project or incur a charge without the owner's explicit approval.
+This workflow is implemented but **has not yet run against a real R2 backup**. A successful local restore rehearsal demonstrates recovery of the exported custom application database and Storage contents plus local Auth service availability. It is not a complete hosted-project clone, does not recover Supabase-managed settings or existing Auth users, and must not be described more broadly.
 
-## 8. Current staging baseline and outstanding owner decisions
+T099 remains **NOT ACCEPTED** until the owner configures the R2 bucket/token and protected Environment secrets, the export workflow passes, this exact-prefix isolated restore workflow passes, RPO/RTO are recorded, and the recovery evidence is reviewed.
 
-The last read-only inventory measured a roughly 14 MB PostgreSQL database. It found two private buckets: `shoir-industrial-datasets` (0 objects) and `subscription-payment-proofs` (one JPEG object, 26,844 bytes according to object metadata). This is a point-in-time inventory, not the backup itself; re-inventory when the backup actually runs.
+## 8. Current staging baseline and outstanding owner actions
 
-The following still require owner decisions or provider access:
+The latest read-only inventory measured a roughly 14 MB PostgreSQL database, 29 application tables, two private Storage buckets, one Storage object and one Storage policy. The single object was 26,844 bytes according to source metadata. This is a point-in-time inventory, not the backup itself; re-inventory when the backup actually runs.
 
-- choose the off-project S3-compatible provider/account, region and retention;
-- generate the destination credentials and encryption keys and store them in the `staging-recovery` GitHub Environment;
-- authorize an isolated restore target and its cost, if any;
-- approve measurable RPO/RTO targets and the recovery operator.
+The following still require owner actions or account permissions:
 
-No backup has been run by this guide. No project, plan, schema, secret, bucket, account, or production resource has been changed by writing this procedure.
+- create the private Cloudflare R2 bucket `shoir-ie-staging-recovery` and a bucket-scoped Object Read & Write token;
+- add the 11 export secrets and the private age identity restore secret to protected GitHub Environment `staging-recovery`;
+- make the authorized staging-only ruleset change or obtain the real independent approval required by the active ruleset;
+- merge the reviewed PR to staging, create the export marker after setup, verify the actual backup, then create the restore marker using that exact run prefix;
+- review the measured RPO/RTO and restore evidence.
+
+No R2 bucket, Cloudflare token, GitHub Environment secret, ruleset, staging deployment, backup or restore run has been created by this runbook work. Production `main` and the production Supabase project remain outside scope.
