@@ -1311,6 +1311,22 @@ def account_is_expired(expires_at: Any, now: Optional[dt.datetime] = None) -> bo
     return expires_at <= now
 
 
+def session_subscription_expiry(
+    server_expiry: Any,
+    cached_expiry: Any = None,
+) -> Any:
+    """Prefer the expiry returned by the authoritative server login.
+
+    The local SQLite account row is only an ephemeral compatibility cache. It
+    can lag behind a successful server-side renewal or staging fixture repair.
+    A non-empty server value must therefore win; the cached value is only a
+    fallback for legacy local-only sessions that have no server entitlement.
+    """
+    if server_expiry is not None and str(server_expiry).strip():
+        return server_expiry
+    return cached_expiry
+
+
 def renewed_expiry(existing_expiry: Any, days: int = 30, now: Optional[dt.datetime] = None) -> dt.datetime:
     now = now or dt.datetime.now(dt.timezone.utc)
     if existing_expiry:
