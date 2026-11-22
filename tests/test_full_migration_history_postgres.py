@@ -40,8 +40,14 @@ EXPECTED_VERSIONS = [
     "20261019140600",
     "20261021130000",
     "20261022110000",
-    "20261023130000",
-    "20261026110000",
+    "20261025164602",
+    "20261104183132",
+    "20261104184453",
+    "20261104192112",
+    "20261104192857",
+    "20261105101231",
+    "20261105111832",
+    "20261107120637",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -145,7 +151,8 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
         target.commit()
 
         # Build the account/request schema immediately before the historical
-        # data-rewriting referral migration. Do not execute that historical file.
+        # data-rewriting referral migration. Do not execute that historical file;
+        # exercise the later additive migration that is actually in staging.
         base_migrations = [
             migration for migration in sorted(MIGRATIONS.glob("*.sql"))
             if migration.name.split("_", 1)[0] < "20261021130000"
@@ -207,7 +214,7 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             """,
         )[0]
 
-        safe_migration = MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
+        safe_migration = MIGRATIONS / "20261105101231_safe_beta_legal_referrals_20261105.sql"
         with target.cursor() as cursor:
             cursor.execute(safe_migration.read_text(encoding="utf-8"))
         target.commit()
