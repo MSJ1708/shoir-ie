@@ -1,3 +1,5 @@
+import json
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -74,6 +76,63 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
         "password_hash",
     ):
         assert secret_key not in restored
+
+
+def test_workspace_hydration_strips_nested_credentials_from_legacy_snapshot(tmp_path: Path):
+    db = str(tmp_path / "legacy-workspace.db")
+    assert save_user_workspace("Alice", {"ordinary_value": "keep"}, db)
+
+    # Recreate a pre-hardening snapshot containing nested secrets. This bypasses
+    # the current save-time filter to verify that hydration also protects users
+    # who still have legacy data in their existing workspace record.
+    legacy_payload = {
+        "nested_state": {
+            "__type__": "dict",
+            "value": {
+                "AUTH": {
+                    "__type__": "dict",
+                    "value": {
+                        "remote_session_token": "legacy-revoked-token",
+                        "client_secret": "legacy-client-secret",
+                        "scenario": "keep this workspace value",
+                    },
+                },
+                "items": {
+                    "__type__": "list",
+                    "value": [
+                        {
+                            "__type__": "dict",
+                            "value": {
+                                "refresh_token": "legacy-refresh-token",
+                                "label": "keep this item",
+                            },
+                        }
+                    ],
+                },
+                "metadata": {
+                    "__type__": "dict",
+                    "value": {
+                        "workspace_marker": "keep this metadata",
+                    },
+                },
+            },
+        },
+    }
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE workspace_states SET state_json = ? WHERE username = ?",
+            (json.dumps(legacy_payload), "alice"),
+        )
+
+    restored = {"remote_session_token": "fresh-session-token"}
+    assert load_user_workspace("Alice", restored, db)
+    assert restored["remote_session_token"] == "fresh-session-token"
+    assert restored["ordinary_value"] == "keep"
+    assert restored["nested_state"] == {
+        "AUTH": {"scenario": "keep this workspace value"},
+        "items": [{"label": "keep this item"}],
+        "metadata": {"workspace_marker": "keep this metadata"},
+    }
 
 
 def test_workspace_isolated_per_user(tmp_path: Path):
