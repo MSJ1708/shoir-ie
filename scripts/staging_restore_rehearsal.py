@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import psycopg2
 import requests
@@ -73,6 +73,24 @@ def load_objects(path: Path) -> list[dict[str, Any]]:
                 raise ValueError(f"Storage object manifest line {line_number} is not an object.")
             objects.append(value)
     return objects
+
+
+def validate_local_target_urls(db_url: str, api_url: str) -> None:
+    parsed_db = urlparse(db_url)
+    if (
+        parsed_db.scheme not in {"postgres", "postgresql"}
+        or parsed_db.hostname not in {"127.0.0.1", "localhost"}
+        or parsed_db.port != 54322
+        or parsed_db.path.rstrip("/") != "/postgres"
+    ):
+        raise RuntimeError("Refusing any database target other than the disposable local Supabase PostgreSQL listener.")
+    parsed_api = urlparse(api_url)
+    if (
+        parsed_api.scheme != "http"
+        or parsed_api.hostname not in {"127.0.0.1", "localhost"}
+        or parsed_api.port != 54321
+    ):
+        raise RuntimeError("Refusing any API target other than the disposable local Supabase API listener.")
 
 
 def db_connect(db_url: str):
@@ -181,22 +199,26 @@ def restore_storage_policies(conn, policies: list[dict[str, Any]]) -> None:
             ):
                 raise RuntimeError("Storage policy contains an unsupported SQL expression.")
 
-        statement = sql.SQL(
-            "DROP POLICY IF EXISTS {name} ON storage.{table}; "
-            "CREATE POLICY {name} ON storage.{table} AS {mode} "
-            "FOR {command} TO {roles}"
-        ).format(
-            name=sql.Identifier(policy_name),
-            table=sql.Identifier(table),
-            mode=sql.SQL(mode),
-            command=sql.SQL(command),
-            roles=sql.SQL(", ").join(role_sql),
-        )
-        if qual is not None:
-            statement += sql.SQL(" USING ({})").format(sql.SQL(qual))
-        if with_check is not None:
-            statement += sql.SQL(" WITH CHECK ({})").format(sql.SQL(with_check))
         with conn.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("DROP POLICY IF EXISTS {} ON storage.{}").format(
+                    sql.Identifier(policy_name), sql.Identifier(table)
+                )
+            )
+            statement = sql.SQL(
+                "CREATE POLICY {name} ON storage.{table} AS {mode} "
+                "FOR {command} TO {roles}"
+            ).format(
+                name=sql.Identifier(policy_name),
+                table=sql.Identifier(table),
+                mode=sql.SQL(mode),
+                command=sql.SQL(command),
+                roles=sql.SQL(", ").join(role_sql),
+            )
+            if qual is not None:
+                statement += sql.SQL(" USING ({})").format(sql.SQL(qual))
+            if with_check is not None:
+                statement += sql.SQL(" WITH CHECK ({})").format(sql.SQL(with_check))
             cursor.execute(statement)
     conn.commit()
 
@@ -326,6 +348,8 @@ def main() -> int:
     parser.add_argument("--service-role-key", required=True)
     parser.add_argument("--evidence-out", required=True, type=Path)
     args = parser.parse_args()
+
+    validate_local_target_urls(args.db_url, args.api_url)
 
     missing = sorted(
         name for name in REQUIRED_ARCHIVE_FILES if not (args.recovery_dir / name).is_file()
