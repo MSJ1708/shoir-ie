@@ -109,11 +109,13 @@ jobs:
           endpoint = urlparse(os.environ["SHOIR_RECOVERY_S3_ENDPOINT"])
           if endpoint.scheme != "https" or not endpoint.hostname:
               raise SystemExit("The off-site S3 endpoint must be a valid HTTPS URL.")
-          if endpoint.hostname.endswith("supabase.co") or endpoint.hostname.endswith("supabase.com"):
-              raise SystemExit("The recovery destination must be outside Supabase.")
+          if not endpoint.hostname.endswith(".r2.cloudflarestorage.com"):
+              raise SystemExit("The recovery destination must be the dedicated Cloudflare R2 endpoint.")
+          if os.environ["SHOIR_RECOVERY_S3_REGION"] != "auto":
+              raise SystemExit("Cloudflare R2 must use region 'auto'.")
           bucket = os.environ["SHOIR_RECOVERY_S3_BUCKET"]
-          if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
-              raise SystemExit("The off-site S3 bucket name is invalid.")
+          if bucket != "shoir-ie-staging-recovery":
+              raise SystemExit("The recovery destination must use the dedicated shoir-ie-staging-recovery bucket.")
           for name in ("SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD", "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"):
               if len(os.environ[name]) < 32:
                   raise SystemExit(f"{name} must contain at least 32 characters.")
@@ -189,17 +191,27 @@ jobs:
             exit 2
           fi
           export SHOIR_AUTH_SCHEMA_MIGRATION_COUNT="$auth_schema_migration_count"
+          export SHOIR_AUTH_NON_MIGRATION_ROWS=0
           echo "PASS: no rows exist in non-migration Supabase Auth tables; auth schema migration metadata count recorded."
+
+          # Capture exact row counts for every application table. The file is
+          # inside the encrypted database bundle and is used by the isolated
+          # restore workflow; it contains table names and counts only.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "SELECT COALESCE(jsonb_object_agg(table_schema || '.' || table_name, (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text::bigint), '{}'::jsonb) FROM information_schema.tables WHERE table_schema IN ('public', 'shoir_internal') AND table_type = 'BASE TABLE'" \
+            > "$backup_dir/app-table-counts.json"
 
           test -s "$backup_dir/roles.sql"
           test -s "$backup_dir/schema.sql"
           test -s "$backup_dir/data.sql"
           test -s "$backup_dir/storage-buckets.json"
           test -s "$backup_dir/storage-policies.json"
+          test -s "$backup_dir/app-table-counts.json"
 
           tar --create --gzip --file "$backup_dir/database-bundle.tar.gz" \
             --directory "$backup_dir" roles.sql schema.sql data.sql \
-            storage-buckets.json storage-objects.ndjson storage-policies.json
+            storage-buckets.json storage-objects.ndjson storage-policies.json \
+            app-table-counts.json
           age --encrypt --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
             --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
           sha256sum "$backup_dir/database-bundle.tar.gz.age" > "$backup_dir/database-bundle.tar.gz.age.sha256"
@@ -211,6 +223,7 @@ jobs:
 
           root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-backup"
           buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
+          table_counts = json.loads((root / "app-table-counts.json").read_text(encoding="utf-8"))
           object_file = root / "storage-objects.ndjson"
           object_count = sum(1 for line in object_file.open("rb") if line.strip())
           manifest = {
@@ -220,7 +233,9 @@ jobs:
               "storage_metadata": ["storage.buckets", "storage.objects", "storage_policies"],
               "storage_bucket_count": len(buckets),
               "storage_object_metadata_count": object_count,
+              "application_table_count": len(table_counts),
               "auth_data_exported": False,
+              "auth_non_migration_rows": int(os.environ["SHOIR_AUTH_NON_MIGRATION_ROWS"]),
               "auth_data_policy": "backup is blocked unless every non-schema_migrations auth table is empty",
               "auth_schema_migrations_count": int(os.environ["SHOIR_AUTH_SCHEMA_MIGRATION_COUNT"]),
               "run_id": os.environ["GITHUB_RUN_ID"],
@@ -229,7 +244,7 @@ jobs:
               "database_archive_sha256": (root / "database-bundle.tar.gz.age.sha256").read_text(encoding="utf-8").split()[0],
           }
           (root / "backup-manifest.json").write_text(
-              json.dumps(manifest, indent=2, sort_keys=True) + "\\n",
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
           PY
