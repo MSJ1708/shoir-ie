@@ -194,6 +194,7 @@ jobs:
           for name in (
               "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
               "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
+              "database-contract.json",
           ):
               if not (root / "decrypted" / name).is_file():
                   raise SystemExit(f"Decrypted backup is missing {name}.")
