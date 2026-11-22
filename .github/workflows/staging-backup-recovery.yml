@@ -154,6 +154,43 @@ jobs:
             --command "select coalesce(jsonb_agg(to_jsonb(p) order by tablename, policyname), '[]'::jsonb) from pg_policies p where schemaname = 'storage'" \
             > "$backup_dir/storage-policies.json"
 
+          # Supabase CLI db dump excludes the managed auth schema. Do not let
+          # this export silently omit future user or identity records. The
+          # schema_migrations table is platform version metadata and is
+          # intentionally excluded from this row-content guard.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 <<'SQL'
+          DO $auth_guard$
+          DECLARE
+            auth_table record;
+            auth_row_count bigint;
+          BEGIN
+            FOR auth_table IN
+              SELECT table_name
+              FROM information_schema.tables
+              WHERE table_schema = 'auth'
+                AND table_type = 'BASE TABLE'
+                AND table_name <> 'schema_migrations'
+            LOOP
+              EXECUTE format('SELECT count(*) FROM auth.%I', auth_table.table_name)
+                INTO auth_row_count;
+              IF auth_row_count > 0 THEN
+                RAISE EXCEPTION
+                  'Auth table auth.% contains % rows; this workflow does not export Auth data. Extend the recovery export before continuing.',
+                  auth_table.table_name, auth_row_count;
+              END IF;
+            END LOOP;
+          END
+          $auth_guard$;
+          SQL
+
+          auth_schema_migration_count="$(psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only --command "select count(*) from auth.schema_migrations")"
+          if [[ ! "$auth_schema_migration_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not verify the Supabase Auth schema migration metadata."
+            exit 2
+          fi
+          export SHOIR_AUTH_SCHEMA_MIGRATION_COUNT="$auth_schema_migration_count"
+          echo "PASS: no rows exist in non-migration Supabase Auth tables; auth schema migration metadata count recorded."
+
           test -s "$backup_dir/roles.sql"
           test -s "$backup_dir/schema.sql"
           test -s "$backup_dir/data.sql"
@@ -183,6 +220,9 @@ jobs:
               "storage_metadata": ["storage.buckets", "storage.objects", "storage_policies"],
               "storage_bucket_count": len(buckets),
               "storage_object_metadata_count": object_count,
+              "auth_data_exported": False,
+              "auth_data_policy": "backup is blocked unless every non-schema_migrations auth table is empty",
+              "auth_schema_migrations_count": int(os.environ["SHOIR_AUTH_SCHEMA_MIGRATION_COUNT"]),
               "run_id": os.environ["GITHUB_RUN_ID"],
               "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
               "created_at_utc": os.environ["RUN_STARTED_AT_UTC"],
