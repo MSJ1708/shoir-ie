@@ -146,6 +146,7 @@ def _excluded(key: str) -> bool:
     exact_exclusions = {item.casefold() for item in _EXACT_EXCLUDE | _ACTION_KEYS}
     return (
         lowered in exact_exclusions
+        or _excluded_nested(lowered)
         or any(lowered.startswith(prefix.casefold()) for prefix in _PREFIX_EXCLUDE)
         or lowered.startswith(("download_", "upload_"))
         or lowered.endswith(("_button", "_btn", "_submit"))
@@ -160,6 +161,7 @@ def _excluded_nested(key: str) -> bool:
         "refresh_token", "session_token", "id_token", "api_secret",
         "client_secret", "password", "password_hash", "secret",
         "service_role_key", "supabase_service_role_key",
+        "authorization", "cookie", "private_key", "private_key_pem",
     }
     return (
         lowered in exact_credentials
