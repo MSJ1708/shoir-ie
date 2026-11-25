@@ -2,12 +2,7 @@ name: Subscription transaction integration
 
 on:
   pull_request:
-    paths:
-      - "supabase/migrations/**"
-      - "tests/test_atomic_subscription_migration_postgres.py"
-      - "tests/test_full_migration_history_postgres.py"
-      - "tests/test_migration_source_inventory.py"
-      - ".github/workflows/subscription-transaction-integration.yml"
+    branches: ["main", "staging-e2e-20261019"]
   push:
     branches: [main]
     paths:
@@ -33,6 +28,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: shoir_test
+          POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
         ports:
           - 5432:5432
         options: >-

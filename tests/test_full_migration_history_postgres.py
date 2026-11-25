@@ -40,8 +40,14 @@ EXPECTED_VERSIONS = [
     "20261019140600",
     "20261021130000",
     "20261022110000",
-    "20261023130000",
-    "20261026110000",
+    "20261025164602",
+    "20261104183132",
+    "20261104184453",
+    "20261104192112",
+    "20261104192857",
+    "20261105101231",
+    "20261105111832",
+    "20261107120637",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -145,19 +151,24 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
         target.commit()
 
         # Build the account/request schema immediately before the historical
-        # data-rewriting referral migration. Do not execute that historical file.
+        # data-rewriting referral migration. Do not execute that historical file;
+        # exercise the later additive migration that is actually in staging.
         base_migrations = [
             migration for migration in sorted(MIGRATIONS.glob("*.sql"))
             if migration.name.split("_", 1)[0] < "20261021130000"
         ]
         assert base_migrations, "No pre-referral schema migrations were found."
+        # Migration files own explicit BEGIN/COMMIT boundaries. Run scripts
+        # in autocommit mode so psycopg2 does not implicitly open an outer
+        # transaction before a migration's own BEGIN statement.
+        target.autocommit = True
         for migration in base_migrations:
             sql = migration.read_text(encoding="utf-8")
             if not sql.strip():
                 pytest.fail(f"Migration file is empty: {migration.name}")
             with target.cursor() as cursor:
                 cursor.execute(sql)
-            target.commit()
+        target.autocommit = False
 
         with target.cursor() as cursor:
             cursor.executemany(
@@ -207,10 +218,16 @@ def test_additive_referral_migration_preserves_existing_codes_and_timestamps():
             """,
         )[0]
 
-        safe_migration = MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
+        # _fetchone opens a read transaction on psycopg2's default connection
+        # mode. End it before switching to autocommit for the SQL-owned
+        # transaction boundary below.
+        target.commit()
+        safe_migration = MIGRATIONS / "20261105101231_safe_beta_legal_referrals_20261105.sql"
+        # This SQL file has its own transaction boundary too.
+        target.autocommit = True
         with target.cursor() as cursor:
             cursor.execute(safe_migration.read_text(encoding="utf-8"))
-        target.commit()
+        target.autocommit = False
 
         after = _fetchone(
             target,
@@ -362,13 +379,16 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 )
             target.commit()
 
+            # Versioned migration scripts may include explicit transactions.
+            # Do not nest those in psycopg2's implicit transaction.
+            target.autocommit = True
             for migration in migration_files:
                 sql = migration.read_text(encoding="utf-8")
                 if not sql.strip():
                     pytest.fail(f"Migration file is empty: {migration.name}")
                 with target.cursor() as cursor:
                     cursor.execute(sql)
-                target.commit()
+            target.autocommit = False
 
             # Required schema objects and the correct versioned function contracts.
             expected_tables = {

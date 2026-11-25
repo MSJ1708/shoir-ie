@@ -29,7 +29,7 @@ INVENTORY = ROOT / "docs" / "MODULE_TIER_INVENTORY.csv"
 REPORT = Path(os.environ.get("SHOIR_E2E_MODULE_REPORT", "artifacts/authenticated-release-gate/module-matrix-report.json"))
 URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 PREFIX = "shoir-e2e-"
-CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.2"
+CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.3"
 EXPECTED_TIERS = {
     "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
     "Enterprise Plus", "Research Pack",

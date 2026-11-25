@@ -1,0 +1,369 @@
+name: Staging Encrypted Backup Restore Rehearsal
+
+on:
+  # Only a deliberate restore-marker change on the protected staging branch
+  # may start a restore. The marker contains the exact previously verified R2 prefix.
+  push:
+    branches:
+      - staging-e2e-20261019
+    paths:
+      - ".github/restore-triggers/staging-recovery.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shoir-staging-restore-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  isolated-restore:
+    name: Restore staging backup into disposable local Supabase
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment:
+      name: staging-recovery
+    env:
+      SHOIR_RECOVERY_S3_ENDPOINT: ${{ secrets.SHOIR_RECOVERY_S3_ENDPOINT }}
+      SHOIR_RECOVERY_S3_REGION: ${{ secrets.SHOIR_RECOVERY_S3_REGION }}
+      SHOIR_RECOVERY_S3_BUCKET: ${{ secrets.SHOIR_RECOVERY_S3_BUCKET }}
+      SHOIR_RECOVERY_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
+      SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
+      SHOIR_BACKUP_AGE_RESTORE_IDENTITY: ${{ secrets.SHOIR_BACKUP_AGE_RESTORE_IDENTITY }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
+    steps:
+      - name: Check out the reviewed staging branch
+        uses: actions/checkout@v7
+
+      - name: Record restore start time for measured RPO and RTO
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SHOIR_RESTORE_STARTED_AT_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+      - name: Install pinned Supabase CLI v2
+        uses: supabase/setup-cli@v3
+        with:
+          version: v2.stable
+
+      - name: Install restore utilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes age postgresql-client rclone jq
+          python -m pip install --disable-pip-version-check psycopg2-binary requests
+
+      - name: Validate destination and exact backup prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          endpoint = urlparse(os.environ.get("SHOIR_RECOVERY_S3_ENDPOINT", ""))
+          if endpoint.scheme != "https" or not (endpoint.hostname or "").endswith(".r2.cloudflarestorage.com"):
+              raise SystemExit("Recovery endpoint must be the configured Cloudflare R2 HTTPS endpoint.")
+          if os.environ.get("SHOIR_RECOVERY_S3_REGION") != "auto":
+              raise SystemExit("Cloudflare R2 region must be auto.")
+          if os.environ.get("SHOIR_RECOVERY_S3_BUCKET") != "shoir-ie-staging-recovery":
+              raise SystemExit("Refusing a recovery bucket other than shoir-ie-staging-recovery.")
+          for name in (
+              "SHOIR_RECOVERY_S3_ACCESS_KEY_ID",
+              "SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY",
+              "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD",
+              "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2",
+          ):
+              if not os.environ.get(name, "").strip():
+                  raise SystemExit(f"Missing required recovery environment secret: {name}")
+          for name in ("SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD", "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"):
+              if len(os.environ[name]) < 32:
+                  raise SystemExit(f"{name} must contain at least 32 characters.")
+          if os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD"] == os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"]:
+              raise SystemExit("The rclone crypt passwords must be different.")
+          identity = os.environ.get("SHOIR_BACKUP_AGE_RESTORE_IDENTITY", "")
+          if "AGE-SECRET-KEY-1" not in identity:
+              raise SystemExit("Missing valid-format private age identity in the protected restore environment.")
+
+          marker = Path(".github/restore-triggers/staging-recovery.txt")
+          if not marker.is_file():
+              raise SystemExit("Restore marker file is missing.")
+          values = {}
+          for line in marker.read_text(encoding="utf-8").splitlines():
+              if not line.strip() or line.lstrip().startswith("#"):
+                  continue
+              if "=" not in line:
+                  raise SystemExit("Restore marker lines must use key=value format.")
+              key, value = line.split("=", 1)
+              values[key.strip()] = value.strip()
+          prefix = values.get("backup_prefix", "")
+          if not re.fullmatch(r"shoir-ie/staging/[0-9]+-[0-9]+", prefix):
+              raise SystemExit("Restore marker must name an exact shoir-ie/staging/<run-id>-<attempt> prefix.")
+          print("PASS: Cloudflare R2 target, protected encryption material, and exact staging backup prefix validated.")
+          PY
+
+      - name: Download and authenticate the encrypted recovery bundle
+        id: fetch
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          prefix="$(sed -n 's/^backup_prefix=//p' .github/restore-triggers/staging-recovery.txt | head -n 1 | tr -d '\r')"
+          test -n "$prefix"
+          config="$RUNNER_TEMP/rclone-restore.conf"
+          export RCLONE_CONFIG="$config"
+          umask 077
+
+          rclone config create recovery-destination s3 \
+            provider Other env_auth false \
+            access_key_id "$SHOIR_RECOVERY_S3_ACCESS_KEY_ID" \
+            secret_access_key "$SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY" \
+            endpoint "$SHOIR_RECOVERY_S3_ENDPOINT" region auto force_path_style true
+          crypt_password="$(rclone obscure "$SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD")"
+          crypt_password2="$(rclone obscure "$SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2")"
+          rclone config create encrypted-storage crypt \
+            remote "recovery-destination:$SHOIR_RECOVERY_S3_BUCKET/$prefix/storage" \
+            filename_encryption standard directory_name_encryption true \
+            password "$crypt_password" password2 "$crypt_password2"
+
+          backup_dir="$RUNNER_TEMP/shoir-staging-restore"
+          mkdir -p "$backup_dir/decrypted" "$backup_dir/plain-storage"
+          rclone copyto \
+            "recovery-destination:$SHOIR_RECOVERY_S3_BUCKET/$prefix/database-bundle.tar.gz.age" \
+            "$backup_dir/database-bundle.tar.gz.age"
+          rclone copyto \
+            "recovery-destination:$SHOIR_RECOVERY_S3_BUCKET/$prefix/database-bundle.tar.gz.age.sha256" \
+            "$backup_dir/database-bundle.tar.gz.age.sha256"
+          rclone copyto \
+            "recovery-destination:$SHOIR_RECOVERY_S3_BUCKET/$prefix/backup-manifest.json" \
+            "$backup_dir/backup-manifest.json"
+
+          (cd "$backup_dir" && sha256sum --check database-bundle.tar.gz.age.sha256)
+          identity_file="$RUNNER_TEMP/shoir-staging-age-identity.txt"
+          printf '%s\n' "$SHOIR_BACKUP_AGE_RESTORE_IDENTITY" > "$identity_file"
+          chmod 600 "$identity_file"
+          age --decrypt --identity "$identity_file" \
+            --output "$backup_dir/database-bundle.tar.gz" \
+            "$backup_dir/database-bundle.tar.gz.age"
+          BACKUP_DIR="$backup_dir" python - <<'PY'
+          import os
+          import tarfile
+          from pathlib import Path
+
+          source = Path(os.environ["BACKUP_DIR"]) / "database-bundle.tar.gz"
+          target = Path(os.environ["BACKUP_DIR"]) / "decrypted"
+          allowed = {
+              "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
+              "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
+              "database-contract.json", "migration-history.json",
+          }
+          with tarfile.open(source, "r:gz") as archive:
+              members = archive.getmembers()
+              if {member.name for member in members} != allowed:
+                  raise SystemExit("Encrypted archive has unexpected or missing members.")
+              for member in members:
+                  if not member.isfile() or member.issym() or member.islnk() or member.name not in allowed:
+                      raise SystemExit("Encrypted archive contains an unsafe non-regular member.")
+                  destination = (target / member.name).resolve()
+                  if target.resolve() not in destination.parents:
+                      raise SystemExit("Encrypted archive member escapes the restore directory.")
+                  extracted = archive.extractfile(member)
+                  if extracted is None:
+                      raise SystemExit("Unable to read an archive member.")
+                  with destination.open("wb") as output:
+                      while chunk := extracted.read(1024 * 1024):
+                          output.write(chunk)
+                  destination.chmod(0o600)
+          PY
+
+          # Validate source metadata and source Auth zero-row guard before
+          # starting the restore. No source DB connection is used by this job.
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-restore"
+          manifest = json.loads((root / "backup-manifest.json").read_text(encoding="utf-8"))
+          if manifest.get("project_ref") != "hfhrosthswcybccepmak":
+              raise SystemExit("Backup manifest belongs to a different project.")
+          if manifest.get("auth_data_exported") is not False or manifest.get("auth_non_migration_rows") != 0:
+              raise SystemExit("Backup does not prove the source Auth zero-row guard passed.")
+          if int(manifest.get("migration_history_count", -1)) != int(manifest.get("source_migration_count", -2)):
+              raise SystemExit("Backup manifest migration history counters do not agree.")
+          checksum = (root / "database-bundle.tar.gz.age.sha256").read_text(encoding="utf-8").split()[0]
+          if manifest.get("database_archive_sha256") != checksum:
+              raise SystemExit("Archive checksum does not match the signed-off manifest digest.")
+          for name in (
+              "roles.sql", "schema.sql", "data.sql", "storage-buckets.json",
+              "storage-objects.ndjson", "storage-policies.json", "app-table-counts.json",
+              "database-contract.json", "migration-history.json",
+          ):
+              if not (root / "decrypted" / name).is_file():
+                  raise SystemExit(f"Decrypted backup is missing {name}.")
+          (root / "plain-storage").mkdir(exist_ok=True)
+          print("PASS: archive checksum, decryption, staging project ref, and Auth scope verified.")
+          PY
+
+          # The restore utility consumes one directory for both the manifest and
+          # decrypted payload. Copy the already-validated manifest beside the
+          # extracted archive files before passing --recovery-dir to the utility.
+          cp "$backup_dir/backup-manifest.json" "$backup_dir/decrypted/backup-manifest.json"
+          chmod 600 "$backup_dir/decrypted/backup-manifest.json"
+
+          # Every bucket is named in the encrypted metadata bundle. Decrypt
+          # each separate R2 Storage tree to ephemeral runner disk.
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-restore" / "decrypted"
+          buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
+          Path(os.environ["RUNNER_TEMP"], "shoir-staging-restore", "storage-buckets.list").write_text(
+              "\n".join(row["id"] for row in buckets) + ("\n" if buckets else ""),
+              encoding="utf-8",
+          )
+          PY
+          while IFS= read -r bucket; do
+            [[ -n "$bucket" ]] || continue
+            rclone copy \
+              "encrypted-storage:$bucket" \
+              "$backup_dir/plain-storage/$bucket" \
+              --fast-list --transfers 4 --checkers 8 --stats 30s
+          done < "$backup_dir/storage-buckets.list"
+
+      - name: Start isolated local Supabase and restore database plus Storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          backup_dir="$RUNNER_TEMP/shoir-staging-restore"
+          restore_project="$RUNNER_TEMP/shoir-supabase-local"
+          mkdir -p "$restore_project"
+          cd "$restore_project"
+          supabase init
+          mkdir -p supabase/functions
+          cp -R "$GITHUB_WORKSPACE/supabase/functions/shoir-persistence" supabase/functions/
+          test -s supabase/functions/shoir-persistence/index.ts
+          test -s supabase/functions/shoir-persistence/security.ts
+
+          # Match the source PostgreSQL major version. The local stack is
+          # isolated on this ephemeral runner and has no hosted project link.
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path("supabase/config.toml")
+          text = path.read_text(encoding="utf-8")
+          if "[db]" not in text:
+              raise SystemExit("Generated Supabase config has no [db] section.")
+          if re.search(r"(?m)^major_version\s*=", text):
+              text = re.sub(r"(?m)^major_version\s*=\s*\d+\s*$", "major_version = 17", text)
+          else:
+              text = text.replace("[db]\n", "[db]\nmajor_version = 17\n", 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+          supabase start -x studio,analytics,vector,postgres-meta,mailpit,imgproxy,supavisor
+          supabase status -o env > "$RUNNER_TEMP/shoir-local-supabase.env"
+          set -a
+          # This file is produced by Supabase CLI on the same ephemeral runner.
+          . "$RUNNER_TEMP/shoir-local-supabase.env"
+          set +a
+          test -n "$DB_URL"
+          test -n "$API_URL"
+          test -n "$ANON_KEY"
+          test -n "$SERVICE_ROLE_KEY"
+
+          # Run the actual Shoir-IE persistence Edge Function against the
+          # isolated local database, with the local stack's generated keys.
+          # The source project and production are never linked or contacted.
+          supabase functions serve shoir-persistence --no-verify-jwt \
+            > "$RUNNER_TEMP/shoir-local-edge-function.log" 2>&1 &
+          function_pid=$!
+          printf '%s\n' "$function_pid" > "$RUNNER_TEMP/shoir-local-edge-function.pid"
+          chmod 600 "$RUNNER_TEMP/shoir-local-edge-function.pid"
+          function_ready=false
+          for attempt in $(seq 1 60); do
+            if ! kill -0 "$function_pid" 2>/dev/null; then
+              echo "::error::Local Shoir-IE Edge Function process exited before becoming ready."
+              tail -n 40 "$RUNNER_TEMP/shoir-local-edge-function.log" || true
+              exit 1
+            fi
+            status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              --max-time 5 --request POST "$API_URL/functions/v1/shoir-persistence" \
+              --header "apikey: $ANON_KEY" --header "Content-Type: application/json" \
+              --data '{"action":"restore_readiness_probe"}' || true)"
+            if [[ "$status_code" == "400" ]]; then
+              function_ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$function_ready" != "true" ]]; then
+            echo "::error::Local Shoir-IE Edge Function did not become ready."
+            tail -n 60 "$RUNNER_TEMP/shoir-local-edge-function.log" || true
+            exit 1
+          fi
+
+          # Revoke default target grants that would otherwise be inherited
+          # by restored tables; the dump's explicit GRANT statements then
+          # reconstruct the source ACLs on the isolated target.
+          psql "$DB_URL" -X --set ON_ERROR_STOP=1 <<'SQL'
+          CREATE SCHEMA IF NOT EXISTS shoir_internal;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA shoir_internal REVOKE ALL ON TABLES FROM anon, authenticated;
+          SQL
+
+          # Restore only custom application schemas and custom roles. Supabase
+          # platform schemas (auth/storage/extensions) are initialized locally.
+          psql "$DB_URL" -X --set ON_ERROR_STOP=1 -f "$backup_dir/decrypted/roles.sql"
+          psql "$DB_URL" -X --set ON_ERROR_STOP=1 -f "$backup_dir/decrypted/schema.sql"
+          psql "$DB_URL" -X --set ON_ERROR_STOP=1 -f "$backup_dir/decrypted/data.sql"
+
+          python "$GITHUB_WORKSPACE/scripts/staging_restore_rehearsal.py" \
+            --recovery-dir "$backup_dir/decrypted" \
+            --migration-dir "$GITHUB_WORKSPACE/supabase/migrations" \
+            --plain-storage-dir "$backup_dir/plain-storage" \
+            --db-url "$DB_URL" \
+            --api-url "$API_URL" \
+            --anon-key "$ANON_KEY" \
+            --service-role-key "$SERVICE_ROLE_KEY" \
+            --evidence-out "$RUNNER_TEMP/staging-restore-evidence.json"
+
+          kill "$function_pid" 2>/dev/null || true
+          wait "$function_pid" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/shoir-local-edge-function.pid"
+          rm -f "$RUNNER_TEMP/shoir-local-edge-function.log"
+          mkdir -p "$RUNNER_TEMP/staging-restore-evidence"
+          cp "$RUNNER_TEMP/staging-restore-evidence.json" "$RUNNER_TEMP/staging-restore-evidence/"
+
+      - name: Upload redacted isolated-restore evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-staging-restore-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/staging-restore-evidence/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Destroy the ephemeral local Supabase stack
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -f "$RUNNER_TEMP/shoir-local-edge-function.pid" ]]; then
+            function_pid="$(cat "$RUNNER_TEMP/shoir-local-edge-function.pid")"
+            kill "$function_pid" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/shoir-local-edge-function.pid"
+          fi
+          if [[ -f "$RUNNER_TEMP/shoir-supabase-local/supabase/config.toml" ]]; then
+            cd "$RUNNER_TEMP/shoir-supabase-local"
+            supabase stop --no-backup
+          fi
+          rm -f "$RUNNER_TEMP/shoir-staging-age-identity.txt"
+          rm -f "$RUNNER_TEMP/shoir-local-supabase.env"
+          rm -f "$RUNNER_TEMP/shoir-local-edge-function.log"

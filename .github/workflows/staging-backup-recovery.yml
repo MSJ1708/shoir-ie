@@ -1,0 +1,364 @@
+name: Staging Encrypted Backup Export
+
+on:
+  # Keep this workflow staging-only without adding the file to production main.
+  # A deliberate update to the trigger marker on the protected staging branch
+  # launches the export after the workflow itself has been merged to staging.
+  push:
+    branches:
+      - staging-e2e-20261019
+    paths:
+      - ".github/backup-triggers/staging-recovery.txt"
+  # GitHub only offers workflow_dispatch when the file also exists on the
+  # repository default branch. Retained for a future, separately approved use.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shoir-staging-backup-recovery
+  cancel-in-progress: false
+
+jobs:
+  encrypted-staging-backup:
+    name: Export and verify staging database and Storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    # Configure this GitHub Environment with required reviewers and the
+    # secrets documented in docs/SHOIR_IE_STAGING_BACKUP_RECOVERY_RUNBOOK.md.
+    environment:
+      name: staging-recovery
+    env:
+      SHOIR_STAGING_DB_URL: ${{ secrets.SHOIR_STAGING_DB_URL }}
+      SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID }}
+      SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY }}
+      SHOIR_RECOVERY_S3_ENDPOINT: ${{ secrets.SHOIR_RECOVERY_S3_ENDPOINT }}
+      SHOIR_RECOVERY_S3_REGION: ${{ secrets.SHOIR_RECOVERY_S3_REGION }}
+      SHOIR_RECOVERY_S3_BUCKET: ${{ secrets.SHOIR_RECOVERY_S3_BUCKET }}
+      SHOIR_RECOVERY_S3_ACCESS_KEY_ID: ${{ secrets.SHOIR_RECOVERY_S3_ACCESS_KEY_ID }}
+      SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY: ${{ secrets.SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY }}
+      SHOIR_BACKUP_AGE_RECIPIENT: ${{ secrets.SHOIR_BACKUP_AGE_RECIPIENT }}
+      SHOIR_BACKUP_AGE_RESTORE_RECIPIENT: ${{ secrets.SHOIR_BACKUP_AGE_RESTORE_RECIPIENT }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD }}
+      SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2: ${{ secrets.SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2 }}
+      SHOIR_STAGING_PROJECT_REF: hfhrosthswcybccepmak
+    steps:
+      - name: Check out the reviewed candidate
+        uses: actions/checkout@v7
+
+      - name: Install pinned Supabase CLI v2
+        uses: supabase/setup-cli@v3
+        with:
+          version: v2.stable
+
+      - name: Install backup utilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes age postgresql-client rclone jq
+
+      - name: Validate staging-only targets and recovery configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from urllib.parse import urlparse
+
+          project_ref = "hfhrosthswcybccepmak"
+          db_url = os.environ.get("SHOIR_STAGING_DB_URL", "").strip()
+          if not db_url:
+              raise SystemExit("Missing environment secret: SHOIR_STAGING_DB_URL")
+          parsed = urlparse(db_url)
+          if parsed.scheme not in {"postgres", "postgresql"}:
+              raise SystemExit("The staging DB URL must use postgres:// or postgresql://.")
+          direct_host = f"db.{project_ref}.supabase.co"
+          pooler_host = (parsed.hostname or "").endswith(".pooler.supabase.com")
+          direct_host_match = parsed.hostname == direct_host
+          if not (direct_host_match or pooler_host):
+              raise SystemExit("Refusing a database host outside the fixed Shoir-IE staging project or Supabase pooler.")
+          username = parsed.username or ""
+          if direct_host_match and username != "postgres":
+              raise SystemExit("The direct staging database URL must use the postgres database role.")
+          if pooler_host and username != f"postgres.{project_ref}":
+              raise SystemExit("A Supabase pooler URL must use the project-scoped postgres.<project-ref> username.")
+          if parsed.path.rstrip("/") != "/postgres":
+              raise SystemExit("The staging DB URL must target the postgres database.")
+          query = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(parsed.query))
+          if query.get("sslmode") not in {"require", "verify-ca", "verify-full"}:
+              raise SystemExit("The staging database connection must require TLS with sslmode=require or stronger.")
+
+          required = (
+              "SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID",
+              "SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY",
+              "SHOIR_RECOVERY_S3_ENDPOINT",
+              "SHOIR_RECOVERY_S3_REGION",
+              "SHOIR_RECOVERY_S3_BUCKET",
+              "SHOIR_RECOVERY_S3_ACCESS_KEY_ID",
+              "SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY",
+              "SHOIR_BACKUP_AGE_RECIPIENT",
+              "SHOIR_BACKUP_AGE_RESTORE_RECIPIENT",
+              "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD",
+              "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2",
+          )
+          for name in required:
+              if not os.environ.get(name, "").strip():
+                  raise SystemExit(f"Missing required GitHub Environment secret: {name}")
+
+          endpoint = urlparse(os.environ["SHOIR_RECOVERY_S3_ENDPOINT"])
+          if endpoint.scheme != "https" or not endpoint.hostname:
+              raise SystemExit("The off-site S3 endpoint must be a valid HTTPS URL.")
+          if not endpoint.hostname.endswith(".r2.cloudflarestorage.com"):
+              raise SystemExit("The recovery destination must be the dedicated Cloudflare R2 endpoint.")
+          if os.environ["SHOIR_RECOVERY_S3_REGION"] != "auto":
+              raise SystemExit("Cloudflare R2 must use region 'auto'.")
+          bucket = os.environ["SHOIR_RECOVERY_S3_BUCKET"]
+          if bucket != "shoir-ie-staging-recovery":
+              raise SystemExit("The recovery destination must use the dedicated shoir-ie-staging-recovery bucket.")
+          for name in ("SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD", "SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"):
+              if len(os.environ[name]) < 32:
+                  raise SystemExit(f"{name} must contain at least 32 characters.")
+          if os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD"] == os.environ["SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2"]:
+              raise SystemExit("The two rclone crypt secrets must be different.")
+          print("PASS: fixed staging database target and required encrypted off-site backup configuration are present.")
+          PY
+          supabase --version
+          rclone version | head -n 1
+          age --version
+
+      - name: Export Shoir-IE database and Storage metadata
+        id: export
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          backup_dir="$RUNNER_TEMP/shoir-staging-backup"
+          mkdir -p "$backup_dir"
+          export RUN_STARTED_AT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          : > "$backup_dir/storage-objects.ndjson"
+
+          # CLI v2 is pinned because v3 changed db dump's remote-selection
+          # defaults. The direct database hostname is checked above.
+          supabase db dump --db-url "$SHOIR_STAGING_DB_URL" --role-only --file "$backup_dir/roles.sql"
+          supabase db dump --db-url "$SHOIR_STAGING_DB_URL" --schema public,shoir_internal --file "$backup_dir/schema.sql"
+          supabase db dump --db-url "$SHOIR_STAGING_DB_URL" --schema public,shoir_internal --data-only --use-copy --file "$backup_dir/data.sql"
+
+          # Supabase CLI intentionally omits managed Storage schemas. Export
+          # bucket/object metadata separately; object bytes are copied below
+          # through the S3-compatible API.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "select coalesce(jsonb_agg(to_jsonb(b) order by b.id), '[]'::jsonb) from storage.buckets b" \
+            > "$backup_dir/storage-buckets.json"
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 <<SQL
+          \\copy (select to_jsonb(o) from storage.objects o order by bucket_id, name) to '$backup_dir/storage-objects.ndjson' with (format text)
+          SQL
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "select coalesce(jsonb_agg(to_jsonb(p) order by tablename, policyname), '[]'::jsonb) from pg_policies p where schemaname = 'storage'" \
+            > "$backup_dir/storage-policies.json"
+
+          # Supabase CLI db dump excludes the managed auth schema. Do not let
+          # this export silently omit future user or identity records. The
+          # schema_migrations table is platform version metadata and is
+          # intentionally excluded from this row-content guard.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 <<'SQL'
+          DO $auth_guard$
+          DECLARE
+            auth_table record;
+            auth_row_count bigint;
+          BEGIN
+            FOR auth_table IN
+              SELECT table_name
+              FROM information_schema.tables
+              WHERE table_schema = 'auth'
+                AND table_type = 'BASE TABLE'
+                AND table_name <> 'schema_migrations'
+            LOOP
+              EXECUTE format('SELECT count(*) FROM auth.%I', auth_table.table_name)
+                INTO auth_row_count;
+              IF auth_row_count > 0 THEN
+                RAISE EXCEPTION
+                  'Auth table auth.% contains % rows; this workflow does not export Auth data. Extend the recovery export before continuing.',
+                  auth_table.table_name, auth_row_count;
+              END IF;
+            END LOOP;
+          END
+          $auth_guard$;
+          SQL
+
+          auth_schema_migration_count="$(psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only --command "select count(*) from auth.schema_migrations")"
+          if [[ ! "$auth_schema_migration_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not verify the Supabase Auth schema migration metadata."
+            exit 2
+          fi
+          export SHOIR_AUTH_SCHEMA_MIGRATION_COUNT="$auth_schema_migration_count"
+          export SHOIR_AUTH_NON_MIGRATION_ROWS=0
+          echo "PASS: no rows exist in non-migration Supabase Auth tables; auth schema migration metadata count recorded."
+
+          # Capture exact row counts for every application table. The file is
+          # inside the encrypted database bundle and is used by the isolated
+          # restore workflow; it contains table names and counts only.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "SELECT COALESCE(jsonb_object_agg(table_schema || '.' || table_name, (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text::bigint), '{}'::jsonb) FROM information_schema.tables WHERE table_schema IN ('public', 'shoir_internal') AND table_type = 'BASE TABLE'" \
+            > "$backup_dir/app-table-counts.json"
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "SELECT jsonb_build_object('rls_table_count', (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public', 'shoir_internal') AND c.relkind = 'r' AND c.relrowsecurity), 'policy_count', (SELECT count(*) FROM pg_policies WHERE schemaname IN ('public', 'shoir_internal')), 'constraint_count', (SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace WHERE n.nspname IN ('public', 'shoir_internal')), 'function_count', (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public', 'shoir_internal') AND p.prokind IN ('f', 'p')), 'table_grant_count', (SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema IN ('public', 'shoir_internal')), 'routine_grant_count', (SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema IN ('public', 'shoir_internal')), 'source_migration_count', (SELECT count(*) FROM supabase_migrations.schema_migrations))" \
+            > "$backup_dir/database-contract.json"
+
+          # Snapshot the exact migration ledger (versions + names only) inside
+          # the encrypted bundle so the restore runner can prove the repository
+          # contains every migration applied to this staging database.
+          psql "$SHOIR_STAGING_DB_URL" -X --set ON_ERROR_STOP=1 --no-align --tuples-only \
+            --command "SELECT COALESCE(jsonb_agg(jsonb_build_object('version', version, 'name', name) ORDER BY version), '[]'::jsonb) FROM supabase_migrations.schema_migrations" \
+            > "$backup_dir/migration-history.json"
+
+          test -s "$backup_dir/roles.sql"
+          test -s "$backup_dir/schema.sql"
+          test -s "$backup_dir/data.sql"
+          test -s "$backup_dir/storage-buckets.json"
+          test -s "$backup_dir/storage-policies.json"
+          test -s "$backup_dir/app-table-counts.json"
+          test -s "$backup_dir/database-contract.json"
+          test -s "$backup_dir/migration-history.json"
+
+          tar --create --gzip --file "$backup_dir/database-bundle.tar.gz" \
+            --directory "$backup_dir" roles.sql schema.sql data.sql \
+            storage-buckets.json storage-objects.ndjson storage-policies.json \
+            app-table-counts.json database-contract.json migration-history.json
+          # Encrypt for both the offline recovery owner and the separate
+          # protected GitHub restore-runner key. The offline private identity
+          # is never uploaded to GitHub.
+          age --encrypt \
+            --recipient "$SHOIR_BACKUP_AGE_RECIPIENT" \
+            --recipient "$SHOIR_BACKUP_AGE_RESTORE_RECIPIENT" \
+            --output "$backup_dir/database-bundle.tar.gz.age" "$backup_dir/database-bundle.tar.gz"
+          (cd "$backup_dir" && sha256sum database-bundle.tar.gz.age > database-bundle.tar.gz.age.sha256)
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-backup"
+          buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
+          table_counts = json.loads((root / "app-table-counts.json").read_text(encoding="utf-8"))
+          migration_history = json.loads((root / "migration-history.json").read_text(encoding="utf-8"))
+          object_file = root / "storage-objects.ndjson"
+          object_count = sum(1 for line in object_file.open("rb") if line.strip())
+          manifest = {
+              "schema_version": 1,
+              "project_ref": "hfhrosthswcybccepmak",
+              "database_scope": ["public", "shoir_internal", "custom_roles"],
+              "storage_metadata": ["storage.buckets", "storage.objects", "storage_policies"],
+              "storage_bucket_count": len(buckets),
+              "storage_object_metadata_count": object_count,
+              "application_table_count": len(table_counts),
+              "migration_history_count": len(migration_history),
+              "source_migration_count": len(migration_history),
+              "auth_data_exported": False,
+              "auth_non_migration_rows": int(os.environ["SHOIR_AUTH_NON_MIGRATION_ROWS"]),
+              "auth_data_policy": "backup is blocked unless every non-schema_migrations auth table is empty",
+              "auth_schema_migrations_count": int(os.environ["SHOIR_AUTH_SCHEMA_MIGRATION_COUNT"]),
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "created_at_utc": os.environ["RUN_STARTED_AT_UTC"],
+              "database_archive_sha256": (root / "database-bundle.tar.gz.age.sha256").read_text(encoding="utf-8").split()[0],
+          }
+          (root / "backup-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Copy every Storage bucket to the encrypted off-site destination
+        id: storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          config="$RUNNER_TEMP/rclone.conf"
+          export RCLONE_CONFIG="$config"
+          umask 077
+
+          source_endpoint="https://${SHOIR_STAGING_PROJECT_REF}.storage.supabase.co/storage/v1/s3"
+          rclone config create staging-storage s3 \
+            provider Other env_auth false \
+            access_key_id "$SHOIR_STAGING_STORAGE_S3_ACCESS_KEY_ID" \
+            secret_access_key "$SHOIR_STAGING_STORAGE_S3_SECRET_ACCESS_KEY" \
+            endpoint "$source_endpoint" region eu-central-1 force_path_style true
+          rclone config create recovery-destination s3 \
+            provider Other env_auth false \
+            access_key_id "$SHOIR_RECOVERY_S3_ACCESS_KEY_ID" \
+            secret_access_key "$SHOIR_RECOVERY_S3_SECRET_ACCESS_KEY" \
+            endpoint "$SHOIR_RECOVERY_S3_ENDPOINT" \
+            region "$SHOIR_RECOVERY_S3_REGION" force_path_style true
+
+          crypt_password="$(rclone obscure "$SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD")"
+          crypt_password2="$(rclone obscure "$SHOIR_BACKUP_RCLONE_CRYPT_PASSWORD2")"
+          prefix="shoir-ie/staging/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rclone config create encrypted-storage crypt \
+            remote "recovery-destination:${SHOIR_RECOVERY_S3_BUCKET}/${prefix}/storage" \
+            filename_encryption standard directory_name_encryption true \
+            password "$crypt_password" password2 "$crypt_password2"
+
+          rclone lsf staging-storage: --dirs-only > "$RUNNER_TEMP/storage-buckets.txt"
+          if [[ ! -s "$RUNNER_TEMP/storage-buckets.txt" ]]; then
+            echo "::error::The staging Storage endpoint returned no buckets; refusing an empty backup."
+            exit 2
+          fi
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "shoir-staging-backup"
+          database_buckets = json.loads((root / "storage-buckets.json").read_text(encoding="utf-8"))
+          database_ids = sorted(str(row["id"]) for row in database_buckets)
+          s3_ids = sorted(
+              line.strip().rstrip("/")
+              for line in Path(os.environ["RUNNER_TEMP"], "storage-buckets.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          )
+          if len(database_ids) != len(set(database_ids)):
+              raise SystemExit("Database Storage bucket metadata contains duplicate IDs.")
+          if database_ids != s3_ids:
+              raise SystemExit(
+                  f"Storage bucket inventory mismatch: database={database_ids}, S3={s3_ids}"
+              )
+          print(f"PASS: database and Storage S3 bucket inventories match ({len(database_ids)} buckets).")
+          PY
+
+          while IFS= read -r bucket_entry; do
+            bucket="${bucket_entry%/}"
+            [[ -n "$bucket" ]] || continue
+            echo "Backing up Storage bucket: $bucket"
+            rclone copy "staging-storage:$bucket" "encrypted-storage:$bucket" \
+              --create-empty-src-dirs --fast-list --transfers 4 --checkers 8 --stats 30s
+            rclone cryptcheck "staging-storage:$bucket" "encrypted-storage:$bucket"
+          done < "$RUNNER_TEMP/storage-buckets.txt"
+
+          # Store the database archive and the non-sensitive manifest beside
+          # the encrypted Storage tree. The DB archive is age-encrypted before
+          # leaving the runner; the manifest contains no object names or secrets.
+          db_dir="$RUNNER_TEMP/shoir-staging-backup"
+          db_target="recovery-destination:${SHOIR_RECOVERY_S3_BUCKET}/${prefix}"
+          rclone copyto "$db_dir/database-bundle.tar.gz.age" "$db_target/database-bundle.tar.gz.age"
+          rclone copyto "$db_dir/database-bundle.tar.gz.age.sha256" "$db_target/database-bundle.tar.gz.age.sha256"
+          rclone copyto "$db_dir/backup-manifest.json" "$db_target/backup-manifest.json"
+          rclone check --download "$db_dir/database-bundle.tar.gz.age" "$db_target/database-bundle.tar.gz.age"
+          rclone check --download "$db_dir/backup-manifest.json" "$db_target/backup-manifest.json"
+
+          mkdir -p "$RUNNER_TEMP/backup-evidence"
+          cp "$db_dir/backup-manifest.json" "$RUNNER_TEMP/backup-evidence/"
+          cp "$db_dir/database-bundle.tar.gz.age.sha256" "$RUNNER_TEMP/backup-evidence/"
+
+      - name: Upload safe backup evidence only
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-staging-backup-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/backup-evidence/
+          if-no-files-found: warn
+          retention-days: 14

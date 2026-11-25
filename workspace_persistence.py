@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS workspace_states (
 _EXACT_EXCLUDE = {
     "authenticated",
     "current_user",
+    # Authentication/session material must never enter durable workspace JSON.
+    # A later login creates a fresh server token; hydrating an old/revoked token
+    # here would overwrite it and make every subsequent workspace call return 401.
+    "remote_session_token",
+    "renewal_session_token",
+    "access_token",
+    "refresh_token",
+    "session_token",
+    "api_secret",
+    "password",
+    "password_hash",
     "user_role",
     "user_tier",
     "user_email",
@@ -51,6 +62,9 @@ _EXACT_EXCLUDE = {
 
 _PREFIX_EXCLUDE = (
     "signin_",
+    "token_",
+    "secret_",
+    "password_",
     "reg_",
     "payment_",
     "uploaded_",
@@ -126,13 +140,39 @@ _ACTION_KEYS = {
 }
 
 def _excluded(key: str) -> bool:
-    lowered = str(key).lower()
+    # Normalize names before exact/prefix comparisons so differently-cased
+    # credential keys cannot bypass the top-level snapshot filter.
+    lowered = str(key).casefold()
+    exact_exclusions = {item.casefold() for item in _EXACT_EXCLUDE | _ACTION_KEYS}
     return (
-        key in _EXACT_EXCLUDE
-        or key in _ACTION_KEYS
-        or any(key.startswith(p) for p in _PREFIX_EXCLUDE)
+        lowered in exact_exclusions
+        or _excluded_nested(lowered)
+        or any(lowered.startswith(prefix.casefold()) for prefix in _PREFIX_EXCLUDE)
         or lowered.startswith(("download_", "upload_"))
         or lowered.endswith(("_button", "_btn", "_submit"))
+    )
+
+
+def _excluded_nested(key: str) -> bool:
+    """Remove credential-like nested keys without dropping workspace metadata."""
+    lowered = str(key).casefold()
+    exact_credentials = {
+        "remote_session_token", "renewal_session_token", "access_token",
+        "refresh_token", "session_token", "id_token", "api_secret",
+        "client_secret", "password", "password_hash", "secret",
+        "service_role_key", "supabase_service_role_key",
+        "authorization", "cookie", "private_key", "private_key_pem",
+    }
+    return (
+        lowered in exact_credentials
+        or lowered.startswith((
+            "token_", "secret_", "password_", "credential_",
+            "authorization_", "cookie_", "private_key_",
+        ))
+        or lowered.endswith((
+            "_token", "_secret", "_password", "_credential",
+            "_client_secret", "_service_role_key",
+        ))
     )
 
 def _pack(value: Any) -> Any:
@@ -160,7 +200,7 @@ def _pack(value: Any) -> Any:
     if isinstance(value, dict):
         return {
             "__type__": "dict",
-            "value": {str(k): _pack(v) for k, v in value.items()},
+            "value": {str(k): _pack(v) for k, v in value.items() if not _excluded_nested(str(k))},
         }
     if isinstance(value, list):
         return {"__type__": "list", "value": [_pack(v) for v in value]}
@@ -202,7 +242,14 @@ def _unpack(value: Any) -> Any:
         except ValueError:
             return payload
     if kind == "dict":
-        return {k: _unpack(v) for k, v in payload.items()}
+        # Older workspace snapshots may contain nested credentials written
+        # before save-time filtering was added. Apply the same denylist during
+        # hydration so legacy data cannot reintroduce stale tokens or secrets.
+        return {
+            k: _unpack(v)
+            for k, v in payload.items()
+            if not _excluded_nested(str(k))
+        }
     if kind == "list":
         return [_unpack(v) for v in payload]
     if kind == "tuple":

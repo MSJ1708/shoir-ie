@@ -21,6 +21,20 @@ from scipy import stats
 from scipy.optimize import minimize, linprog
 import pulp
 
+def _infer_frequency_string(values: pd.Series) -> str:
+    """Infer a pandas frequency using the forward-compatible offset return type."""
+    future_options = getattr(pd.options, "future", None)
+    if future_options is not None and hasattr(future_options, "infer_freq_returns_offset"):
+        with pd.option_context("future.infer_freq_returns_offset", True):
+            inferred = pd.infer_freq(values)
+    else:
+        inferred = pd.infer_freq(values)
+    if inferred is None:
+        return "D"
+    return str(getattr(inferred, "freqstr", inferred))
+
+
+
 
 # ---------------------------------------------------------------------------
 # Experiment Engine
@@ -426,7 +440,8 @@ def forecast_series(
     y_test = test[target_col].to_numpy(dtype=float)
     residuals = y_test - test_pred
     sigma = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else float(np.std(train[target_col] - model.predict(x_train)))
-    future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon) + 1, freq=pd.infer_freq(d[date_col]) or "D")[1:]
+    frequency = _infer_frequency_string(d[date_col])
+    future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon) + 1, freq=frequency)[1:]
     future_external = {c: np.repeat(float(d[c].iloc[-1]), int(horizon)) for c in ext}
     x_future = _forecast_features(future_dates, len(d), future_external)
     forecast = np.maximum(0, model.predict(x_future))

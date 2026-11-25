@@ -16,7 +16,7 @@ from staging_e2e_guard import validate_app_from_env
 
 REPORT = Path(os.environ.get("SHOIR_E2E_UI_REPORT", "artifacts/authenticated-release-gate/browser-report.json"))
 PREFIX = "shoir-e2e-"
-CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.2"
+CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.3"
 URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 ACTIVE_MODULE_SELECTOR = '[data-testid="shoir-active-module"]'
 

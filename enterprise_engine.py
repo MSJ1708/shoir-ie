@@ -92,7 +92,13 @@ class EnterpriseSupplyChainEngine:
         prob = pulp.LpProblem("Carbon_Aware_Supply_Chain_Optimization", pulp.LpMinimize)
 
         # Decision Variables
-        x = pulp.LpVariable.dicts("Shipment", (warehouses, demands), lowBound=0, cat='Continuous')
+        x = {
+            w: {
+                d: prob.add_variable(f"Shipment_{w}_{d}", lowBound=0, cat=pulp.LpContinuous)
+                for d in demands
+            }
+            for w in warehouses
+        }
 
         # Objective Function
         prob += pulp.lpSum(
@@ -109,7 +115,7 @@ class EnterpriseSupplyChainEngine:
             prob += pulp.lpSum(x[w][d] for w in warehouses) >= data["demand"][d], f"Demand_Satisfaction_{d}"
 
         # Solve MILP silently
-        prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        prob.solve(pulp.COIN_CMD(msg=False))
 
         results = {
             "status": pulp.LpStatus[prob.status],

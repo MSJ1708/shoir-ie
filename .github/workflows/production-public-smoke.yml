@@ -1,0 +1,44 @@
+name: Shoir-IE production public entry smoke
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require the production branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "::error::This workflow only checks the production public entry point from main."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install headless browser
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Test production entry-screen rendering at desktop and mobile widths
+        env:
+          SHOIR_LIVE_URL: https://shoir-ie-app.streamlit.app/
+        run: python scripts/live_deployment_smoke.py
+      - name: Save production browser screenshots and result
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-production-public-smoke
+          path: artifacts/live-deployment-smoke/
+          if-no-files-found: warn

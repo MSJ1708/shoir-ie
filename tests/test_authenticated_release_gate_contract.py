@@ -68,7 +68,7 @@ def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_befor
     assert "STAGING_BUILD_WAIT_SECONDS" not in matrix
     candidate = (ROOT / "scripts/staging_candidate_build_preflight.py").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
-    assert "SHOIR-IE SHELL VERSION: 3.2" in candidate
+    assert "SHOIR-IE SHELL VERSION: 3.3" in candidate
     assert "WAIT_SECONDS = 90" in candidate
     assert "python scripts/staging_candidate_build_preflight.py" in workflow
     assert "steps.candidate_build.conclusion == 'success'" in workflow
@@ -146,7 +146,7 @@ def test_staging_app_must_declare_staging_and_refuses_production_backend_fallbac
     assert "Direct PostgreSQL URLs are forbidden in Shoir-IE staging mode" in durable
     assert "STAGING TEST ENVIRONMENT" in app
     assert 'st.caption(f"SHOIR-IE SHELL VERSION: {SHELL_VERSION}")' in app
-    assert "SHELL_VERSION = \"3.2\"" in (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
+    assert "SHELL_VERSION = \"3.3\"" in (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
     assert "if not is_staging" in browser
     assert "STAGING TEST ENVIRONMENT" in module_matrix
     assert "edge_url = " in docs

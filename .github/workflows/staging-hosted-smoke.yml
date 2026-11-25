@@ -1,0 +1,61 @@
+name: Shoir-IE staging hosted browser smoke
+
+on:
+  push:
+    branches:
+      - staging-e2e-20261019
+    paths:
+      - ".github/staging-smoke-triggers/run.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shoir-ie-staging-hosted-smoke
+  cancel-in-progress: false
+
+jobs:
+  staging-hosted-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: staging-smoke
+    env:
+      SHOIR_LIVE_URL: ${{ vars.SHOIR_STAGING_LIVE_URL }}
+    steps:
+      - name: Require a configured HTTPS staging URL, never production
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          value = os.environ.get("SHOIR_LIVE_URL", "").strip()
+          parsed = urlparse(value)
+          if parsed.scheme != "https" or not parsed.hostname:
+              raise SystemExit("Configure environment variable SHOIR_STAGING_LIVE_URL with the staging app's HTTPS URL.")
+          if parsed.username or parsed.password or parsed.query or parsed.fragment:
+              raise SystemExit("The staging URL must not contain credentials, query strings, or fragments.")
+          if parsed.hostname.lower() == "shoir-ie-app.streamlit.app":
+              raise SystemExit("Refusing to run a staging smoke against the known production Streamlit hostname.")
+          print(f"PASS: HTTPS staging host configured ({parsed.hostname}).")
+          PY
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install headless browser
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Test staging entry-screen rendering at desktop and mobile widths
+        run: python scripts/live_deployment_smoke.py
+      - name: Save staging browser screenshots and result
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: shoir-ie-staging-hosted-smoke
+          path: artifacts/live-deployment-smoke/
+          if-no-files-found: warn

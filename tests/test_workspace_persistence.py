@@ -1,3 +1,5 @@
+import json
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +12,22 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     source = {
         "authenticated": True,
         "current_user": "Alice",
+        "remote_session_token": "old-revoked-session",
+        "renewal_session_token": "old-renewal-session",
+        "access_token": "old-access-token",
+        "refresh_token": "old-refresh-token",
+        "session_token": "old-session-token",
+        "id_token": "old-id-token",
+        "client_secret": "must-not-persist",
+        "service_role_key": "must-not-persist",
+        "supabase_service_role_key": "must-not-persist",
+        "authorization": "Bearer must-not-persist",
+        "cookie": "must-not-persist",
+        "private_key": "must-not-persist",
+        "temporary_token": "must-not-persist",
+        "api_secret": "must-not-persist",
+        "password": "must-not-persist",
+        "password_hash": "must-not-persist",
         "user_tier": "Professional Tier",
         "selected_nav": "Dashboard",
         "enterprise_module_selector": "Inventory · EOQ",
@@ -17,6 +35,18 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
         "copilot_messages": [{"role": "user", "content": "run my scenario"}],
         "df": pd.DataFrame({"SKU": ["A", "B"], "Demand": [10, 20]}),
         "signin_password_input": "must-not-persist",
+        "nested_state": {
+            "AUTH": {
+                "remote_session_token": "nested-old-session",
+                "API_SECRET": "nested-secret",
+                "scenario": "keep this workspace value",
+            },
+            "items": [
+                {"REFRESH_TOKEN": "nested-old-refresh", "label": "keep this item"},
+            ],
+            "Password_HASH": "nested-password-hash",
+            "metadata": {"_workspace_persistence": "keep durable workspace marker"},
+        },
     }
 
     assert save_user_workspace("Alice", source, db)
@@ -24,6 +54,9 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     restored = {
         "authenticated": True,
         "current_user": "Alice",
+        # A freshly-authenticated session must survive workspace hydration.
+        "remote_session_token": "fresh-session-token",
+        "renewal_session_token": "fresh-renewal-token",
         "demand": 999,
     }
     assert load_user_workspace("Alice", restored, db)
@@ -35,6 +68,88 @@ def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
     assert restored["copilot_messages"][0]["content"] == "run my scenario"
     pd.testing.assert_frame_equal(restored["df"], source["df"])
     assert "signin_password_input" not in restored
+    assert restored["remote_session_token"] == "fresh-session-token"
+    assert restored["renewal_session_token"] == "fresh-renewal-token"
+    assert restored["nested_state"] == {
+        "AUTH": {"scenario": "keep this workspace value"},
+        "items": [{"label": "keep this item"}],
+        "metadata": {"_workspace_persistence": "keep durable workspace marker"},
+    }
+    for secret_key in (
+        "access_token",
+        "refresh_token",
+        "session_token",
+        "id_token",
+        "client_secret",
+        "service_role_key",
+        "supabase_service_role_key",
+        "authorization",
+        "cookie",
+        "private_key",
+        "temporary_token",
+        "api_secret",
+        "password",
+        "password_hash",
+    ):
+        assert secret_key not in restored
+
+
+def test_workspace_hydration_strips_nested_credentials_from_legacy_snapshot(tmp_path: Path):
+    db = str(tmp_path / "legacy-workspace.db")
+    assert save_user_workspace("Alice", {"ordinary_value": "keep"}, db)
+
+    # Recreate a pre-hardening snapshot containing nested secrets. This bypasses
+    # the current save-time filter to verify that hydration also protects users
+    # who still have legacy data in their existing workspace record.
+    legacy_payload = {
+        "ordinary_value": "keep",
+        "nested_state": {
+            "__type__": "dict",
+            "value": {
+                "AUTH": {
+                    "__type__": "dict",
+                    "value": {
+                        "remote_session_token": "legacy-revoked-token",
+                        "client_secret": "legacy-client-secret",
+                        "scenario": "keep this workspace value",
+                    },
+                },
+                "items": {
+                    "__type__": "list",
+                    "value": [
+                        {
+                            "__type__": "dict",
+                            "value": {
+                                "refresh_token": "legacy-refresh-token",
+                                "label": "keep this item",
+                            },
+                        }
+                    ],
+                },
+                "metadata": {
+                    "__type__": "dict",
+                    "value": {
+                        "workspace_marker": "keep this metadata",
+                    },
+                },
+            },
+        },
+    }
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE workspace_states SET state_json = ? WHERE username = ?",
+            (json.dumps(legacy_payload), "alice"),
+        )
+
+    restored = {"remote_session_token": "fresh-session-token"}
+    assert load_user_workspace("Alice", restored, db)
+    assert restored["remote_session_token"] == "fresh-session-token"
+    assert restored["ordinary_value"] == "keep"
+    assert restored["nested_state"] == {
+        "AUTH": {"scenario": "keep this workspace value"},
+        "items": [{"label": "keep this item"}],
+        "metadata": {"workspace_marker": "keep this metadata"},
+    }
 
 
 def test_workspace_isolated_per_user(tmp_path: Path):

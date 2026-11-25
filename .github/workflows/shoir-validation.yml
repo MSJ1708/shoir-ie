@@ -1,15 +1,42 @@
 name: Shoir-IE validation
 
 on:
+  # Feature branches are validated by the PR event below; running both push
+  # and pull_request for the same feature commit needlessly doubles the
+  # complete regression workload. Keep direct branch validation on main and
+  # the protected staging acceptance branch.
   push:
+    branches:
+      - main
+      - staging-e2e-20261019
   pull_request:
+    branches:
+      - main
+      - staging-e2e-20261019
   workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shoir_test
+          POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shoir_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       PYTHONPATH: .
+      SHOIR_TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/shoir_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -25,7 +52,7 @@ jobs:
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python -m pytest -q tests
+        run: python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q tests
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
@@ -58,7 +85,7 @@ jobs:
           fi
       - name: Upload sanitized report-export validation artifacts and rendered pages
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-report-export-validation
           path: artifacts/report-export-validation/
@@ -109,44 +136,9 @@ jobs:
         run: python scripts/live_deployment_smoke.py
       - name: Upload local runtime smoke evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shoir-ie-local-runtime-smoke
-          path: artifacts/live-deployment-smoke/
-          if-no-files-found: warn
-
-  live-deployment-smoke:
-    # Probe the currently hosted, anonymous shell for audit PRs and after
-    # every main push. This is a service-availability/rendering check, not proof
-    # that the hosted app has deployed the triggering Git SHA. Manual runs on
-    # main allow an explicit post-deployment check without account credentials.
-    if: >-
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
-      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      SHoir_LIVE_URL: https://shoir-ie-app.streamlit.app/
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Install headless browser
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install playwright
-          python -m playwright install --with-deps chromium
-      - name: Test hosted entry-screen rendering at desktop and mobile widths
-        env:
-          SHOIR_LIVE_URL: https://shoir-ie-app.streamlit.app/
-        run: python scripts/live_deployment_smoke.py
-      - name: Save live browser screenshots and result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: shoir-ie-live-deployment-smoke
           path: artifacts/live-deployment-smoke/
           if-no-files-found: warn
 

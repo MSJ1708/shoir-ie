@@ -8,6 +8,7 @@ CI reports the real Python exception while avoiding the interactive UI lifecycle
 from __future__ import annotations
 
 import ast
+import logging
 import sys
 import traceback
 from pathlib import Path
@@ -35,6 +36,16 @@ def main() -> int:
         "__name__": "__shoir_runtime_import_smoke__",
         "__file__": str(app_path),
     }
+    # This import-only smoke runs outside Streamlit's script runner. Suppress
+    # only the two known bare-mode context warnings here; the real server and
+    # browser runtime are exercised in the immediately following Playwright test.
+    streamlit_warning_loggers = (
+        logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context"),
+        logging.getLogger("streamlit.runtime.state.session_state_proxy"),
+    )
+    previous_levels = [logger.level for logger in streamlit_warning_loggers]
+    for logger in streamlit_warning_loggers:
+        logger.setLevel(logging.ERROR)
     try:
         exec(compile(preamble, str(app_path), "exec"), namespace)
     except BaseException:
@@ -45,6 +56,9 @@ def main() -> int:
         )
         traceback.print_exc()
         return 1
+    finally:
+        for logger, previous_level in zip(streamlit_warning_loggers, previous_levels):
+            logger.setLevel(previous_level)
 
     print(
         "Runtime import smoke passed: app.py's top-level imports and guarded "

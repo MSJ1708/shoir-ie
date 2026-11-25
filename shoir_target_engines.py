@@ -135,11 +135,11 @@ def solve_cutting_stock(
     bins = range(total_items)
     choices = range(len(normalized))
     used = {
-        b: pulp.LpVariable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
+        b: model.add_variable(f"stock_used_{b}", lowBound=0, upBound=1, cat=pulp.LpBinary)
         for b in bins
     }
     allocation = {
-        (i, b): pulp.LpVariable(
+        (i, b): model.add_variable(
             f"part_{i}_in_stock_{b}",
             lowBound=0,
             upBound=normalized[i]["quantity"],
@@ -163,7 +163,7 @@ def solve_cutting_stock(
             model += used[b] >= used[b + 1], f"symmetry_{b}"
 
     try:
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds)
+        solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit_seconds)
         if not solver.available():
             raise RuntimeError("PuLP's CBC solver is not available in this runtime.")
         model.solve(solver)
@@ -4490,11 +4490,11 @@ def optimize_supply_chain_network(
 
     model = pulp.LpProblem("shoir_single_period_supply_chain_transport", pulp.LpMinimize)
     shipment_vars = {
-        key: pulp.LpVariable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
+        key: model.add_variable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
         for i, (key, item) in enumerate(route_map.items(), start=1)
     }
     unmet_vars = {
-        site: pulp.LpVariable(f"unmet_{i}", lowBound=0)
+        site: model.add_variable(f"unmet_{i}", lowBound=0)
         for i, site in enumerate(demand, start=1)
     }
     model += pulp.lpSum(route_map[key]["unit_cost"] * shipment_vars[key] for key in route_map) + penalty * pulp.lpSum(unmet_vars.values())
@@ -4506,7 +4506,7 @@ def optimize_supply_chain_network(
         model += pulp.lpSum(
             var for (_, destination), var in shipment_vars.items() if destination == site
         ) + unmet_vars[site] == requested, f"site_demand_{list(demand).index(site)}"
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
+    solver = pulp.COIN_CMD(msg=False, timeLimit=time_limit)
     try:
         model.solve(solver)
     except Exception as exc:
@@ -4911,7 +4911,7 @@ def run_solver_diagnostics(
         pulp.LpMinimize if direction_value in {"minimize", "min"} else pulp.LpMaximize,
     )
     variables = {
-        name: pulp.LpVariable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
+        name: problem.add_variable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
         for name, spec in normalized_specs.items()
     }
     problem += pulp.lpSum(coefficient * variables[name] for name, coefficient in objective.items()), "objective"
@@ -4925,7 +4925,7 @@ def run_solver_diagnostics(
             problem += expression == item["rhs"], item["name"]
 
     try:
-        solver_status_code = problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit))
+        solver_status_code = problem.solve(pulp.COIN_CMD(msg=False, timeLimit=time_limit))
     except Exception as exc:
         return {
             "status": "SOLVER_ERROR",
@@ -4938,16 +4938,61 @@ def run_solver_diagnostics(
             "data_provenance": "USER_ENTERED_UNVERIFIED",
         }
 
-    solver_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
+    solver_reported_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
+    solver_status = solver_reported_status
     solution_status_code = getattr(problem, "sol_status", None)
     solution_status = pulp.LpSolution.get(solution_status_code, "UNKNOWN_SOLUTION_STATUS")
+
+    # A one-variable linear constraint can sometimes be proved infeasible
+    # directly from that variable's finite bounds. This is a mathematical
+    # interval proof, not an inference from a missing solver solution.
+    infeasibility_witnesses: list[str] = []
+    for item in normalized_constraints:
+        if len(item["coefficients"]) != 1:
+            continue
+        variable_name, coefficient = next(iter(item["coefficients"].items()))
+        spec = normalized_specs[variable_name]
+        low, high = spec["low"], spec["up"]
+        if coefficient > 0:
+            lhs_min = -math.inf if low is None else coefficient * low
+            lhs_max = math.inf if high is None else coefficient * high
+        elif coefficient < 0:
+            lhs_min = -math.inf if high is None else coefficient * high
+            lhs_max = math.inf if low is None else coefficient * low
+        else:
+            lhs_min = lhs_max = 0.0
+
+        if item["sense"] == pulp.LpConstraintLE:
+            impossible = lhs_min > item["rhs"] + tolerance
+        elif item["sense"] == pulp.LpConstraintGE:
+            impossible = lhs_max < item["rhs"] - tolerance
+        else:
+            impossible = (
+                item["rhs"] < lhs_min - tolerance
+                or item["rhs"] > lhs_max + tolerance
+            )
+        if impossible:
+            infeasibility_witnesses.append(
+                f"Constraint '{item['name']}' cannot be satisfied: variable '{variable_name}' "
+                f"bounds restrict its left-hand side to [{lhs_min:g}, {lhs_max:g}], "
+                f"but the required relation is {item['sense_label']} {item['rhs']:g}."
+            )
+
+    solver_status_source = "CBC"
+    if infeasibility_witnesses:
+        # Keep the raw solver response visible, but use the independently
+        # proven mathematical contradiction as the authoritative diagnosis.
+        solver_status = "Infeasible"
+        solution_status = "INFEASIBLE_BY_BOUND_PRECHECK"
+        solver_status_source = "INDEPENDENT_BOUND_PRECHECK"
+
     variable_rows: list[dict[str, Any]] = []
-    violations: list[str] = []
+    violations: list[str] = list(infeasibility_witnesses)
     all_values_assigned = True
     all_bounds_ok = True
 
     for name, variable in variables.items():
-        raw_value = variable.varValue
+        raw_value = None if infeasibility_witnesses else variable.varValue
         value = None if raw_value is None else float(raw_value)
         spec = normalized_specs[name]
         bound_violation = 0.0
@@ -5020,7 +5065,13 @@ def run_solver_diagnostics(
 
     if solver_status == "Infeasible":
         interpretation_status = "INFEASIBLE"
-        warnings = ["The solver reported infeasibility; no feasible decision should be inferred from any leftover variable values."]
+        if infeasibility_witnesses:
+            warnings = [
+                "An independent variable-bound interval check proved the model infeasible. "
+                "The raw CBC status is retained separately; no leftover solver values are used."
+            ]
+        else:
+            warnings = ["The solver reported infeasibility; no feasible decision should be inferred from any leftover variable values."]
         objective_value = None
     elif solver_status == "Unbounded":
         interpretation_status = "UNBOUNDED"
@@ -5041,6 +5092,9 @@ def run_solver_diagnostics(
     return {
         "status": interpretation_status,
         "solver_status": solver_status,
+        "solver_reported_status": solver_reported_status,
+        "solver_status_source": solver_status_source,
+        "infeasibility_witnesses": infeasibility_witnesses,
         "solution_status": solution_status,
         "objective_direction": "minimize" if direction_value in {"minimize", "min"} else "maximize",
         "objective_value": objective_value,
@@ -5425,11 +5479,11 @@ def optimize_facility_location_flow(
 
     model = pulp.LpProblem("ShoirIE_Facility_Location_Flow", pulp.LpMinimize)
     open_vars = {
-        i: pulp.LpVariable(f"facility_open_{i}", cat=pulp.LpBinary)
+        i: model.add_variable(f"facility_open_{i}", cat=pulp.LpBinary)
         for i in range(len(normalized_facilities))
     }
     flow_vars = {
-        r["index"] - 1: pulp.LpVariable(
+        r["index"] - 1: model.add_variable(
             f"route_flow_{r['index'] - 1}", lowBound=0, upBound=r["capacity"], cat=pulp.LpContinuous
         )
         for r in normalized_routes
@@ -5451,7 +5505,7 @@ def optimize_facility_location_flow(
         model += inbound == customer["demand"], f"customer_demand_{i}"
 
     try:
-        model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=limit))
+        model.solve(pulp.COIN_CMD(msg=False, timeLimit=limit))
     except pulp.PulpSolverError:
         return {
             "status": "SOLVER_UNAVAILABLE",

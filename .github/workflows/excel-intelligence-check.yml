@@ -17,30 +17,19 @@ on:
       - "industrial_platform_excellence.py"
       - "pages/Industrial_Engineering_Workbench.py"
       - "shoir_live_visuals.py"
+      - "workspace_persistence.py"
+      - "shoir_application_shell.py"
+      - "tests/test_workspace_persistence.py"
       - "tests/test_excel_*.py"
       - "tests/excel_addin_planner.test.cjs"
       - "tests/test_module_catalog_categories.py"
+      - "workspace_persistence.py"
+      - "shoir_application_shell.py"
+      - "tests/test_workspace_persistence.py"
       - ".github/workflows/excel-intelligence-check.yml"
   pull_request:
     branches:
       - staging-e2e-20261019
-    paths:
-      - "excel_addin/**"
-      - "shoir_excel_entitlements.py"
-      - "durable_account_store.py"
-      - "supabase/functions/shoir-persistence/**"
-      - "tests/test_durable_account_store_environment.py"
-      - "shoir_excel_runtime.py"
-      - "shoir_excel_foundation.py"
-      - "shoir_tier_capabilities.py"
-      - "industrial_platform.py"
-      - "industrial_platform_excellence.py"
-      - "pages/Industrial_Engineering_Workbench.py"
-      - "shoir_live_visuals.py"
-      - "tests/test_excel_*.py"
-      - "tests/excel_addin_planner.test.cjs"
-      - "tests/test_module_catalog_categories.py"
-      - ".github/workflows/excel-intelligence-check.yml"
 
 permissions:
   contents: read
@@ -74,9 +63,10 @@ jobs:
             tests/test_excel_runtime.py \
             tests/test_excel_intelligence_navigation.py \
             tests/test_module_catalog_categories.py
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: "20"
+          node-version: "24"
+          package-manager-cache: false
       - name: Check Office.js task pane and run local planner tests
         run: |
           node --check excel_addin/planner.js
@@ -108,7 +98,7 @@ jobs:
           }
           placeholders = any("YOUR-SHOIR-IE-HOST" in value for value in urls.values())
           if placeholders:
-              print("::warning::Office add-in manifest is an unhosted template. It is valid XML, not an installable or deployed add-in.")
+              print("::notice::Office add-in manifest is an unhosted template. It is valid XML, not an installable or deployed add-in; hosted Office deployment remains unverified.")
           else:
               parsed = {name: urlparse(value) for name, value in urls.items()}
               for name, value in parsed.items():

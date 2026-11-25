@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "feature/**"]
   pull_request:
-    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
+    branches: ["main", "staging-e2e-20261019", "feat/shoir-100-tools-integration-20261025"]
 
 permissions:
   contents: read
@@ -12,9 +12,25 @@ permissions:
 jobs:
   security-quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shoir_test
+          POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shoir_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       PYTHONPATH: .
+      SHOIR_TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/shoir_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -29,7 +45,7 @@ jobs:
       - name: Compile
         run: python -m compileall -q .
       - name: Regression tests
-        run: python -m pytest -q tests
+        run: python -W error::DeprecationWarning -W error::FutureWarning -m pytest -q tests
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Secret-pattern guard
